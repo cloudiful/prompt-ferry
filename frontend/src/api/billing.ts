@@ -22,7 +22,7 @@ import type {
   BillingRepriceResponse,
 } from '../generated/admin-api'
 import { expectData, withData } from '../api'
-import type { BillingChargeFilters } from '../models/billing'
+import type { BillingChargeFilters } from '../lib/billing-model'
 
 export async function fetchBillingSummary(
   query: BillingChargeFilters,

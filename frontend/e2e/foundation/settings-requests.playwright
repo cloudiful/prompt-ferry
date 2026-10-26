@@ -1,0 +1,990 @@
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const REQUEST_LOGGING = '/api/v1/settings/request-content-logging'
+  const USAGE_RETENTION = '/api/v1/settings/usage-retention'
+  const STREAM_BATCHING = '/api/v1/settings/stream-delta-batching'
+  const MODEL_WHITELIST = '/api/v1/settings/model-route-whitelist'
+  const READ_PATHS = [
+    REQUEST_LOGGING,
+    USAGE_RETENTION,
+    STREAM_BATCHING,
+    MODEL_WHITELIST,
+  ]
+
+  const startedAt = new Date().toISOString()
+  const report = {
+    runId: `settings-requests-${Date.now()}`,
+    startedAt,
+    finishedAt: null,
+    checks: {},
+    scenarios: {
+      'R-SETTINGS-REQUESTS': {
+        'route-render': null,
+        'admin-denial': null,
+        'mutation-update': null,
+        'mutation-conflict-guard': null,
+        'mutation-failure-draft': null,
+      },
+    },
+    screenshots: [],
+    apiFailures: [],
+    expectedApiFailures: [],
+    unexpectedRequests: [],
+    settingsRequests: [],
+    consoleErrorCount: 0,
+    pageErrorCount: 0,
+    limitations: [],
+  }
+  let stage = 'startup'
+  let collecting = false
+
+  page.setDefaultTimeout(15000)
+  page.on('pageerror', () => report.pageErrorCount++)
+  page.on('console', message => {
+    if (message.type() !== 'error') return
+    if (/\b(401|403|503)\b/.test(message.text())) return
+    report.consoleErrorCount++
+  })
+  page.on('request', request => {
+    const url = new URL(request.url())
+    if (url.pathname.startsWith('/api/v1/settings/')) {
+      report.settingsRequests.push({
+        stage,
+        method: request.method(),
+        path: url.pathname,
+        body: request.postData() ?? null,
+      })
+      return
+    }
+    if (!url.pathname.startsWith('/api/')) return
+    if (!collecting) return
+    if (
+      url.pathname.startsWith('/api/v1/auth/') ||
+      url.pathname.startsWith('/api/v1/relay/auth/') ||
+      url.pathname.startsWith('/api/v1/me/') ||
+      url.pathname === '/api/v1/bridge/status'
+    ) {
+      // Session bootstrap and the signed-in self surface, not this tab.
+      return
+    }
+    report.unexpectedRequests.push(`${request.method()} ${url.pathname}`)
+  })
+  page.on('response', response => {
+    const url = new URL(response.url())
+    if (!url.pathname.startsWith('/api/')) return
+    if (response.status() < 400) return
+    if (response.status() === 401 && url.pathname === '/api/v1/auth/me') {
+      report.expectedApiFailures.push('401 GET /api/v1/auth/me')
+      return
+    }
+    const entry = `${response.status()} ${response.request().method()} ${url.pathname}`
+    if (
+      response.status() === 403 &&
+      READ_PATHS.includes(url.pathname) &&
+      stage === 'admin-denial'
+    ) {
+      report.expectedApiFailures.push(entry)
+      return
+    }
+    if (
+      response.status() === 401 &&
+      READ_PATHS.includes(url.pathname) &&
+      stage === 'admin-denial'
+    ) {
+      report.expectedApiFailures.push(entry)
+      return
+    }
+    if (
+      response.status() === 503 &&
+      url.pathname === STREAM_BATCHING &&
+      stage === 'mutation-failure-draft'
+    ) {
+      report.expectedApiFailures.push(entry)
+      return
+    }
+    report.apiFailures.push(entry)
+  })
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(`${stage}: ${message}`)
+  }
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms))
+  }
+
+  async function capture(name) {
+    const path = `${screenshots}/${name}.png`
+    await page.screenshot({ path, fullPage: true })
+    report.screenshots.push(path)
+  }
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) {
+      throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    }
+    return response.json()
+  }
+
+  async function clearFaults() {
+    await fixture('/__fixtures/faults', 'DELETE')
+  }
+
+  async function injectFault(fault) {
+    await clearFaults()
+    await fixture('/__fixtures/faults', 'POST', fault)
+  }
+
+  function requestsFor(requestStage) {
+    return report.settingsRequests.filter(entry => entry.stage === requestStage)
+  }
+
+  function readsFor(requestStage) {
+    return requestsFor(requestStage).filter(entry => entry.method === 'GET')
+  }
+
+  function writesFor(requestStage, path) {
+    return requestsFor(requestStage).filter(
+      entry =>
+        entry.method === 'PATCH' && (path === undefined || entry.path === path),
+    )
+  }
+
+  function bodyOf(entry) {
+    return entry?.body ? JSON.parse(entry.body) : null
+  }
+
+  async function signIn(loginName) {
+    await page.goto(`${BASE}/login`)
+    const loginNameField = page.getByLabel(/^(Login name|登录名)$/)
+    await loginNameField.waitFor({ state: 'visible' })
+    await loginNameField.fill(loginName)
+    await page
+      .getByRole('textbox', { name: /^(Password|密码)$/ })
+      .fill('fixture-password')
+    await page.getByRole('button', { name: /^(Login|登录)$/ }).click()
+    await page.waitForURL(url => new URL(url).pathname === '/api-keys')
+  }
+
+  async function signOut() {
+    await page.getByRole('button', { name: /Logout|退出登录/ }).click()
+    await page.waitForURL(url => new URL(url).pathname === '/login')
+  }
+
+  async function openRequests() {
+    await page.goto(`${BASE}/settings/requests`)
+    await page.waitForSelector('[data-foundation-route-id="R-SETTINGS-REQUESTS"]')
+    await waitLoaded()
+  }
+
+  async function waitLoaded() {
+    await page.waitForFunction(() => {
+      const control = document.getElementById(
+        'settings-request-content-logging-mode',
+      )
+      return control !== null && !control.hasAttribute('disabled')
+    })
+    await page.waitForTimeout(150)
+  }
+
+  async function stored(section) {
+    return page.evaluate(async path => {
+      const response = await fetch(`/api/v1/${path}`)
+      return { status: response.status, body: await response.json() }
+    }, `settings/${section}`)
+  }
+
+  function passed(scenario, evidence) {
+    report.scenarios['R-SETTINGS-REQUESTS'][scenario] = {
+      passed: true,
+      evidence,
+    }
+  }
+
+  async function selectMode(optionName) {
+    await page.locator('#settings-request-content-logging-mode').click()
+    await page.getByRole('option', { name: optionName, exact: true }).click()
+  }
+
+  async function fillNumber(id, value) {
+    await page.locator(`#${id}`).fill(String(value))
+  }
+
+  stage = 'admin-sign-in'
+  await page.goto(`${BASE}/login`)
+  await page.evaluate(() => {
+    window.localStorage.setItem('prompt-ferry:locale', 'en-US')
+    window.localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await signIn('admin')
+  await clearFaults()
+  // Let the post-login landing page finish its own reads before the ledger
+  // starts: only the mounted requests tab is this run's business.
+  await page.waitForTimeout(600)
+  collecting = true
+
+  stage = 'route-render'
+  await openRequests()
+  const routeId = await page
+    .locator('[data-foundation-route-id]')
+    .getAttribute('data-foundation-route-id')
+  const routeTab = await page
+    .locator('[data-foundation-route-id]')
+    .getAttribute('data-settings-tab')
+  assert(
+    routeId === 'R-SETTINGS-REQUESTS' && routeTab === 'requests',
+    `the requests route identity is wrong: ${routeId}/${routeTab}`,
+  )
+  const heading = await page
+    .locator('[data-foundation-route-id="R-SETTINGS-REQUESTS"] h1')
+    .innerText()
+  assert(heading === 'Requests & routing', `heading is not localized: ${heading}`)
+
+  const cardCount = await page.locator('[data-settings-card]').count()
+  assert(cardCount === 3, `expected three setting cards, got ${cardCount}`)
+  for (const id of [
+    'settings-request-content-logging-mode',
+    'settings-raw-retention-days',
+    'settings-approval-retention-days',
+    'settings-model-route-whitelist-enabled',
+    'settings-stream-delta-batching-enabled',
+    'settings-flush-window-ms',
+    'settings-max-buffer-chars',
+    'settings-max-buffer-bytes',
+    'settings-flush-on-line-break',
+    'settings-flush-on-sentence-end',
+  ]) {
+    assert(
+      (await page.locator(`#${id}`).count()) === 1,
+      `the ${id} control is missing or duplicated`,
+    )
+  }
+  assert(
+    (await page.getByRole('button', { name: /^Save$/ }).count()) === 0,
+    'the requests tab exposes a save button',
+  )
+  assert(
+    (await page.getByRole('button', { name: /^Saved$/ }).count()) === 0,
+    'the requests tab exposes a success state',
+  )
+
+  const readPaths = readsFor('route-render').map(entry => entry.path)
+  for (const path of READ_PATHS) {
+    assert(
+      readPaths.filter(candidate => candidate === path).length === 1,
+      `the mount read ${path} ${readPaths.filter(p => p === path).length} times`,
+    )
+  }
+  assert(
+    readPaths.length === 4,
+    `the mount issued ${readPaths.length} settings reads instead of four`,
+  )
+  assert(
+    writesFor('route-render').length === 0,
+    'mounting the tab wrote a setting',
+  )
+
+  const loaded = {
+    rawDays: await page.locator('#settings-raw-retention-days').inputValue(),
+    approvalDays: await page
+      .locator('#settings-approval-retention-days')
+      .inputValue(),
+    flushWindow: await page.locator('#settings-flush-window-ms').inputValue(),
+    maxChars: await page.locator('#settings-max-buffer-chars').inputValue(),
+    maxBytes: await page.locator('#settings-max-buffer-bytes').inputValue(),
+    mode: await page.locator('#settings-request-content-logging-mode').innerText(),
+    whitelist: await page
+      .locator('#settings-model-route-whitelist-enabled')
+      .getAttribute('data-state'),
+    batching: await page
+      .locator('#settings-stream-delta-batching-enabled')
+      .getAttribute('data-state'),
+    lineBreak: await page
+      .locator('#settings-flush-on-line-break')
+      .getAttribute('data-state'),
+    sentenceEnd: await page
+      .locator('#settings-flush-on-sentence-end')
+      .getAttribute('data-state'),
+  }
+  assert(
+    loaded.rawDays === '7' && loaded.approvalDays === '30',
+    `loaded retention values are wrong: ${JSON.stringify(loaded)}`,
+  )
+  assert(
+    loaded.mode.includes('Normalized + raw JSON'),
+    `loaded logging mode is wrong: ${loaded.mode}`,
+  )
+  assert(
+    loaded.flushWindow === '40' &&
+      loaded.maxChars === '32768' &&
+      loaded.maxBytes === '65536',
+    `loaded batching values are wrong: ${JSON.stringify(loaded)}`,
+  )
+  assert(
+    loaded.whitelist === 'unchecked' && loaded.batching === 'checked',
+    'loaded switches are wrong',
+  )
+  assert(
+    loaded.lineBreak === 'checked' && loaded.sentenceEnd === 'checked',
+    'loaded flush switches are wrong',
+  )
+  report.checks.routeRender = { routeId, routeTab, cardCount, loaded, readPaths }
+  report.checks.loadedOutOfRangePreserved = loaded.maxChars === '32768'
+  await capture('settings-requests-en-light-1440')
+  passed(
+    'route-render',
+    'the admin requests route renders three cards with every control, exactly four reads and no write on mount',
+  )
+
+  stage = 'mutation-update'
+  await selectMode('Off')
+  await page.waitForTimeout(700)
+  const loggingWrites = writesFor('mutation-update', REQUEST_LOGGING)
+  assert(
+    loggingWrites.length === 1,
+    `the logging mode autosave sent ${loggingWrites.length} writes`,
+  )
+  assert(
+    JSON.stringify(bodyOf(loggingWrites[0])) ===
+      JSON.stringify({ mode: 'off', raw_retention_days: 7 }),
+    `the logging body is wrong: ${loggingWrites[0]?.body}`,
+  )
+
+  await fillNumber('settings-raw-retention-days', 10)
+  await page.waitForTimeout(700)
+  const rawWrites = writesFor('mutation-update', REQUEST_LOGGING).slice(1)
+  assert(rawWrites.length === 1, 'the raw retention edit did not autosave once')
+  assert(
+    JSON.stringify(bodyOf(rawWrites[0])) ===
+      JSON.stringify({ mode: 'off', raw_retention_days: 10 }),
+    `the raw retention body is wrong: ${rawWrites[0]?.body}`,
+  )
+
+  await fillNumber('settings-approval-retention-days', 45)
+  await page.waitForTimeout(700)
+  const retentionWrites = writesFor('mutation-update', USAGE_RETENTION)
+  assert(
+    retentionWrites.length === 1,
+    `the approval retention autosave sent ${retentionWrites.length} writes`,
+  )
+  const retentionBody = bodyOf(retentionWrites[0])
+  assert(
+    retentionBody.approval_retention_days === 45 &&
+      retentionBody.content_retention_days === 30 &&
+      retentionBody.metadata_retention_days === 90 &&
+      retentionBody.raw_backend === 'local' &&
+      retentionBody.replay_enabled === true &&
+      retentionBody.raw_retention_days === 10,
+    `the retention body lost a stored field: ${retentionWrites[0]?.body}`,
+  )
+
+  await page.locator('#settings-model-route-whitelist-enabled').click()
+  await page.waitForTimeout(500)
+  const whitelistWrites = writesFor('mutation-update', MODEL_WHITELIST)
+  assert(
+    whitelistWrites.length === 1 &&
+      JSON.stringify(bodyOf(whitelistWrites[0])) ===
+        JSON.stringify({ enabled: true }),
+    `the whitelist autosave is wrong: ${JSON.stringify(whitelistWrites)}`,
+  )
+
+  await fillNumber('settings-flush-window-ms', 500)
+  await page.waitForTimeout(50)
+  await fillNumber('settings-max-buffer-chars', 4096)
+  await page.waitForTimeout(50)
+  await fillNumber('settings-max-buffer-bytes', 8192)
+  await page.waitForTimeout(50)
+  await page.locator('#settings-flush-on-sentence-end').click()
+  await page.waitForTimeout(900)
+  const batchingWrites = writesFor('mutation-update', STREAM_BATCHING)
+  assert(
+    batchingWrites.length === 1,
+    `the batching burst sent ${batchingWrites.length} writes instead of one`,
+  )
+  const batchingBody = bodyOf(batchingWrites[0])
+  assert(
+    batchingBody.flush_window_ms === 500 &&
+      batchingBody.max_buffer_chars === 4096 &&
+      batchingBody.max_buffer_bytes === 8192 &&
+      batchingBody.flush_on_line_break === true &&
+      batchingBody.flush_on_sentence_end === false &&
+      batchingBody.enabled === true,
+    `the batching body is wrong: ${batchingWrites[0]?.body}`,
+  )
+
+  const storedRetention = await stored('usage-retention')
+  assert(
+    storedRetention.status === 200 &&
+      storedRetention.body.approval_retention_days === 45 &&
+      storedRetention.body.content_retention_days === 30 &&
+      storedRetention.body.metadata_retention_days === 90 &&
+      storedRetention.body.raw_backend === 'local' &&
+      storedRetention.body.replay_enabled === true,
+    `the stored retention record lost an unexposed field: ${JSON.stringify(storedRetention.body)}`,
+  )
+  const storedLogging = await stored('request-content-logging')
+  assert(
+    storedLogging.body.mode === 'off' &&
+      storedLogging.body.raw_retention_days === 10,
+    `the stored logging record is wrong: ${JSON.stringify(storedLogging.body)}`,
+  )
+
+  assert(
+    writesFor('mutation-update').length === 5,
+    `the control roundtrips wrote ${writesFor('mutation-update').length} times instead of five`,
+  )
+  report.checks.mutationUpdate = {
+    loggingBody: bodyOf(loggingWrites[0]),
+    rawBody: bodyOf(rawWrites[0]),
+    retentionBody,
+    whitelistBody: bodyOf(whitelistWrites[0]),
+    batchingBody,
+    storedRetention: storedRetention.body,
+    storedLogging: storedLogging.body,
+    writes: writesFor('mutation-update').length,
+  }
+  passed(
+    'mutation-update',
+    'every exposed control autosaved exactly once with its real body, the burst coalesced into one write, and the stored record kept the fields this tab does not expose',
+  )
+
+  stage = 'mutation-update-reload'
+  await openRequests()
+  const reloaded = {
+    raw: await page.locator('#settings-raw-retention-days').inputValue(),
+    approval: await page
+      .locator('#settings-approval-retention-days')
+      .inputValue(),
+    whitelist: await page
+      .locator('#settings-model-route-whitelist-enabled')
+      .getAttribute('data-state'),
+    flush: await page.locator('#settings-flush-window-ms').inputValue(),
+    chars: await page.locator('#settings-max-buffer-chars').inputValue(),
+    bytes: await page.locator('#settings-max-buffer-bytes').inputValue(),
+    sentenceEnd: await page
+      .locator('#settings-flush-on-sentence-end')
+      .getAttribute('data-state'),
+    mode: await page.locator('#settings-request-content-logging-mode').innerText(),
+    reads: readsFor('mutation-update-reload').length,
+    writes: writesFor('mutation-update-reload').length,
+  }
+  assert(
+    reloaded.raw === '10' &&
+      reloaded.approval === '45' &&
+      reloaded.whitelist === 'checked' &&
+      reloaded.flush === '500' &&
+      reloaded.chars === '4096' &&
+      reloaded.bytes === '8192' &&
+      reloaded.sentenceEnd === 'unchecked' &&
+      reloaded.mode.includes('Off'),
+    `the saved settings did not survive a reload: ${JSON.stringify(reloaded)}`,
+  )
+  assert(
+    reloaded.reads === 4 && reloaded.writes === 0,
+    `the reload issued ${reloaded.reads} reads and ${reloaded.writes} writes`,
+  )
+  report.checks.reload = reloaded
+
+  stage = 'mutation-conflict-guard'
+  // A delayed but successful write: the fixture only short-circuits failures,
+  // so an explicit 200 keeps the real handler and its response.
+  await injectFault({
+    pathPrefix: REQUEST_LOGGING,
+    method: 'PATCH',
+    status: 200,
+    delayMs: 900,
+    count: 1,
+  })
+  await selectMode('Normalized only')
+  await fillNumber('settings-approval-retention-days', 50)
+  await page.waitForTimeout(450)
+  const retentionInput = page.locator('#settings-approval-retention-days')
+  const rawInput = page.locator('#settings-raw-retention-days')
+  const bothDisabled =
+    (await retentionInput.isDisabled()) && (await rawInput.isDisabled())
+  assert(
+    bothDisabled,
+    'the shared retention controls stayed enabled while the logging write was in flight',
+  )
+  const spinners = page.getByRole('status', { name: 'Loading' })
+  const claimantSpinners = await spinners.count()
+  assert(
+    claimantSpinners === 1,
+    `expected one claimant spinner, got ${claimantSpinners}`,
+  )
+  const heldWritesBeforeRelease = writesFor(
+    'mutation-conflict-guard',
+    USAGE_RETENTION,
+  ).length
+  assert(
+    heldWritesBeforeRelease === 0,
+    'the held retention form reached the server while the shared key was taken',
+  )
+
+  await page.locator('#settings-model-route-whitelist-enabled').click()
+  await page.waitForTimeout(500)
+  assert(
+    writesFor('mutation-conflict-guard', MODEL_WHITELIST).length === 1,
+    'an independent key was blocked by the shared retention write',
+  )
+  const whitelistEnabled = await page
+    .locator('#settings-model-route-whitelist-enabled')
+    .getAttribute('data-state')
+  const independentKeyWrites = writesFor(
+    'mutation-conflict-guard',
+    MODEL_WHITELIST,
+  ).length
+  assert(
+    whitelistEnabled === 'unchecked' && independentKeyWrites === 1,
+    'the independent whitelist write did not finish while retention was held',
+  )
+
+  await page.waitForTimeout(1600)
+  const guardedLogging = writesFor('mutation-conflict-guard', REQUEST_LOGGING)
+  const guardedRetention = writesFor(
+    'mutation-conflict-guard',
+    USAGE_RETENTION,
+  )
+  assert(
+    guardedLogging.length === 1,
+    `the claimant sent ${guardedLogging.length} logging writes`,
+  )
+  assert(
+    guardedRetention.length === 1,
+    `the held retention form sent ${guardedRetention.length} writes after release`,
+  )
+  const guardedRetentionBody = bodyOf(guardedRetention[0])
+  assert(
+    guardedRetentionBody.approval_retention_days === 50 &&
+      guardedRetentionBody.raw_retention_days === 10,
+    `the released retention draft is wrong: ${guardedRetention[0]?.body}`,
+  )
+  assert(
+    (await page.getByRole('status', { name: 'Loading' }).count()) === 0,
+    'a spinner survived the released write',
+  )
+  assert(
+    !(await retentionInput.isDisabled()) && !(await rawInput.isDisabled()),
+    'the retention controls stayed disabled after release',
+  )
+  report.checks.conflictGuard = {
+    claimantSpinners,
+    bothDisabled,
+    heldWritesBeforeRelease,
+    independentKeyWrites,
+    loggingWrites: guardedLogging.length,
+    retentionWrites: guardedRetention.length,
+    retentionBody: guardedRetentionBody,
+  }
+  await capture('settings-requests-retention-guard-en-light-1440')
+  passed(
+    'mutation-conflict-guard',
+    'both retention forms disabled under one shared key with only the claimant spinning, the independent key stayed usable, and the held draft was submitted once on release with the shared raw days kept in step',
+  )
+
+  stage = 'mutation-failure-draft'
+  await injectFault({
+    pathPrefix: STREAM_BATCHING,
+    method: 'PATCH',
+    status: 503,
+    code: 'fixture_injected_error',
+    message: 'fixture injected failure',
+    count: 1,
+  })
+  await fillNumber('settings-flush-window-ms', 640)
+  await page.waitForTimeout(900)
+  const failureAlerts = await page.getByRole('alert').count()
+  assert(failureAlerts >= 1, 'the failed write did not surface an error')
+  const failedDraft = await page
+    .locator('#settings-flush-window-ms')
+    .inputValue()
+  assert(failedDraft === '640', 'the failed write dropped the operator draft')
+  const failedWrites = writesFor(
+    'mutation-failure-draft',
+    STREAM_BATCHING,
+  ).length
+  assert(
+    failedWrites === 1,
+    'the failed write retried itself without an operator action',
+  )
+  await page.waitForTimeout(900)
+  assert(
+    writesFor('mutation-failure-draft', STREAM_BATCHING).length === 1,
+    'the failed write looped instead of waiting for a retry',
+  )
+  const retryButton = page.getByRole('button', { name: 'Retry' })
+  const retryDiagnostics = {
+    alerts: await page.getByRole('alert').allInnerTexts(),
+    apiFailures: report.apiFailures,
+    loggingWrites: writesFor('mutation-failure-draft', REQUEST_LOGGING),
+    buttons: await page.getByRole('button').allInnerTexts(),
+    cards: await page
+      .locator('[data-settings-card]')
+      .evaluateAll(nodes => nodes.map(node => node.innerText)),
+  }
+  assert(
+    (await retryButton.count()) === 1,
+    `the failed section does not offer a retry control: ${JSON.stringify(retryDiagnostics)}`,
+  )
+  await capture('settings-requests-failure-draft-en-light-1440')
+  await retryButton.click()
+  await page.waitForTimeout(700)
+  const retried = writesFor('mutation-failure-draft', STREAM_BATCHING)
+  assert(retried.length === 2, 'the retry control did not send the draft again')
+  assert(
+    bodyOf(retried[1]).flush_window_ms === 640,
+    `the retried draft is wrong: ${retried[1]?.body}`,
+  )
+  assert(
+    (await page.getByRole('button', { name: 'Retry' }).count()) === 0,
+    'the retry control survived a successful retry',
+  )
+  assert(
+    (await page.locator('#settings-flush-window-ms').inputValue()) === '640',
+    'the retried value is not the confirmed one',
+  )
+  report.checks.failureDraft = {
+    failedWrites,
+    draftKept: failedDraft,
+    failureAlerts,
+    retryWrites: retried.length,
+    retryBody: bodyOf(retried[1]),
+  }
+  await clearFaults()
+  passed(
+    'mutation-failure-draft',
+    'a 503 kept the draft, notified once, offered a retry only for that section, and the retry sent the same draft again',
+  )
+
+  stage = 'newer-draft'
+  await injectFault({
+    pathPrefix: STREAM_BATCHING,
+    method: 'PATCH',
+    status: 200,
+    delayMs: 800,
+    count: 1,
+  })
+  await fillNumber('settings-flush-window-ms', 700)
+  await page.waitForTimeout(450)
+  await fillNumber('settings-flush-window-ms', 720)
+  await page.waitForTimeout(2200)
+  const newerWrites = writesFor('newer-draft', STREAM_BATCHING)
+  assert(
+    newerWrites.length === 2,
+    `the newer draft sent ${newerWrites.length} writes`,
+  )
+  assert(
+    bodyOf(newerWrites[0]).flush_window_ms === 700 &&
+      bodyOf(newerWrites[1]).flush_window_ms === 720,
+    `the newer draft was not submitted after the first: ${JSON.stringify(newerWrites.map(bodyOf))}`,
+  )
+  assert(
+    (await page.locator('#settings-flush-window-ms').inputValue()) === '720',
+    'the confirmed response overwrote the newer draft',
+  )
+  report.checks.newerDraft = { writes: 2, final: '720' }
+  await clearFaults()
+
+  stage = 'scoped-refresh'
+  const beforeRefresh = readsFor('scoped-refresh').length
+  await page.locator('#settings-requests-refresh').click()
+  await page.waitForTimeout(900)
+  assert(
+    readsFor('scoped-refresh').length - beforeRefresh === 4,
+    `the scoped refresh issued ${readsFor('scoped-refresh').length - beforeRefresh} reads instead of four`,
+  )
+  const refreshWrites = writesFor('scoped-refresh').length
+  assert(refreshWrites === 0, 'a refresh wrote a setting')
+  await fillNumber('settings-raw-retention-days', 12)
+  const disabledWhileDirty = await page
+    .locator('#settings-requests-refresh')
+    .isDisabled()
+  assert(
+    disabledWhileDirty,
+    'the refresh stayed enabled while a draft was unsaved',
+  )
+  await page.waitForTimeout(700)
+  const enabledAfterSave = !(await page
+    .locator('#settings-requests-refresh')
+    .isDisabled())
+  assert(
+    enabledAfterSave,
+    'the refresh stayed disabled after the draft was saved',
+  )
+  report.checks.scopedRefresh = {
+    reads: readsFor('scoped-refresh').length - beforeRefresh,
+    refreshWrites,
+    draftWrites: writesFor('scoped-refresh').length - refreshWrites,
+    disabledWhileDirty,
+    enabledAfterSave,
+  }
+
+  stage = 'stale-read'
+  await injectFault({
+    pathPrefix: USAGE_RETENTION,
+    method: 'GET',
+    status: 200,
+    delayMs: 1200,
+    count: 1,
+  })
+  await page.locator('#settings-requests-refresh').click()
+  await page.waitForTimeout(300)
+  await fillNumber('settings-approval-retention-days', 55)
+  await page.waitForTimeout(2600)
+  const keptDraft = await page
+    .locator('#settings-approval-retention-days')
+    .inputValue()
+  assert(
+    keptDraft === '55',
+    'a read that started before the edit reverted the newer draft',
+  )
+  const staleRetention = await stored('usage-retention')
+  assert(
+    staleRetention.body.approval_retention_days === 55,
+    `the stored approval days are ${staleRetention.body.approval_retention_days}`,
+  )
+  await clearFaults()
+  report.checks.staleRead = {
+    keptDraft,
+    storedApproval: staleRetention.body.approval_retention_days,
+  }
+
+  stage = 'responsive-en'
+  await page.evaluate(() => {
+    window.localStorage.setItem('prompt-ferry:locale', 'en-US')
+    window.localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await openRequests()
+  const profile = []
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.waitForTimeout(250)
+    const measured = await page.evaluate(() => {
+      const controls = [
+        'settings-request-content-logging-mode',
+        'settings-raw-retention-days',
+        'settings-approval-retention-days',
+        'settings-model-route-whitelist-enabled',
+        'settings-stream-delta-batching-enabled',
+        'settings-flush-window-ms',
+        'settings-max-buffer-chars',
+        'settings-max-buffer-bytes',
+        'settings-flush-on-line-break',
+        'settings-flush-on-sentence-end',
+      ].map(id => {
+        const rect = document.getElementById(id)?.getBoundingClientRect()
+        return rect
+          ? {
+              id,
+              left: Math.round(rect.left),
+              right: Math.round(rect.right),
+              top: Math.round(rect.top),
+            }
+          : { id, left: -1, right: -1, top: -1 }
+      })
+      return {
+        controls,
+        cards: document.querySelectorAll('[data-settings-card]').length,
+        documentWidth: document.documentElement.scrollWidth,
+        viewport: window.innerWidth,
+      }
+    })
+    assert(
+      measured.cards === 3,
+      `the ${width}px layout does not show three cards`,
+    )
+    assert(
+      measured.documentWidth <= measured.viewport,
+      `the requests tab overflows at ${width}px (${measured.documentWidth} > ${measured.viewport})`,
+    )
+    for (const control of measured.controls) {
+      assert(
+        control.left >= 0 &&
+          control.right <= measured.viewport &&
+          control.right > control.left,
+        `the ${control.id} control is not reachable at ${width}px`,
+      )
+    }
+    profile.push({
+      width,
+      documentWidth: measured.documentWidth,
+      controls: measured.controls.length,
+    })
+    if (width === 390) await capture('settings-requests-en-light-390')
+  }
+  report.checks.responsive = profile
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  stage = 'locale-theme-no-refetch'
+  const beforeToggle = readsFor('locale-theme-no-refetch').length
+  const writesBeforeToggle = writesFor('locale-theme-no-refetch').length
+  const rawBeforeToggle = await page
+    .locator('#settings-raw-retention-days')
+    .inputValue()
+  await page.getByRole('button', { name: 'Language', exact: true }).click()
+  await page.waitForTimeout(400)
+  // The theme control is labelled with the mode it switches to.
+  await page.getByRole('button', { name: /^(Dark|暗色)$/ }).click()
+  await page.waitForTimeout(600)
+  assert(
+    (await page.evaluate(() => document.documentElement.lang)) === 'zh-CN' &&
+      (await page.evaluate(() =>
+        document.documentElement.classList.contains('dark'),
+      )) === true,
+    'the locale or theme change did not reach the document',
+  )
+  assert(
+    readsFor('locale-theme-no-refetch').length === beforeToggle,
+    `a locale/theme rerender refetched the settings: ${readsFor('locale-theme-no-refetch').length - beforeToggle} reads`,
+  )
+  assert(
+    writesFor('locale-theme-no-refetch').length === writesBeforeToggle,
+    'a locale/theme rerender wrote a setting',
+  )
+  assert(
+    (await page.locator('#settings-raw-retention-days').inputValue()) ===
+      rawBeforeToggle,
+    'a locale/theme rerender changed a loaded setting',
+  )
+  report.checks.localeThemeNoRefetch = {
+    reads: readsFor('locale-theme-no-refetch').length - beforeToggle,
+    writes: writesFor('locale-theme-no-refetch').length - writesBeforeToggle,
+    keptValue: rawBeforeToggle,
+  }
+
+  stage = 'locale-zh'
+  await page.evaluate(() => {
+    window.localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    window.localStorage.setItem('prompt-ferry:theme-mode', 'dark')
+  })
+  await openRequests()
+  const zhHeading = await page
+    .locator('[data-foundation-route-id="R-SETTINGS-REQUESTS"] h1')
+    .innerText()
+  assert(zhHeading === '请求与路由', `the Chinese heading is wrong: ${zhHeading}`)
+  const zhCopy = {
+    mode: await page.locator('#settings-request-content-logging-mode').innerText(),
+    whitelist: await page.locator('[data-settings-card]').nth(1).innerText(),
+    batching: await page.locator('[data-settings-card]').nth(2).innerText(),
+  }
+  assert(
+    zhCopy.mode.includes('标准化'),
+    `the Chinese mode option is wrong: ${zhCopy.mode}`,
+  )
+  assert(
+    zhCopy.whitelist.includes('模型路由白名单') &&
+      zhCopy.whitelist.includes('只允许命中模型路由的模型调用'),
+    'the Chinese whitelist copy is wrong',
+  )
+  assert(
+    zhCopy.batching.includes('流式批处理') &&
+      zhCopy.batching.includes('换行即 flush'),
+    'the Chinese batching copy is wrong',
+  )
+  await capture('settings-requests-zh-dark-1440')
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.waitForTimeout(300)
+  const zhOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  )
+  assert(!zhOverflow, 'the Chinese dark requests tab overflows at 390px')
+  await capture('settings-requests-zh-dark-390')
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  // The ledger above covers the mounted requests tab; the denial walkthrough
+  // visits the login landing page, the general tab and the redaction route,
+  // whose own reads are not this tab's business.
+  collecting = false
+
+  stage = 'admin-denial'
+  await signOut()
+  await signIn('operator')
+  const operatorNav = await page.evaluate(() =>
+    [...document.querySelectorAll('nav a')].map(link =>
+      link.getAttribute('href'),
+    ),
+  )
+  const navHidden = !operatorNav.includes('/settings/requests')
+  assert(navHidden, 'the ordinary-user nav exposes the requests settings route')
+  await page.goto(`${BASE}/settings/requests`)
+  await page.waitForTimeout(700)
+  const redirected = new URL(page.url()).pathname !== '/settings/requests'
+  assert(redirected, 'an ordinary user stayed on the admin requests route')
+  assert(
+    (await page
+      .locator('[data-foundation-route-id="R-SETTINGS-REQUESTS"]')
+      .count()) === 0,
+    'an ordinary user rendered the requests settings section',
+  )
+  const forgedWrites = await page.evaluate(async () => {
+    const patch = await fetch('/api/v1/settings/usage-retention', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approval_retention_days: 99 }),
+    })
+    const read = await fetch('/api/v1/settings/request-content-logging')
+    return { patch: patch.status, read: read.status }
+  })
+  assert(
+    forgedWrites.patch === 403 && forgedWrites.read === 403,
+    `the fixture answered a non-admin settings request with ${JSON.stringify(forgedWrites)}`,
+  )
+  await page.goto(`${BASE}/settings/general`)
+  await page.waitForSelector('[data-foundation-route-id="R-SETTINGS-GENERAL"]')
+  assert(
+    (await page.locator('[data-settings-card]').count()) === 3,
+    'the ordinary user lost the general settings tab',
+  )
+  await page.goto(`${BASE}/redaction/rules`)
+  await page.waitForSelector('[data-foundation-route-id="R-REDACTION-RULES"]')
+  const redactionScoped = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/settings/redaction')
+    return response.status
+  })
+  assert(
+    redactionScoped === 200,
+    `the ordinary-user redaction setting returned ${redactionScoped}`,
+  )
+  await signOut()
+  const anonymous = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/settings/usage-retention')
+    return response.status
+  })
+  assert(
+    anonymous === 401,
+    `an anonymous settings read returned ${anonymous}`,
+  )
+  report.checks.adminDenial = {
+    navHidden,
+    redirected,
+    forgedPatch: forgedWrites.patch,
+    forgedRead: forgedWrites.read,
+    generalIntact: true,
+    redactionIntact: redactionScoped,
+    anonymousRead: anonymous,
+  }
+  passed(
+    'admin-denial',
+    'an ordinary user has no requests link, is redirected away from the route without rendering it, is refused with 403 on forged settings reads and writes, and still reaches the general and redaction settings while an anonymous read is refused with 401',
+  )
+  await signIn('admin')
+
+  stage = 'finish'
+  report.checks.settingsReadPaths = READ_PATHS
+  report.checks.officialPendingRoutes = 0
+  report.checks.unexpectedWindow = 'mounted admin requests tab stages'
+  report.limitations.push(
+    'Evidence is the synthetic fixture and its stored settings records; no live provider, database or production behaviour is claimed.',
+    'The 503, delay and forged-role cases run against the fixture fault injection and role gate, not a remote service.',
+  )
+  report.checks.limitations = report.limitations
+  report.finishedAt = new Date().toISOString()
+  return report
+}

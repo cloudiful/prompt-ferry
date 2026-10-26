@@ -1,0 +1,567 @@
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const startedAt = new Date().toISOString()
+  const previewText = 'contact mail@fixture.invalid with sk_fixture_preview0001'
+  const unsavedSignature = 'redaction-preview-e2e-unsaved'
+  const report = {
+    runId: `redaction-preview-${Date.now()}`,
+    startedAt,
+    checks: {},
+    screenshots: [],
+    expectedApiFailures: [],
+    apiFailures: [],
+    consoleErrorCount: 0,
+    pageErrorCount: 0,
+    previewRequestCount: 0,
+    settingsRequestCount: 0,
+  }
+  const previewBodies = []
+  let stage = 'startup'
+
+  page.setDefaultTimeout(12000)
+  page.on('pageerror', () => report.pageErrorCount++)
+  page.on('console', (message) => {
+    if (message.type() !== 'error') return
+    if (/(?:status of )?(?:400|401|403|404|503)\b/.test(message.text())) return
+    report.consoleErrorCount++
+  })
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (!url.pathname.startsWith('/api/')) return
+    if (
+      url.pathname === '/api/v1/settings/redaction' &&
+      request.method() === 'GET'
+    ) {
+      report.settingsRequestCount++
+    }
+    if (
+      url.pathname !== '/api/v1/settings/redaction/preview' ||
+      request.method() !== 'POST'
+    ) {
+      return
+    }
+    report.previewRequestCount++
+    try {
+      const body = request.postDataJSON()
+      previewBodies.push({
+        customSignaturePresent:
+          Array.isArray(body.custom_strings) &&
+          body.custom_strings.some((rule) => rule.pattern === unsavedSignature),
+        customStringCount: Array.isArray(body.custom_strings)
+          ? body.custom_strings.length
+          : 0,
+        enabled: body.enabled === true,
+        inputKind: body.input_kind,
+        organizationRule: body.rules?.organization === true,
+        textLength: typeof body.text === 'string' ? body.text.length : -1,
+      })
+    } catch {}
+  })
+  page.on('response', (response) => {
+    const url = new URL(response.url())
+    if (!url.pathname.startsWith('/api/') || response.status() < 400) return
+    const method = response.request().method()
+    if (response.status() === 401 && url.pathname === '/api/v1/auth/me') return
+    if (
+      response.status() === 503 &&
+      method === 'POST' &&
+      url.pathname === '/api/v1/settings/redaction/preview'
+    ) {
+      report.expectedApiFailures.push(
+        '503 POST /api/v1/settings/redaction/preview',
+      )
+      return
+    }
+    report.apiFailures.push(`${response.status()} ${method} ${url.pathname}`)
+  })
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(`${stage}: ${message}`)
+  }
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok)
+      throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  function previewButton() {
+    return page.getByRole('button', { name: 'Preview', exact: true })
+  }
+
+  function previewRoute() {
+    return page.locator('[data-foundation-route-id="R-REDACTION-PREVIEW"]')
+  }
+
+  function outputText() {
+    return page
+      .locator('#redaction-preview-output')
+      .evaluate((element) => element.textContent ?? '')
+  }
+
+  async function waitForPreview() {
+    await page
+      .waitForResponse(
+        (response) =>
+          response.request().method() === 'POST' &&
+          new URL(response.url()).pathname ===
+            '/api/v1/settings/redaction/preview',
+      )
+      .catch((cause) => {
+        throw new Error(
+          `${stage}: timed out waiting for a preview response; ${cause.message}`,
+        )
+      })
+  }
+
+  async function capture(name) {
+    const path = `${screenshots}/${name}.png`
+    await page.screenshot({ path, fullPage: true })
+    report.screenshots.push(path)
+  }
+
+  async function signIn(loginName) {
+    await page.getByLabel('Login name').waitFor({ state: 'visible' })
+    await page.getByLabel('Login name').fill(loginName)
+    await page
+      .getByRole('textbox', { name: 'Password' })
+      .fill('fixture-password')
+    await page.getByRole('button', { name: 'Login' }).click()
+    await page.waitForURL((url) => new URL(url).pathname === '/api-keys')
+  }
+
+  await page.context().clearCookies()
+  await fixture('/__fixtures/reset', 'POST')
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin: BASE,
+  })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto(`${BASE}/login`)
+  await page.evaluate(() => {
+    localStorage.clear()
+    localStorage.setItem('prompt-ferry:locale', 'en-US')
+    localStorage.setItem('prompt-ferry:theme-mode', 'light')
+    localStorage.setItem('prompt-ferry:display-time-zone', 'UTC')
+  })
+  await page.reload()
+  await signIn('admin')
+
+  stage = 'route-render'
+  await page.goto(`${BASE}/redaction/preview`)
+  await previewRoute().waitFor({ state: 'visible' })
+  await page
+    .locator('[data-foundation-route-id="R-REDACTION-PREVIEW"] > header > h1')
+    .waitFor({ state: 'visible' })
+  await page.getByRole('combobox', { name: 'Input kind' }).waitFor({
+    state: 'visible',
+  })
+  assert(
+    (await page.locator('[data-foundation-placeholder]').count()) === 0,
+    'the preview route still renders a foundation placeholder',
+  )
+  assert(
+    (await page.getByText('No findings').count()) === 1 &&
+      (await page.getByText('No replacements').count()) === 1,
+    'the preview details did not render their empty states',
+  )
+  report.checks.routeRender = {
+    routeId: true,
+    emptyDetails: true,
+    noPlaceholder: true,
+    inputKindOptions: await page
+      .getByRole('combobox', { name: 'Input kind' })
+      .count(),
+  }
+  await capture('redaction-preview-empty-en-light-1440')
+
+  stage = 'successful-preview'
+  const previewInput = page.locator('#redaction-preview-input')
+  await previewInput.fill(previewText)
+  const firstPreview = waitForPreview()
+  await previewButton().click()
+  await firstPreview
+  const firstBody = previewBodies[previewBodies.length - 1]
+  assert(
+    firstBody && firstBody.enabled === true && firstBody.inputKind === 'text',
+    'the preview request did not carry the current enabled flag and input kind',
+  )
+  assert(
+    firstBody.textLength === previewText.length,
+    'the preview request did not carry the current preview text',
+  )
+  assert(
+    firstBody.customStringCount > 0,
+    'the preview request did not carry the configured custom strings',
+  )
+  const output = await outputText()
+  assert(
+    output.includes('[EMAIL]') && output.includes('[SECRET]'),
+    'the preview output did not mask the built-in email and secret rules',
+  )
+  assert(
+    (await page.getByText('Findings 2').count()) === 1 &&
+      (await page.getByText('Replacements 2').count()) === 1,
+    'the preview statistics did not match the fixture findings',
+  )
+  assert(
+    (await page.locator('tr[data-finding-index]').count()) === 2,
+    'the findings table did not render one row per fixture match',
+  )
+  report.checks.success = {
+    requestSnapshot: true,
+    outputMaskedEmail: true,
+    outputMaskedSecret: true,
+    statsMatched: true,
+    findingRows: 2,
+  }
+  await previewInput.fill('')
+  await capture('redaction-preview-result-en-light-1440')
+
+  stage = 'copy-output'
+  await page.getByRole('button', { name: 'Copy redacted output' }).click()
+  const clipboard = await page.evaluate(() =>
+    navigator.clipboard.readText().catch(() => ''),
+  )
+  assert(
+    clipboard.includes('[EMAIL]') && clipboard.includes('[SECRET]'),
+    'the copy action did not write the redacted output to the clipboard',
+  )
+  assert(
+    (await page.getByText('Copied', { exact: true }).count()) === 1,
+    'the copy action did not report the copied state',
+  )
+  report.checks.copyOutput = { clipboardWritten: true, copiedFeedback: true }
+
+  stage = 'stale-preview'
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/settings/redaction/preview',
+    method: 'POST',
+    status: 200,
+    delayMs: 900,
+  })
+  await previewInput.fill('stale preview body')
+  const staleRequest = waitForPreview()
+  await previewButton().click()
+  await page.waitForTimeout(250)
+  await previewInput.fill('edited preview body')
+  const requestsBeforeSecond = report.previewRequestCount
+  await previewButton()
+    .dispatchEvent('click')
+    .catch(() => undefined)
+  await page.waitForTimeout(150)
+  assert(
+    report.previewRequestCount === requestsBeforeSecond,
+    'a second preview request was issued while the first was in flight',
+  )
+  assert(
+    await previewButton().isDisabled(),
+    'the preview action stayed enabled while a preview was in flight',
+  )
+  await staleRequest
+  await page.waitForTimeout(200)
+  const staleOutput = await outputText()
+  assert(
+    !staleOutput.includes('[EMAIL]') && !staleOutput.includes('[SECRET]'),
+    'a late preview response was applied after the draft changed',
+  )
+  assert(
+    (await page
+      .locator('#redaction-preview-output [data-preview-highlight="true"]')
+      .count()) === 0,
+    'a discarded preview response still highlighted the output',
+  )
+  report.checks.staleResponse = {
+    singleRequest: true,
+    lateResultDiscarded: true,
+    noHighlight: true,
+  }
+
+  stage = 'stale-retry'
+  const retryRequest = waitForPreview()
+  await previewButton().click()
+  await retryRequest
+  assert(
+    (await page.getByText('Findings 0').count()) === 1,
+    'the retry after a discarded preview did not produce a result',
+  )
+  report.checks.staleRetry = { retrySucceeded: true }
+
+  stage = 'preview-conflict'
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/settings/redaction/preview',
+    method: 'POST',
+    status: 503,
+    delayMs: 700,
+  })
+  const conflictRequest = waitForPreview()
+  await previewButton().click()
+  await page.waitForTimeout(200)
+  const conflictRequests = report.previewRequestCount
+  await previewButton()
+    .dispatchEvent('click')
+    .catch(() => undefined)
+  await page.waitForTimeout(150)
+  assert(
+    report.previewRequestCount === conflictRequests,
+    'a duplicate preview request was issued while the failing preview was in flight',
+  )
+  await conflictRequest
+  await page.getByRole('alert').first().waitFor({ state: 'visible' })
+  assert(
+    !(await outputText()).includes('[EMAIL]'),
+    'a failed preview kept a stale result',
+  )
+  report.checks.conflict = {
+    singleRequest: true,
+    errorVisible: true,
+    resultCleared: true,
+  }
+
+  stage = 'conflict-retry'
+  const conflictRetry = waitForPreview()
+  await previewButton().click()
+  await conflictRetry
+  assert(
+    (await page.getByText('Findings 0').count()) === 1,
+    'the retry after a failed preview did not produce a result',
+  )
+  report.checks.conflictRetry = { retrySucceeded: true }
+
+  stage = 'selection-and-highlight'
+  await previewInput.fill(previewText)
+  const selectionPreview = waitForPreview()
+  await previewButton().click()
+  await selectionPreview
+  await page.locator('tr[data-finding-index] button').first().click()
+  assert(
+    (await page
+      .locator('#redaction-preview-output [data-preview-highlight="true"]')
+      .count()) === 1,
+    'selecting a finding did not highlight the output',
+  )
+  assert(
+    (await page
+      .locator('#redaction-preview-input [data-preview-highlight="true"]')
+      .count()) === 1,
+    'selecting a finding did not highlight the input',
+  )
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.waitForTimeout(150)
+  const mobileSwitch = await page.evaluate(() => {
+    const output = document.getElementById('redaction-preview-output')
+    const input = document.getElementById('redaction-preview-input')
+    const visible = (element) => {
+      if (!element) return false
+      const box = element.getBoundingClientRect()
+      return box.width > 0 && box.height > 0
+    }
+    return { output: visible(output), input: visible(input) }
+  })
+  assert(
+    mobileSwitch.output && !mobileSwitch.input,
+    'selecting a finding did not switch the mobile pane to the output',
+  )
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.waitForTimeout(150)
+  report.checks.selection = {
+    outputHighlighted: true,
+    inputHighlighted: true,
+    mobilePaneSwitched: true,
+  }
+
+  stage = 'shared-draft'
+  const settingsReadsBefore = report.settingsRequestCount
+  await page.getByRole('link', { name: 'Built-in rules', exact: true }).click()
+  await page
+    .locator('[data-foundation-route-id="R-REDACTION-RULES"]')
+    .waitFor({ state: 'visible' })
+  await page.getByRole('button', { name: 'Add rule' }).click()
+  const addedIndex = await page
+    .locator('tr[data-redaction-array-index]')
+    .evaluateAll((rows) =>
+      Math.max(
+        ...rows.map((row) =>
+          Number(row.getAttribute('data-redaction-array-index')),
+        ),
+      ),
+    )
+  await page
+    .locator(
+      `[data-redaction-array-index="${addedIndex}"] input[name="redaction-custom-pattern"]`,
+    )
+    .fill(unsavedSignature)
+  await page.getByRole('checkbox', { name: 'Organization' }).click()
+  assert(
+    (await page.getByText('Unsaved', { exact: true }).count()) === 1,
+    'the unsaved custom rule was not marked as a draft',
+  )
+  await page.getByRole('link', { name: 'Preview', exact: true }).click()
+  await previewRoute().waitFor({ state: 'visible' })
+  assert(
+    report.settingsRequestCount === settingsReadsBefore,
+    'switching to the preview route refetched the shared configuration',
+  )
+  await previewInput.fill(previewText)
+  const sharedPreview = waitForPreview()
+  await previewButton().click()
+  await sharedPreview
+  const sharedBody = previewBodies[previewBodies.length - 1]
+  assert(
+    sharedBody && sharedBody.customSignaturePresent === true,
+    'the unsaved custom rule was not sent in the preview request',
+  )
+  assert(
+    sharedBody && sharedBody.organizationRule === true,
+    'the unsaved built-in rule toggle was not sent in the preview request',
+  )
+  report.checks.sharedDraft = {
+    draftPreserved: true,
+    noRefetch: true,
+    customSignatureSent: true,
+    builtinToggleSent: true,
+  }
+
+  stage = 'input-kind-boundary'
+  await page.getByRole('combobox', { name: 'Input kind' }).click()
+  await page.getByRole('option', { name: 'Git diff' }).click()
+  const boundaryPreview = waitForPreview()
+  await previewButton().click()
+  await boundaryPreview
+  const boundaryBody = previewBodies[previewBodies.length - 1]
+  assert(
+    boundaryBody && boundaryBody.inputKind === 'git_diff',
+    'the preview request did not carry the git diff input kind',
+  )
+  assert(
+    boundaryBody && boundaryBody.customSignaturePresent === true,
+    'the preview request did not carry the custom signature',
+  )
+  report.checks.inputKindBoundary = {
+    gitDiffSent: true,
+    customSignatureSent: true,
+  }
+
+  stage = 'disabled-preview'
+  await page.getByRole('checkbox', { name: 'Redaction' }).click()
+  const disabledPreview = waitForPreview()
+  await previewButton().click()
+  await disabledPreview
+  const disabledBody = previewBodies[previewBodies.length - 1]
+  assert(
+    disabledBody && disabledBody.enabled === false,
+    'the preview request did not carry the disabled redaction flag',
+  )
+  const disabledOutput = await outputText()
+  assert(
+    !disabledOutput.includes('[EMAIL]') &&
+      !disabledOutput.includes('[SECRET]') &&
+      (await page.getByText('No findings').count()) === 1,
+    'a disabled preview still redacted the input',
+  )
+  report.checks.disabledPreview = { textUnchanged: true, noFindings: true }
+  await page.getByRole('checkbox', { name: 'Redaction' }).click()
+  await previewInput.fill(previewText)
+  const restoredPreview = waitForPreview()
+  await previewButton().click()
+  await restoredPreview
+  assert(
+    (await outputText()).includes('[EMAIL]'),
+    'the restored enabled preview did not mask the input again',
+  )
+
+  stage = 'responsive-panes'
+  await previewInput.fill('')
+  const responsive = []
+  const mobilePane = { outputVisible: false, inputHidden: false, inputRestored: false }
+  async function checkWidths(locale, theme) {
+    for (const width of [1440, 1024, 768, 390]) {
+      await page.setViewportSize({ width, height: 1000 })
+      const result = await page.evaluate(() => {
+        const tables = [
+          ...document.querySelectorAll('[data-slot="table-container"]'),
+        ]
+        const scroll = tables.some(
+          (table) => table.scrollWidth > table.clientWidth,
+        )
+        const output = document.getElementById('redaction-preview-output')
+        const input = document.getElementById('redaction-preview-input')
+        const visible = (element) => {
+          if (!element) return false
+          const box = element.getBoundingClientRect()
+          return box.width > 0 && box.height > 0
+        }
+        return {
+          documentWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth,
+          tableScrolls: scroll,
+          outputVisible: visible(output),
+          inputVisible: visible(input),
+        }
+      })
+      assert(
+        result.documentWidth <= width,
+        `the preview page overflows horizontally at ${width}px`,
+      )
+      if (width === 390) {
+        const tabs = page.getByRole('tab')
+        assert((await tabs.count()) === 2, 'the mobile pane tabs are missing')
+        await page.getByRole('tab').nth(1).click()
+        const switched = await page.evaluate(() => {
+          const output = document.getElementById('redaction-preview-output')
+          const input = document.getElementById('redaction-preview-input')
+          const visible = (element) => {
+            if (!element) return false
+            const box = element.getBoundingClientRect()
+            return box.width > 0 && box.height > 0
+          }
+          return { output: visible(output), input: visible(input) }
+        })
+        assert(
+          switched.output && !switched.input,
+          'the mobile output pane did not replace the input pane',
+        )
+        mobilePane.outputVisible = switched.output
+        mobilePane.inputHidden = !switched.input
+        await page.getByRole('tab').nth(0).click()
+        const restored = await page.evaluate(() => {
+          const input = document.getElementById('redaction-preview-input')
+          if (!input) return false
+          const box = input.getBoundingClientRect()
+          return box.width > 0 && box.height > 0
+        })
+        assert(restored, 'the mobile input pane did not come back')
+        mobilePane.inputRestored = restored
+      }
+      responsive.push({ locale, theme, width, ...result })
+    }
+  }
+
+  await checkWidths('en-US', 'light')
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.getByRole('button', { name: 'Language' }).click()
+  await page.getByRole('button', { name: '语言' }).waitFor({ state: 'visible' })
+  await page.getByRole('button', { name: '暗色' }).click()
+  await checkWidths('zh-CN', 'dark')
+  await page.setViewportSize({ width: 390, height: 1000 })
+  await capture('redaction-preview-zh-dark-390')
+  await page.getByRole('button', { name: '语言' }).click()
+  await page.getByRole('button', { name: 'Light' }).click()
+  report.checks.responsivePanes = responsive
+  report.checks.mobilePaneSwitch = mobilePane
+
+  report.finishedAt = new Date().toISOString()
+  assert(
+    report.apiFailures.length === 0,
+    `unexpected API failures: ${report.apiFailures.join(', ')}`,
+  )
+  assert(report.consoleErrorCount === 0, 'console errors were reported')
+  assert(report.pageErrorCount === 0, 'page errors were reported')
+  return report
+}

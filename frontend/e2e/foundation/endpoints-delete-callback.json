@@ -1,0 +1,20 @@
+{
+  "startedAt": "2026-10-26T10:35:08.209Z",
+  "checks": {
+    "toggleAndIndependentProbe": {
+      "toggledOff": true,
+      "probePath": "/api/v1/admin/endpoints/ep-1002/test",
+      "probeResultRendered": true,
+      "accessibleName": "HTTP 200 / 312ms / fixture upstream accepted the probe",
+      "restored": true
+    },
+    "deleteCancelAndSuccess": {
+      "cancelledWrites": 0,
+      "successfulDelete": true
+    },
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  "screenshots": [],
+  "finishedAt": "2026-10-26T10:35:08.760Z"
+}

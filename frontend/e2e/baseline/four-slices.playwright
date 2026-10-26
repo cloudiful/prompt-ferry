@@ -1,0 +1,215 @@
+async page => {
+  const base = 'http://127.0.0.1:5171'
+  const control = 'http://127.0.0.1:8789'
+  const result = { checks: {}, captures: [], failures: [], startedAt: new Date().toISOString() }
+  page.setDefaultTimeout(8000)
+  const api = async (path, body) => (await fetch(control + path, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })).json()
+  const log = async () => (await api('/__fixtures/log?limit=500')).requests
+  const since = async stamp => (await log()).filter(r => Date.parse(r.at) >= stamp)
+  const shot = async name => {
+    const path = `e2e/baseline/screenshots/slice3_${name}.png`
+    await page.screenshot({ path, fullPage: true })
+    result.captures.push({ name, path })
+  }
+  const visit = async route => {
+    await page.goto(base + route, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(1100)
+  }
+  const run = async (name, fn) => {
+    try { await fn() } catch (error) { result.failures.push({ name, error: String(error) }) }
+  }
+  await api('/__fixtures/reset', {})
+  await page.context().clearCookies()
+  await visit('/login')
+  await page.evaluate(() => { localStorage.clear(); localStorage.setItem('prompt-ferry:locale', 'zh-CN') })
+  await page.reload()
+  await page.getByRole('textbox', { name: /登录名/ }).fill('admin')
+  await page.getByRole('textbox', { name: /密码/ }).fill('fixture-password')
+  await page.getByRole('button', { name: /^登录$/ }).click()
+  await page.waitForTimeout(1200)
+
+  await run('archive', async () => {
+    await visit('/settings/config-archive')
+    const prepare = async () => {
+      await page.locator('input[type=file]').setInputFiles('e2e/baseline/fixtures/fixture.pfce')
+      await page.locator('input[type=password]').nth(1).fill('fixture-passphrase')
+      await page.getByRole('button', { name: '预览变更' }).click()
+      await page.waitForTimeout(700)
+      await page.getByRole('button', { name: '应用导入' }).click()
+      await page.getByRole('dialog').last().waitFor()
+    }
+    await prepare()
+    let stamp = Date.now()
+    await page.getByRole('dialog').last().getByRole('button', { name: /取消/ }).click()
+    await page.waitForTimeout(500)
+    const cancelled = await since(stamp)
+    const cancelCleared = !(await page.locator('body').innerText()).includes('fixture.pfce')
+    await prepare()
+    await api('/__fixtures/faults', { pathPrefix: '/api/v1/admin/config-import', method: 'POST', status: 500, count: 1 })
+    stamp = Date.now()
+    await page.getByRole('dialog').last().getByRole('button', { name: /确认导入/ }).click()
+    await page.waitForTimeout(1000)
+    const failed = await since(stamp)
+    const cleared = (await page.locator('input[type=password]').nth(1).inputValue()) === ''
+    await page.keyboard.press('Escape')
+    await prepare()
+    stamp = Date.now()
+    await page.getByRole('dialog').last().getByRole('button', { name: /确认导入/ }).click()
+    await page.waitForTimeout(1200)
+    const succeeded = await since(stamp)
+    const body = await page.locator('body').innerText()
+    result.checks.archive = {
+      cancelNoPost: !cancelled.some(r => r.path === '/api/v1/admin/config-import' && r.method === 'POST'),
+      cancelCleared,
+      failed: failed.find(r => r.path === '/api/v1/admin/config-import' && r.status === 500),
+      cleared,
+      success: succeeded.find(r => r.path === '/api/v1/admin/config-import' && r.status === 200),
+      auditRefreshed: succeeded.some(r => r.path === '/api/v1/admin/config-audit'),
+      auditVisible: body.includes('c1b2c3d4e5f60718'),
+      text: body.slice(0, 900),
+    }
+    await shot('archive')
+  })
+
+  await run('billing', async () => {
+    await visit('/billing')
+    const charges = page.locator('section').filter({ has: page.getByRole('heading', { name: '请求费用', exact: true }) }).last()
+    const rules = page.locator('section').filter({ has: page.getByRole('heading', { name: '价格规则', exact: true }) }).last()
+    const ruleFirst = rules.getByRole('button', { name: '首页', exact: true })
+    if (await ruleFirst.isEnabled()) { await ruleFirst.click(); await page.waitForTimeout(700) }
+    const chargeBefore = await charges.locator('tbody').innerText()
+    const ruleBefore = await rules.locator('tbody').innerText()
+    let stamp = Date.now()
+    await charges.getByRole('button', { name: '下一页', exact: true }).click()
+    await page.waitForTimeout(900)
+    const chargeRequests = await since(stamp)
+    const chargeAfter = await charges.locator('tbody').innerText()
+    const rulesUnchanged = ruleBefore === await rules.locator('tbody').innerText()
+    stamp = Date.now()
+    await rules.getByRole('button', { name: '下一页', exact: true }).click()
+    await page.waitForTimeout(900)
+    const ruleRequests = await since(stamp)
+    const chargesUnchanged = chargeAfter === await charges.locator('tbody').innerText()
+    const ruleAfter = await rules.locator('tbody').innerText()
+    await page.getByPlaceholder('公开模型', { exact: true }).fill('minimax-m2')
+    stamp = Date.now()
+    await page.getByRole('button', { name: '应用筛选' }).click()
+    await page.waitForTimeout(1000)
+    const filtered = await since(stamp)
+    const responses = await page.evaluate(async () => {
+      const q = '?requested_model=minimax-m2&first=0&rows=25'
+      return {
+        page: await (await fetch('/api/v1/admin/billing/charges' + q)).json(),
+        summary: await (await fetch('/api/v1/admin/billing/summary' + q)).json(),
+      }
+    })
+    result.checks.billing = {
+      chargeChanged: chargeBefore !== chargeAfter, rulesUnchanged,
+      ruleChanged: ruleBefore !== ruleAfter, chargesUnchanged,
+      chargeRequests, ruleRequests, filtered,
+      filteredModels: responses.page.charges.map(r => r.requested_model),
+      summaryCount: responses.summary.request_count,
+      summaryAmount: responses.summary.customer_amount,
+    }
+    await shot('billing')
+  })
+
+  await run('sort', async () => {
+    await visit('/request-records/ai')
+    await page.getByRole('button', { name: '记录', exact: true }).click()
+    await page.waitForTimeout(900)
+    const header = page.locator('th').filter({ hasText: 'Token / 缓存' }).first()
+    const before = await header.getAttribute('aria-sort')
+    const stamp = Date.now()
+    await header.click()
+    await page.waitForTimeout(700)
+    const after = await header.getAttribute('aria-sort')
+    result.checks.sort = {
+      disposition: 'known-baseline-defect',
+      before, after,
+      requests: (await since(stamp)).filter(r => r.path === '/api/v1/admin/request-records'),
+      buttons: await header.getByRole('button').count(),
+      source: 'frontend/src/components/usage/UsagePanel.vue: columns and sorting; Nuxt UI Table header renders strings without toggle handler',
+      futureFixId: 'REACT-AI-SORT-ACCESSIBLE',
+      target: 'Header buttons with keyboard activation, aria-sort, sort_field/sort_order requests',
+    }
+    await shot('inert_sort')
+  })
+
+  await run('redaction', async () => {
+    await visit('/redaction/rules')
+    const search = page.getByPlaceholder('搜索 pattern')
+    let stamp = Date.now()
+    await search.fill('SECRET-10')
+    await search.press('Enter')
+    await page.waitForTimeout(1000)
+    const requests = await since(stamp)
+    const searched = await page.locator('table tbody').innerText()
+    const searchValues = await page.locator('table input[type=password]').evaluateAll(els => els.map(el => el.value))
+    await search.fill('')
+    await search.press('Enter')
+    await page.waitForTimeout(800)
+    await page.getByRole('button', { name: '新增规则' }).click()
+    await page.waitForTimeout(300)
+    const patterns = page.locator('input[name="redaction-custom-pattern"]')
+    const pattern = patterns.last()
+    await pattern.fill('[')
+    const match = page.getByRole('combobox', { name: '匹配方式' }).last()
+    await match.click()
+    await page.getByRole('option', { name: '正则', exact: true }).click()
+    await page.waitForTimeout(300)
+    const invalid = await pattern.getAttribute('aria-invalid')
+    const warning = await page.locator('body').innerText()
+    stamp = Date.now()
+    await page.getByRole('button', { name: '保存', exact: true }).click()
+    await page.waitForTimeout(500)
+    const blockedRequests = await since(stamp)
+    await pattern.fill('fixture-valid-.*')
+    stamp = Date.now()
+    await page.getByRole('button', { name: '保存', exact: true }).click()
+    await page.waitForTimeout(800)
+    const corrected = await since(stamp)
+    result.checks.redaction = {
+      requests, searched, searchValues, invalid, warning: warning.slice(-1000),
+      noInvalidPatch: !blockedRequests.some(r => r.method === 'PATCH' && r.path === '/api/v1/settings/redaction'),
+      corrected: corrected.find(r => r.method === 'PATCH' && r.path === '/api/v1/settings/redaction'),
+    }
+    await shot('redaction')
+    const addRule = async (scope) => {
+      await page.getByRole('button', { name: '新增规则' }).click()
+      await page.waitForTimeout(200)
+      const inputs = page.locator('input[name="redaction-custom-pattern"]')
+      let empty = null
+      for (let i = 0; i < await inputs.count(); i++) {
+        if (await inputs.nth(i).inputValue() === '') { empty = inputs.nth(i); break }
+      }
+      if (!empty) throw new Error('new blank rule not rendered')
+      await empty.fill('duplicate-fixture')
+      if (scope === 'line') {
+        await empty.locator('xpath=ancestor::tr').getByRole('combobox', { name: '作用域', exact: true }).click()
+        await page.getByRole('option', { name: '单行', exact: true }).click()
+      }
+    }
+    await addRule('text')
+    await addRule('text')
+    const duplicates = await page.locator('body').innerText()
+    await addRule('line')
+    const conflicts = await page.locator('body').innerText()
+    stamp = Date.now()
+    await page.getByRole('button', { name: '保存', exact: true }).click()
+    await page.waitForTimeout(800)
+    const saved = (await since(stamp)).find(r => r.method === 'PATCH' && r.path === '/api/v1/settings/redaction')
+    result.checks.redaction.duplicates = {
+      warningText: duplicates.slice(-1200), conflictText: conflicts.slice(-1200),
+      payload: saved?.body,
+      signatures: saved?.body?.custom_strings?.filter(r => r.pattern === 'duplicate-fixture'),
+    }
+    await shot('duplicate_conflict')
+  })
+  result.finishedAt = new Date().toISOString()
+  return JSON.stringify(result)
+}

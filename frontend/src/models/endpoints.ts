@@ -16,6 +16,28 @@ import {
   type ModelRouteViewItemLabels,
 } from './endpoints/model-route-item'
 
+export const ENDPOINT_KEY_PREFIX = 'endpoint'
+export const MODEL_ROUTE_KEY_PREFIX = 'modelroute'
+export const NETWORK_TEST_KEY_PREFIX = 'networktest'
+export const MODEL_ROUTE_CACHE_NAMESPACE = 'model-routes-page'
+
+export type EndpointActionKeyDomain = 'endpoint' | 'modelroute'
+
+export function endpointActionKey(endpointId: string | null): string {
+  return `${ENDPOINT_KEY_PREFIX}:${endpointId ?? 'create'}`
+}
+
+export function modelRouteActionKey(ruleId: string | null): string {
+  return `${MODEL_ROUTE_KEY_PREFIX}:${ruleId ?? 'create'}`
+}
+
+export function networkTestKey(
+  domain: EndpointActionKeyDomain,
+  id: string,
+): string {
+  return `${NETWORK_TEST_KEY_PREFIX}:${domain}:${id}`
+}
+
 export type EndpointListItemView = {
   endpoint_id: string
   name: string

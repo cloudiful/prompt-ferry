@@ -1,0 +1,1050 @@
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const CACHE_ALERT = '/api/v1/settings/cache-alert'
+  const CAPABILITY_CODE = 'capability_unavailable'
+  const CAPABILITY_MESSAGE =
+    'this Admin API capability is not available with SQLite yet'
+
+  const startedAt = new Date().toISOString()
+  const report = {
+    runId: `settings-cache-alert-${Date.now()}`,
+    startedAt,
+    finishedAt: null,
+    checks: {},
+    scenarios: {
+      'R-SETTINGS-CACHE-ALERT': {
+        'route-render': null,
+        'admin-denial': null,
+        'mutation-update': null,
+        'mutation-failure-draft': null,
+      },
+    },
+    screenshots: [],
+    apiFailures: [],
+    expectedApiFailures: [],
+    unexpectedRequests: [],
+    settingsRequests: [],
+    consoleErrorCount: 0,
+    pageErrorCount: 0,
+    limitations: [],
+  }
+  let stage = 'startup'
+  let collecting = false
+
+  page.setDefaultTimeout(15000)
+  page.on('pageerror', () => report.pageErrorCount++)
+  page.on('console', message => {
+    if (message.type() !== 'error') return
+    if (/\b(400|401|403|501|503)\b/.test(message.text())) return
+    report.consoleErrorCount++
+  })
+  page.on('request', request => {
+    const url = new URL(request.url())
+    if (url.pathname.startsWith('/api/v1/settings/')) {
+      // The ledger keeps the request shape and a boolean for the secret; the
+      // stored or typed value itself is never recorded.
+      const body = request.postData()
+      let shape = null
+      if (body) {
+        try {
+          const parsed = JSON.parse(body)
+          shape = {
+            keys: Object.keys(parsed).sort(),
+            enabled: parsed.enabled,
+            window_minutes: parsed.window_minutes,
+            min_turns: parsed.min_turns,
+            threshold: parsed.threshold,
+            cooldown_minutes: parsed.cooldown_minutes,
+            dingtalk_webhook_url: parsed.dingtalk_webhook_url,
+            dingtalk_secret_present: Boolean(parsed.dingtalk_secret),
+          }
+        } catch {
+          shape = { unparsable: true }
+        }
+      }
+      report.settingsRequests.push({
+        stage,
+        method: request.method(),
+        path: url.pathname,
+        body: shape,
+      })
+      return
+    }
+    if (!url.pathname.startsWith('/api/')) return
+    if (!collecting) return
+    if (
+      url.pathname.startsWith('/api/v1/auth/') ||
+      url.pathname.startsWith('/api/v1/relay/auth/') ||
+      url.pathname.startsWith('/api/v1/me/') ||
+      url.pathname === '/api/v1/bridge/status'
+    ) {
+      return
+    }
+    report.unexpectedRequests.push(`${request.method()} ${url.pathname}`)
+  })
+  page.on('response', response => {
+    const url = new URL(response.url())
+    if (!url.pathname.startsWith('/api/')) return
+    if (response.status() < 400) return
+    if (response.status() === 401 && url.pathname === '/api/v1/auth/me') {
+      report.expectedApiFailures.push('401 GET /api/v1/auth/me')
+      return
+    }
+    const entry = `${response.status()} ${response.request().method()} ${url.pathname}`
+    if (
+      url.pathname === CACHE_ALERT &&
+      [400, 401, 403, 501, 503].includes(response.status())
+    ) {
+      report.expectedApiFailures.push(entry)
+      return
+    }
+    report.apiFailures.push(entry)
+  })
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(`${stage}: ${message}`)
+  }
+
+  async function capture(name) {
+    const path = `${screenshots}/${name}.png`
+    await page.screenshot({ path, fullPage: true })
+    report.screenshots.push(path)
+  }
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) {
+      throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    }
+    return response.json()
+  }
+
+  async function clearFaults() {
+    await fixture('/__fixtures/faults', 'DELETE')
+  }
+
+  async function injectFault(fault) {
+    await clearFaults()
+    await fixture('/__fixtures/faults', 'POST', fault)
+  }
+
+  function requestsFor(requestStage) {
+    return report.settingsRequests.filter(entry => entry.stage === requestStage)
+  }
+
+  function readsFor(requestStage) {
+    return requestsFor(requestStage).filter(entry => entry.method === 'GET')
+  }
+
+  function writesFor(requestStage) {
+    return requestsFor(requestStage).filter(entry => entry.method === 'PUT')
+  }
+
+  async function signIn(loginName) {
+    await page.goto(`${BASE}/login`)
+    const loginNameField = page.getByLabel(/^(Login name|登录名)$/)
+    await loginNameField.waitFor({ state: 'visible' })
+    await loginNameField.fill(loginName)
+    await page
+      .getByRole('textbox', { name: /^(Password|密码)$/ })
+      .fill('fixture-password')
+    await page.getByRole('button', { name: /^(Login|登录)$/ }).click()
+    await page.waitForURL(url => new URL(url).pathname === '/api-keys')
+  }
+
+  async function signOut() {
+    await page.getByRole('button', { name: /Logout|退出登录/ }).click()
+    await page.waitForURL(url => new URL(url).pathname === '/login')
+  }
+
+  async function openCacheAlert() {
+    await page.goto(`${BASE}/settings/cache-alert`)
+    await page.waitForSelector(
+      '[data-foundation-route-id="R-SETTINGS-CACHE-ALERT"]',
+    )
+    await page.waitForTimeout(250)
+  }
+
+  async function waitForLoadedForm() {
+    await page.waitForFunction(() => {
+      const save = document.getElementById('settings-cache-alert-save')
+      return save !== null && !save.hasAttribute('disabled')
+    })
+    await page.waitForTimeout(150)
+  }
+
+  async function storedSettings() {
+    return page.evaluate(async () => {
+      const response = await fetch('/api/v1/settings/cache-alert')
+      const body = await response.json()
+      return {
+        status: response.status,
+        enabled: body.enabled,
+        window_minutes: body.window_minutes,
+        min_turns: body.min_turns,
+        threshold: body.threshold,
+        cooldown_minutes: body.cooldown_minutes,
+        dingtalk_webhook_url: body.dingtalk_webhook_url,
+        dingtalk_secret_blank: body.dingtalk_secret === '',
+        has_dingtalk_secret: body.has_dingtalk_secret,
+      }
+    })
+  }
+
+  function toastCount(text) {
+    return page.getByText(text, { exact: true }).count()
+  }
+
+  async function waitForNoToasts(text) {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if ((await toastCount(text)) === 0) return
+      await page.waitForTimeout(250)
+    }
+    throw new Error('a notification never cleared')
+  }
+
+  async function setText(id, value) {
+    await page.locator(`#${id}`).fill(String(value))
+  }
+
+  async function save() {
+    await page.locator('#settings-cache-alert-save').click()
+  }
+
+  function passed(scenario, evidence) {
+    report.scenarios['R-SETTINGS-CACHE-ALERT'][scenario] = {
+      passed: true,
+      evidence,
+    }
+  }
+
+  stage = 'admin-sign-in'
+  await page.goto(`${BASE}/login`)
+  await page.evaluate(() => {
+    window.localStorage.setItem('prompt-ferry:locale', 'en-US')
+    window.localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await signIn('admin')
+  await clearFaults()
+  await page.waitForTimeout(600)
+  collecting = true
+
+  stage = 'route-render'
+  await openCacheAlert()
+  await waitForLoadedForm()
+  const routeId = await page
+    .locator('[data-foundation-route-id]')
+    .getAttribute('data-foundation-route-id')
+  const routeTab = await page
+    .locator('[data-foundation-route-id]')
+    .getAttribute('data-settings-tab')
+  assert(
+    routeId === 'R-SETTINGS-CACHE-ALERT' && routeTab === 'cache-alert',
+    `the cache alert route identity is wrong: ${routeId}/${routeTab}`,
+  )
+  assert(
+    (await page
+      .locator('[data-foundation-route-id="R-SETTINGS-CACHE-ALERT"] h1')
+      .innerText()) === 'Cache alerts',
+    'the cache alert heading is not localized',
+  )
+  const controls = await page.evaluate(() => {
+    const ids = [
+      'settings-cache-alert-enabled',
+      'settings-cache-alert-window-minutes',
+      'settings-cache-alert-min-turns',
+      'settings-cache-alert-threshold',
+      'settings-cache-alert-cooldown-minutes',
+      'settings-cache-alert-webhook-url',
+      'settings-cache-alert-secret',
+      'settings-cache-alert-save',
+    ]
+    const value = id => document.getElementById(id)?.value
+    return {
+      missing: ids.filter(id => document.getElementById(id) === null),
+      enabled: document
+        .getElementById('settings-cache-alert-enabled')
+        ?.getAttribute('data-state'),
+      window: value('settings-cache-alert-window-minutes'),
+      minTurns: value('settings-cache-alert-min-turns'),
+      threshold: value('settings-cache-alert-threshold'),
+      cooldown: value('settings-cache-alert-cooldown-minutes'),
+      webhook: value('settings-cache-alert-webhook-url'),
+      secretType: document
+        .getElementById('settings-cache-alert-secret')
+        ?.getAttribute('type'),
+      secretValue: value('settings-cache-alert-secret'),
+      windowBounds: {
+        min: document
+          .getElementById('settings-cache-alert-window-minutes')
+          ?.getAttribute('min'),
+        max: document
+          .getElementById('settings-cache-alert-window-minutes')
+          ?.getAttribute('max'),
+      },
+      thresholdBounds: {
+        min: document
+          .getElementById('settings-cache-alert-threshold')
+          ?.getAttribute('min'),
+        max: document
+          .getElementById('settings-cache-alert-threshold')
+          ?.getAttribute('max'),
+        step: document
+          .getElementById('settings-cache-alert-threshold')
+          ?.getAttribute('step'),
+      },
+      presence: document
+        .querySelector('[data-secret-present]')
+        ?.getAttribute('data-secret-present'),
+      mode: document
+        .querySelector('[data-secret-mode]')
+        ?.getAttribute('data-secret-mode'),
+      hint: document.body.innerText.includes(
+        'PostgreSQL storage mode only.',
+      ),
+      bodyLeak: document.body.innerText.includes('fixture-synthetic-dingtalk'),
+      secretControls: [...document.querySelectorAll('button, a, label')].filter(
+        node => /^(clear|清除)$/i.test((node.textContent ?? '').trim()),
+      ).length,
+      saveDisabled: document
+        .getElementById('settings-cache-alert-save')
+        ?.hasAttribute('disabled'),
+      refreshDisabled: document
+        .getElementById('settings-cache-alert-refresh')
+        ?.hasAttribute('disabled'),
+    }
+  })
+  assert(controls.missing.length === 0, `missing controls: ${controls.missing}`)
+  assert(controls.enabled === 'checked', 'the loaded enabled switch is wrong')
+  assert(
+    controls.window === '30' &&
+      controls.minTurns === '8' &&
+      controls.threshold === '0.85' &&
+      controls.cooldown === '15',
+    `the loaded numbers are wrong: ${JSON.stringify(controls)}`,
+  )
+  assert(
+    controls.webhook ===
+      'https://oapi.dingtalk.com/robot/send?access_token=fixture',
+    `the loaded webhook is wrong: ${controls.webhook}`,
+  )
+  assert(
+    controls.secretType === 'password' && controls.secretValue === '',
+    'the secret is not an empty password input',
+  )
+  assert(
+    JSON.stringify(controls.windowBounds) ===
+      JSON.stringify({ min: '5', max: '1440' }) &&
+      JSON.stringify(controls.thresholdBounds) ===
+        JSON.stringify({ min: '0', max: '1', step: '0.05' }),
+    `the numeric bounds are wrong: ${JSON.stringify(controls)}`,
+  )
+  assert(
+    controls.presence === 'true' && controls.mode === 'keep',
+    `the presence or mode badge is wrong: ${controls.presence}/${controls.mode}`,
+  )
+  assert(controls.hint, 'the PostgreSQL storage-mode hint is not visible')
+  assert(controls.bodyLeak === false, 'a stored secret reached the document')
+  assert(controls.secretControls === 0, 'the tab exposes a clear-secret action')
+  assert(
+    controls.saveDisabled === false && controls.refreshDisabled === false,
+    'the save or refresh control is disabled on a loaded form',
+  )
+  assert(
+    readsFor('route-render').length === 1 &&
+      readsFor('route-render')[0].path === CACHE_ALERT,
+    `the mount read ${JSON.stringify(readsFor('route-render'))}`,
+  )
+  assert(
+    writesFor('route-render').length === 0,
+    'mounting the cache alert tab saved the settings',
+  )
+  await capture('settings-cache-alert-en-light-1440')
+  report.checks.routeRender = { routeId, routeTab, controls }
+  passed(
+    'route-render',
+    'the admin cache alert route renders one card with the enabled switch, the four bounded numbers and the float threshold, the webhook, a password-only empty secret with the server presence badge and the local keep badge, and the PostgreSQL hint, from exactly one read and no write',
+  )
+
+  stage = 'no-autosave'
+  await setText('settings-cache-alert-window-minutes', '31')
+  await page.waitForTimeout(900)
+  assert(
+    writesFor('no-autosave').length === 0,
+    'editing a field autosaved the cache alert settings',
+  )
+  report.checks.noAutosave = { writes: 0 }
+
+  stage = 'secret-badges'
+  const badges = await page.evaluate(async () => {
+    const secret = document.getElementById('settings-cache-alert-secret')
+    const setValue = value => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      ).set
+      setter.call(secret, value)
+      secret.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    const read = () => ({
+      presence: document
+        .querySelector('[data-secret-present]')
+        ?.getAttribute('data-secret-present'),
+      mode: document
+        .querySelector('[data-secret-mode]')
+        ?.getAttribute('data-secret-mode'),
+    })
+    const before = read()
+    setValue('synthetic-browser-secret')
+    await new Promise(resolve => setTimeout(resolve, 200))
+    const typed = read()
+    setValue('   ')
+    await new Promise(resolve => setTimeout(resolve, 200))
+    const blank = read()
+    return { before, typed, blank }
+  })
+  assert(
+    badges.before.mode === 'keep' && badges.before.presence === 'true',
+    `the initial badges are wrong: ${JSON.stringify(badges.before)}`,
+  )
+  assert(
+    badges.typed.mode === 'replace' && badges.typed.presence === 'true',
+    `typing a secret did not flip only the mode badge: ${JSON.stringify(badges.typed)}`,
+  )
+  assert(
+    badges.blank.mode === 'keep' && badges.blank.presence === 'true',
+    `clearing the draft did not restore keep: ${JSON.stringify(badges.blank)}`,
+  )
+  report.checks.secretBadges = badges
+
+  stage = 'mutation-update'
+  await setText('settings-cache-alert-window-minutes', '45')
+  await setText('settings-cache-alert-min-turns', '10')
+  await setText('settings-cache-alert-threshold', '0.35')
+  await setText('settings-cache-alert-cooldown-minutes', '30')
+  await setText(
+    'settings-cache-alert-webhook-url',
+    'https://oapi.dingtalk.com/robot/send?access_token=updated',
+  )
+  await save()
+  await page.waitForTimeout(900)
+  const updateWrites = writesFor('mutation-update')
+  assert(updateWrites.length === 1, `the save sent ${updateWrites.length} writes`)
+  const updateBody = updateWrites[0].body
+  assert(
+    JSON.stringify(updateBody.keys) ===
+      JSON.stringify([
+        'cooldown_minutes',
+        'dingtalk_secret',
+        'dingtalk_webhook_url',
+        'enabled',
+        'min_turns',
+        'threshold',
+        'window_minutes',
+      ]),
+    `the save body does not carry every field: ${JSON.stringify(updateBody.keys)}`,
+  )
+  assert(
+    updateBody.enabled === true &&
+      updateBody.window_minutes === 45 &&
+      updateBody.min_turns === 10 &&
+      updateBody.threshold === 0.35 &&
+      updateBody.cooldown_minutes === 30 &&
+      updateBody.dingtalk_webhook_url ===
+        'https://oapi.dingtalk.com/robot/send?access_token=updated',
+    `the saved values are wrong: ${JSON.stringify(updateBody)}`,
+  )
+  assert(
+    updateBody.dingtalk_secret_present === false,
+    'an untouched save did not keep the stored secret',
+  )
+  const savedStored = await storedSettings()
+  assert(
+    savedStored.window_minutes === 45 &&
+      savedStored.min_turns === 10 &&
+      savedStored.threshold === 0.35 &&
+      savedStored.cooldown_minutes === 30 &&
+      savedStored.dingtalk_secret_blank === true &&
+      savedStored.has_dingtalk_secret === true,
+    `the stored policy is wrong: ${JSON.stringify(savedStored)}`,
+  )
+  await waitForNoToasts('Cache alert settings saved')
+  report.checks.mutationUpdate = {
+    writes: updateWrites.length,
+    body: updateBody,
+    stored: savedStored,
+  }
+  passed(
+    'mutation-update',
+    'one manual save sends the whole policy with the float threshold exact and the empty secret keeping the stored one, and the stored record matches',
+  )
+
+  stage = 'secret-replace'
+  await setText(
+    'settings-cache-alert-secret',
+    '  synthetic-browser-secret  ',
+  )
+  await save()
+  await page.waitForTimeout(900)
+  const replaceWrites = writesFor('secret-replace')
+  assert(replaceWrites.length === 1, 'the secret replace did not send one write')
+  assert(
+    replaceWrites[0].body.dingtalk_secret_present === true,
+    'the typed secret was not sent',
+  )
+  const afterReplace = await page.evaluate(() => ({
+    secretValue: document.getElementById('settings-cache-alert-secret')?.value,
+    presence: document
+      .querySelector('[data-secret-present]')
+      ?.getAttribute('data-secret-present'),
+    mode: document
+      .querySelector('[data-secret-mode]')
+      ?.getAttribute('data-secret-mode'),
+    bodyLeak: document.body.innerText.includes('synthetic-browser'),
+    titleLeak: [...document.querySelectorAll('[title]')].some(node =>
+      (node.getAttribute('title') ?? '').includes('synthetic-browser'),
+    ),
+    storageLeak: Object.keys(window.localStorage).some(key =>
+      String(window.localStorage.getItem(key)).includes('synthetic-browser'),
+    ),
+  }))
+  assert(
+    afterReplace.secretValue === '' && afterReplace.mode === 'keep',
+    `the consumed draft did not reset: ${JSON.stringify(afterReplace)}`,
+  )
+  assert(
+    afterReplace.presence === 'true',
+    'the presence badge stopped following the server response',
+  )
+  assert(
+    afterReplace.bodyLeak === false &&
+      afterReplace.titleLeak === false &&
+      afterReplace.storageLeak === false,
+    `a secret reached text, a title or storage: ${JSON.stringify(afterReplace)}`,
+  )
+  const storedAfterReplace = await storedSettings()
+  assert(
+    storedAfterReplace.dingtalk_secret_blank === true &&
+      storedAfterReplace.has_dingtalk_secret === true,
+    `the stored response is not redacted or lost presence: ${JSON.stringify(storedAfterReplace)}`,
+  )
+  report.checks.secretReplace = {
+    body: replaceWrites[0].body,
+    afterReplace,
+    stored: storedAfterReplace,
+  }
+  await waitForNoToasts('Cache alert settings saved')
+
+  stage = 'secret-keep'
+  await setText('settings-cache-alert-min-turns', '12')
+  await save()
+  await page.waitForTimeout(900)
+  const keepWrites = writesFor('secret-keep')
+  assert(keepWrites.length === 1, 'the keep save did not send one write')
+  assert(
+    keepWrites[0].body.dingtalk_secret_present === false,
+    'a blank draft of a set secret did not keep it',
+  )
+  const afterKeep = await storedSettings()
+  assert(
+    afterKeep.has_dingtalk_secret === true && afterKeep.min_turns === 12,
+    `the stored record after keep is wrong: ${JSON.stringify(afterKeep)}`,
+  )
+  report.checks.secretKeep = { body: keepWrites[0].body, stored: afterKeep }
+  await waitForNoToasts('Cache alert settings saved')
+
+  stage = 'fixture-validation'
+  const probes = await page.evaluate(async () => {
+    const put = async body => {
+      const response = await fetch('/api/v1/settings/cache-alert', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const payload = await response.json().catch(() => null)
+      return { status: response.status, payload }
+    }
+    const base = {
+      enabled: true,
+      window_minutes: 45,
+      min_turns: 12,
+      threshold: 0.35,
+      cooldown_minutes: 30,
+      dingtalk_webhook_url: 'https://oapi.dingtalk.com/robot/send?access_token=updated',
+      dingtalk_secret: '',
+    }
+    return {
+      windowLow: await put({ ...base, window_minutes: 4 }),
+      windowHigh: await put({ ...base, window_minutes: 1441 }),
+      minTurnsLow: await put({ ...base, min_turns: 1 }),
+      minTurnsHigh: await put({ ...base, min_turns: 101 }),
+      thresholdLow: await put({ ...base, threshold: -0.01 }),
+      thresholdHigh: await put({ ...base, threshold: 1.01 }),
+      cooldownLow: await put({ ...base, cooldown_minutes: 4 }),
+      cooldownHigh: await put({ ...base, cooldown_minutes: 1441 }),
+      thresholdZero: await put({ ...base, threshold: 0 }),
+      thresholdOne: await put({ ...base, threshold: 1 }),
+      partialDefaults: await put({ enabled: false }),
+      replaceSecret: await put({
+        ...base,
+        dingtalk_secret: '  synthetic-probe-secret  ',
+      }),
+      blankKeepsSecret: await put({ ...base, dingtalk_secret: '   ' }),
+      restore: await put(base),
+    }
+  })
+  for (const [name, expected] of [
+    ['windowLow', 'window_minutes must be between 5 and 1440'],
+    ['windowHigh', 'window_minutes must be between 5 and 1440'],
+    ['minTurnsLow', 'min_turns must be between 2 and 100'],
+    ['minTurnsHigh', 'min_turns must be between 2 and 100'],
+    ['thresholdLow', 'threshold must be between 0 and 1'],
+    ['thresholdHigh', 'threshold must be between 0 and 1'],
+    ['cooldownLow', 'cooldown_minutes must be between 5 and 1440'],
+    ['cooldownHigh', 'cooldown_minutes must be between 5 and 1440'],
+  ]) {
+    const result = probes[name]
+    assert(
+      result.status === 400 &&
+        result.payload?.error?.code === 'bad_request' &&
+        result.payload?.error?.message === expected,
+      `the ${name} validation case is wrong: ${JSON.stringify(result)}`,
+    )
+  }
+  assert(
+    probes.thresholdZero.status === 200 &&
+      probes.thresholdZero.payload?.threshold === 0,
+    `threshold 0 was treated as empty: ${JSON.stringify(probes.thresholdZero)}`,
+  )
+  assert(
+    probes.thresholdOne.status === 200 &&
+      probes.thresholdOne.payload?.threshold === 1,
+    `threshold 1 was rejected: ${JSON.stringify(probes.thresholdOne)}`,
+  )
+  const partial = probes.partialDefaults
+  assert(
+    partial.status === 200 &&
+      partial.payload?.enabled === false &&
+      partial.payload?.window_minutes === 30 &&
+      partial.payload?.min_turns === 5 &&
+      partial.payload?.threshold === 0.2 &&
+      partial.payload?.cooldown_minutes === 60 &&
+      partial.payload?.dingtalk_webhook_url === '',
+    `a partial payload did not take the backend defaults: ${JSON.stringify(partial)}`,
+  )
+  assert(
+    probes.replaceSecret.status === 200 &&
+      probes.replaceSecret.payload?.dingtalk_secret === '' &&
+      probes.replaceSecret.payload?.has_dingtalk_secret === true,
+    `the replace probe is wrong: ${JSON.stringify(probes.replaceSecret)}`,
+  )
+  assert(
+    JSON.stringify(probes.replaceSecret).includes('synthetic-probe') === false,
+    'the read response echoed the stored secret',
+  )
+  assert(
+    probes.blankKeepsSecret.status === 200 &&
+      probes.blankKeepsSecret.payload?.has_dingtalk_secret === true,
+    'a blank write did not keep the stored secret',
+  )
+  assert(
+    probes.restore.status === 200 && probes.restore.payload?.min_turns === 12,
+    'the restore patch failed',
+  )
+  report.checks.fixtureValidation = probes
+  await openCacheAlert()
+  await waitForLoadedForm()
+
+  stage = 'capability-unavailable'
+  await injectFault({
+    pathPrefix: CACHE_ALERT,
+    method: 'GET',
+    status: 501,
+    code: CAPABILITY_CODE,
+    message: CAPABILITY_MESSAGE,
+    count: 1,
+  })
+  await openCacheAlert()
+  await page.waitForTimeout(700)
+  const unavailable = await page.evaluate(() => ({
+    warning: document.body.innerText.includes(
+      'Cache alert settings are not available here.',
+    ),
+    detail: document.body.innerText.includes(
+      'capability_unavailable: this Admin API capability is not available with SQLite yet',
+    ),
+    retry: document.getElementById('settings-cache-alert-retry') !== null,
+    form: document.getElementById('settings-cache-alert-window-minutes') !== null,
+    saveDisabled: document
+      .getElementById('settings-cache-alert-save')
+      ?.hasAttribute('disabled'),
+    pageRefreshDisabled: document
+      .getElementById('settings-cache-alert-refresh')
+      ?.hasAttribute('disabled'),
+  }))
+  assert(unavailable.warning, 'the capability warning is not shown')
+  assert(unavailable.detail, 'the structured capability code is not shown')
+  assert(unavailable.retry, 'the capability warning has no retry')
+  assert(unavailable.form === false, 'the form is shown on an unavailable store')
+  assert(unavailable.saveDisabled === true, 'Save is enabled on an unavailable store')
+  assert(
+    unavailable.pageRefreshDisabled === true,
+    'the page refresh is enabled on an unavailable store',
+  )
+  await clearFaults()
+  await page.locator('#settings-cache-alert-retry').click()
+  await page.waitForFunction(
+    () => document.getElementById('settings-cache-alert-window-minutes') !== null,
+  )
+  await waitForLoadedForm()
+  assert(
+    readsFor('capability-unavailable').filter(entry => entry.method === 'GET')
+      .length >= 2,
+    'the capability retry did not read again',
+  )
+  report.checks.capabilityUnavailable = {
+    ...unavailable,
+    recovered: true,
+    reads: readsFor('capability-unavailable').length,
+  }
+
+  stage = 'double-save'
+  await injectFault({
+    pathPrefix: CACHE_ALERT,
+    method: 'PUT',
+    status: 200,
+    delayMs: 900,
+    count: 1,
+  })
+  await setText('settings-cache-alert-window-minutes', '60')
+  await page.evaluate(() => {
+    const button = document.getElementById('settings-cache-alert-save')
+    button?.click()
+    button?.click()
+  })
+  await page.waitForTimeout(2000)
+  assert(
+    writesFor('double-save').length === 1,
+    `a double save sent ${writesFor('double-save').length} writes`,
+  )
+  assert(
+    (await toastCount('Cache alert settings saved')) === 1,
+    'a double save confirmed more than once',
+  )
+  report.checks.doubleSave = { writes: 1 }
+  await clearFaults()
+  await waitForNoToasts('Cache alert settings saved')
+
+  stage = 'newer-draft'
+  await injectFault({
+    pathPrefix: CACHE_ALERT,
+    method: 'PUT',
+    status: 200,
+    delayMs: 900,
+    count: 1,
+  })
+  await setText('settings-cache-alert-threshold', '0.1')
+  await save()
+  await page.waitForTimeout(300)
+  await setText('settings-cache-alert-threshold', '0.2')
+  await page.waitForTimeout(2200)
+  assert(
+    (await page
+      .locator('#settings-cache-alert-threshold')
+      .inputValue()) === '0.2',
+    'a value typed during the save was overwritten',
+  )
+  assert(
+    await page.locator('#settings-cache-alert-refresh').isDisabled(),
+    'the scoped refresh stayed enabled over an unsaved draft',
+  )
+  report.checks.newerDraft = { kept: '0.2' }
+  await clearFaults()
+  await save()
+  await page.waitForTimeout(900)
+  await waitForNoToasts('Cache alert settings saved')
+
+  stage = 'mutation-failure-draft'
+  await injectFault({
+    pathPrefix: CACHE_ALERT,
+    method: 'PUT',
+    status: 503,
+    count: 1,
+  })
+  await setText('settings-cache-alert-min-turns', '15')
+  await save()
+  await page.waitForTimeout(900)
+  assert(
+    writesFor('mutation-failure-draft').length === 1,
+    'the failing save did not send one write',
+  )
+  assert(
+    (await page.getByRole('alert').count()) === 1,
+    'the transport failure did not report exactly one error',
+  )
+  assert(
+    (await page
+      .locator('#settings-cache-alert-min-turns')
+      .inputValue()) === '15',
+    'the transport failure dropped the draft',
+  )
+  assert(
+    await page.locator('#settings-cache-alert-refresh').isDisabled(),
+    'the scoped refresh stayed enabled after a failed save',
+  )
+  await page.waitForTimeout(1200)
+  assert(
+    writesFor('mutation-failure-draft').length === 1,
+    'the failed save retried itself',
+  )
+  await capture('settings-cache-alert-failure-en-light-1440')
+  await clearFaults()
+  await save()
+  await page.waitForTimeout(900)
+  assert(
+    writesFor('mutation-failure-draft').length === 2,
+    'the Save retry did not resend the draft',
+  )
+  const afterRetry = await storedSettings()
+  assert(
+    afterRetry.min_turns === 15,
+    `the retried draft was not stored: ${JSON.stringify(afterRetry)}`,
+  )
+  report.checks.failureDraft = {
+    writes: 2,
+    stored: afterRetry.min_turns,
+  }
+  passed(
+    'mutation-failure-draft',
+    'a 503 reports one error and keeps the draft without retrying itself, and the Save button resends the same draft successfully',
+  )
+  await waitForNoToasts('Cache alert settings saved')
+
+  stage = 'scoped-refresh'
+  const readsBefore = readsFor('scoped-refresh').length
+  await page.locator('#settings-cache-alert-refresh').click()
+  await page.waitForTimeout(900)
+  assert(
+    readsFor('scoped-refresh').length - readsBefore === 1,
+    `the scoped refresh issued ${readsFor('scoped-refresh').length - readsBefore} reads`,
+  )
+  assert(
+    writesFor('scoped-refresh').length === 0,
+    'a refresh saved the settings',
+  )
+  await setText('settings-cache-alert-window-minutes', '90')
+  assert(
+    await page.locator('#settings-cache-alert-refresh').isDisabled(),
+    'the refresh stayed enabled over a dirty form',
+  )
+  report.checks.scopedRefresh = { reads: 1, writes: 0 }
+  await openCacheAlert()
+  await waitForLoadedForm()
+
+  stage = 'locale-theme-no-refetch'
+  const readsBeforeToggle = readsFor('locale-theme-no-refetch').length
+  const writesBeforeToggle = writesFor('locale-theme-no-refetch').length
+  await page.getByRole('button', { name: 'Language', exact: true }).click()
+  await page.waitForTimeout(400)
+  await page.getByRole('button', { name: /^(Dark|暗色)$/ }).click()
+  await page.waitForTimeout(600)
+  assert(
+    (await page.evaluate(() => document.documentElement.lang)) === 'zh-CN' &&
+      (await page.evaluate(() =>
+        document.documentElement.classList.contains('dark'),
+      )) === true,
+    'the locale or theme change did not reach the document',
+  )
+  assert(
+    readsFor('locale-theme-no-refetch').length === readsBeforeToggle &&
+      writesFor('locale-theme-no-refetch').length === writesBeforeToggle,
+    'a locale/theme rerender refetched or saved the cache alert settings',
+  )
+  report.checks.localeThemeNoRefetch = { reads: 0, writes: 0 }
+
+  stage = 'responsive-en'
+  await page.evaluate(() => {
+    window.localStorage.setItem('prompt-ferry:locale', 'en-US')
+    window.localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await openCacheAlert()
+  await waitForLoadedForm()
+  const profile = []
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.waitForTimeout(250)
+    const measured = await page.evaluate(() => {
+      const ids = [
+        'settings-cache-alert-enabled',
+        'settings-cache-alert-window-minutes',
+        'settings-cache-alert-min-turns',
+        'settings-cache-alert-threshold',
+        'settings-cache-alert-cooldown-minutes',
+        'settings-cache-alert-webhook-url',
+        'settings-cache-alert-secret',
+        'settings-cache-alert-save',
+        'settings-cache-alert-refresh',
+      ]
+      return {
+        controls: ids.map(id => {
+          const rect = document.getElementById(id)?.getBoundingClientRect()
+          return rect
+            ? { id, left: Math.round(rect.left), right: Math.round(rect.right) }
+            : { id, left: -1, right: -1 }
+        }),
+        documentWidth: document.documentElement.scrollWidth,
+        viewport: window.innerWidth,
+      }
+    })
+    assert(
+      measured.documentWidth <= measured.viewport,
+      `the cache alert tab overflows at ${width}px (${measured.documentWidth} > ${measured.viewport})`,
+    )
+    for (const control of measured.controls) {
+      assert(
+        control.left >= 0 &&
+          control.right <= measured.viewport &&
+          control.right > control.left,
+        `the ${control.id} control is not reachable at ${width}px`,
+      )
+    }
+    profile.push({ width, documentWidth: measured.documentWidth })
+    if (width === 390) await capture('settings-cache-alert-en-light-390')
+  }
+  report.checks.responsive = profile
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  stage = 'locale-zh'
+  await page.evaluate(() => {
+    window.localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    window.localStorage.setItem('prompt-ferry:theme-mode', 'dark')
+  })
+  await openCacheAlert()
+  await waitForLoadedForm()
+  const zh = await page.evaluate(() => ({
+    heading: (
+      document.querySelector(
+        '[data-foundation-route-id="R-SETTINGS-CACHE-ALERT"] h1',
+      )?.textContent ?? ''
+    ).trim(),
+    labels: [...document.querySelectorAll('label')].map(node =>
+      (node.textContent ?? '').trim(),
+    ),
+    body: document.body.innerText,
+  }))
+  assert(zh.heading === '缓存报警', `the Chinese heading is wrong: ${zh.heading}`)
+  assert(
+    zh.labels.includes('检测窗口（分钟）') &&
+      zh.labels.includes('最少轮次') &&
+      zh.labels.includes('缓存率阈值') &&
+      zh.labels.includes('冷却（分钟）') &&
+      zh.labels.includes('钉钉 Webhook') &&
+      zh.labels.includes('钉钉 Secret'),
+    `the Chinese labels are wrong: ${JSON.stringify(zh.labels)}`,
+  )
+  assert(
+    zh.body.includes('仅在 PostgreSQL 存储模式下生效。') &&
+      zh.body.includes('已配置') &&
+      zh.body.includes('保持不变'),
+    'the Chinese cache alert copy is incomplete',
+  )
+  await capture('settings-cache-alert-zh-dark-1440')
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.waitForTimeout(300)
+  assert(
+    !(await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    )),
+    'the Chinese dark cache alert tab overflows at 390px',
+  )
+  await capture('settings-cache-alert-zh-dark-390')
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  collecting = false
+
+  stage = 'admin-denial'
+  await signOut()
+  await signIn('operator')
+  const operatorNav = await page.evaluate(() =>
+    [...document.querySelectorAll('nav a')].map(link =>
+      link.getAttribute('href'),
+    ),
+  )
+  const navHidden = !operatorNav.includes('/settings/cache-alert')
+  assert(navHidden, 'the ordinary-user nav exposes the cache alert route')
+  await page.goto(`${BASE}/settings/cache-alert`)
+  await page.waitForTimeout(700)
+  const redirected = new URL(page.url()).pathname !== '/settings/cache-alert'
+  assert(redirected, 'an ordinary user stayed on the admin cache alert route')
+  assert(
+    (await page
+      .locator('[data-foundation-route-id="R-SETTINGS-CACHE-ALERT"]')
+      .count()) === 0,
+    'an ordinary user rendered the cache alert section',
+  )
+  const forged = await page.evaluate(async () => {
+    const put = await fetch('/api/v1/settings/cache-alert', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: false }),
+    })
+    const read = await fetch('/api/v1/settings/cache-alert')
+    return { put: put.status, read: read.status }
+  })
+  assert(
+    forged.put === 403 && forged.read === 403,
+    `the fixture answered a non-admin cache alert request with ${JSON.stringify(forged)}`,
+  )
+  await page.goto(`${BASE}/settings/general`)
+  await page.waitForSelector('[data-foundation-route-id="R-SETTINGS-GENERAL"]')
+  assert(
+    (await page.locator('[data-settings-card]').count()) === 3,
+    'the ordinary user lost the general settings tab',
+  )
+  const redactionScoped = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/settings/redaction')
+    return response.status
+  })
+  assert(
+    redactionScoped === 200,
+    `the ordinary-user redaction setting returned ${redactionScoped}`,
+  )
+  await signOut()
+  const anonymous = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/settings/cache-alert')
+    return response.status
+  })
+  assert(anonymous === 401, `an anonymous cache alert read returned ${anonymous}`)
+  report.checks.adminDenial = {
+    navHidden,
+    redirected,
+    forgedPut: forged.put,
+    forgedRead: forged.read,
+    generalIntact: true,
+    redactionIntact: redactionScoped,
+    anonymousRead: anonymous,
+  }
+  passed(
+    'admin-denial',
+    'an ordinary user has no cache alert link, is redirected away from the route without rendering it, is refused with 403 on forged reads and writes, and still reaches the general and redaction settings while an anonymous read is refused with 401',
+  )
+  await signIn('admin')
+
+  stage = 'finish'
+  report.checks.officialPendingRoutes = 0
+  report.checks.unexpectedWindow = 'mounted admin cache alert tab stages'
+  report.limitations.push(
+    'Evidence is the synthetic fixture and its stored policy; no alert detection, DingTalk delivery, threshold evaluation or production behaviour is claimed.',
+    'The secret is asserted as presence booleans only. The fixture has no path that empties a stored secret, so a false presence badge is covered by the component test rather than the browser run; the 400, 401, 403, 501 and 503 cases run against fixture validation, the role gate, the capability answer and fault injection.',
+  )
+  report.checks.limitations = report.limitations
+  report.finishedAt = new Date().toISOString()
+  return report
+}

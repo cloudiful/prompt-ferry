@@ -1,0 +1,43 @@
+{
+  "startedAt": "2026-10-25T13:43:32.874Z",
+  "checks": {
+    "updateFailureDraftRetry": {
+      "saveDisabled": true,
+      "cancelDisabled": true,
+      "rowToggleDisabled": true,
+      "independentProbeEnabled": true,
+      "otherEndpointAvailable": true,
+      "errorVisible": true,
+      "draftRetained": true,
+      "retryStatus": 200,
+      "payload": {
+        "name": "Fixture Upstream Browser Created Updated",
+        "provider": "minimax",
+        "provider_region": "global",
+        "scope": "user",
+        "owner_user_id": 2,
+        "key_lb_enabled": false,
+        "mcp_enabled": true,
+        "protocol_mode": "manual",
+        "native_api_override": "chat",
+        "service_tier": "tier-fixture",
+        "proxy_present": false,
+        "proxy_empty": false,
+        "windows_present": false,
+        "admin_api_key_present": false,
+        "api_keys": [
+          {
+            "key_id": "key-1001",
+            "key_label": "Primary fixture key",
+            "enabled": true,
+            "api_key_present": false
+          }
+        ]
+      }
+    },
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  "screenshots": [],
+  "finishedAt": "2026-10-25T13:43:34.387Z"
+}

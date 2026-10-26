@@ -1,0 +1,162 @@
+async page => {
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const report = { startedAt: new Date().toISOString(), checks: {}, screenshots: [] }
+  function assert(condition, message) {
+    if (!condition) throw new Error(message)
+  }
+  const consoleErrors = []
+  const pageErrors = []
+  const createPayloads = []
+  const syntheticApiKey = 'pf_fixture_endpoint_key_do_not_persist_in_report'
+  page.setDefaultTimeout(7000)
+  const onConsole = message => {
+    if (message.type() === 'error' && !/(?:status of )?(?:401|500|503)\b/.test(message.text())) consoleErrors.push(message.text())
+  }
+  const onPageError = error => pageErrors.push(error.message)
+  const onRequest = request => {
+    const url = new URL(request.url())
+    if (request.method() !== 'POST' || url.pathname !== '/api/v1/admin/endpoints') return
+    const body = request.postDataJSON()
+    createPayloads.push({
+      name: body.name,
+      provider: body.provider,
+      provider_region: body.provider_region,
+      scope: body.scope,
+      owner_user_id: body.owner_user_id,
+      base_url_trimmed: body.base_url === 'https://fixture.minimax.example/v1',
+      key_lb_enabled: body.key_lb_enabled,
+      mcp_enabled: body.mcp_enabled,
+      protocol_mode: body.protocol_mode,
+      native_api_override: body.native_api_override,
+      service_tier: body.service_tier,
+      api_key_count: body.api_keys?.length ?? 0,
+      api_key_label: body.api_keys?.[0]?.key_label,
+      api_key_present: Boolean(body.api_keys?.[0]?.api_key),
+      proxy_present: Object.hasOwn(body, 'proxy_url') && Boolean(body.proxy_url),
+      windows: body.active_windows,
+      admin_api_key_present: Object.hasOwn(body, 'admin_api_key'),
+    })
+  }
+  page.on('console', onConsole)
+  page.on('pageerror', onPageError)
+  page.on('request', onRequest)
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  async function waitForResponse(method, pathname, status) {
+    return page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return response.request().method() === method && url.pathname === pathname && response.status() === status
+    }, { timeout: 7000 })
+  }
+
+  await page.getByRole('button', { name: 'New endpoint', exact: true }).click()
+  const dialog = page.getByRole('dialog').last()
+  await dialog.getByLabel('Name', { exact: true }).fill('  MiniMax Browser User Upstream With Deliberately Long Operational Name  ')
+  await dialog.getByLabel('Base URL', { exact: true }).fill(' https://fixture.minimax.example/v1 ')
+  await dialog.getByLabel('Type').click()
+  await page.getByText('MiniMax', { exact: true }).last().click()
+  await dialog.getByLabel('Scope').click()
+  await page.getByRole('option', { name: 'Private', exact: true }).click()
+  await dialog.getByLabel('Owner').click()
+  await page.getByRole('option', { name: /^operator \/ Fixture Operator/ }).click()
+  await dialog.getByLabel('Region', { exact: true }).click()
+  await page.getByRole('option', { name: 'Global', exact: true }).click()
+  await dialog.getByLabel('Native API').click()
+  await page.getByRole('option', { name: 'Chat', exact: true }).click()
+  assert(await dialog.getByRole('switch', { name: 'Expose MiniMax MCP tools' }).isChecked(), 'MiniMax MCP default was not enabled')
+  await dialog.getByLabel('Name 1').fill('Primary fixture key')
+  await dialog.getByLabel('API key 1').fill(syntheticApiKey)
+  await dialog.getByRole('button', { name: 'Add API key', exact: true }).click()
+  await dialog.getByLabel('Name 2').fill('Primary fixture key')
+  await dialog.getByLabel('API key 2').fill('temporary-fixture-key')
+  const duplicateWarnings = dialog.getByText('Name duplicates another key; use a unique name', { exact: true })
+  const duplicateWarning = (await duplicateWarnings.count()) === 2 && await duplicateWarnings.first().isVisible() && await duplicateWarnings.last().isVisible()
+  assert(duplicateWarning, 'duplicate endpoint key-name warning was not shown on both rows')
+  await dialog.getByLabel('Name 2').fill('Temporary key')
+  const primaryStatus = dialog.getByRole('switch', { name: 'Status Primary fixture key' })
+  const temporaryStatus = dialog.getByRole('switch', { name: 'Status Temporary key' })
+  assert(await primaryStatus.isEnabled() && await temporaryStatus.isEnabled(), 'multiple enabled endpoint keys could not be toggled')
+  await primaryStatus.click()
+  assert(await temporaryStatus.isDisabled(), 'last enabled endpoint key was not protected from disable')
+  await primaryStatus.click()
+  await dialog.getByRole('button', { name: 'Delete Temporary key', exact: true }).click()
+  assert(await dialog.getByLabel('Name 2').count() === 0, 'endpoint key row could not be removed')
+  assert(await dialog.getByRole('switch', { name: 'Status Primary fixture key' }).isDisabled(), 'single enabled endpoint key was not protected')
+
+  const settingsButton = dialog.getByRole('button', { name: /Endpoint settings/ }).last()
+  await settingsButton.click()
+  await dialog.getByLabel('Service tier').fill(' tier-fixture ')
+  await dialog.getByLabel('Proxy scheme').click()
+  await page.getByRole('option', { name: 'https', exact: true }).click()
+  const proxyAddress = dialog.getByLabel('Proxy address')
+  const saveButton = dialog.getByRole('button', { name: 'Save endpoint', exact: true })
+  assert(await saveButton.isDisabled(), 'incomplete proxy URL was accepted')
+  await proxyAddress.fill('proxy.fixture.internal:8443')
+  await dialog.getByRole('button', { name: 'Add window', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Weekdays', exact: true }).first().click()
+  await dialog.getByRole('button', { name: 'Add window', exact: true }).click()
+  await dialog.locator('input[type="time"]').nth(1).fill('23:00')
+  await dialog.locator('input[pattern]').nth(1).fill('02:00')
+  await dialog.getByRole('button', { name: 'Weekend', exact: true }).nth(1).click()
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).first().click()
+  await dialog.getByLabel('Native API').click()
+  await page.getByRole('option', { name: 'Realtime', exact: true }).click()
+  assert(await dialog.getByLabel('Service tier').count() === 0, 'realtime protocol exposed an ineligible service tier control')
+  await dialog.getByLabel('Native API').click()
+  await page.getByRole('option', { name: 'Chat', exact: true }).click()
+  await dialog.getByRole('button', { name: /Endpoint settings/ }).click()
+  assert((await dialog.getByLabel('Service tier').inputValue()) === 'tier-fixture', 'service-tier normalization did not trim the form value')
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).first().click()
+
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/endpoints',
+    method: 'POST',
+    status: 503,
+    code: 'fixture_endpoint_create_unavailable',
+    message: 'fixture endpoint create failure',
+    delayMs: 600,
+  })
+  const createFailure = waitForResponse('POST', '/api/v1/admin/endpoints', 503)
+  await dialog.getByRole('button', { name: 'Save endpoint', exact: true }).click()
+  const pending = await dialog.getByRole('button', { name: 'Save endpoint', exact: true }).isDisabled()
+  const dismissBlocked = await dialog.getByRole('button', { name: 'Cancel', exact: true }).isDisabled()
+  assert(pending && dismissBlocked, 'pending create did not block duplicate save and dialog dismissal')
+  await createFailure
+  const errorAlert = page.getByRole('alert').last()
+  await errorAlert.waitFor({ state: 'visible' })
+  const createErrorVisible = (await errorAlert.innerText()).length > 0
+  assert(createErrorVisible, 'create failure did not render an error')
+  assert((await dialog.getByLabel('Name', { exact: true }).inputValue()).includes('MiniMax Browser User Upstream'), 'create failure discarded the draft')
+  const createSuccess = waitForResponse('POST', '/api/v1/admin/endpoints', 200)
+  await dialog.getByRole('button', { name: 'Save endpoint', exact: true }).click()
+  await createSuccess
+  const createdRow = page.locator('[data-endpoint-row]').filter({ hasText: 'MiniMax Browser User Upstream With Deliberately Long Operational Name' }).first()
+  await createdRow.waitFor({ state: 'visible' })
+  const createdId = await createdRow.getAttribute('data-endpoint-row')
+  assert(createdId, 'created endpoint row identity was missing')
+  await page.evaluate(id => sessionStorage.setItem('p4c4-created-endpoint-id', id), createdId)
+  report.checks.createDialogAndRetry = { pending, dismissalBlocked: dismissBlocked, errorVisible: createErrorVisible, draftRetained: true, createdId, duplicateKeyWarning: duplicateWarning, invalidProxyBlocked: true }
+  report.checks.createPayloads = createPayloads
+  report.checks.consoleErrors = consoleErrors
+  report.checks.pageErrors = pageErrors
+  assert(pageErrors.length === 0, `browser page errors: ${JSON.stringify(pageErrors)}`)
+  assert(JSON.stringify(createPayloads.map(item => item.name)) === JSON.stringify(['MiniMax Browser User Upstream With Deliberately Long Operational Name', 'MiniMax Browser User Upstream With Deliberately Long Operational Name']), 'create retry payload did not preserve trimmed form values')
+  assert(createPayloads.every(item => item.api_key_present && item.api_key_count === 1 && item.admin_api_key_present === false), 'create payload did not include the required upstream key or omitted Admin API key')
+  const screenshots = 'e2e/foundation/screenshots'
+  await page.screenshot({ path: `${screenshots}/endpoints-created-en-light-1440.png`, fullPage: true })
+  report.screenshots.push(`${screenshots}/endpoints-created-en-light-1440.png`)
+  page.off('console', onConsole)
+  page.off('pageerror', onPageError)
+  page.off('request', onRequest)
+  report.finishedAt = new Date().toISOString()
+  return report
+}

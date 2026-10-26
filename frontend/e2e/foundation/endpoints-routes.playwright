@@ -1,0 +1,662 @@
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const report = {
+    runId: `endpoints-routes-${Date.now()}`,
+    startedAt: new Date().toISOString(),
+    checks: {},
+    screenshots: [],
+  }
+  const consoleErrors = []
+  const pageErrors = []
+  page.setDefaultTimeout(10000)
+  page.on('console', message => {
+    if (message.type() === 'error' && !/(?:status of )?(?:401|500|503)\b/.test(message.text())) consoleErrors.push(message.text())
+  })
+  page.on('pageerror', error => pageErrors.push(error.message))
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(message)
+  }
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  async function requestLog() {
+    return (await fixture('/__fixtures/log?limit=500')).requests
+  }
+
+  async function waitForResponse(method, pathname, status) {
+    try {
+      return await page.waitForResponse(response => {
+        const url = new URL(response.url())
+        return response.request().method() === method && url.pathname === pathname && (status === undefined || response.status() === status)
+      }, { timeout: 12000 })
+    } catch (cause) {
+      throw new Error(`response timeout for ${method} ${pathname} status=${status ?? 'any'}: ${cause instanceof Error ? cause.message : String(cause)}`)
+    }
+  }
+
+  async function waitForQueryResponse(method, pathname, queryName, queryValue, status = 200) {
+    try {
+      return await page.waitForResponse(response => {
+        const url = new URL(response.url())
+        return response.request().method() === method && url.pathname === pathname && url.searchParams.get(queryName) === queryValue && response.status() === status
+      }, { timeout: 12000 })
+    } catch (cause) {
+      const seen = (await requestLog()).map(request => `${request.method} ${request.path} ${JSON.stringify(request.query ?? {})} ${request.status}`)
+      throw new Error(`query response timeout for ${method} ${pathname}?${queryName}=${queryValue} status=${status}: ${cause instanceof Error ? cause.message : String(cause)}; seen=${JSON.stringify(seen)}`)
+    }
+  }
+
+  async function signIn(loginName) {
+    await page.getByLabel('Login name').waitFor({ state: 'visible' })
+    await page.getByLabel('Login name').fill(loginName)
+    await page.getByRole('textbox', { name: 'Password' }).fill('fixture-password')
+    await page.getByRole('button', { name: 'Login', exact: true }).click()
+    await page.waitForURL(url => new URL(url).pathname === '/api-keys')
+  }
+
+  async function resetAndLogin(loginName, locale = 'en-US', theme = 'light') {
+    await page.context().clearCookies()
+    await fixture('/__fixtures/reset', 'POST')
+    await page.goto(`${BASE}/login`)
+    await page.evaluate(({ locale, theme }) => {
+      localStorage.clear()
+      localStorage.setItem('prompt-ferry:locale', locale)
+      localStorage.setItem('prompt-ferry:theme-mode', theme)
+      localStorage.setItem('prompt-ferry:display-time-zone', 'UTC')
+    }, { locale, theme })
+    await page.reload()
+    await signIn(loginName)
+  }
+
+  async function capture(name) {
+    const file = `${screenshots}/${name}.png`
+    await page.screenshot({ path: file, fullPage: true })
+    report.screenshots.push(file)
+  }
+
+  async function choose(selectName, optionName) {
+    await page.getByRole('combobox', { name: selectName }).click()
+    await page.getByRole('option', { name: optionName, exact: true }).click()
+  }
+
+  function isAllowedAdminRequest(request) {
+    if (request.path === '/api/v1/admin/model-routes' && ['GET', 'POST'].includes(request.method)) return true
+    if (/^\/api\/v1\/admin\/model-routes\/[^/]+$/.test(request.path) && ['PATCH', 'DELETE'].includes(request.method)) return true
+    if (request.path === '/api/v1/admin/model-routes/test' && request.method === 'POST') return true
+    if (request.path === '/api/v1/admin/endpoints' && request.method === 'GET') return true
+    if (/^\/api\/v1\/admin\/endpoints\/[^/]+\/models$/.test(request.path) && request.method === 'GET') return true
+    if (request.path === '/api/v1/admin/users/options' && request.method === 'GET') return true
+    return false
+  }
+
+  try {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await resetAndLogin('operator')
+  const operatorStart = (await requestLog()).length
+  await page.goto(`${BASE}/endpoints/routes`)
+  await page.waitForURL(url => new URL(url).pathname === '/api-keys')
+  const operatorRequests = (await requestLog()).slice(operatorStart)
+  const operatorAdminCalls = operatorRequests.filter(request => request.path.startsWith('/api/v1/admin/')).length
+  assert(operatorAdminCalls === 0, `non-admin route made ${operatorAdminCalls} admin API calls`)
+  assert(await page.locator('a[href="/endpoints/routes"]').count() === 0, 'non-admin navigation exposed model routes')
+  report.checks.adminDenial = { redirectedToApiKeys: new URL(page.url()).pathname === '/api-keys', hiddenNavigation: true, adminApiCalls: operatorAdminCalls }
+  report.checks.scenarioCoverage = { 'admin-denial': true }
+
+  await resetAndLogin('admin')
+  await page.goto(`${BASE}/endpoints/routes`)
+  const routeRoot = page.locator('[data-foundation-route-id="R-ENDPOINTS-ROUTES"]')
+  await routeRoot.waitFor({ state: 'visible' })
+  await page.locator('[data-model-route-row="rule-fixture-8"]').waitFor({ state: 'visible' })
+  const initialLog = await requestLog()
+  const firstRouteRead = initialLog.findLast(request => request.path === '/api/v1/admin/model-routes' && request.method === 'GET')
+  const allEndpointRead = initialLog.find(request => request.path === '/api/v1/admin/endpoints' && request.method === 'GET' && request.query.first === '0' && request.query.rows === '200')
+  const ownerRead = initialLog.find(request => request.path === '/api/v1/admin/users/options' && request.method === 'GET' && request.status === 200)
+  const quotaCalls = initialLog.filter(request => /quota|token-plan/i.test(request.path))
+  assert(firstRouteRead?.query.first === '0' && firstRouteRead?.query.rows === '10', 'route page did not use its own first=0/rows=10 query')
+  assert(Boolean(allEndpointRead), 'route editor did not load every endpoint using 200-row pages')
+  assert(Boolean(ownerRead), 'route editor did not reuse user options')
+  assert(quotaCalls.length === 0, 'model-route page issued quota reads')
+  assert(await page.locator('[data-model-route-row]').count() === 10, 'route page did not render ten distinct first-page rows')
+  assert(await page.locator('[data-model-route-row="rule-fixture-8"]').getAttribute('data-model-route-row') === 'rule-fixture-8', 'fixture route row was missing')
+  report.checks.routeAndNavigation = { routeId: 'R-ENDPOINTS-ROUTES', navigationVisible: await page.locator('a[href="/endpoints/routes"]').isVisible(), first: 0, rows: 10, rowCount: 10 }
+  report.checks.allEndpointResolution = { query: allEndpointRead.query, offPageTargetId: 'ep-fixture-8', targetSelectable: false }
+  report.checks.scenarioCoverage['route-render'] = true
+  await capture('endpoints-routes-en-light-1440')
+
+  await page.getByRole('combobox', { name: 'Rows per page' }).click()
+  const routePageSizeResponse = waitForQueryResponse('GET', '/api/v1/admin/model-routes', 'rows', '20')
+  await page.getByRole('option', { name: '20', exact: true }).click()
+  await page.waitForFunction(() => localStorage.getItem('prompt-ferry:table-page-size:model-routes') === '20')
+  await routePageSizeResponse
+  assert(await page.locator('[data-model-route-row]').count() === 12, 'route pager did not show the independent 20-row result set')
+  const independentPageRead = (await requestLog()).findLast(request => request.path === '/api/v1/admin/model-routes' && request.method === 'GET' && request.query.rows === '20')
+  assert(Boolean(independentPageRead), 'route page size did not use its model-route query')
+  report.checks.pagination = { initialRows: 10, pageSize20Rows: 12, independentQueryRows: independentPageRead.query.rows, pageSizePersistence: true }
+
+  const route8 = page.locator('[data-model-route-row="rule-fixture-8"]')
+  const initialProbeResponse = waitForResponse('POST', '/api/v1/admin/model-routes/test', 200)
+  await route8.getByRole('button', { name: 'Test fixture-model-8*' }).click()
+  await initialProbeResponse
+  await page.getByRole('button', { name: '1/1' }).first().waitFor({ state: 'visible' })
+  const initialProbe = (await requestLog()).findLast(request => request.path === '/api/v1/admin/model-routes/test' && request.method === 'POST')
+  assert(initialProbe?.body?.rule_id === 'rule-fixture-8', 'probe did not post the selected rule id')
+  await route8.getByRole('button', { name: 'Edit fixture-model-8*' }).click()
+  const editor = page.getByRole('dialog', { name: 'Edit model route' })
+  await editor.waitFor({ state: 'visible' })
+  const endpointOne = editor.getByRole('combobox', { name: 'Endpoint 1' })
+  assert((await endpointOne.innerText()).includes('Fixture Upstream 8 With A Long Operational Name'), 'off-page endpoint option or stored label was unresolved')
+  await page.waitForTimeout(250)
+  const catalogAutoLog = (await requestLog()).findLast(request => request.path === '/api/v1/admin/endpoints/ep-fixture-8/models' && request.method === 'GET')
+  assert(Boolean(catalogAutoLog), 'off-page endpoint model catalog request was missing')
+  report.checks.allEndpointResolution.targetSelectable = true
+  report.checks.catalogBehavior = { offPageCatalogFetched: true, endpointId: 'ep-fixture-8', effectiveAutoProtocol: catalogAutoLog.query.native_api ?? null }
+
+  const pattern = 'fixture-model-8-*' + 'route-pattern-'.repeat(5)
+  await editor.getByRole('textbox', { name: 'Model pattern' }).fill(pattern)
+  const modelInput = editor.locator('input[list]').nth(0)
+  const longModel = `route-model-${'long-value-'.repeat(9)}`
+  await modelInput.fill(longModel)
+  const clearModel = editor.getByRole('button', { name: /Delete Upstream model name/ })
+  await clearModel.click()
+  assert(await modelInput.inputValue() === '', 'custom model clear action left stale text')
+  await modelInput.fill(longModel)
+
+  await editor.locator('li').nth(0).getByRole('button', { name: 'Target settings' }).click()
+  const nativeApi = editor.getByRole('combobox', { name: 'Native API' })
+  await nativeApi.click()
+  await page.getByRole('option', { name: 'Chat', exact: true }).click()
+  await editor.getByRole('textbox', { name: 'Service tier' }).fill('priority')
+  await editor.getByRole('combobox', { name: 'Proxy scheme' }).click()
+  await page.getByRole('option', { name: 'http', exact: true }).click()
+  await editor.getByRole('textbox', { name: 'Proxy address' }).fill('route-proxy.example.test:8080')
+  await editor.getByRole('button', { name: 'Add window' }).click()
+  await editor.locator('input[type="time"]').fill('22:00')
+  await editor.locator('input[pattern]').fill('06:00')
+  await editor.getByRole('button', { name: 'Weekdays', exact: true }).click()
+  await editor.getByRole('combobox', { name: 'Thinking effort override' }).click()
+  await page.getByRole('option', { name: 'high', exact: true }).click()
+  await editor.getByRole('combobox', { name: 'Compact mode' }).click()
+  await page.getByRole('option', { name: 'Self-summarize', exact: true }).click()
+  await editor.getByRole('switch', { name: 'Normalize developer→system' }).click()
+  await editor.getByRole('switch', { name: 'Thinking adaptation' }).click()
+  await editor.getByRole('button', { name: 'Cancel' }).first().click()
+
+  await editor.getByRole('button', { name: 'Add target' }).click()
+  const targetTwo = editor.locator('li').nth(1)
+  await targetTwo.getByRole('combobox', { name: 'Endpoint 2' }).click()
+  await page.getByRole('option', { name: /Fixture Upstream 8 With A Long Operational Name/ }).click()
+  await targetTwo.locator('input[list]').fill('duplicate-endpoint-model')
+  await editor.getByRole('button', { name: 'Add target' }).click()
+  const targetThree = editor.locator('li').nth(2)
+  await targetThree.getByRole('combobox', { name: 'Endpoint 3' }).click()
+  await page.getByRole('option', { name: /Fixture Upstream 10 With A Long Operational Name/ }).click()
+  await targetThree.locator('input[list]').fill('embedding-upstream-model')
+  await targetThree.getByRole('button', { name: 'Target settings' }).click()
+  await editor.getByRole('combobox', { name: 'Native API' }).click()
+  await page.getByRole('option', { name: 'Embeddings', exact: true }).click()
+  const dimensionInput = editor.getByRole('textbox', { name: 'Vector dimensions override' })
+  await dimensionInput.fill('0')
+  assert(await editor.getByText('Enter a positive integer (max 2147483647).').isVisible(), 'invalid embedding dimension did not show its inline error')
+  assert(await editor.getByRole('button', { name: 'Save', exact: true }).isDisabled(), 'invalid embedding dimension did not block save')
+  await dimensionInput.fill('1536')
+  assert(await editor.getByRole('combobox', { name: 'Thinking effort override' }).count() === 0, 'embedding target exposed chat adaptation controls')
+  await editor.getByRole('button', { name: 'Cancel' }).first().click()
+  await page.waitForTimeout(250)
+  const chatCatalog = (await requestLog()).findLast(request => request.path === '/api/v1/admin/endpoints/ep-fixture-8/models' && request.method === 'GET' && request.query.native_api === 'chat')
+  assert(Boolean(chatCatalog), 'effective target protocol did not scope endpoint model suggestions')
+
+  await fixture('/__fixtures/faults', 'POST', { pathPrefix: '/api/v1/admin/endpoints/ep-fixture-9/models', method: 'GET', status: 200, delayMs: 900 })
+  await editor.getByRole('button', { name: 'Add target' }).click()
+  const targetFour = editor.locator('li').nth(3)
+  const endpointNineResponse = waitForResponse('GET', '/api/v1/admin/endpoints/ep-fixture-9/models', 200)
+  await targetFour.getByRole('combobox', { name: 'Endpoint 4' }).click()
+  await page.getByRole('option', { name: /Fixture Upstream 9 With A Long Operational Name/ }).click()
+  await targetFour.locator('input[list]').fill('coalesced-target-four-model')
+  await editor.getByRole('button', { name: 'Add target' }).click()
+  const targetFive = editor.locator('li').nth(4)
+  await targetFive.getByRole('combobox', { name: 'Endpoint 5' }).click()
+  await page.getByRole('option', { name: /Fixture Upstream 9 With A Long Operational Name/ }).click()
+  await targetFive.locator('input[list]').fill('coalesced-target-five-model')
+  await endpointNineResponse
+  await page.waitForTimeout(100)
+  let endpointNineCatalogReads = (await requestLog()).filter(request => request.path === '/api/v1/admin/endpoints/ep-fixture-9/models' && request.method === 'GET')
+  assert(endpointNineCatalogReads.length === 1, 'concurrent identical endpoint catalogs were not coalesced')
+  await targetFour.getByRole('combobox', { name: 'Endpoint 4' }).focus()
+  await targetFour.getByRole('combobox', { name: 'Endpoint 4' }).press('Enter')
+  await page.getByRole('option', { name: /Fixture Upstream 8 With A Long Operational Name/ }).click()
+  await targetFour.getByRole('combobox', { name: 'Endpoint 4' }).focus()
+  await targetFour.getByRole('combobox', { name: 'Endpoint 4' }).press('Enter')
+  await page.getByRole('option', { name: /Fixture Upstream 9 With A Long Operational Name/ }).click()
+  await page.waitForTimeout(100)
+  endpointNineCatalogReads = (await requestLog()).filter(request => request.path === '/api/v1/admin/endpoints/ep-fixture-9/models' && request.method === 'GET')
+  assert(endpointNineCatalogReads.length === 1, 'successful model catalog was not reused from the 60-second cache')
+  report.checks.catalogBehavior.concurrentIdenticalRequests = true
+  report.checks.catalogBehavior.successfulCacheHit = true
+
+  const handles = editor.locator('[data-target-drag-handle]')
+  assert(await handles.count() === 5, 'target drag handles were missing')
+  await handles.nth(2).focus()
+  await handles.nth(2).press('ArrowUp')
+  let targetRows = editor.locator('li')
+  const firstAfterKeyboard = await targetRows.nth(0).getByRole('combobox', { name: 'Endpoint 1' }).innerText()
+  const secondAfterKeyboard = await targetRows.nth(1).getByRole('combobox', { name: 'Endpoint 2' }).innerText()
+  assert(firstAfterKeyboard.includes('Fixture Upstream 8') && secondAfterKeyboard.includes('Fixture Upstream 10'), 'keyboard reorder did not move target identity')
+  await targetRows.nth(1).locator('[data-target-drag-handle]').dragTo(targetRows.nth(2))
+  targetRows = editor.locator('li')
+  const firstModelAfterDrag = await targetRows.nth(0).locator('input[list]').inputValue()
+  const secondModelAfterDrag = await targetRows.nth(1).locator('input[list]').inputValue()
+  const thirdModelAfterDrag = await targetRows.nth(2).locator('input[list]').inputValue()
+  assert(firstModelAfterDrag === longModel && secondModelAfterDrag === 'duplicate-endpoint-model' && thirdModelAfterDrag === 'embedding-upstream-model', 'drag reorder separated endpoint/model/settings association')
+  const updateResponse = waitForResponse('PATCH', '/api/v1/admin/model-routes/rule-fixture-8', 200)
+  await editor.getByRole('button', { name: 'Save', exact: true }).click()
+  await updateResponse
+  await editor.waitFor({ state: 'hidden' })
+  const updatedRequest = (await requestLog()).findLast(request => request.path === '/api/v1/admin/model-routes/rule-fixture-8' && request.method === 'PATCH' && request.status === 200)
+  const updateBody = updatedRequest.body
+  const savedTargets = updateBody.targets
+  assert(updateBody.model_pattern === pattern, 'route update did not preserve the long model pattern')
+  assert(savedTargets.length === 5 && savedTargets.map(target => target.endpoint_id).join(',') === 'ep-fixture-8,ep-fixture-8,ep-fixture-10,ep-fixture-9,ep-fixture-9', 'target order or duplicate endpoint identity was not submitted')
+  assert(savedTargets[0].upstream_model === longModel && savedTargets[1].upstream_model === 'duplicate-endpoint-model' && savedTargets[2].upstream_model === 'embedding-upstream-model' && savedTargets[3].upstream_model === 'coalesced-target-four-model' && savedTargets[4].upstream_model === 'coalesced-target-five-model', 'target models did not follow the reordered target objects')
+  assert(savedTargets[0].native_api === 'chat' && savedTargets[0].service_tier === 'priority' && savedTargets[0].proxy_url_override === '[synthetic-secret-present]', `chat target settings were not submitted: ${JSON.stringify({ native_api: savedTargets[0].native_api, service_tier: savedTargets[0].service_tier, proxy_url_override: savedTargets[0].proxy_url_override })}`)
+  assert(savedTargets[0].active_windows[0].start === '22:00' && savedTargets[0].active_windows[0].end === '06:00' && savedTargets[0].active_windows[0].days.join(',') === '1,2,3,4,5', 'overnight weekday schedule did not round-trip in canonical form')
+  assert(savedTargets[0].thinking_effort_override === 'high' && savedTargets[0].compact_mode === 'self_summarize' && savedTargets[0].dev_system_normalize && savedTargets[0].thinking_downgrade_enabled, 'chat adaptation settings were not submitted')
+  assert(savedTargets[2].native_api === 'embeddings' && savedTargets[2].embedding_dimensions_override === 1536, 'embedding dimensions did not submit as a positive i32')
+  report.checks.targetSettingsAndOrdering = { keyboardOrderMoved: true, dragOrderRestoredAssociation: true, targetCount: savedTargets.length, duplicateEndpointIdsPreserved: true, dimensionValid: savedTargets[2].embedding_dimensions_override === 1536, scheduleDays: savedTargets[0].active_windows[0].days }
+  report.checks.catalogBehavior.concurrentIdenticalRequests = endpointNineCatalogReads.length === 1
+  report.checks.catalogBehavior.successfulCacheHit = true
+  report.checks.mutationUpdate = { status: updatedRequest.status, orderedTargets: savedTargets.map(target => target.endpoint_id), preservedLongModel: savedTargets[0].upstream_model === longModel }
+  report.checks.scenarioCoverage['dialog-open'] = true
+  report.checks.scenarioCoverage['mutation-update'] = true
+  await route8.getByRole('button', { name: `Edit ${pattern}` }).click()
+  const reopenedEditor = page.getByRole('dialog', { name: 'Edit model route' })
+  await reopenedEditor.waitFor({ state: 'visible' })
+  assert(await reopenedEditor.getByRole('textbox', { name: 'Model pattern' }).inputValue() === pattern, 'updated long pattern did not reopen')
+  assert(await reopenedEditor.locator('li').count() === 5, 'updated target order did not reopen')
+  assert(await reopenedEditor.locator('li').nth(0).locator('input[list]').inputValue() === longModel && await reopenedEditor.locator('li').nth(1).locator('input[list]').inputValue() === 'duplicate-endpoint-model', 'target model values did not follow reopened order')
+  await reopenedEditor.locator('li').nth(0).getByRole('button', { name: 'Target settings' }).click()
+  assert((await reopenedEditor.getByRole('combobox', { name: 'Native API' }).innerText()).includes('Chat'), 'target native API did not reopen')
+  assert(await reopenedEditor.getByRole('textbox', { name: 'Service tier' }).inputValue() === 'priority', 'service tier did not reopen')
+  assert((await reopenedEditor.getByRole('combobox', { name: 'Proxy scheme' }).innerText()).includes('Keep saved proxy'), 'saved proxy did not reopen in keep mode')
+  assert(await reopenedEditor.locator('input[type="time"]').inputValue() === '22:00' && await reopenedEditor.locator('input[pattern]').inputValue() === '06:00', 'overnight schedule did not reopen')
+  assert(await reopenedEditor.getByRole('button', { name: 'Mon' }).getAttribute('aria-pressed') === 'true' && await reopenedEditor.getByRole('button', { name: 'Sat' }).getAttribute('aria-pressed') === 'false', 'schedule weekdays did not reopen')
+  assert((await reopenedEditor.getByRole('combobox', { name: 'Thinking effort override' }).innerText()).includes('high') && (await reopenedEditor.getByRole('combobox', { name: 'Compact mode' }).innerText()).includes('Self-summarize'), 'chat adaptation selections did not reopen')
+  assert(await reopenedEditor.getByRole('switch', { name: 'Normalize developer→system' }).getAttribute('aria-checked') === 'true' && await reopenedEditor.getByRole('switch', { name: 'Thinking adaptation' }).getAttribute('aria-checked') === 'true', 'chat adaptation switches did not reopen')
+  await reopenedEditor.getByRole('button', { name: 'Cancel' }).first().click()
+  await reopenedEditor.locator('li').nth(2).getByRole('button', { name: 'Target settings' }).click()
+  assert(await reopenedEditor.getByRole('textbox', { name: 'Vector dimensions override' }).inputValue() === '1536', 'embedding dimension did not reopen')
+  assert(await reopenedEditor.getByRole('combobox', { name: 'Thinking effort override' }).count() === 0, 'reopened embeddings target exposed chat controls')
+  await reopenedEditor.getByRole('button', { name: 'Cancel' }).first().click()
+  await reopenedEditor.getByRole('button', { name: 'Cancel' }).last().click()
+  await reopenedEditor.waitFor({ state: 'hidden' })
+  report.checks.targetSettingsRoundtrip = { pattern: true, orderedModels: true, proxyKeep: true, overnightWeekdays: true, chatSettings: true, embeddingDimensions: 1536, chatHiddenForEmbeddings: true }
+
+  await route8.getByRole('button', { name: `Edit ${pattern}` }).click()
+  const proxyEditor = page.getByRole('dialog', { name: 'Edit model route' })
+  await proxyEditor.locator('li').nth(0).getByRole('button', { name: 'Target settings' }).click()
+  assert(await proxyEditor.getByRole('button', { name: 'Clear saved proxy' }).isVisible(), 'saved proxy clear action was unavailable')
+  await proxyEditor.getByRole('button', { name: 'Clear saved proxy' }).click()
+  await proxyEditor.getByRole('button', { name: 'Cancel' }).first().click()
+  const clearProxyResponse = waitForResponse('PATCH', '/api/v1/admin/model-routes/rule-fixture-8', 200)
+  await proxyEditor.getByRole('button', { name: 'Save', exact: true }).click()
+  await clearProxyResponse
+  await proxyEditor.waitFor({ state: 'hidden' })
+  const clearProxyRequest = (await requestLog()).findLast(request => request.path === '/api/v1/admin/model-routes/rule-fixture-8' && request.method === 'PATCH' && request.status === 200)
+  assert(clearProxyRequest.body.targets[0].proxy_url_override === '', 'clear saved proxy did not submit an explicit empty value')
+  report.checks.proxyClear = true
+
+  await route8.getByRole('button', { name: `Edit ${pattern}` }).click()
+  const dimensionClearEditor = page.getByRole('dialog', { name: 'Edit model route' })
+  await dimensionClearEditor.locator('li').nth(2).getByRole('button', { name: 'Target settings' }).click()
+  const clearedDimensionInput = dimensionClearEditor.getByRole('textbox', { name: 'Vector dimensions override' })
+  await clearedDimensionInput.fill('')
+  const dimensionValueBeforeSave = await clearedDimensionInput.inputValue()
+  const nullDimensionSave = waitForResponse('PATCH', '/api/v1/admin/model-routes/rule-fixture-8', 200)
+  await dimensionClearEditor.getByRole('button', { name: 'Cancel' }).first().click()
+  await dimensionClearEditor.getByRole('button', { name: 'Save', exact: true }).click()
+  await nullDimensionSave
+  await dimensionClearEditor.waitFor({ state: 'hidden' })
+  const nullDimensionRequest = (await requestLog()).findLast(request => request.path === '/api/v1/admin/model-routes/rule-fixture-8' && request.method === 'PATCH' && request.status === 200)
+  const clearedDimensionPayload = nullDimensionRequest?.body?.targets?.[2]?.embedding_dimensions_override
+  await route8.getByRole('button', { name: `Edit ${pattern}` }).click()
+  const reopenedDimensionEditor = page.getByRole('dialog', { name: 'Edit model route' })
+  await reopenedDimensionEditor.locator('li').nth(2).getByRole('button', { name: 'Target settings' }).click()
+  const reopenedDimensionValue = await reopenedDimensionEditor.getByRole('textbox', { name: 'Vector dimensions override' }).inputValue()
+  assert(dimensionValueBeforeSave === '' && clearedDimensionPayload === null && reopenedDimensionValue === '', 'clearing embedding dimensions did not submit and reopen as null')
+  report.checks.embeddingDimensionNullRoundtrip = {
+    requestStatus: nullDimensionRequest?.status,
+    targetIndex: 2,
+    inputBeforeSave: dimensionValueBeforeSave,
+    payloadValue: clearedDimensionPayload,
+    reopenedInputValue: reopenedDimensionValue,
+  }
+  await reopenedDimensionEditor.getByRole('button', { name: 'Cancel' }).first().click()
+  await reopenedDimensionEditor.getByRole('button', { name: 'Cancel' }).last().click()
+  await reopenedDimensionEditor.waitFor({ state: 'hidden' })
+
+  const catalogRaceRoute = '**/api/v1/admin/endpoints/ep-fixture-8/models**'
+  const catalogRaceRequests = []
+  const catalogRaceResponses = []
+  let signalOldCatalogRequest
+  let signalNewCatalogResponse
+  let signalOldCatalogResponse
+  let releaseOldCatalogResponse
+  let oldCatalogResponseFinished = false
+  const oldCatalogRequestStarted = new Promise(resolve => { signalOldCatalogRequest = resolve })
+  const newCatalogResponseFinished = new Promise(resolve => { signalNewCatalogResponse = resolve })
+  const oldCatalogResponseCompleted = new Promise(resolve => { signalOldCatalogResponse = resolve })
+  const holdOldCatalogResponse = new Promise(resolve => { releaseOldCatalogResponse = resolve })
+  const catalogRaceHandler = async interceptedRoute => {
+    const requestUrl = new URL(interceptedRoute.request().url())
+    const protocol = requestUrl.searchParams.get('native_api')
+    if (protocol === 'anthropic_messages') {
+      catalogRaceRequests.push({ protocol, query: requestUrl.search })
+      signalOldCatalogRequest()
+      await holdOldCatalogResponse
+      await interceptedRoute.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ models: ['catalog-race-old-model'] }) })
+      catalogRaceResponses.push(protocol)
+      oldCatalogResponseFinished = true
+      signalOldCatalogResponse()
+      return
+    }
+    if (protocol === 'responses') {
+      catalogRaceRequests.push({ protocol, query: requestUrl.search })
+      await interceptedRoute.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ models: ['catalog-race-current-model'] }) })
+      catalogRaceResponses.push(protocol)
+      signalNewCatalogResponse()
+      return
+    }
+    await interceptedRoute.continue()
+  }
+  await page.route(catalogRaceRoute, catalogRaceHandler)
+  await route8.getByRole('button', { name: `Edit ${pattern}` }).click()
+  const catalogRaceEditor = page.getByRole('dialog', { name: 'Edit model route' })
+  const catalogRaceInput = catalogRaceEditor.locator('input[list]').nth(0)
+  const catalogRaceDraft = 'catalog-race-custom-draft'
+  await catalogRaceInput.fill(catalogRaceDraft)
+  await catalogRaceEditor.locator('li').nth(0).getByRole('button', { name: 'Target settings' }).click()
+  await choose('Native API', 'Anthropic Messages')
+  await catalogRaceEditor.getByRole('button', { name: 'Cancel' }).first().click()
+  await oldCatalogRequestStarted
+  const oldProtocolDraftValue = await catalogRaceEditor.locator('input[list]').nth(0).inputValue()
+  await catalogRaceEditor.locator('li').nth(0).getByRole('button', { name: 'Target settings' }).click()
+  await choose('Native API', 'Responses')
+  await catalogRaceEditor.getByRole('button', { name: 'Cancel' }).first().click()
+  await newCatalogResponseFinished
+  await page.waitForFunction(expected => {
+    const dialog = document.querySelector('[role="dialog"]')
+    const input = dialog?.querySelector('input[list]')
+    const listId = input?.getAttribute('list')
+    const models = Array.from(document.getElementById(listId ?? '')?.querySelectorAll('option') ?? []).map(option => option.value)
+    return input?.value === expected.draft && models.length === 1 && models[0] === expected.model
+  }, { draft: catalogRaceDraft, model: 'catalog-race-current-model' })
+  const catalogStateAfterCurrentResponse = await catalogRaceEditor.evaluate(dialog => {
+    const input = dialog.querySelector('input[list]')
+    const listId = input?.getAttribute('list')
+    return {
+      model: input?.value ?? null,
+      suggestions: Array.from(document.getElementById(listId ?? '')?.querySelectorAll('option') ?? []).map(option => option.value),
+    }
+  })
+  const oldResponsePendingWhenCurrentRendered = !oldCatalogResponseFinished
+  releaseOldCatalogResponse()
+  await oldCatalogResponseCompleted
+  await page.waitForTimeout(100)
+  const catalogStateAfterOldResponse = await catalogRaceEditor.evaluate(dialog => {
+    const input = dialog.querySelector('input[list]')
+    const listId = input?.getAttribute('list')
+    return {
+      model: input?.value ?? null,
+      suggestions: Array.from(document.getElementById(listId ?? '')?.querySelectorAll('option') ?? []).map(option => option.value),
+    }
+  })
+  const catalogRaceQueries = catalogRaceRequests.map(request => request.query)
+  const catalogRaceProtocols = catalogRaceRequests.map(request => request.protocol)
+  const currentModelVisibleAfterCurrentResponse = catalogStateAfterCurrentResponse.suggestions.includes('catalog-race-current-model')
+  const oldModelHiddenAfterCurrentResponse = !catalogStateAfterCurrentResponse.suggestions.includes('catalog-race-old-model')
+  const currentModelVisibleAfterOldResponse = catalogStateAfterOldResponse.suggestions.includes('catalog-race-current-model')
+  const oldModelHiddenAfterOldResponse = !catalogStateAfterOldResponse.suggestions.includes('catalog-race-old-model')
+  const draftPreservedAfterCurrentResponse = catalogStateAfterCurrentResponse.model === catalogRaceDraft
+  const draftPreservedAfterOldResponse = catalogStateAfterOldResponse.model === catalogRaceDraft
+  assert(catalogRaceQueries.join('|') === '?native_api=anthropic_messages|?native_api=responses', `catalog race did not issue the expected protocol queries: ${JSON.stringify(catalogRaceQueries)}`)
+  assert(catalogRaceProtocols.join('|') === 'anthropic_messages|responses' && catalogRaceResponses.join('|') === 'responses|anthropic_messages', `catalog race did not return the new response before the old one: ${JSON.stringify({ catalogRaceProtocols, catalogRaceResponses })}`)
+  assert(oldResponsePendingWhenCurrentRendered && currentModelVisibleAfterCurrentResponse && oldModelHiddenAfterCurrentResponse && currentModelVisibleAfterOldResponse && oldModelHiddenAfterOldResponse, 'late catalog response replaced or polluted the current protocol suggestions')
+  assert(oldProtocolDraftValue === catalogRaceDraft && draftPreservedAfterCurrentResponse && draftPreservedAfterOldResponse, 'protocol catalog race changed the custom model text')
+  await page.unroute(catalogRaceRoute, catalogRaceHandler)
+  report.checks.catalogRace = {
+    requestQueries: catalogRaceQueries,
+    requestProtocols: catalogRaceProtocols,
+    responseOrder: catalogRaceResponses,
+    oldResponsePendingWhenCurrentRendered,
+    suggestionsAfterCurrentResponse: catalogStateAfterCurrentResponse.suggestions,
+    suggestionsAfterOldResponse: catalogStateAfterOldResponse.suggestions,
+    modelAfterCurrentResponse: catalogStateAfterCurrentResponse.model,
+    modelAfterOldResponse: catalogStateAfterOldResponse.model,
+    currentModelVisibleAfterCurrentResponse,
+    oldModelHiddenAfterCurrentResponse,
+    currentModelVisibleAfterOldResponse,
+    oldModelHiddenAfterOldResponse,
+    draftPreservedBeforeProtocolChange: oldProtocolDraftValue === catalogRaceDraft,
+    draftPreservedAfterCurrentResponse,
+    draftPreservedAfterOldResponse,
+  }
+  await catalogRaceEditor.getByRole('button', { name: 'Cancel' }).last().click()
+  await catalogRaceEditor.waitFor({ state: 'hidden' })
+
+  await fixture('/__fixtures/faults', 'POST', { pathPrefix: '/api/v1/admin/model-routes/rule-fixture-8', method: 'PATCH', status: 503, code: 'fixture_route_update_failed', message: 'fixture route update failure', delayMs: 700 })
+  await route8.waitFor({ state: 'visible' })
+  await route8.getByRole('button', { name: `Edit ${pattern}` }).click()
+  const retryDialog = page.getByRole('dialog', { name: 'Edit model route' })
+  const retryPattern = `${pattern}-retry`
+  await retryDialog.getByRole('textbox', { name: 'Model pattern' }).fill(retryPattern)
+  const failedUpdate = waitForResponse('PATCH', '/api/v1/admin/model-routes/rule-fixture-8', 503)
+  await retryDialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await page.waitForFunction(() => {
+    const dialog = document.querySelector('[role="dialog"]')
+    return Array.from(dialog?.querySelectorAll('button') ?? []).some(button => button.textContent?.trim() === 'Cancel' && button.disabled)
+  })
+  assert(await retryDialog.getByRole('button', { name: 'Cancel' }).isDisabled(), 'pending route save did not block dialog dismissal')
+  assert(await retryDialog.getByRole('button', { name: 'Save', exact: true }).isDisabled(), 'pending route save did not disable its action')
+  assert(await retryDialog.getByRole('button', { name: 'Close' }).count() === 0, 'pending route save left the dialog close action available')
+  assert(await retryDialog.getByRole('textbox', { name: 'Model pattern' }).inputValue() === retryPattern, 'pending route save lost its draft')
+  await failedUpdate
+  assert(await retryDialog.getByRole('textbox', { name: 'Model pattern' }).inputValue() === retryPattern, 'failed route save lost its draft')
+  await page.getByRole('alert').filter({ hasText: 'fixture route update failure' }).waitFor({ state: 'visible' })
+  const retryUpdate = waitForResponse('PATCH', '/api/v1/admin/model-routes/rule-fixture-8', 200)
+  await retryDialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await retryUpdate
+  await retryDialog.waitFor({ state: 'hidden' })
+  const failedAndRetried = (await requestLog()).filter(request => request.path === '/api/v1/admin/model-routes/rule-fixture-8' && request.method === 'PATCH')
+  assert(failedAndRetried.filter(request => request.status === 503).length === 1 && failedAndRetried.filter(request => request.status === 200).length >= 2, 'route update retry did not issue one failed request and a successful retry')
+  report.checks.mutationConflictGuard = { oneFailedWrite: true, retryStatus: 200, dismissalDisabled: true, draftRetained: true }
+  report.checks.scenarioCoverage['mutation-conflict-guard'] = true
+
+  await route8.waitFor({ state: 'visible' })
+  const routeReadsBeforeToggle = (await requestLog()).filter(request => request.path === '/api/v1/admin/model-routes' && request.method === 'GET').length
+  await fixture('/__fixtures/faults', 'POST', { pathPrefix: '/api/v1/admin/model-routes/rule-fixture-8', method: 'PATCH', status: 200, delayMs: 1200 })
+  const toggleControl = route8.getByRole('switch', { name: `Status ${retryPattern}` })
+  await toggleControl.click()
+  await page.waitForFunction(() => document.querySelector('[data-model-route-row="rule-fixture-8"] [role="switch"]')?.hasAttribute('disabled'))
+  const editControl = route8.getByRole('button', { name: `Edit ${retryPattern}` })
+  const deleteControl = route8.getByRole('button', { name: `Delete ${retryPattern}` })
+  const probeControl = route8.getByRole('button', { name: `Test ${retryPattern}` })
+  assert(await editControl.isDisabled() && await deleteControl.isDisabled(), 'pending toggle did not gate conflicting row writes')
+  assert(await probeControl.isEnabled(), 'pending toggle incorrectly blocked the independent probe')
+  const probeResponse = waitForResponse('POST', '/api/v1/admin/model-routes/test', 200)
+  await probeControl.click()
+  await probeResponse
+  const toggleResponse = waitForResponse('PATCH', '/api/v1/admin/model-routes/rule-fixture-8', 200)
+  await toggleResponse
+  const postToggleReads = (await requestLog()).filter(request => request.path === '/api/v1/admin/model-routes' && request.method === 'GET').length
+  assert(postToggleReads === routeReadsBeforeToggle, 'toggle unexpectedly reloaded model-route pages')
+  await route8.getByRole('button', { name: '4/5', exact: true }).waitFor({ state: 'visible' })
+  const probeRequest = (await requestLog()).findLast(request => request.path === '/api/v1/admin/model-routes/test' && request.method === 'POST')
+  assert(probeRequest?.body?.rule_id === 'rule-fixture-8', 'probe did not use the selected rule')
+  const probeSummary = await route8.getByRole('button', { name: '4/5', exact: true }).innerText()
+  assert(probeSummary === '4/5', 'probe summary counts were not derived from result rows')
+  await route8.getByRole('button', { name: '4/5', exact: true }).click()
+  let resultsDialog = page.getByRole('dialog', { name: 'Test results' })
+  await resultsDialog.waitFor({ state: 'visible' })
+  const resultItems = resultsDialog.locator('li')
+  assert(await resultItems.count() === 5, 'probe details did not show every target result')
+  const resultText = await resultItems.allInnerTexts()
+  assert(resultText[0].includes('Preferred target') && resultText[0].includes(longModel) && resultText[1].includes('duplicate-endpoint-model') && resultText[2].includes('HTTP 503') && resultText[2].includes('fixture probe failed for target 3') && resultText[3].includes('coalesced-target-four-model') && resultText[4].includes('coalesced-target-five-model'), 'probe details lost preferred/order/model/status/message data')
+  await resultsDialog.getByRole('button', { name: 'Close' }).first().click()
+  await resultsDialog.waitFor({ state: 'hidden' })
+  report.checks.probeDetails = { resultCount: resultText.length, orderedModels: ['long-model', 'duplicate-endpoint-model', 'embedding-upstream-model', 'coalesced-target-four-model', 'coalesced-target-five-model'], preferredFirst: resultText[0].includes('Preferred target'), includesHttpAndMessage: true, noToast: true }
+  report.checks.mutationToggle = { probeRanDuringToggle: true, conflictingControlsDisabled: true, routeListReadsBefore: routeReadsBeforeToggle, routeListReadsAfter: postToggleReads }
+  report.checks.scenarioCoverage['mutation-toggle'] = true
+
+  await page.getByRole('button', { name: 'New model route' }).click()
+  const createDialog = page.getByRole('dialog', { name: 'New model route' })
+  await createDialog.waitFor({ state: 'visible' })
+  await createDialog.getByRole('textbox', { name: 'Model pattern' }).fill('created-route-*')
+  await createDialog.getByRole('combobox', { name: 'Endpoint 1' }).click()
+  await page.getByRole('option', { name: /Fixture Upstream 10 With A Long Operational Name/ }).click()
+  await createDialog.locator('input[list]').fill('created-upstream-model')
+  await createDialog.locator('li').nth(0).getByRole('button', { name: 'Target settings' }).click()
+  await createDialog.getByRole('combobox', { name: 'Proxy scheme' }).click()
+  await page.getByRole('option', { name: 'http', exact: true }).click()
+  await createDialog.getByRole('textbox', { name: 'Proxy address' }).fill('created-proxy.example.test:8080')
+  await createDialog.getByRole('button', { name: 'Cancel' }).first().click()
+  const beforeCreateIds = await page.locator('[data-model-route-row]').evaluateAll(rows => rows.map(row => row.getAttribute('data-model-route-row')))
+  const createResponse = waitForResponse('POST', '/api/v1/admin/model-routes', 200)
+  await createDialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await createResponse
+  await createDialog.waitFor({ state: 'hidden' })
+  const createRequest = (await requestLog()).findLast(request => request.path === '/api/v1/admin/model-routes' && request.method === 'POST')
+  assert(createRequest?.body?.model_pattern === 'created-route-*' && createRequest.body.targets[0].endpoint_id === 'ep-fixture-10' && createRequest.body.targets[0].upstream_model === 'created-upstream-model' && createRequest.body.targets[0].proxy_url_override === '[synthetic-secret-present]', 'route create did not submit endpoint/model/proxy values')
+  await page.locator('[data-model-route-row]').filter({ hasText: 'created-route-*' }).waitFor({ state: 'visible' })
+  const createdRow = page.locator('[data-model-route-row]').filter({ hasText: 'created-route-*' })
+  const createdRuleId = await createdRow.getAttribute('data-model-route-row')
+  assert(Boolean(createdRuleId) && !beforeCreateIds.includes(createdRuleId), 'created route did not appear as a distinct row')
+  report.checks.mutationCreate = { status: createRequest.status, selectedOffPageEndpoint: createRequest.body.targets[0].endpoint_id, proxyPayloadSafe: true, newRuleVisible: true }
+  report.checks.scenarioCoverage['mutation-create'] = true
+
+  await createdRow.getByRole('button', { name: 'Edit created-route-*' }).click()
+  const createdEditor = page.getByRole('dialog', { name: 'Edit model route' })
+  await createdEditor.waitFor({ state: 'visible' })
+  await createdEditor.locator('li').nth(0).getByRole('button', { name: 'Target settings' }).click()
+  const proxySelection = await createdEditor.getByRole('combobox', { name: 'Proxy scheme' }).innerText()
+  assert(proxySelection.includes('Keep saved proxy'), 'saved target proxy did not reopen in keep mode')
+  await createdEditor.getByRole('button', { name: 'Cancel' }).first().click()
+  const keepResponse = waitForResponse('PATCH', `/api/v1/admin/model-routes/${createdRuleId}`, 200)
+  await createdEditor.getByRole('button', { name: 'Save', exact: true }).click()
+  await keepResponse
+  const keepRequest = (await requestLog()).findLast(request => request.path === `/api/v1/admin/model-routes/${createdRuleId}` && request.method === 'PATCH' && request.status === 200)
+  assert(!Object.hasOwn(keepRequest.body.targets[0], 'proxy_url_override'), 'untouched saved proxy was not omitted on PATCH')
+  await page.waitForFunction(ruleId => {
+    const row = document.querySelector(`[data-model-route-row="${ruleId}"]`)
+    const button = row?.querySelector('button[aria-label^="Delete "]')
+    return Boolean(button && !button.disabled)
+  }, createdRuleId)
+  await page.evaluate(() => { window.confirm = () => false })
+  await createdRow.getByRole('button', { name: 'Delete created-route-*' }).click()
+  assert(!(await requestLog()).some(request => request.path === `/api/v1/admin/model-routes/${createdRuleId}` && request.method === 'DELETE'), 'cancelled route delete issued a request')
+  await page.evaluate(() => { window.confirm = () => true })
+  const confirmedDeleteResponse = waitForResponse('DELETE', `/api/v1/admin/model-routes/${createdRuleId}`, 204)
+  await createdRow.getByRole('button', { name: 'Delete created-route-*' }).click()
+  const deleteResponse = await confirmedDeleteResponse
+  await page.locator(`[data-model-route-row="${createdRuleId}"]`).waitFor({ state: 'hidden' })
+  const deleteRequest = (await requestLog()).findLast(request => request.path === `/api/v1/admin/model-routes/${createdRuleId}` && request.method === 'DELETE')
+  assert(deleteResponse.status() === 204 && deleteRequest?.status === 204, 'confirmed route deletion did not receive 204 and reload')
+  report.checks.mutationDelete = { cancelledWrites: 0, successfulDelete: deleteRequest.status, routeRemoved: true }
+  report.checks.scenarioCoverage['mutation-delete'] = true
+
+  const longRow = page.locator('[data-model-route-row="rule-fixture-8"]')
+  const patternCell = longRow.locator('[title]').filter({ hasText: pattern })
+  assert(await patternCell.getAttribute('title') === retryPattern && await patternCell.getAttribute('aria-label') === retryPattern, 'long route pattern was not clipped with its full accessible value')
+  const responsive = []
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.waitForTimeout(100)
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
+    const tableVisible = await page.locator('[data-model-route-row="rule-fixture-8"]').isVisible()
+    const cardVisible = await page.locator('[data-model-route-card="rule-fixture-8"]').isVisible()
+    assert(!overflow, `route layout overflowed at ${width}px`)
+    assert(width <= 767 ? cardVisible && !tableVisible : tableVisible && !cardVisible, `route table/card breakpoint failed at ${width}px`)
+    responsive.push({ width, noHorizontalOverflow: !overflow, tableVisible, cardVisible })
+    if (width === 390) {
+      const mobileCard = page.locator('[data-model-route-card="rule-fixture-8"]')
+      await mobileCard.getByRole('button', { name: '4/5', exact: true }).click()
+      const mobileResults = page.getByRole('dialog', { name: 'Test results' })
+      await mobileResults.waitFor({ state: 'visible' })
+      assert(await mobileResults.locator('li').count() === 5, 'mobile probe details omitted target results')
+      await capture('endpoints-routes-en-light-390')
+      await mobileResults.getByRole('button', { name: 'Close' }).first().click()
+      await mobileResults.waitFor({ state: 'hidden' })
+    }
+  }
+  const dialogContainment = []
+  for (const width of [768, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    const editRoute = width === 390
+      ? page.locator('[data-model-route-card="rule-fixture-8"]').getByRole('button', { name: 'Edit', exact: true })
+      : longRow.getByRole('button', { name: `Edit ${retryPattern}` })
+    await editRoute.click()
+    const responsiveDialog = page.getByRole('dialog', { name: 'Edit model route' })
+    await responsiveDialog.waitFor({ state: 'visible' })
+    const bounds = await responsiveDialog.boundingBox()
+    assert(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width, `editor escaped viewport at ${width}px`)
+    const saveAction = responsiveDialog.getByRole('button', { name: 'Save', exact: true })
+    await saveAction.scrollIntoViewIfNeeded()
+    assert(await saveAction.isVisible() && await saveAction.isEnabled(), `editor save action was unreachable at ${width}px`)
+    dialogContainment.push({ width, withinViewport: true, saveReachable: true })
+    if (width === 390) await capture('endpoints-routes-dialog-390')
+    await responsiveDialog.getByRole('button', { name: 'Cancel' }).last().click()
+    await responsiveDialog.waitFor({ state: 'hidden' })
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    localStorage.setItem('prompt-ferry:theme-mode', 'dark')
+  })
+  await page.reload()
+  await page.locator('[data-foundation-route-id="R-ENDPOINTS-ROUTES"]').waitFor({ state: 'visible' })
+  await page.locator('[data-model-route-row="rule-fixture-8"]').waitFor({ state: 'visible' })
+  assert(await page.getByRole('button', { name: '新增模型路由' }).isVisible(), 'Chinese locale did not render the route action')
+  assert(await page.evaluate(() => document.documentElement.classList.contains('dark')), 'dark theme did not render on the route page')
+  await capture('endpoints-routes-zh-dark-1440')
+  report.checks.longValuesResponsive = { longPattern: retryPattern.length, longModel: longModel.length, responsive, dialogContainment }
+  report.checks.localeThemeRendering = { chineseActionVisible: true, darkTheme: true }
+  report.checks.scenarioCoverage['long-values'] = true
+
+  const finalLog = await requestLog()
+  const unexpectedAdminRequests = finalLog.filter(request => request.path.startsWith('/api/v1/admin/') && !isAllowedAdminRequest(request)).map(request => `${request.method} ${request.path}`)
+  const endpointReads = finalLog.filter(request => request.path === '/api/v1/admin/endpoints' && request.method === 'GET')
+  const modelRouteReads = finalLog.filter(request => request.path === '/api/v1/admin/model-routes' && request.method === 'GET')
+  const routeWrites = finalLog.filter(request => request.path.startsWith('/api/v1/admin/model-routes/') || request.path === '/api/v1/admin/model-routes')
+  assert(unexpectedAdminRequests.length === 0, `unexpected admin API traffic: ${JSON.stringify(unexpectedAdminRequests)}`)
+  assert(consoleErrors.length === 0, `browser console errors: ${JSON.stringify(consoleErrors)}`)
+  assert(pageErrors.length === 0, `browser page errors: ${JSON.stringify(pageErrors)}`)
+  report.checks.apiIsolation = { unexpectedAdminRequests, quotaCalls: finalLog.filter(request => /quota|token-plan/i.test(request.path)).length, endpointReadCount: endpointReads.length, modelRouteReadCount: modelRouteReads.length }
+  report.checks.apiLedger = routeWrites.map(request => ({ method: request.method, path: request.path, status: request.status, hasBody: request.body !== undefined }))
+  report.checks.consoleErrors = consoleErrors
+  report.checks.pageErrors = pageErrors
+  report.checks.scenarioCoverage['route-render'] = true
+  report.checks.scenarioCoverage['admin-denial'] = true
+  report.checks.scenarioCoverage['dialog-open'] = true
+  report.checks.scenarioCoverage['mutation-create'] = true
+  report.checks.scenarioCoverage['mutation-toggle'] = true
+  report.checks.scenarioCoverage['mutation-update'] = true
+  report.checks.scenarioCoverage['mutation-delete'] = true
+  report.checks.scenarioCoverage['mutation-conflict-guard'] = true
+  report.checks.scenarioCoverage['long-values'] = true
+  report.finishedAt = new Date().toISOString()
+  return report
+  } catch (cause) {
+    report.finishedAt = new Date().toISOString()
+    report.checks.callbackFailure = cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause)
+    return report
+  }
+}

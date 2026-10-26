@@ -1,0 +1,42 @@
+{
+  "runId": "endpoints-1793010891626",
+  "startedAt": "2026-10-26T10:34:51.626Z",
+  "checks": {
+    "adminDenial": {
+      "redirectedToApiKeys": true,
+      "hiddenNavigation": true,
+      "adminApiCalls": 0
+    },
+    "adminUserOptionsRead": true,
+    "routeAndNavigation": {
+      "routeId": "R-ENDPOINTS-UPSTREAMS",
+      "navVisible": true,
+      "initialRowCount": 10,
+      "firstPageQuery": {
+        "first": 0,
+        "rows": 10
+      }
+    },
+    "loadingState": true,
+    "pagination": {
+      "initialRows": 10,
+      "secondPageRows": 3,
+      "secondPageIds": ["ep-fixture-8", "ep-fixture-9", "ep-fixture-10"],
+      "query": {
+        "first": "10",
+        "rows": "10"
+      }
+    },
+    "pageSizePersistence": true,
+    "errorState": {
+      "visible": true,
+      "retainedRows": true,
+      "retried": true,
+      "messagePresent": true
+    },
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  "screenshots": ["e2e/foundation/screenshots/endpoints-en-light-1440.png"],
+  "finishedAt": "2026-10-26T10:34:56.399Z"
+}

@@ -145,6 +145,23 @@ pub async fn fixture_keys(pool: &PgPool, endpoint_id: Uuid) -> i64 {
         .expect("count the fixture keys")
 }
 
+/// Refresh the planner's statistics for one of the two referencing tables.
+///
+/// `ANALYZE` names a table and cannot bind it, so the name is composed from
+/// the closed [`Table`] list and nothing a caller supplies reaches the
+/// statement. The production code does the same for a partition it has just
+/// created (`src/db/partition_ddl.rs`): statistics are an input the planner
+/// needs, so a fixture refreshes them for the population it actually wrote
+/// instead of leaving the outcome to whichever autovacuum run happened to
+/// happen first.
+pub async fn analyze_table(pool: &PgPool, table: Table) -> anyhow::Result<()> {
+    let statement = format!("ANALYZE {}", table.name());
+    sqlx::query(sqlx::AssertSqlSafe(statement))
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// The plan PostgreSQL chose, reduced to what a test can assert on.
 #[derive(Debug)]
 pub struct PlanSummary {

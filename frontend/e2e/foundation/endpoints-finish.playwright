@@ -1,0 +1,128 @@
+async page => {
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const report = { startedAt: new Date().toISOString(), checks: {}, screenshots: [] }
+  function assert(condition, message) {
+    if (!condition) throw new Error(message)
+  }
+  const consoleErrors = []
+  const pageErrors = []
+  page.setDefaultTimeout(7000)
+  const onConsole = message => {
+    if (message.type() === 'error' && !/(?:status of )?(?:401|500|503)\b/.test(message.text())) consoleErrors.push(message.text())
+  }
+  const onPageError = error => pageErrors.push(error.message)
+  page.on('console', onConsole)
+  page.on('pageerror', onPageError)
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  async function capture(name) {
+    const file = `${screenshots}/${name}.png`
+    await page.screenshot({ path: file, fullPage: true })
+    report.screenshots.push(file)
+  }
+
+  await page.waitForURL(url => new URL(url).pathname === '/endpoints/upstreams')
+  const viewportChecks = []
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.locator('[data-foundation-route-id="R-ENDPOINTS-UPSTREAMS"]').waitFor({ state: 'visible' })
+    const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth)
+    const contained = documentWidth <= width
+    assert(contained, `upstreams page overflows at ${width}px (document=${documentWidth})`)
+    const endpointVisible = width < 768
+      ? await page.locator('[data-endpoint-card="ep-minimax-cn"]').isVisible()
+      : await page.locator('[data-endpoint-row="ep-minimax-cn"]').isVisible()
+    assert(endpointVisible, `upstream row/card missing at ${width}px`)
+    viewportChecks.push({ width, documentWidth, contained, endpointVisible })
+    if (width === 1024) await capture('endpoints-en-light-1024')
+    if (width === 768) await capture('endpoints-en-light-768')
+    if (width === 390) await capture('endpoints-en-light-390')
+  }
+  report.checks.responsiveContainment = viewportChecks
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    localStorage.setItem('prompt-ferry:theme-mode', 'dark')
+  })
+  await page.reload()
+  await page.locator('[data-foundation-route-id="R-ENDPOINTS-UPSTREAMS"]').waitFor({ state: 'visible' })
+  await page.locator('[data-endpoint-row="ep-minimax-cn"]').waitFor({ state: 'visible' })
+  const zhDark = await page.evaluate(() => ({ lang: document.documentElement.lang, dark: document.documentElement.classList.contains('dark'), colorScheme: document.documentElement.style.colorScheme }))
+  assert(zhDark.lang === 'zh-CN' && zhDark.dark && zhDark.colorScheme === 'dark', 'zh-CN dark preferences did not render on the upstream route')
+  await capture('endpoints-zh-dark-1440')
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'en-US')
+    localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await page.reload()
+  await page.locator('[data-foundation-route-id="R-ENDPOINTS-UPSTREAMS"]').waitFor({ state: 'visible' })
+  await page.locator('[data-endpoint-row="ep-minimax-cn"]').waitFor({ state: 'visible' })
+  const enLight = await page.evaluate(() => ({ lang: document.documentElement.lang, dark: document.documentElement.classList.contains('dark'), colorScheme: document.documentElement.style.colorScheme, timeZone: localStorage.getItem('prompt-ferry:display-time-zone') }))
+  assert(enLight.lang === 'en-US' && !enLight.dark && enLight.colorScheme === 'light', 'en-US light preferences did not render on the upstream route')
+  report.checks.localeThemeRendering = { zhDark, enLight }
+  await capture('endpoints-en-light-1440-final')
+
+  await fixture('/__fixtures/quota', 'POST', { stale: true })
+  await page.reload()
+  await page.locator('[data-foundation-route-id="R-ENDPOINTS-UPSTREAMS"]').waitFor({ state: 'visible' })
+  await page.locator('[data-endpoint-row="ep-minimax-cn"]').waitFor({ state: 'visible' })
+  await page.locator('[data-endpoint-row="ep-minimax-cn"]').getByRole('button', { name: 'Token plan usage', exact: true }).click()
+  let quotaDialog = page.getByRole('dialog').last()
+  await quotaDialog.locator('[data-quota-dialog="ep-minimax-cn"]').waitFor({ state: 'visible' })
+  const staleQuotaText = await quotaDialog.innerText()
+  const staleLabelsVisible = staleQuotaText.includes('Cached observation') && staleQuotaText.includes('Refresh failed; showing the latest successful observation.')
+  const staleNumbersRetained = staleQuotaText.includes('62') || staleQuotaText.includes('38')
+  assert(staleLabelsVisible && staleNumbersRetained, 'stale quota did not retain cached labels and observed numbers')
+  await quotaDialog.getByRole('button', { name: 'Close', exact: true }).click()
+  await fixture('/__fixtures/quota', 'POST', { stale: false })
+  await page.reload()
+  await page.locator('[data-foundation-route-id="R-ENDPOINTS-UPSTREAMS"]').waitFor({ state: 'visible' })
+  await page.locator('[data-endpoint-row="ep-minimax-cn"]').waitFor({ state: 'visible' })
+  await page.locator('[data-endpoint-row="ep-minimax-cn"]').getByRole('button', { name: 'Token plan usage', exact: true }).click()
+  quotaDialog = page.getByRole('dialog').last()
+  await quotaDialog.locator('[data-quota-dialog="ep-minimax-cn"]').waitFor({ state: 'visible' })
+  const freshQuotaText = await quotaDialog.innerText()
+  const freshLabelsCleared = !freshQuotaText.includes('Cached observation') && !freshQuotaText.includes('Refresh failed; showing the latest successful observation.')
+  assert(freshLabelsCleared, 'fresh quota observation retained stale labels')
+  report.checks.quotaStale = { staleLabelsVisible, staleNumbersRetained, freshLabelsCleared }
+  await capture('endpoints-quota-fresh-en-light-1440')
+  await quotaDialog.getByRole('button', { name: 'Close', exact: true }).click()
+
+  const requests = (await fixture('/__fixtures/log?limit=500')).requests
+  const createdId = await page.evaluate(() => sessionStorage.getItem('p4c4-created-endpoint-id'))
+  const requiredApiFailures = [
+    '503 GET /api/v1/admin/endpoints',
+    '503 POST /api/v1/admin/endpoints',
+    `503 PATCH /api/v1/admin/endpoints/${createdId}`,
+    '500 GET /api/v1/admin/endpoints/ep-minimax-cn/quota-observations',
+    '500 POST /api/v1/admin/endpoints/ep-openai-codex/oauth/refresh',
+    '500 POST /api/v1/admin/endpoints/ep-openai-codex/oauth/device',
+    '500 POST /api/v1/admin/endpoints/ep-openai-codex/oauth/browser',
+    '503 POST /api/v1/admin/endpoints/ep-openai-codex/oauth/browser/complete',
+  ]
+  const actualApiFailures = requests.filter(request => request.path.startsWith('/api/v1/admin/endpoints') && request.status >= 500).map(request => `${request.status} ${request.method} ${request.path}`)
+  assert(JSON.stringify([...actualApiFailures].sort()) === JSON.stringify([...requiredApiFailures].sort()), `current endpoint API failure set differs: ${JSON.stringify(actualApiFailures)}`)
+  const endpointBodies = requests.filter(request => request.path.startsWith('/api/v1/admin/endpoints') && request.body).map(request => JSON.stringify(request.body)).join('\n')
+  assert(!endpointBodies.includes('pf_fixture_endpoint_key_do_not_persist_in_report') && !endpointBodies.includes('pf_fixture_second_key_do_not_persist') && !JSON.stringify(report).includes('fixture-only'), 'synthetic OAuth or API key data leaked into current evidence')
+  report.checks.expectedApiFailures = actualApiFailures
+  report.checks.apiFailures = []
+  report.checks.syntheticSecretSafety = { reportRedacted: true, endpointLedgerRedacted: true, oauthBodyNotRecorded: true }
+  report.checks.consoleErrors = consoleErrors
+  report.checks.pageErrors = pageErrors
+  assert(pageErrors.length === 0, `browser page errors: ${JSON.stringify(pageErrors)}`)
+  page.off('console', onConsole)
+  page.off('pageerror', onPageError)
+  report.finishedAt = new Date().toISOString()
+  return report
+}

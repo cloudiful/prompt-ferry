@@ -1,0 +1,873 @@
+/**
+ * Full-app Playwright CLI baseline for issue #1060.
+ *
+ * This file is a single function expression executed by
+ * `playwright-cli run-code --filename=e2e/baseline/capture.js`.
+ * It drives the real Vue app against the stateful fixture API, never a page
+ * fragment and never a production endpoint. Run it through
+ * `e2e/baseline/run-baseline.sh`, which owns the fixture server, the dev server,
+ * and the fixture reset.
+ */
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const shots = 'e2e/baseline/screenshots'
+  // Kept explicit so the callback needs no module loader. The matrix validator
+  // reads this file and fails when these route lists drift from parity.matrix.ts.
+  const routeRows = [
+    ['/api-keys', 'authenticated'],
+    ['/available-models', 'authenticated'],
+    ['/users', 'admin'],
+    ['/endpoints/upstreams', 'admin'],
+    ['/endpoints/routes', 'admin'],
+    ['/mcp', 'authenticated'],
+    ['/relays', 'admin'],
+    ['/relay-host', 'relay-session'],
+    ['/redaction/rules', 'authenticated'],
+    ['/redaction/preview', 'authenticated'],
+    ['/request-records/ai', 'authenticated'],
+    ['/request-records/mcp', 'authenticated'],
+    ['/billing', 'authenticated'],
+    ['/approvals', 'admin'],
+    ['/settings/general', 'authenticated'],
+    ['/settings/requests', 'admin'],
+    ['/settings/network', 'admin'],
+    ['/settings/review', 'admin'],
+    ['/settings/storage', 'admin'],
+    ['/settings/cache-alert', 'admin'],
+    ['/settings/config-archive', 'admin'],
+  ]
+  const routes = routeRows.map(([route, scope]) => ({ route, scope }))
+  const redirects = [
+    { id: 'RD-ROOT', from: '/', to: '/api-keys' },
+    { id: 'RD-ENDPOINTS', from: '/endpoints', to: '/endpoints/upstreams' },
+    { id: 'RD-REDACTION', from: '/redaction', to: '/redaction/rules' },
+    { id: 'RD-RECORDS', from: '/request-records', to: '/request-records/ai' },
+    { id: 'RD-SETTINGS', from: '/settings', to: '/settings/general' },
+    { id: 'RD-CATCH-ALL', from: '/this-path-does-not-exist', to: '/api-keys' },
+  ]
+  const adminOnly = routes
+    .filter((row) => row.scope === 'admin')
+    .map((row) => row.route)
+  const nonAdminRoutes = routes
+    .filter((row) => row.scope === 'authenticated')
+    .map((row) => row.route)
+
+  const evidence = {
+    startedAt: new Date().toISOString(),
+    captures: [],
+    checks: {},
+    mutations: [],
+    fixtureSummary: null,
+    requestLog: [],
+  }
+  const consoleErrors = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text())
+  })
+  page.setDefaultTimeout(10000)
+
+  async function fixture(path, method, body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method: method || 'GET',
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    return response.json()
+  }
+
+  async function setFault(fault) {
+    await fixture('/__fixtures/faults', 'POST', fault)
+  }
+  async function clearFaults() {
+    await fixture('/__fixtures/faults', 'DELETE')
+  }
+  async function requestLog(limit) {
+    const data = await fixture(`/__fixtures/log?limit=${limit || 250}`)
+    return data.requests
+  }
+
+  async function applyPrefs(prefs) {
+    await page.evaluate((values) => {
+      localStorage.setItem('prompt-ferry:locale', values.locale)
+      localStorage.setItem('prompt-ferry:theme-mode', values.theme)
+    }, prefs)
+  }
+
+  async function boot(prefs) {
+    await page.context().clearCookies()
+    await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
+    await page.evaluate(() => localStorage.clear())
+    await applyPrefs(prefs)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(500)
+  }
+
+  async function login(loginName, password) {
+    await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
+    const nameField = page.getByRole('textbox', { name: /登录名|login name/i })
+    await nameField.fill(loginName)
+    await page.getByRole('textbox', { name: /密码|password/i }).fill(password)
+    await page
+      .getByRole('button', { name: /^登录$|^log in$|^sign in$/i })
+      .click()
+    await page.waitForTimeout(1200)
+  }
+
+  async function logout() {
+    await page
+      .getByRole('button', { name: /退出登录|logout/i })
+      .first()
+      .click()
+    await page.waitForTimeout(900)
+  }
+
+  async function capture(name, options) {
+    const settings = options || {}
+    if (settings.width) {
+      await page.setViewportSize({ width: settings.width, height: 900 })
+    }
+    consoleErrors.length = 0
+    await page.waitForTimeout(settings.wait || 900)
+    const path = `${shots}/${name}.png`
+    await page.screenshot({ path, fullPage: true })
+    const text = (await page.locator('body').innerText()).replace(
+      /\n{3,}/g,
+      '\n\n',
+    )
+    const entry = {
+      name,
+      path,
+      url: page.url().replace(BASE, ''),
+      title: await page.title(),
+      locale: settings.locale || null,
+      theme: settings.theme || null,
+      width: settings.width || null,
+      errors: [...consoleErrors],
+      text: text.slice(0, settings.textLimit || 2000),
+    }
+    evidence.captures.push(entry)
+    return entry
+  }
+
+  async function captureRoute(prefix, route, prefs, options) {
+    await applyPrefs(prefs)
+    await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(400)
+    const name = `${prefix}${route.replaceAll('/', '_')}`
+    return capture(name, { ...(options || {}), ...prefs })
+  }
+
+  try {
+    // ---------------------------------------------------------------- setup
+    const reset = await fixture('/__fixtures/reset', 'POST')
+    if (!reset.reset) throw new Error('fixture reset was refused')
+    const resetSummary = await fixture('/__fixtures/summary')
+    if (resetSummary.aiRecords !== 26 || resetSummary.approvals !== 14) {
+      throw new Error('fixture reset did not restore the seeded state')
+    }
+    await boot({ locale: 'zh-CN', theme: 'dark' })
+    await page.setViewportSize({ width: 1440, height: 900 })
+
+    // ------------------------------------------------------- login / logout
+    await boot({ locale: 'zh-CN', theme: 'dark' })
+    await capture('auth_01_login_zh_dark_1440', {
+      locale: 'zh-CN',
+      theme: 'dark',
+      width: 1440,
+    })
+    await page
+      .getByRole('textbox', { name: /登录名|login name/i })
+      .fill('admin')
+    await page
+      .getByRole('textbox', { name: /密码|password/i })
+      .fill('wrong-password')
+    await page
+      .getByRole('button', { name: /^登录$|^log in$|^sign in$/i })
+      .click()
+    await page.waitForTimeout(900)
+    const invalidVisible =
+      /invalid_credentials|invalid fixture credentials/i.test(
+        await page.locator('body').innerText(),
+      )
+    await capture('auth_02_invalid_credentials_zh_dark_1440', {
+      locale: 'zh-CN',
+      theme: 'dark',
+      width: 1440,
+    })
+    await login('admin', 'fixture-password')
+    await page.waitForTimeout(900)
+    evidence.checks.login = {
+      invalidAlertVisible: invalidVisible,
+      landed: page.url().replace(BASE, ''),
+    }
+
+    // ------------------------------------------------------------ redirects
+    evidence.checks.redirects = []
+    for (const redirect of redirects) {
+      await page.goto(`${BASE}${redirect.from}`, {
+        waitUntil: 'domcontentloaded',
+      })
+      await page.waitForTimeout(700)
+      evidence.checks.redirects.push({
+        id: redirect.id,
+        from: redirect.from,
+        expected: redirect.to,
+        actual: page.url().replace(BASE, ''),
+      })
+    }
+
+    // ------------------------------------------------------ admin zh sweep
+    for (const row of routes) {
+      if (row.route === '/login' || row.route === '/relay-host') continue
+      await captureRoute(
+        'admin_zh_dark_1440',
+        row.route,
+        { locale: 'zh-CN', theme: 'dark' },
+        { width: 1440 },
+      )
+    }
+
+    // ------------------------------------------------------ admin en sweep
+    for (const row of routes) {
+      if (row.route === '/login' || row.route === '/relay-host') continue
+      await captureRoute(
+        'admin_en_dark_1440',
+        row.route,
+        { locale: 'en-US', theme: 'dark' },
+        { width: 1440 },
+      )
+    }
+
+    // --------------------------------------------------- representative light
+    for (const route of [
+      '/api-keys',
+      '/endpoints/upstreams',
+      '/request-records/ai',
+      '/billing',
+      '/settings/general',
+    ]) {
+      await captureRoute(
+        'admin_zh_light_1440',
+        route,
+        { locale: 'zh-CN', theme: 'light' },
+        { width: 1440 },
+      )
+    }
+
+    // ------------------------------------------------------ responsive widths
+    for (const width of [1024, 768, 390]) {
+      for (const route of [
+        '/api-keys',
+        '/endpoints/upstreams',
+        '/request-records/ai',
+        '/billing',
+      ]) {
+        await captureRoute(
+          `admin_zh_dark_${width}`,
+          route,
+          { locale: 'zh-CN', theme: 'dark' },
+          { width },
+        )
+      }
+    }
+    await page.setViewportSize({ width: 1440, height: 900 })
+
+    // --------------------------------------- zero-token fold + header stress
+    evidence.checks.zeroTokenFold = []
+    for (const localeEntry of [
+      { locale: 'zh-CN', open: '上游明细', expand: '展开', folded: /已折叠/ },
+      {
+        locale: 'en-US',
+        open: 'Upstream breakdown',
+        expand: 'Show',
+        folded: /fully failed rows hidden/i,
+      },
+    ]) {
+      await applyPrefs({ locale: localeEntry.locale, theme: 'dark' })
+      await page.goto(`${BASE}/request-records/ai`, {
+        waitUntil: 'domcontentloaded',
+      })
+      await page.waitForTimeout(1200)
+      const opener = page
+        .getByRole('button', { name: localeEntry.open })
+        .first()
+      await opener.click()
+      await page.waitForTimeout(700)
+      const popoverText = await page.locator('body').innerText()
+      const table = page.locator('table').last()
+      const headers = await table.locator('th').evaluateAll((ths) =>
+        ths.map((th) => {
+          const box = th.getBoundingClientRect()
+          return {
+            text: (th.innerText || '').trim(),
+            x: Math.round(box.x),
+            width: Math.round(box.width),
+            clientWidth: th.clientWidth,
+            scrollWidth: th.scrollWidth,
+            overflow: th.scrollWidth > th.clientWidth + 1,
+          }
+        }),
+      )
+      const rowTexts = await table.locator('tbody tr').allInnerTexts()
+      await capture(`regression_fold_${localeEntry.locale}_collapsed`, {
+        locale: localeEntry.locale,
+        theme: 'dark',
+        width: 1440,
+        textLimit: 4000,
+      })
+      const expander = page
+        .getByRole('button', {
+          name: new RegExp(`^${localeEntry.expand}$`, 'i'),
+        })
+        .first()
+      let expandedRows = 0
+      if (await expander.count()) {
+        await expander.click()
+        await page.waitForTimeout(600)
+        expandedRows = await page
+          .locator('table')
+          .last()
+          .locator('tbody tr')
+          .count()
+        await capture(`regression_fold_${localeEntry.locale}_expanded`, {
+          locale: localeEntry.locale,
+          theme: 'dark',
+          width: 1440,
+          textLimit: 4000,
+        })
+      }
+      evidence.checks.zeroTokenFold.push({
+        locale: localeEntry.locale,
+        foldedLabelPresent: localeEntry.folded.test(popoverText),
+        collapsedRows: rowTexts.length,
+        expandedRows,
+        mixedZeroTokenVisible: rowTexts.some(
+          (text) => /60%/.test(text) && /\b0\b/.test(text),
+        ),
+        hiddenCountText: (popoverText.match(localeEntry.folded) || [''])[0],
+        headers,
+        headerOverflow: headers.some((header) => header.overflow),
+      })
+      await page.keyboard.press('Escape')
+    }
+    await page.setViewportSize({ width: 1440, height: 900 })
+
+    // ---------------------------------------------- non-admin role boundary
+    await applyPrefs({ locale: 'zh-CN', theme: 'dark' })
+    await logout()
+    evidence.checks.logout = { landed: page.url().replace(BASE, '') }
+    await login('operator', 'fixture-password')
+    await page.waitForTimeout(900)
+    evidence.checks.nonAdmin = {
+      landing: page.url().replace(BASE, ''),
+      allowed: [],
+      denied: [],
+    }
+    for (const route of nonAdminRoutes) {
+      await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(700)
+      evidence.checks.nonAdmin.allowed.push({
+        route,
+        actual: page.url().replace(BASE, ''),
+      })
+      const entry = await capture(
+        `operator_zh_dark_1440${route.replaceAll('/', '_')}`,
+        {
+          locale: 'zh-CN',
+          theme: 'dark',
+          width: 1440,
+        },
+      )
+      if (route === '/mcp') {
+        evidence.checks.nonAdmin.mcpConsoleErrors = entry.errors
+        evidence.checks.nonAdmin.mcpAdminEndpoint403 = entry.errors.some(
+          (message) => message.includes('403'),
+        )
+      }
+    }
+    for (const route of adminOnly) {
+      await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(700)
+      evidence.checks.nonAdmin.denied.push({
+        route,
+        actual: page.url().replace(BASE, ''),
+      })
+    }
+    await capture('operator_zh_dark_1440_admin_denial', {
+      locale: 'zh-CN',
+      theme: 'dark',
+      width: 1440,
+    })
+
+    // ------------------------------------- relay host independent of Worker
+    await logout()
+    await page.context().clearCookies({ name: 'pf_fixture_relay' })
+    await page.goto(`${BASE}/relay-host`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(900)
+    await capture('relay_host_01_token_form_zh_dark_1440', {
+      locale: 'zh-CN',
+      theme: 'dark',
+      width: 1440,
+    })
+    await page
+      .locator('input[type=password]')
+      .first()
+      .fill('relay-fixture-token')
+    await page
+      .getByRole('button', { name: /^登录$|^log in$/i })
+      .first()
+      .click()
+    await page.waitForTimeout(1200)
+    await capture('relay_host_02_authenticated_zh_dark_1440', {
+      locale: 'zh-CN',
+      theme: 'dark',
+      width: 1440,
+    })
+    await capture('relay_host_03_authenticated_zh_dark_768', {
+      locale: 'zh-CN',
+      theme: 'dark',
+      width: 768,
+    })
+    await capture('relay_host_04_authenticated_zh_dark_390', {
+      locale: 'zh-CN',
+      theme: 'dark',
+      width: 390,
+    })
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const relayRoleLog = await requestLog(250)
+    const roleButton = page
+      .getByRole('button', { name: /使用该模式|use this mode/i })
+      .first()
+    let relayRoleWrite = null
+    if (await roleButton.count()) {
+      const started = Date.now()
+      await roleButton.click()
+      await page.waitForTimeout(1200)
+      const fresh = (await requestLog(250)).filter(
+        (entry) => new Date(entry.at).getTime() >= started - 50,
+      )
+      relayRoleWrite = fresh
+        .filter(
+          (entry) =>
+            entry.method !== 'GET' && !entry.path.startsWith('/__fixtures'),
+        )
+        .map((entry) => `${entry.method} ${entry.path} -> ${entry.status}`)
+      await capture('relay_host_05_role_change_zh_dark_1440', {
+        locale: 'zh-CN',
+        theme: 'dark',
+        width: 1440,
+      })
+    }
+    evidence.checks.relayRoleChange = {
+      write: relayRoleWrite,
+      requestsBefore: relayRoleLog.length,
+    }
+    const relaySession = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/relay/auth/me')
+      return response.json()
+    })
+    const workerAfterRelay = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/auth/me')
+      return {
+        status: response.status,
+        body: await response.json().catch(() => null),
+      }
+    })
+    await page.goto(`${BASE}/api-keys`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(900)
+    evidence.checks.relayHost = {
+      relaySession,
+      workerAfterRelay,
+      workerRouteActual: page.url().replace(BASE, ''),
+    }
+
+    // -------------------------------------------------------------- dialogs
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await login('admin', 'fixture-password')
+    await page.waitForTimeout(900)
+    evidence.checks.dialogs = []
+    const dialogCases = [
+      ['/api-keys', /生成密钥|create key/i, 'api-keys'],
+      ['/users', /创建用户|create user/i, 'users'],
+      ['/endpoints/upstreams', /新增上游节点|add endpoint/i, 'endpoint-edit'],
+      [
+        '/endpoints/routes',
+        /新增模型路由|add model route/i,
+        'model-route-edit',
+      ],
+      ['/mcp', /新增 MCP|add mcp/i, 'mcp-edit'],
+      ['/relays', /新增中继|add relay/i, 'relay-edit'],
+      ['/billing', /新增价格版本|add price rule/i, 'billing-price-rule'],
+      ['/redaction/rules', /新增规则|add rule/i, 'redaction-rule'],
+    ]
+    for (const [route, opener, slug] of dialogCases) {
+      consoleErrors.length = 0
+      await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(1100)
+      const button = page.getByRole('button', { name: opener }).first()
+      const opened = await button.count()
+      if (opened) await button.click()
+      await page.waitForTimeout(600)
+      const dialog = page.getByRole('dialog').last()
+      const dialogVisible = await dialog.isVisible().catch(() => false)
+      await capture(`dialog_${slug}_zh_dark_1440`, {
+        locale: 'zh-CN',
+        theme: 'dark',
+        width: 1440,
+        textLimit: 600,
+      })
+      evidence.checks.dialogs.push({
+        route,
+        slug,
+        opened: Boolean(opened),
+        dialogVisible,
+        text: dialogVisible
+          ? (await dialog.innerText()).replace(/\s+/g, ' ').slice(0, 300)
+          : null,
+      })
+      if (dialogVisible) await page.keyboard.press('Escape')
+      await page.waitForTimeout(300)
+    }
+
+    // --------------------------------------------------------- mutations
+
+    async function mutation(name, run) {
+      consoleErrors.length = 0
+      const before = await requestLog(250)
+      const startedAt = Date.now()
+      let error = null
+      try {
+        await run()
+      } catch (cause) {
+        error = String(cause)
+      }
+      await page.waitForTimeout(900)
+      const after = await requestLog(250)
+      const fresh = after.filter(
+        (entry) => new Date(entry.at).getTime() >= startedAt - 50,
+      )
+      const result = {
+        name,
+        error,
+        requests: fresh.map(
+          (entry) => `${entry.method} ${entry.path} -> ${entry.status}`,
+        ),
+        beforeCount: before.length,
+        errors: [...consoleErrors],
+      }
+      evidence.mutations.push(result)
+      return result
+    }
+
+    await mutation('api-key-create', async () => {
+      await page.goto(`${BASE}/api-keys`, { waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(900)
+      await page
+        .getByRole('button', { name: /生成密钥|create key/i })
+        .first()
+        .click()
+      await page.waitForTimeout(500)
+      const dialog = page.getByRole('dialog').last()
+      const input = dialog.locator('input[type=text]').first()
+      await input.fill('fixture-created-key')
+      await dialog
+        .getByRole('button', { name: /生成|create|创建|保存|save/i })
+        .last()
+        .click()
+      await page.waitForTimeout(1000)
+      await capture('mutation_api_key_create_zh_dark_1440', {
+        locale: 'zh-CN',
+        theme: 'dark',
+        width: 1440,
+      })
+    })
+
+    await mutation('api-key-create-failure-draft', async () => {
+      await setFault({
+        pathPrefix: '/api/v1/me/client-keys',
+        method: 'POST',
+        status: 500,
+        code: 'fixture_write_failed',
+        message: 'fixture rejected key creation',
+        count: 1,
+      })
+      await page.goto(`${BASE}/api-keys`, { waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(900)
+      await page
+        .getByRole('button', { name: /生成密钥|create key/i })
+        .first()
+        .click()
+      await page.waitForTimeout(500)
+      const dialog = page.getByRole('dialog').last()
+      const input = dialog.locator('input[type=text]').first()
+      await input.fill('fixture-retryable-draft')
+      await dialog
+        .getByRole('button', { name: /生成|create|创建|保存|save/i })
+        .last()
+        .click()
+      await page.waitForTimeout(1200)
+      evidence.checks.failureDraft = {
+        dialogStillOpen: await dialog.isVisible().catch(() => false),
+        draftValue: await input.inputValue().catch(() => null),
+      }
+      await capture('mutation_api_key_failure_draft_zh_dark_1440', {
+        locale: 'zh-CN',
+        theme: 'dark',
+        width: 1440,
+      })
+      await page.keyboard.press('Escape')
+      await clearFaults()
+    })
+
+    await mutation('endpoint-toggle-conflict-guard', async () => {
+      await page.goto(`${BASE}/endpoints/upstreams`, {
+        waitUntil: 'domcontentloaded',
+      })
+      await page.waitForTimeout(1000)
+      await setFault({
+        pathPrefix: '/api/v1/admin/endpoints/',
+        method: 'PATCH',
+        status: 200,
+        delayMs: 1500,
+        count: 1,
+      })
+      const toggle = page
+        .getByRole('switch', { name: /状态|status|enabled/i })
+        .first()
+      const beforePatches = (await requestLog(250)).filter(
+        (entry) => entry.method === 'PATCH',
+      ).length
+      await toggle.click()
+      await page.waitForTimeout(120)
+      await toggle.click({ force: true })
+      await page.waitForTimeout(2200)
+      const afterPatches = (await requestLog(250)).filter(
+        (entry) => entry.method === 'PATCH',
+      ).length
+      evidence.checks.conflictGuard = {
+        beforePatches,
+        afterPatches,
+        dispatched: afterPatches - beforePatches,
+      }
+      await capture('mutation_endpoint_toggle_conflict_zh_dark_1440', {
+        locale: 'zh-CN',
+        theme: 'dark',
+        width: 1440,
+      })
+      await clearFaults()
+    })
+
+    await mutation('model-route-toggle', async () => {
+      await page.goto(`${BASE}/endpoints/routes`, {
+        waitUntil: 'domcontentloaded',
+      })
+      await page.waitForTimeout(1000)
+      const toggle = page
+        .getByRole('switch', { name: /状态|status|enabled/i })
+        .first()
+      if (await toggle.count()) await toggle.click()
+      await page.waitForTimeout(1000)
+      await capture('mutation_route_toggle_zh_dark_1440', {
+        locale: 'zh-CN',
+        theme: 'dark',
+        width: 1440,
+      })
+    })
+
+    await mutation('mcp-toggle', async () => {
+      await page.goto(`${BASE}/mcp`, { waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(1000)
+      const toggle = page
+        .getByRole('switch', { name: /状态|status|enabled/i })
+        .first()
+      if (await toggle.count()) await toggle.click()
+      await page.waitForTimeout(1000)
+      await capture('mutation_mcp_toggle_zh_dark_1440', {
+        locale: 'zh-CN',
+        theme: 'dark',
+        width: 1440,
+      })
+    })
+
+    await mutation('relay-reconnect', async () => {
+      await page.goto(`${BASE}/relays`, { waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(1000)
+      await page
+        .getByRole('button', { name: /重连|reconnect/i })
+        .first()
+        .click()
+      await page.waitForTimeout(1000)
+      await capture('mutation_relay_reconnect_zh_dark_1440', {
+        locale: 'zh-CN',
+        theme: 'dark',
+        width: 1440,
+      })
+    })
+
+    await mutation('approval-approve', async () => {
+      await page.goto(`${BASE}/approvals`, { waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(1000)
+      await page
+        .getByRole('button', { name: /查看详情|view details/i })
+        .first()
+        .click()
+      await page.waitForTimeout(500)
+      const dialog = page.getByRole('dialog').last()
+      await dialog.getByRole('button', { name: /^批准$|^approve$/i }).click()
+      await page.waitForTimeout(1100)
+      await capture('mutation_approval_approve_zh_dark_1440', {
+        locale: 'zh-CN',
+        theme: 'dark',
+        width: 1440,
+      })
+    })
+
+    await mutation('billing-reprice', async () => {
+      await page.goto(`${BASE}/billing`, { waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(1000)
+      await page
+        .getByRole('button', { name: /重算未定价|reprice/i })
+        .first()
+        .click()
+      await page.waitForTimeout(1000)
+      await capture('mutation_billing_reprice_zh_dark_1440', {
+        locale: 'zh-CN',
+        theme: 'dark',
+        width: 1440,
+      })
+    })
+
+    await mutation('redaction-save', async () => {
+      await page.goto(`${BASE}/redaction/rules`, {
+        waitUntil: 'domcontentloaded',
+      })
+      await page.waitForTimeout(1000)
+      await page
+        .getByRole('button', { name: /^保存$|^save$/i })
+        .first()
+        .click()
+      await page.waitForTimeout(1000)
+      await capture('mutation_redaction_save_zh_dark_1440', {
+        locale: 'zh-CN',
+        theme: 'dark',
+        width: 1440,
+      })
+    })
+
+    await mutation('settings-toggle', async () => {
+      await page.goto(`${BASE}/settings/requests`, {
+        waitUntil: 'domcontentloaded',
+      })
+      await page.waitForTimeout(1000)
+      const toggle = page
+        .getByRole('switch', { name: /模型路由白名单|model route whitelist/i })
+        .first()
+      if (await toggle.count()) await toggle.click()
+      await page.waitForTimeout(1000)
+      await capture('mutation_settings_toggle_zh_dark_1440', {
+        locale: 'zh-CN',
+        theme: 'dark',
+        width: 1440,
+      })
+    })
+
+    await mutation('config-export', async () => {
+      await page.goto(`${BASE}/settings/config-archive`, {
+        waitUntil: 'domcontentloaded',
+      })
+      await page.waitForTimeout(1000)
+      const input = page.locator('input[type=password]').first()
+      if (await input.count()) await input.fill('fixture-passphrase')
+      const download = page
+        .waitForEvent('download', { timeout: 5000 })
+        .catch(() => null)
+      await page
+        .getByRole('button', { name: /导出并下载|export/i })
+        .first()
+        .click()
+      const file = await download
+      await page.waitForTimeout(1000)
+      evidence.checks.configExport = {
+        downloadSuggested: file ? file.suggestedFilename() : null,
+      }
+      await capture('mutation_config_export_zh_dark_1440', {
+        locale: 'zh-CN',
+        theme: 'dark',
+        width: 1440,
+      })
+    })
+
+    // -------------------------------------------------------- empty + error
+    await page.goto(`${BASE}/request-records/ai`, {
+      waitUntil: 'domcontentloaded',
+    })
+    await page.waitForTimeout(900)
+    await fixture('/__fixtures/overview', 'POST', {
+      category: 'ai',
+      empty: true,
+    })
+    await page
+      .getByRole('button', { name: /刷新|refresh/i })
+      .first()
+      .click()
+    await page.waitForTimeout(1200)
+    await capture('state_usage_empty_zh_dark_1440', {
+      locale: 'zh-CN',
+      theme: 'dark',
+      width: 1440,
+    })
+    await setFault({
+      pathPrefix: '/api/v1/admin/request-records/overview',
+      method: 'GET',
+      status: 500,
+      code: 'fixture_overview_failed',
+      message: 'fixture overview failed',
+      count: 1,
+    })
+    await page
+      .getByRole('button', { name: /刷新|refresh/i })
+      .first()
+      .click()
+    await page.waitForTimeout(1200)
+    await capture('state_usage_error_zh_dark_1440', {
+      locale: 'zh-CN',
+      theme: 'dark',
+      width: 1440,
+    })
+    await clearFaults()
+
+    await setFault({
+      pathPrefix: '/api/v1/admin/endpoints',
+      method: 'GET',
+      status: 200,
+      delayMs: 1500,
+      count: 1,
+    })
+    await page.goto(`${BASE}/endpoints/upstreams`, {
+      waitUntil: 'domcontentloaded',
+    })
+    await page.waitForTimeout(500)
+    await capture('state_endpoints_loading_zh_dark_1440', {
+      locale: 'zh-CN',
+      theme: 'dark',
+      width: 1440,
+      wait: 200,
+    })
+    await page.waitForTimeout(1800)
+    await clearFaults()
+
+    evidence.fixtureSummary = await fixture('/__fixtures/summary')
+    evidence.requestLog = (await requestLog(250)).slice(-80)
+    evidence.finishedAt = new Date().toISOString()
+    await page.setViewportSize({ width: 1440, height: 900 })
+    return JSON.stringify(evidence)
+  } catch (cause) {
+    evidence.failedAt = new Date().toISOString()
+    evidence.failure = String(cause)
+    evidence.fixtureSummary = await fixture('/__fixtures/summary').catch(
+      () => null,
+    )
+    return JSON.stringify(evidence)
+  }
+}

@@ -163,6 +163,10 @@ export const usageMessages = {
     overviewUpstreamBreakdown: '上游明细',
     overviewUpstreamEndpoint: '上游节点',
     overviewUpstreamEmpty: '暂无上游明细',
+    overviewZeroTokenHidden: '已折叠 {count} 次零 Token 请求',
+    overviewZeroTokenCount: '{count} 次零 Token 请求',
+    overviewZeroTokenHide: '收起',
+    overviewZeroTokenReveal: '展开',
   },
   'en-US': {
     currentSlice: 'Current slice',
@@ -332,5 +336,9 @@ export const usageMessages = {
     overviewUpstreamBreakdown: 'Upstream breakdown',
     overviewUpstreamEndpoint: 'Upstream endpoint',
     overviewUpstreamEmpty: 'No upstream details',
+    overviewZeroTokenHidden: '{count} zero-token requests hidden',
+    overviewZeroTokenCount: '{count} zero-token requests',
+    overviewZeroTokenHide: 'Hide',
+    overviewZeroTokenReveal: 'Show',
   },
 } as const

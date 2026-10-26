@@ -1,0 +1,13 @@
+{
+  "name": "prompt-ferry-api-codegen",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.14",
+  "scripts": {
+    "generate": "node node_modules/@hey-api/openapi-ts/bin/run.js -f openapi-ts.config.ts"
+  },
+  "devDependencies": {
+    "@hey-api/openapi-ts": "0.99.0",
+    "typescript": "6.0.3"
+  }
+}

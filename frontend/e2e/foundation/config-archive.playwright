@@ -1,0 +1,1154 @@
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const DOWNLOAD = 'e2e/foundation/config-archive-download.pfce'
+  const EXPORT = '/api/v1/admin/config-export'
+  const IMPORT = '/api/v1/admin/config-import'
+  const PREVIEW = '/api/v1/admin/config-import/preview'
+  const AUDIT = '/api/v1/admin/config-audit'
+  const MAGIC = 'PROMPT_FERRY_SYNTHETIC_ARCHIVE'
+  const PASSPHRASE = 'synthetic-browser-archive-passphrase'
+
+  const startedAt = new Date().toISOString()
+  const report = {
+    runId: `config-archive-${Date.now()}`,
+    startedAt,
+    finishedAt: null,
+    checks: {},
+    scenarios: {
+      'R-SETTINGS-CONFIG-ARCHIVE': {
+        'route-render': null,
+        'admin-denial': null,
+        pagination: null,
+        'file-export': null,
+        'file-import': null,
+        'destructive-confirm': null,
+        'mutation-failure-draft': null,
+      },
+    },
+    screenshots: [],
+    apiFailures: [],
+    expectedApiFailures: [],
+    unexpectedRequests: [],
+    archiveRequests: [],
+    consoleErrorCount: 0,
+    pageErrorCount: 0,
+    limitations: [],
+  }
+  let stage = 'startup'
+  let collecting = false
+
+  page.setDefaultTimeout(15000)
+  page.on('pageerror', () => report.pageErrorCount++)
+  page.on('console', message => {
+    if (message.type() !== 'error') return
+    // The expected archive refusals (a rejected passphrase, a corrupt envelope,
+    // a faulted request) log their status; the strict response ledger below is
+    // what proves no other failure happened.
+    if (/\b(400|401|403|422|500|501|503)\b/.test(message.text())) return
+    report.consoleErrorCount++
+  })
+  page.on('request', request => {
+    const url = new URL(request.url())
+    if (
+      [EXPORT, PREVIEW, IMPORT].includes(url.pathname) ||
+      url.pathname === AUDIT
+    ) {
+      // The ledger records the request shape and, for an archive body, only its
+      // presence and length: never the passphrase or the bytes.
+      const body = request.postData()
+      let shape = null
+      if (body) {
+        try {
+          const parsed = JSON.parse(body)
+          shape = {
+            keys: Object.keys(parsed).sort(),
+            passphrase_present: Boolean(parsed.passphrase),
+            passphrase_chars:
+              typeof parsed.passphrase === 'string'
+                ? [...parsed.passphrase].length
+                : 0,
+            archive_base64_present: Boolean(parsed.archive_base64),
+            archive_base64_chars:
+              typeof parsed.archive_base64 === 'string'
+                ? parsed.archive_base64.length
+                : 0,
+          }
+        } catch {
+          shape = { unparsable: true }
+        }
+      }
+      report.archiveRequests.push({
+        stage,
+        method: request.method(),
+        path: url.pathname,
+        query: Object.fromEntries(url.searchParams),
+        body: shape,
+      })
+      return
+    }
+    if (!url.pathname.startsWith('/api/')) return
+    if (!collecting) return
+    if (
+      url.pathname.startsWith('/api/v1/auth/') ||
+      url.pathname.startsWith('/api/v1/relay/auth/') ||
+      url.pathname.startsWith('/api/v1/me/') ||
+      url.pathname === '/api/v1/bridge/status'
+    ) {
+      return
+    }
+    report.unexpectedRequests.push(`${request.method()} ${url.pathname}`)
+  })
+  page.on('response', response => {
+    const url = new URL(response.url())
+    if (!url.pathname.startsWith('/api/')) return
+    if (response.status() < 400) return
+    if (response.status() === 401 && url.pathname === '/api/v1/auth/me') {
+      report.expectedApiFailures.push('401 GET /api/v1/auth/me')
+      return
+    }
+    const entry = `${response.status()} ${response.request().method()} ${url.pathname}`
+    const archivePath = [EXPORT, PREVIEW, IMPORT, AUDIT].includes(url.pathname)
+    if (archivePath && [400, 401, 403, 422, 500, 501, 503].includes(response.status())) {
+      report.expectedApiFailures.push(entry)
+      return
+    }
+    report.apiFailures.push(entry)
+  })
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(`${stage}: ${message}`)
+  }
+
+  async function capture(name) {
+    const path = `${screenshots}/${name}.png`
+    await page.screenshot({ path, fullPage: true })
+    report.screenshots.push(path)
+  }
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) {
+      throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    }
+    return response.json()
+  }
+
+  async function clearFaults() {
+    await fixture('/__fixtures/faults', 'DELETE')
+  }
+
+  async function injectFault(fault) {
+    await clearFaults()
+    await fixture('/__fixtures/faults', 'POST', fault)
+  }
+
+  function requestsFor(requestStage, path) {
+    return report.archiveRequests.filter(
+      entry =>
+        entry.stage === requestStage && (!path || entry.path === path),
+    )
+  }
+
+  async function signIn(loginName) {
+    await page.goto(`${BASE}/login`)
+    const loginNameField = page.getByLabel(/^(Login name|登录名)$/)
+    await loginNameField.waitFor({ state: 'visible' })
+    await loginNameField.fill(loginName)
+    await page
+      .getByRole('textbox', { name: /^(Password|密码)$/ })
+      .fill('fixture-password')
+    await page.getByRole('button', { name: /^(Login|登录)$/ }).click()
+    await page.waitForURL(url => new URL(url).pathname === '/api-keys')
+  }
+
+  async function signOut() {
+    await page.getByRole('button', { name: /Logout|退出登录/ }).click()
+    await page.waitForURL(url => new URL(url).pathname === '/login')
+  }
+
+  async function openArchive() {
+    await page.goto(`${BASE}/settings/config-archive`)
+    await page.waitForSelector(
+      '[data-foundation-route-id="R-SETTINGS-CONFIG-ARCHIVE"]',
+    )
+    await page.waitForSelector('[data-config-archive-audit]')
+    await page.waitForTimeout(300)
+  }
+
+  async function auditRowIds() {
+    return page.evaluate(() =>
+      [...document.querySelectorAll('[data-audit-id]')].map(node =>
+        node.getAttribute('data-audit-id'),
+      ),
+    )
+  }
+
+  async function auditTotal() {
+    return page.evaluate(() => document.querySelectorAll('[data-audit-id]').length)
+  }
+
+  /** Replace the file input's selection with a crafted synthetic archive. */
+  async function pickCrafted(name, text) {
+    await page.evaluate(
+      ({ name, text }) => {
+        const input = document.getElementById('settings-config-archive-file')
+        const transfer = new DataTransfer()
+        transfer.items.add(
+          new File([text], name, { type: 'application/octet-stream' }),
+        )
+        input.files = transfer.files
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+      },
+      { name, text },
+    )
+    await page.waitForTimeout(300)
+  }
+
+  /** Return the audit table to its newest page. */
+  async function firstAuditPage() {
+    const first = page.getByRole('button', { name: /^(First page|首页)$/ })
+    if (await first.isEnabled()) {
+      await first.click()
+      await page.waitForTimeout(500)
+    }
+  }
+
+  async function setText(id, value) {
+    await page.locator(`#${id}`).fill(value)
+  }
+
+  async function waitForNoToasts(text) {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if ((await page.getByText(text, { exact: true }).count()) === 0) return
+      await page.waitForTimeout(250)
+    }
+    throw new Error('a notification never cleared')
+  }
+
+  function passed(scenario, evidence) {
+    report.scenarios['R-SETTINGS-CONFIG-ARCHIVE'][scenario] = {
+      passed: true,
+      evidence,
+    }
+  }
+
+  stage = 'admin-sign-in'
+  await page.goto(`${BASE}/login`)
+  await page.evaluate(() => {
+    window.localStorage.setItem('prompt-ferry:locale', 'en-US')
+    window.localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await signIn('admin')
+  await clearFaults()
+  await page.waitForTimeout(600)
+  collecting = true
+
+  stage = 'route-render'
+  await openArchive()
+  const routeId = await page
+    .locator('[data-foundation-route-id]')
+    .getAttribute('data-foundation-route-id')
+  const routeTab = await page
+    .locator('[data-foundation-route-id]')
+    .getAttribute('data-settings-tab')
+  assert(
+    routeId === 'R-SETTINGS-CONFIG-ARCHIVE' && routeTab === 'config-archive',
+    `the archive route identity is wrong: ${routeId}/${routeTab}`,
+  )
+  assert(
+    (await page
+      .locator('[data-foundation-route-id="R-SETTINGS-CONFIG-ARCHIVE"] h1')
+      .innerText()) === 'Config archive',
+    'the archive heading is not localized',
+  )
+  const controls = await page.evaluate(() => {
+    const ids = [
+      'settings-config-archive-passphrase',
+      'settings-config-archive-export',
+      'settings-config-archive-file',
+      'settings-config-archive-import-passphrase',
+      'settings-config-archive-preview',
+      'settings-config-archive-apply',
+      'settings-config-archive-audit-refresh',
+    ]
+    const value = id => document.getElementById(id)
+    return {
+      missing: ids.filter(id => value(id) === null),
+      exportType: value('settings-config-archive-passphrase')?.getAttribute(
+        'type',
+      ),
+      importType: value(
+        'settings-config-archive-import-passphrase',
+      )?.getAttribute('type'),
+      fileAccept: value('settings-config-archive-file')?.getAttribute('accept'),
+      exportDisabled:
+        value('settings-config-archive-export')?.hasAttribute('disabled'),
+      previewDisabled:
+        value('settings-config-archive-preview')?.hasAttribute('disabled'),
+      applyDisabled:
+        value('settings-config-archive-apply')?.hasAttribute('disabled'),
+      auditRows: document.querySelectorAll('[data-audit-id]').length,
+      auditColumns: [
+        ...document.querySelectorAll('[data-config-archive-audit] thead th'),
+      ].length,
+      auditTitle: document.body.innerText.includes('Archive audit'),
+      importTitle: document.body.innerText.includes(
+        'Import configuration archive',
+      ),
+      bodyLeak: /synthetic-browser-archive-passphrase/.test(
+        document.body.innerText,
+      ),
+    }
+  })
+  assert(controls.missing.length === 0, `missing controls: ${controls.missing}`)
+  assert(
+    controls.exportType === 'password' && controls.importType === 'password',
+    'a passphrase field is not a password input',
+  )
+  assert(
+    controls.fileAccept === '.pfce,application/octet-stream',
+    `the file input accepts ${controls.fileAccept}`,
+  )
+  assert(
+    controls.exportDisabled === true &&
+      controls.previewDisabled === true &&
+      controls.applyDisabled === true,
+    'an action is enabled before it has the input it needs',
+  )
+  assert(
+    controls.auditRows > 0 && controls.auditColumns === 9,
+    `the audit table is wrong: ${controls.auditRows} rows / ${controls.auditColumns} columns`,
+  )
+  assert(
+    controls.auditTitle && controls.importTitle,
+    'a card title is missing',
+  )
+  assert(controls.bodyLeak === false, 'a passphrase reached the document')
+  assert(
+    requestsFor('route-render', AUDIT).length === 1,
+    `the mount read ${JSON.stringify(requestsFor('route-render', AUDIT))}`,
+  )
+  assert(
+    requestsFor('route-render', EXPORT).length === 0 &&
+      requestsFor('route-render', IMPORT).length === 0 &&
+      requestsFor('route-render', PREVIEW).length === 0,
+    'mounting the archive tab sent a write',
+  )
+  await capture('config-archive-en-light-1440')
+  report.checks.routeRender = { routeId, routeTab, controls }
+  passed(
+    'route-render',
+    'the admin archive route renders the export card, the import wizard and the nine-column audit table from exactly one audit read and zero writes, with password-only passphrases',
+  )
+
+  stage = 'pagination'
+  await page
+    .getByRole('combobox', { name: /^(Rows per page|每页条数)$/ })
+    .click()
+  await page.getByRole('option', { name: '20', exact: true }).click()
+  await page.waitForTimeout(400)
+  const rowsAfterSize = await auditTotal()
+  const storedPageSize = await page.evaluate(() =>
+    window.localStorage.getItem('prompt-ferry:table-page-size:config-archive-audit'),
+  )
+  assert(storedPageSize === '20', `the page size stored ${storedPageSize}`)
+  await page
+    .getByRole('combobox', { name: /^(Rows per page|每页条数)$/ })
+    .click()
+  await page.getByRole('option', { name: '10', exact: true }).click()
+  await page.waitForTimeout(400)
+  const pageOne = await auditRowIds()
+  const nextButton = page.getByRole('button', { name: /^(Next page|下一页) #?2?$/ })
+  const pageTwoButton = page
+    .locator('nav button[aria-label]')
+    .filter({ hasText: /^2$/ })
+  await pageTwoButton.first().click()
+  await page.waitForTimeout(500)
+  const pageTwo = await auditRowIds()
+  assert(
+    pageOne.length > 0 && pageTwo.length > 0,
+    `a page has no rows: ${pageOne.length}/${pageTwo.length}`,
+  )
+  assert(
+    pageOne[0] !== pageTwo[0],
+    'the second audit page repeats the first',
+  )
+  assert(
+    (await page.evaluate(() =>
+      window.localStorage.getItem(
+        'prompt-ferry:table-page-size:config-archive-audit',
+      ),
+    )) === '10',
+    'the page size preference was not updated to 10',
+  )
+  report.checks.pagination = {
+    rowsAfterSize,
+    storedPageSize: '20',
+    pageOneFirst: pageOne[0],
+    pageTwoFirst: pageTwo[0],
+    pageTwoRows: pageTwo.length,
+  }
+  passed(
+    'pagination',
+    'the audit pager reads a distinct second page, persists the page size under the config-archive-audit scope and offers the standard sizes',
+  )
+
+  stage = 'file-export'
+  // A malicious server filename must not reach the saved file name.
+  await page.route(`**${EXPORT}`, async route => {
+    const response = await route.fetch()
+    const body = await response.body()
+    const headers = { ...response.headers() }
+    // Only a successful archive answer describes the bytes; a faulted export
+    // answers an error body and must not overwrite the recorded evidence.
+    if (response.status() === 200) report.checks.exportBytes = {
+      length: body.length,
+      magic: body.subarray(0, MAGIC.length).toString('utf8'),
+      headerFingerprint: headers['x-config-export-fingerprint'] ?? '',
+      headerBackend: headers['x-config-export-backend'] ?? '',
+      headerFormatVersion: headers['x-config-export-format-version'] ?? '',
+    }
+    headers['content-disposition'] =
+      'attachment; filename="server-chosen-name.pfce"'
+    await route.fulfill({ body, headers, status: response.status() })
+  })
+  await setText('settings-config-archive-passphrase', PASSPHRASE)
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('#settings-config-archive-export').click(),
+  ])
+  const suggested = download.suggestedFilename()
+  await download.saveAs(DOWNLOAD)
+  await page.waitForTimeout(900)
+  assert(
+    suggested === 'prompt-ferry-config.pfce',
+    `the download name is ${suggested}`,
+  )
+  const exportBytes = report.checks.exportBytes
+  assert(
+    exportBytes.length > 0 &&
+      exportBytes.magic === MAGIC &&
+      exportBytes.headerBackend === 'postgresql' &&
+      exportBytes.headerFormatVersion === '1' &&
+      /^[0-9a-f]{64}$/.test(exportBytes.headerFingerprint),
+    `the exported bytes or headers are wrong: ${JSON.stringify(exportBytes)}`,
+  )
+  const exportRequests = requestsFor('file-export', EXPORT)
+  assert(
+    exportRequests.length === 1 &&
+      exportRequests[0].body?.keys?.join(',') === 'passphrase' &&
+      exportRequests[0].body?.passphrase_present === true,
+    `the export body is wrong: ${JSON.stringify(exportRequests)}`,
+  )
+  const summary = await page.evaluate(() => ({
+    passphrase:
+      document.getElementById('settings-config-archive-passphrase')?.value,
+    fingerprint: document
+      .getElementById('settings-config-archive-export-fingerprint')
+      ?.getAttribute('title'),
+    text: document.body.innerText,
+  }))
+  assert(summary.passphrase === '', 'the consumed export passphrase stayed')
+  assert(
+    summary.fingerprint === exportBytes.headerFingerprint,
+    'the summary fingerprint does not match the response header',
+  )
+  assert(
+    summary.text.includes(String(exportBytes.length)),
+    'the export summary does not report the exact byte length',
+  )
+  const exportAuditRows = await auditRowIds()
+  assert(
+    exportAuditRows[0] !== pageTwo[0],
+    'the export did not refresh the audit trail',
+  )
+  await capture('config-archive-export-en-light-1440')
+  report.checks.fileExport = {
+    suggested,
+    savedPath: DOWNLOAD,
+    bytes: exportBytes,
+    auditFirstRow: exportAuditRows[0],
+  }
+  passed(
+    'file-export',
+    'one export sends only the passphrase, saves the real browser download under the fixed name despite a server-chosen Content-Disposition, and reports the response backend, format, fingerprint and exact length while the audit trail refreshes inside the claim',
+  )
+
+  stage = 'file-import'
+  const auditBeforePreview = await auditRowIds()
+  await page.setInputFiles('#settings-config-archive-file', DOWNLOAD)
+  await page.waitForTimeout(400)
+  await setText('settings-config-archive-import-passphrase', PASSPHRASE)
+  // The same file twice: the cleared input still fires a change.
+  await page.setInputFiles('#settings-config-archive-file', DOWNLOAD)
+  await page.waitForTimeout(400)
+  assert(
+    (await page
+      .locator('#settings-config-archive-file-name')
+      .innerText()).includes('config-archive-download.pfce'),
+    'the selected file name is not shown',
+  )
+  await setText('settings-config-archive-import-passphrase', PASSPHRASE)
+  await page.locator('#settings-config-archive-preview').click()
+  await page.waitForSelector('#settings-config-archive-preview-panel')
+  const preview = await page.evaluate(() => {
+    const panel = document.getElementById('settings-config-archive-preview-panel')
+    return {
+      text: panel?.innerText ?? '',
+      domains: [...document.querySelectorAll('[data-preview-domain]')].map(
+        node => ({
+          name: node.getAttribute('data-preview-domain'),
+          cells: [...node.querySelectorAll('td')].map(cell => cell.innerText),
+        }),
+      ),
+      warnings:
+        document.getElementById('settings-config-archive-preview-warnings')
+          ?.innerText ?? '',
+    }
+  })
+  assert(
+    preview.domains.length === 3,
+    `the preview lists ${preview.domains.length} domains`,
+  )
+  for (const domain of preview.domains) {
+    assert(
+      domain.cells.length === 7 &&
+        domain.cells.every(cell => cell.trim() !== ''),
+      `the ${domain.name} preview row is incomplete: ${JSON.stringify(domain)}`,
+    )
+  }
+  assert(
+    preview.text.includes(exportBytes.headerBackend) &&
+      preview.text.includes(exportBytes.headerFingerprint.slice(0, 16)),
+    'the preview does not report the backend or the fingerprint',
+  )
+  assert(
+    preview.warnings.includes('record(s) carry an unrecoverable secret'),
+    `the preview warnings are wrong: ${preview.warnings}`,
+  )
+  const previewRequests = requestsFor('file-import', PREVIEW)
+  assert(
+    previewRequests.length === 1 &&
+      previewRequests[0].body?.keys?.join(',') === 'archive_base64,passphrase' &&
+      previewRequests[0].body?.archive_base64_present === true,
+    `the preview body is wrong: ${JSON.stringify(previewRequests)}`,
+  )
+  const auditAfterPreview = await auditRowIds()
+  assert(
+    auditAfterPreview.join(',') === auditBeforePreview.join(','),
+    'a preview wrote an audit row or refreshed the trail',
+  )
+  await capture('config-archive-preview-en-light-1440')
+  report.checks.fileImport = {
+    domains: preview.domains.map(domain => domain.name),
+    warnings: preview.warnings,
+    body: previewRequests[0].body,
+    auditUnchanged: true,
+  }
+  passed(
+    'file-import',
+    'the downloaded synthetic archive imports back: the same file can be chosen twice, the preview reports every per-domain count and warning and records no audit row',
+  )
+
+  stage = 'destructive-confirm'
+  await page.locator('#settings-config-archive-apply').click()
+  await page.waitForSelector('#settings-config-archive-confirm')
+  const dialog = await page.evaluate(() => ({
+    body: document.getElementById('settings-config-archive-confirm')?.innerText ?? '',
+    applyDisabled: document
+      .getElementById('settings-config-archive-confirm-apply')
+      ?.hasAttribute('disabled'),
+  }))
+  assert(
+    dialog.body.includes('cannot be undone'),
+    'the destructive warning is missing',
+  )
+  assert(
+    dialog.applyDisabled === false,
+    'the confirm action is disabled while idle',
+  )
+  assert(
+    requestsFor('destructive-confirm', IMPORT).length === 0,
+    'opening the confirmation sent the import',
+  )
+  await capture('config-archive-confirm-en-light-1440')
+
+  await page.locator('#settings-config-archive-confirm-cancel').click()
+  await page.waitForTimeout(300)
+  assert(
+    (await page.locator('#settings-config-archive-confirm').count()) === 0,
+    'cancel left the confirmation open',
+  )
+  assert(
+    (await page.locator('#settings-config-archive-preview-panel').count()) === 0,
+    'cancel kept the preview',
+  )
+  assert(
+    requestsFor('destructive-confirm', IMPORT).length === 0,
+    'cancel sent the import',
+  )
+
+  // Re-run the preview and confirm the apply, from the newest audit page.
+  await firstAuditPage()
+  await page.setInputFiles('#settings-config-archive-file', DOWNLOAD)
+  await page.waitForTimeout(300)
+  await setText('settings-config-archive-import-passphrase', PASSPHRASE)
+  await page.locator('#settings-config-archive-preview').click()
+  await page.waitForSelector('#settings-config-archive-preview-panel')
+  await page.locator('#settings-config-archive-apply').click()
+  await page.waitForSelector('#settings-config-archive-confirm')
+  await page.locator('#settings-config-archive-confirm-apply').click()
+  await page.waitForSelector('#settings-config-archive-applied')
+  await page.waitForTimeout(600)
+  const confirm = await page.evaluate(() => ({
+    applied:
+      document.getElementById('settings-config-archive-applied')?.innerText ??
+      '',
+    domains: [...document.querySelectorAll('[data-applied-domain]')].map(
+      node => node.getAttribute('data-applied-domain'),
+    ),
+    dialog: document.getElementById('settings-config-archive-confirm') !== null,
+    file:
+      document.getElementById('settings-config-archive-file-name') !== null,
+    importPassphrase: document.getElementById(
+      'settings-config-archive-import-passphrase',
+    )?.value,
+    preview:
+      document.getElementById('settings-config-archive-preview-panel') !== null,
+  }))
+  assert(
+    confirm.dialog === false,
+    'a successful apply left the confirmation open',
+  )
+  assert(
+    confirm.file === false &&
+      confirm.importPassphrase === '' &&
+      confirm.preview === false,
+    `a successful apply did not clear the flow: ${JSON.stringify(confirm)}`,
+  )
+  assert(
+    confirm.domains.length === 3 &&
+      confirm.applied.includes('Configuration imported'),
+    `the applied summary is wrong: ${JSON.stringify(confirm)}`,
+  )
+  const importRequests = requestsFor('destructive-confirm', IMPORT)
+  assert(
+    importRequests.length === 1 &&
+      importRequests[0].body?.keys?.join(',') === 'archive_base64,passphrase',
+    `the apply body is wrong: ${JSON.stringify(importRequests)}`,
+  )
+  const latestAudit = await page.evaluate(() => {
+    const row = document.querySelector('[data-audit-id]')
+    return row?.innerText ?? ''
+  })
+  assert(
+    latestAudit.includes('Import'),
+    `the apply did not add an import audit row: ${latestAudit}`,
+  )
+  await capture('config-archive-applied-en-light-1440')
+  // The applied panel is the confirmation surface: it appears once, above the
+  // refreshed trail.
+  assert(
+    (await page.locator('#settings-config-archive-applied').count()) === 1,
+    'the apply did not report exactly one applied summary',
+  )
+  report.checks.destructiveConfirm = {
+    dialogBody: dialog.body,
+    applied: confirm.applied,
+    domains: confirm.domains,
+    body: importRequests[0].body,
+    latestAuditRow: latestAudit.slice(0, 120),
+  }
+  passed(
+    'destructive-confirm',
+    'opening the warning sends nothing, cancel writes nothing and clears the flow, and the confirmed apply replaces the archive, reports every restored domain, clears the transient secrets and adds the audit row',
+  )
+
+  stage = 'mutation-failure-draft'
+  // A wrong passphrase keeps the file, clears only the consumed passphrase.
+  await page.setInputFiles('#settings-config-archive-file', DOWNLOAD)
+  await page.waitForTimeout(300)
+  await setText('settings-config-archive-import-passphrase', 'wrong-synthetic-passphrase')
+  await page.locator('#settings-config-archive-preview').click()
+  await page.waitForTimeout(800)
+  const wrongPassphrase = await page.evaluate(() => ({
+    error:
+      document.getElementById('settings-config-archive-import-error')
+        ?.innerText ?? '',
+    passphrasePresent: document.getElementById(
+      'settings-config-archive-import-passphrase',
+    )?.value
+      ? true
+      : false,
+    file: document.getElementById('settings-config-archive-file-name') !== null,
+    preview:
+      document.getElementById('settings-config-archive-preview-panel') !== null,
+  }))
+  assert(
+    wrongPassphrase.error.includes('archive_decrypt_failed'),
+    `the wrong-passphrase error is ${wrongPassphrase.error}`,
+  )
+  assert(
+    wrongPassphrase.passphrasePresent === false && wrongPassphrase.file === true,
+    `a rejected passphrase was not cleared or the file was dropped: ${JSON.stringify(wrongPassphrase)}`,
+  )
+  assert(
+    wrongPassphrase.preview === false,
+    'a rejected preview still shows a preview',
+  )
+
+  // A corrupt header and two crafted envelopes answer the codec's own codes.
+  await pickCrafted('corrupt.pfce', 'not a configuration archive')
+  await setText('settings-config-archive-import-passphrase', PASSPHRASE)
+  await page.locator('#settings-config-archive-preview').click()
+  await page.waitForTimeout(700)
+  const corrupt = await page.evaluate(
+    () =>
+      document.getElementById('settings-config-archive-import-error')?.innerText ??
+      '',
+  )
+  assert(
+    corrupt.includes('archive_invalid_header'),
+    `the corrupt archive answered ${corrupt}`,
+  )
+
+  await pickCrafted(
+    'future.pfce',
+    `PROMPT_FERRY_SYNTHETIC_ARCHIVE\n${JSON.stringify({ version: 9, backend: 'postgresql', passphrase_digest: 'x', payload_fingerprint: 'y', payload: '{}' })}`,
+  )
+  await setText('settings-config-archive-import-passphrase', PASSPHRASE)
+  await page.locator('#settings-config-archive-preview').click()
+  await page.waitForTimeout(700)
+  const version = await page.evaluate(
+    () =>
+      document.getElementById('settings-config-archive-import-error')?.innerText ??
+      '',
+  )
+  assert(
+    version.includes('archive_unsupported_version'),
+    `the future-version archive answered ${version}`,
+  )
+
+  await pickCrafted(
+    'foreign.pfce',
+    `PROMPT_FERRY_SYNTHETIC_ARCHIVE\n${JSON.stringify({ version: 1, backend: 'sqlite', passphrase_digest: 'x', payload_fingerprint: 'y', payload: '{}' })}`,
+  )
+  await setText('settings-config-archive-import-passphrase', PASSPHRASE)
+  await page.locator('#settings-config-archive-preview').click()
+  await page.waitForTimeout(700)
+  const backend = await page.evaluate(
+    () =>
+      document.getElementById('settings-config-archive-import-error')?.innerText ??
+      '',
+  )
+  assert(
+    backend.includes('archive_backend_mismatch'),
+    `the foreign-backend archive answered ${backend}`,
+  )
+
+  // A 503 on the confirmed apply keeps the whole wizard for a deliberate retry.
+  await page.setInputFiles('#settings-config-archive-file', DOWNLOAD)
+  await page.waitForTimeout(300)
+  await setText('settings-config-archive-import-passphrase', PASSPHRASE)
+  await page.locator('#settings-config-archive-preview').click()
+  await page.waitForSelector('#settings-config-archive-preview-panel')
+  await page.locator('#settings-config-archive-apply').click()
+  await page.waitForSelector('#settings-config-archive-confirm')
+  await injectFault({
+    pathPrefix: IMPORT,
+    method: 'POST',
+    status: 503,
+    count: 1,
+  })
+  await page.locator('#settings-config-archive-confirm-apply').click()
+  await page.waitForTimeout(900)
+  const failed = await page.evaluate(() => ({
+    dialog: document.getElementById('settings-config-archive-confirm') !== null,
+    error:
+      document.getElementById('settings-config-archive-confirm-error')
+        ?.innerText ?? '',
+    passphrasePresent: document.getElementById(
+      'settings-config-archive-import-passphrase',
+    )?.value
+      ? true
+      : false,
+    preview:
+      document.getElementById('settings-config-archive-preview-panel') !== null,
+  }))
+  assert(failed.dialog === true, 'a failed apply closed the confirmation')
+  assert(
+    failed.error !== '',
+    'a failed apply did not report an error inside the confirmation',
+  )
+  assert(
+    failed.passphrasePresent === true && failed.preview === true,
+    `a failed apply dropped the wizard: ${JSON.stringify(failed)}`,
+  )
+  const failedWrites = requestsFor('mutation-failure-draft', IMPORT).length
+  assert(failedWrites === 1, `the failed apply sent ${failedWrites} writes`)
+  await capture('config-archive-failure-en-light-1440')
+  await clearFaults()
+  await page.locator('#settings-config-archive-confirm-apply').click()
+  await page.waitForTimeout(2000)
+  const retryState = await page.evaluate(() => ({
+    applied: document.getElementById('settings-config-archive-applied') !== null,
+    confirmApplyDisabled: document
+      .getElementById('settings-config-archive-confirm-apply')
+      ?.hasAttribute('disabled'),
+    dialog: document.getElementById('settings-config-archive-confirm') !== null,
+    error:
+      document.getElementById('settings-config-archive-confirm-error')
+        ?.innerText ?? '',
+  }))
+  assert(
+    retryState.applied === true,
+    `the retried apply did not land: ${JSON.stringify(retryState)}`,
+  )
+  const retriedWrites = requestsFor('mutation-failure-draft', IMPORT)
+  assert(
+    retriedWrites.length === 2,
+    `the retried apply sent ${retriedWrites.length} writes`,
+  )
+  assert(
+    retriedWrites[1].body?.archive_base64_chars ===
+      retriedWrites[0].body?.archive_base64_chars,
+    'the retried apply changed the body',
+  )
+
+  // A double export sends one request: the delayed first answer still holds the
+  // claim when the second click lands.
+  await injectFault({
+    pathPrefix: EXPORT,
+    method: 'POST',
+    status: 200,
+    delayMs: 900,
+    count: 1,
+  })
+  await setText('settings-config-archive-passphrase', PASSPHRASE)
+  await page.waitForTimeout(100)
+  await page.evaluate(() => {
+    const button = document.getElementById('settings-config-archive-export')
+    button?.click()
+    button?.click()
+  })
+  await page.waitForTimeout(2500)
+  const doubleExport = requestsFor('mutation-failure-draft', EXPORT).length
+  assert(
+    doubleExport === 1,
+    `a double export sent ${doubleExport} requests`,
+  )
+  await clearFaults()
+
+  // The three capability codes stay distinct and recover on retry.
+  await injectFault({
+    pathPrefix: AUDIT,
+    method: 'GET',
+    status: 501,
+    code: 'sqlite_config_audit_unavailable',
+    message: 'the configuration archive audit trail is available on SQLite',
+    count: 1,
+  })
+  await openArchive()
+  await page.waitForTimeout(700)
+  const auditCapability = await page.evaluate(() => ({
+    warning: document.body.innerText.includes(
+      'sqlite_config_audit_unavailable',
+    ),
+    retry:
+      document.getElementById(
+        'settings-config-archive-audit-unavailable-retry',
+      ) !== null,
+  }))
+  assert(
+    auditCapability.warning && auditCapability.retry,
+    'the audit capability code is not shown with its retry',
+  )
+  await clearFaults()
+  await page.locator('#settings-config-archive-audit-unavailable-retry').click()
+  await page.waitForTimeout(900)
+  assert(
+    (await page.locator('#settings-config-archive-audit-unavailable-retry').count()) ===
+      0,
+    'the audit capability warning did not clear on retry',
+  )
+
+  await injectFault({
+    pathPrefix: EXPORT,
+    method: 'POST',
+    status: 501,
+    code: 'sqlite_config_export_unavailable',
+    message: 'encrypted configuration export is available on SQLite',
+    count: 1,
+  })
+  await setText('settings-config-archive-passphrase', PASSPHRASE)
+  await page.locator('#settings-config-archive-export').click()
+  await page.waitForTimeout(800)
+  assert(
+    (await page.locator('#settings-config-archive-export-retry').count()) === 1,
+    'the export capability code is not shown',
+  )
+  await clearFaults()
+  await page.locator('#settings-config-archive-export-retry').click()
+  await setText('settings-config-archive-passphrase', PASSPHRASE)
+  await page.locator('#settings-config-archive-export').click()
+  await page.waitForTimeout(900)
+  const exportRecovery = await page.evaluate(() => ({
+    retry:
+      document.getElementById('settings-config-archive-export-retry') !== null,
+    fingerprint: document
+      .getElementById('settings-config-archive-export-fingerprint')
+      ?.getAttribute('title'),
+    passphrasePresent: Boolean(
+      document.getElementById('settings-config-archive-passphrase')?.value,
+    ),
+  }))
+  assert(
+    exportRecovery.retry === false &&
+      exportRecovery.fingerprint !== null &&
+      exportRecovery.passphrasePresent === false,
+    `the export capability warning did not clear on retry: ${JSON.stringify(exportRecovery)}`,
+  )
+
+  await injectFault({
+    pathPrefix: PREVIEW,
+    method: 'POST',
+    status: 501,
+    code: 'sqlite_config_import_unavailable',
+    message: 'encrypted configuration import is available on SQLite',
+    count: 1,
+  })
+  await page.setInputFiles('#settings-config-archive-file', DOWNLOAD)
+  await page.waitForTimeout(300)
+  await setText('settings-config-archive-import-passphrase', PASSPHRASE)
+  await page.locator('#settings-config-archive-preview').click()
+  await page.waitForTimeout(800)
+  assert(
+    (await page.locator('#settings-config-archive-import-retry').count()) === 1,
+    'the import capability code is not shown',
+  )
+  await clearFaults()
+  await page.locator('#settings-config-archive-import-retry').click()
+  await setText('settings-config-archive-import-passphrase', PASSPHRASE)
+  await page.locator('#settings-config-archive-preview').click()
+  await page.waitForTimeout(900)
+  assert(
+    (await page.locator('#settings-config-archive-import-retry').count()) === 0,
+    'the import capability warning did not clear on retry',
+  )
+  report.checks.capabilities = {
+    audit: true,
+    export: true,
+    import: true,
+    recovered: true,
+  }
+  report.checks.failureDraft = {
+    wrongPassphrase,
+    corrupt,
+    version,
+    backend,
+    failed,
+    writes: retriedWrites.length,
+    doubleExport,
+  }
+  passed(
+    'mutation-failure-draft',
+    'a wrong passphrase, a corrupt header, an unsupported version and a foreign backend each answer the codec\'s own code while the file survives, a 503 keeps the confirmed wizard and resends the same body, a double export sends one request, and the three capability codes stay distinct and recover on retry',
+  )
+
+  stage = 'responsive-and-locale'
+  const profile = []
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await openArchive()
+    await page.waitForTimeout(250)
+    const measured = await page.evaluate(() => {
+      const ids = [
+        'settings-config-archive-passphrase',
+        'settings-config-archive-export',
+        'settings-config-archive-file',
+        'settings-config-archive-import-passphrase',
+        'settings-config-archive-preview',
+        'settings-config-archive-apply',
+      ]
+      const table = document.querySelector('[data-config-archive-audit]')
+      const container = table?.parentElement
+      return {
+        controls: ids.map(id => {
+          const rect = document.getElementById(id)?.getBoundingClientRect()
+          return rect
+            ? { id, left: Math.round(rect.left), right: Math.round(rect.right) }
+            : { id, left: -1, right: -1 }
+        }),
+        documentWidth: document.documentElement.scrollWidth,
+        viewport: window.innerWidth,
+        tableScrollable:
+          container !== null && container !== undefined
+            ? container.scrollWidth >= container.clientWidth
+            : false,
+        headers: document.querySelectorAll('[data-config-archive-audit] thead th')
+          .length,
+      }
+    })
+    assert(
+      measured.documentWidth <= measured.viewport,
+      `the archive tab overflows at ${width}px (${measured.documentWidth} > ${measured.viewport})`,
+    )
+    for (const control of measured.controls) {
+      assert(
+        control.left >= 0 &&
+          control.right <= measured.viewport &&
+          control.right > control.left,
+        `the ${control.id} control is not reachable at ${width}px`,
+      )
+    }
+    assert(
+      measured.tableScrollable && measured.headers === 9,
+      `the audit table dropped a column or cannot pan at ${width}px`,
+    )
+    profile.push({
+      width,
+      documentWidth: measured.documentWidth,
+      headers: measured.headers,
+    })
+    if (width === 390) await capture('config-archive-en-light-390')
+  }
+  report.checks.responsive = profile
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  await page.evaluate(() => {
+    window.localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    window.localStorage.setItem('prompt-ferry:theme-mode', 'dark')
+  })
+  await openArchive()
+  const zh = await page.evaluate(() => ({
+    heading: (
+      document.querySelector(
+        '[data-foundation-route-id="R-SETTINGS-CONFIG-ARCHIVE"] h1',
+      )?.textContent ?? ''
+    ).trim(),
+    body: document.body.innerText,
+  }))
+  assert(zh.heading === '配置归档', `the Chinese heading is ${zh.heading}`)
+  assert(
+    zh.body.includes('导出配置归档') &&
+      zh.body.includes('导入配置归档') &&
+      zh.body.includes('归档审计'),
+    `the Chinese archive copy is incomplete: ${JSON.stringify(zh.body.slice(0, 300))}`,
+  )
+  await capture('config-archive-zh-dark-1440')
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.waitForTimeout(300)
+  assert(
+    !(await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    )),
+    'the Chinese dark archive tab overflows at 390px',
+  )
+  await capture('config-archive-zh-dark-390')
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  collecting = false
+
+  stage = 'admin-denial'
+  await signOut()
+  await signIn('operator')
+  const operatorNav = await page.evaluate(() =>
+    [...document.querySelectorAll('nav a')].map(link =>
+      link.getAttribute('href'),
+    ),
+  )
+  const navHidden = !operatorNav.includes('/settings/config-archive')
+  assert(navHidden, 'the ordinary-user nav exposes the archive route')
+  await page.goto(`${BASE}/settings/config-archive`)
+  await page.waitForTimeout(700)
+  const redirected = new URL(page.url()).pathname !== '/settings/config-archive'
+  assert(redirected, 'an ordinary user stayed on the archive route')
+  assert(
+    (await page
+      .locator('[data-foundation-route-id="R-SETTINGS-CONFIG-ARCHIVE"]')
+      .count()) === 0,
+    'an ordinary user rendered the archive section',
+  )
+  const forged = await page.evaluate(async () => {
+    const post = async (path, body) => {
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      return response.status
+    }
+    const audit = await fetch('/api/v1/admin/config-audit?first=0&rows=10')
+    return {
+      audit: audit.status,
+      export: await post('/api/v1/admin/config-export', {
+        passphrase: 'synthetic-forged-passphrase',
+      }),
+      preview: await post('/api/v1/admin/config-import/preview', {
+        archive_base64: '',
+        passphrase: 'synthetic-forged-passphrase',
+      }),
+      apply: await post('/api/v1/admin/config-import', {
+        archive_base64: '',
+        passphrase: 'synthetic-forged-passphrase',
+      }),
+    }
+  })
+  assert(
+    forged.audit === 403 &&
+      forged.export === 403 &&
+      forged.preview === 403 &&
+      forged.apply === 403,
+    `the fixture answered forged archive requests with ${JSON.stringify(forged)}`,
+  )
+  await page.goto(`${BASE}/settings/general`)
+  await page.waitForSelector('[data-foundation-route-id="R-SETTINGS-GENERAL"]')
+  assert(
+    (await page.locator('[data-settings-card]').count()) === 3,
+    'the ordinary user lost the general settings tab',
+  )
+  const redactionScoped = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/settings/redaction')
+    return response.status
+  })
+  assert(
+    redactionScoped === 200,
+    `the ordinary-user redaction setting returned ${redactionScoped}`,
+  )
+  await signOut()
+  const anonymous = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/admin/config-audit?first=0&rows=10')
+    return response.status
+  })
+  assert(anonymous === 401, `an anonymous audit read returned ${anonymous}`)
+  report.checks.adminDenial = {
+    navHidden,
+    redirected,
+    forged,
+    generalIntact: true,
+    redactionIntact: redactionScoped,
+    anonymousRead: anonymous,
+  }
+  passed(
+    'admin-denial',
+    'an ordinary user has no archive link, is redirected away from the route without rendering it, is refused with 403 on all four archive routes, and still reaches the general and redaction settings while an anonymous read is refused with 401',
+  )
+  await signIn('admin')
+
+  stage = 'finish'
+  report.checks.officialPendingRoutes = 0
+  report.checks.unexpectedWindow = 'mounted admin archive tab stages'
+  report.limitations.push(
+    'Evidence is the synthetic fixture archive format: no production .pfce, Argon2id/ChaCha20-Poly1305 archive, real configuration replacement or production behaviour is claimed.',
+    'The passphrase and the archive body are recorded as presence flags and lengths only. The audit empty-tail page correction and the 32 KB base64 chunking are asserted by the unit suite rather than here, because the synthetic audit trail only grows within a run and a wrong-window read cannot be produced through the UI.',
+  )
+  report.checks.limitations = report.limitations
+  report.finishedAt = new Date().toISOString()
+  return report
+}

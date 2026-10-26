@@ -1,0 +1,256 @@
+{
+  "checks": {
+    "archive": {
+      "cancelNoPost": true,
+      "cancelCleared": true,
+      "failed": {
+        "at": "2026-10-23T15:51:16.597Z",
+        "method": "POST",
+        "path": "/api/v1/admin/config-import",
+        "query": {},
+        "body": {
+          "archive_base64": "Zml4dHVyZS1wcm9tcHQtZmVycnktY29uZmlnLWFyY2hpdmUK",
+          "passphrase": "fixture-passphrase"
+        },
+        "status": 500,
+        "ms": 0
+      },
+      "cleared": false,
+      "success": {
+        "at": "2026-10-23T15:51:18.832Z",
+        "method": "POST",
+        "path": "/api/v1/admin/config-import",
+        "query": {},
+        "body": {
+          "archive_base64": "Zml4dHVyZS1wcm9tcHQtZmVycnktY29uZmlnLWFyY2hpdmUK",
+          "passphrase": "fixture-passphrase"
+        },
+        "status": 200,
+        "ms": 0
+      },
+      "auditRefreshed": true,
+      "auditVisible": true,
+      "text": "API 密钥\n可用模型\n用户\n上游节点\nMCP\n中继\n本机服务\n脱敏\n请求记录\n账单\n审批队列\n设置\n常规\n请求与路由\n网络访问\n审核\n对象存储\n缓存报警\n配置归档\nadmin\n退出登录\n刷新\n导出配置归档\n口令\n导出并下载\n\n口令仅用于本次导出，导出后立即清除。\n\n导入配置归档\n归档文件\n选择归档文件\n口令\n预览变更\n应用导入\n\n配置已导入\n\n指纹: c1b2c3d4e5f60718\n\nendpoints: 3\nmodel_routes: 2\n\n归档审计\n刷新\n操作\t操作者\t后端\t字节数\t指纹\t记录数\t结果\t错误\t时间\n\n导入\n\tadmin\tlocal\t36\tc1b2c3d4e5f60718\t3\t\n成功\n\t\n-\n\t2026/10/23 23:51:18\n\n导出\n\tadmin\tlocal\t40,000\td1b2c3d4e5f60718\t1\t\n成功\n\t\n-\n\t2026/10/23 20:00:00\n\n导入\n\tadmin\tlocal\t40,001\td1b2c3d4e5f60718\t1\t\n成功\n\t\n-\n\t2026/10/23 20:00:00\n\n导出\n\tadmin\tlocal\t40,002\td1b2c3d4e5f60718\t1\t\n成功\n\t\n-\n\t2026/10/23 20:00:00\n\n导入\n\tadmin\tlocal\t40,003\td1b2c3d4e5f60718\t1\t\n成功\n\t\n-\n\t2026/10/23 20:00:00\n\n导出\n\tadmin\tlocal\t40,004\td1b2c3d4e5f60718\t1\t\n成功\n\t\n-\n\t2026/10/23 20:00:00\n\n导入\n\tadmin\tlocal\t40,005\td1b2c3d4e5f60718\t1\t\n成功\n\t\n-\n\t2026/10/23 20:00:00\n\n导出\n\tadmin\tlocal\t40,006\td1b2c3d4e5f60718\t1\t\n成功\n\t\n-\n\t2026/10/23 20:00:00\n\n导入\n\tadmin\tlocal\t40,007\td1b2c3d4e5f60718\t1\t\n成功\n\t\n-\n\t2026/10/23 2"
+    },
+    "billing": {
+      "chargeChanged": true,
+      "rulesUnchanged": true,
+      "ruleChanged": false,
+      "chargesUnchanged": true,
+      "chargeRequests": [
+        {
+          "at": "2026-10-23T15:51:21.579Z",
+          "method": "GET",
+          "path": "/api/v1/admin/billing/charges",
+          "query": {
+            "start_at": "2026-09-30T16:00:00.000Z",
+            "first": "25",
+            "rows": "25"
+          },
+          "status": 200,
+          "ms": 0
+        }
+      ],
+      "ruleRequests": [],
+      "filtered": [
+        {
+          "at": "2026-10-23T15:51:23.478Z",
+          "method": "GET",
+          "path": "/api/v1/admin/billing/summary",
+          "query": {
+            "start_at": "2026-09-30T16:00:00.000Z",
+            "requested_model": "minimax-m2"
+          },
+          "status": 200,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T15:51:23.479Z",
+          "method": "GET",
+          "path": "/api/v1/admin/billing/charges",
+          "query": {
+            "start_at": "2026-09-30T16:00:00.000Z",
+            "requested_model": "minimax-m2",
+            "first": "0",
+            "rows": "25"
+          },
+          "status": 200,
+          "ms": 0
+        }
+      ],
+      "filteredModels": [
+        "minimax-m2",
+        "minimax-m2",
+        "minimax-m2",
+        "minimax-m2",
+        "minimax-m2",
+        "minimax-m2",
+        "minimax-m2",
+        "minimax-m2",
+        "minimax-m2",
+        "minimax-m2",
+        "minimax-m2",
+        "minimax-m2",
+        "minimax-m2",
+        "minimax-m2",
+        "minimax-m2",
+        "minimax-m2"
+      ],
+      "summaryCount": 16,
+      "summaryAmount": "0.046310"
+    },
+    "sort": {
+      "disposition": "known-baseline-defect",
+      "before": "none",
+      "after": "none",
+      "requests": [],
+      "buttons": 0,
+      "source": "frontend/src/components/usage/UsagePanel.vue: columns and sorting; Nuxt UI Table header renders strings without toggle handler",
+      "futureFixId": "REACT-AI-SORT-ACCESSIBLE",
+      "target": "Header buttons with keyboard activation, aria-sort, sort_field/sort_order requests"
+    },
+    "redaction": {
+      "requests": [
+        {
+          "at": "2026-10-23T15:51:28.925Z",
+          "method": "GET",
+          "path": "/api/v1/settings/redaction/custom-strings",
+          "query": {
+            "scope": "global",
+            "first": "0",
+            "rows": "10",
+            "search": "SECRET-10"
+          },
+          "status": 200,
+          "ms": 0
+        }
+      ],
+      "searched": "\t\n包含\n\t\n单行\n\t2026/10/16 16:00:00\t2026/10/23 20:00:00\t",
+      "searchValues": ["fixture-secret-10"],
+      "invalid": "true",
+      "warning": "API 密钥\n可用模型\n用户\n上游节点\nMCP\n中继\n本机服务\n脱敏\n内建规则\n脱敏预览\n请求记录\n账单\n审批队列\n设置\nadmin\n退出登录\n规则范围\n公共规则\n保存\n刷新\n未保存\n密钥\n域名\n链接\n邮箱\nIP\nCIDR\n电话\n人名\n组织\n高级规则\n新增规则\n模式\t匹配方式\t作用域\t创建时间\t更新时间\t\n\n\t\n包含\n\t\n全文\n\t-\t-\t\n\n\n\t\n正则\n\t\n单行\n\t2026/10/16 16:00:00\t2026/10/23 20:00:00\t\n\n\n正则表达式无法编译，请修正后再保存。\n\t\n正则\n\t\n全文\n\t2026/10/16 16:00:00\t2026/10/23 20:00:00\t\n10\n1",
+      "noInvalidPatch": true,
+      "corrected": {
+        "at": "2026-10-23T15:51:32.442Z",
+        "method": "PATCH",
+        "path": "/api/v1/settings/redaction",
+        "query": {
+          "scope": "global"
+        },
+        "body": {
+          "custom_strings": [
+            {
+              "created_at": "2026-10-16T08:00:00.000Z",
+              "match_type": "regex",
+              "pattern": "fixture-valid-.*",
+              "scope": "text",
+              "updated_at": "2026-10-23T12:00:00.000Z"
+            },
+            {
+              "created_at": "2026-10-16T08:00:00.000Z",
+              "match_type": "regex",
+              "pattern": "sk_fixture_[A-Za-z0-9]+",
+              "scope": "line",
+              "updated_at": "2026-10-23T12:00:00.000Z"
+            }
+          ],
+          "enabled": true,
+          "rules": {
+            "cidr": true,
+            "domain": true,
+            "email": true,
+            "ip": true,
+            "organization": false,
+            "person": false,
+            "phone": true,
+            "secret": true,
+            "url": true
+          }
+        },
+        "status": 200,
+        "ms": 0
+      },
+      "duplicates": {
+        "warningText": "API 密钥\n可用模型\n用户\n上游节点\nMCP\n中继\n本机服务\n脱敏\n内建规则\n脱敏预览\n请求记录\n账单\n审批队列\n设置\nadmin\n退出登录\n规则范围\n公共规则\n保存\n刷新\n未保存\n密钥\n域名\n链接\n邮箱\nIP\nCIDR\n电话\n人名\n组织\n高级规则\n新增规则\n模式\t匹配方式\t作用域\t创建时间\t更新时间\t\n\n存在完全相同的规则，保存时会被合并。\n\t\n包含\n\t\n全文\n\t-\t-\t\n\n\n存在完全相同的规则，保存时会被合并。\n\t\n包含\n\t\n全文\n\t-\t-\t\n\n\n\t\n正则\n\t\n单行\n\t2026/10/16 16:00:00\t2026/10/23 20:00:00\t\n\n\n\t\n正则\n\t\n全文\n\t2026/10/16 16:00:00\t2026/10/23 20:00:00\t\n10\n1\nNotification invalid custom string regex\nNotification 已保存\ninvalid custom string regex\n已保存",
+        "conflictText": "API 密钥\n可用模型\n用户\n上游节点\nMCP\n中继\n本机服务\n脱敏\n内建规则\n脱敏预览\n请求记录\n账单\n审批队列\n设置\nadmin\n退出登录\n规则范围\n公共规则\n保存\n刷新\n未保存\n密钥\n域名\n链接\n邮箱\nIP\nCIDR\n电话\n人名\n组织\n高级规则\n新增规则\n模式\t匹配方式\t作用域\t创建时间\t更新时间\t\n\n同名的模式匹配方式/作用域不同，可能产生意外命中。\n\t\n包含\n\t\n单行\n\t-\t-\t\n\n\n存在完全相同的规则，保存时会被合并。\n\t\n包含\n\t\n全文\n\t-\t-\t\n\n\n存在完全相同的规则，保存时会被合并。\n\t\n包含\n\t\n全文\n\t-\t-\t\n\n\n\t\n正则\n\t\n单行\n\t2026/10/16 16:00:00\t2026/10/23 20:00:00\t\n\n\n\t\n正则\n\t\n全文\n\t2026/10/16 16:00:00\t2026/10/23 20:00:00\t\n10\n1\nNotification invalid custom string regex\nNotification 已保存\ninvalid custom string regex\n已保存\n全文\n单行",
+        "payload": {
+          "custom_strings": [
+            {
+              "created_at": "2026-10-16T08:00:00.000Z",
+              "match_type": "regex",
+              "pattern": "fixture-valid-.*",
+              "scope": "text",
+              "updated_at": "2026-10-23T12:00:00.000Z"
+            },
+            {
+              "created_at": "2026-10-16T08:00:00.000Z",
+              "match_type": "regex",
+              "pattern": "sk_fixture_[A-Za-z0-9]+",
+              "scope": "line",
+              "updated_at": "2026-10-23T12:00:00.000Z"
+            },
+            {
+              "pattern": "duplicate-fixture",
+              "match_type": "contains",
+              "scope": "text"
+            },
+            {
+              "pattern": "duplicate-fixture",
+              "match_type": "contains",
+              "scope": "line"
+            }
+          ],
+          "enabled": true,
+          "rules": {
+            "cidr": true,
+            "domain": true,
+            "email": true,
+            "ip": true,
+            "organization": false,
+            "person": false,
+            "phone": true,
+            "secret": true,
+            "url": true
+          }
+        },
+        "signatures": [
+          {
+            "pattern": "duplicate-fixture",
+            "match_type": "contains",
+            "scope": "text"
+          },
+          {
+            "pattern": "duplicate-fixture",
+            "match_type": "contains",
+            "scope": "line"
+          }
+        ]
+      }
+    }
+  },
+  "captures": [
+    {
+      "name": "archive",
+      "path": "e2e/baseline/screenshots/slice3_archive.png"
+    },
+    {
+      "name": "billing",
+      "path": "e2e/baseline/screenshots/slice3_billing.png"
+    },
+    {
+      "name": "inert_sort",
+      "path": "e2e/baseline/screenshots/slice3_inert_sort.png"
+    },
+    {
+      "name": "redaction",
+      "path": "e2e/baseline/screenshots/slice3_redaction.png"
+    },
+    {
+      "name": "duplicate_conflict",
+      "path": "e2e/baseline/screenshots/slice3_duplicate_conflict.png"
+    }
+  ],
+  "failures": [],
+  "startedAt": "2026-10-23T15:51:09.618Z",
+  "finishedAt": "2026-10-23T15:51:35.674Z"
+}

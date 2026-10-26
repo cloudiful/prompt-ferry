@@ -1,0 +1,294 @@
+{
+  "runId": "mcp-1793010978486",
+  "startedAt": "2026-10-26T10:36:18.486Z",
+  "checks": {
+    "ownerRole": {
+      "routeId": "R-MCP",
+      "navVisible": true,
+      "ownRows": 1,
+      "foreignStatuses": {
+        "catalog": 404,
+        "test": 404,
+        "update": 404
+      },
+      "anonymousStatuses": {
+        "providers": 401,
+        "servers": 401,
+        "catalog": 401,
+        "test": 401,
+        "unrelated-endpoints": 401,
+        "unrelated-relays": 401
+      },
+      "unrelatedAdminStatuses": {
+        "endpoints": 403,
+        "relays": 403,
+        "unknownMcpPath": 404
+      },
+      "disabledCatalogNotFetched": true,
+      "disabledCatalogEmpty": true,
+      "disabledTestFalse": true,
+      "adminUserOptionsCalls": 0,
+      "recordsCalls": 0,
+      "createOwner": 2,
+      "updateOwner": 2,
+      "createScope": "user",
+      "updateScope": "user"
+    },
+    "pagination": {
+      "initialRows": 10,
+      "firstPageIds": [
+        "mcp-context7",
+        "mcp-local-everything",
+        "mcp-fixture-1",
+        "mcp-fixture-2",
+        "mcp-fixture-3",
+        "mcp-fixture-4",
+        "mcp-fixture-5",
+        "mcp-fixture-6",
+        "mcp-fixture-7",
+        "mcp-fixture-8"
+      ],
+      "secondPageRows": 2,
+      "secondPageIds": ["mcp-fixture-9", "mcp-fixture-10"],
+      "lastPageCorrection": true,
+      "deleteCancelledWrites": 0,
+      "deleteSuccesses": 2,
+      "nativeConfirmApi": true,
+      "pageSizePersistence": true,
+      "adminUserOptionsRead": true
+    },
+    "catalogEditor": {
+      "firstCatalogCalls": 3,
+      "unchangedAfterRefresh": true,
+      "invalidatedOnSave": true,
+      "searchableTools": true,
+      "missingCatalogChipPreserved": true,
+      "filterModeRoundTrip": true,
+      "automaticProtocolSentinel": true,
+      "explicitProtocolRoundTrip": true,
+      "hiddenHeaderPreserved": true,
+      "hiddenTimeoutPreserved": true,
+      "hiddenControlsAbsent": true
+    },
+    "toggleAndIndependentProbe": {
+      "sameRowWriteControlsGated": true,
+      "singleWrite": true,
+      "otherRowAvailable": true,
+      "independentProbeAvailable": true,
+      "probeResultRendered": true,
+      "listCallsUnchangedByProbe": true,
+      "guardHeldThroughRefresh": true,
+      "toggled": true
+    },
+    "failureDraftRetry": {
+      "pendingSaveGatesDialog": true,
+      "draftRetained": true,
+      "sameBodyRetry": true,
+      "retryStatus": 200,
+      "savedTokenPresent": true,
+      "hiddenHeaderPreserved": true,
+      "hiddenTimeoutPreserved": true,
+      "secretsMasked": true
+    },
+    "createDialog": {
+      "hostedCreated": "mcp-1001",
+      "privateOwner": 2,
+      "providerRegistryChoices": ["Generic", "Context7", "Firecrawl"],
+      "hostedProviderPinned": true,
+      "hostedBearerPresent": true,
+      "bearerMasked": true,
+      "bearerAddRemove": true,
+      "lastEnabledTokenGate": true,
+      "basicCreated": true,
+      "basicPasswordMasked": true,
+      "basicPasswordNotEchoed": true,
+      "basicKeep": true,
+      "basicReplacement": true,
+      "proxyKeep": true,
+      "proxyClear": true,
+      "proxyReplacement": true
+    },
+    "stdioEnvironment": {
+      "savedDirectMasked": true,
+      "directKeep": true,
+      "workerReferenceRoundTrip": true,
+      "workerCreate": true,
+      "invalidWorkerValueBlocked": true
+    },
+    "dialogGenerationLateAnswer": true,
+    "longValues": {
+      "longNameLength": 56,
+      "longEndpointLength": 81,
+      "longCommand": 55,
+      "nameAndCommandContainedAt390": true
+    },
+    "responsiveContainment": [
+      {
+        "width": 1440,
+        "contained": true,
+        "actionsReachable": [true, true, true, true]
+      },
+      {
+        "width": 1024,
+        "contained": true,
+        "actionsReachable": [true, true, true, true]
+      },
+      {
+        "width": 768,
+        "contained": true,
+        "actionsReachable": [true, true, true, true]
+      },
+      {
+        "width": 390,
+        "contained": true,
+        "actionsReachable": [true, true, true, true]
+      }
+    ],
+    "localeThemeRendering": {
+      "lang": "zh-CN",
+      "dark": true,
+      "colorScheme": "dark"
+    },
+    "requestRecordCalls": 0,
+    "expectedApiFailures": [
+      {
+        "method": "GET",
+        "path": "/api/v1/auth/me",
+        "status": 401
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/auth/me",
+        "status": 401
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/mcp-providers",
+        "status": 401
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/mcp-servers",
+        "status": 401
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/mcp-servers/mcp-context7/catalog",
+        "status": 401
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/mcp-servers/mcp-context7/test",
+        "status": 401
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/endpoints",
+        "status": 401
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "status": 401
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/endpoints",
+        "status": 403
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "status": 403
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/mcp-servers/mcp-local-everything/unknown",
+        "status": 404
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/mcp-servers/mcp-context7/catalog",
+        "status": 404
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/mcp-servers/mcp-context7/test",
+        "status": 404
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/admin/mcp-servers/mcp-context7",
+        "status": 404
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/auth/me",
+        "status": 401
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/auth/me",
+        "status": 401
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/admin/mcp-servers/mcp-context7",
+        "status": 503
+      }
+    ],
+    "apiFailures": [],
+    "consoleErrors": [],
+    "pageErrors": [],
+    "secretSafety": {
+      "fixtureCredentialValuesExcluded": true,
+      "requestBodiesNotSerialized": true,
+      "inputPasswordsMasked": true
+    },
+    "scenarioCoverage": {
+      "route-render": true,
+      "pagination": true,
+      "dialog-open": true,
+      "mutation-create": true,
+      "mutation-toggle": true,
+      "mutation-delete": true,
+      "mutation-failure-draft": true,
+      "long-values": true
+    }
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/mcp-admin-en-light-1440.png",
+    "e2e/foundation/screenshots/mcp-hosted-editor-en-light-1440.png",
+    "e2e/foundation/screenshots/mcp-hosted-create-en-light-1440.png",
+    "e2e/foundation/screenshots/mcp-admin-en-light-390.png",
+    "e2e/foundation/screenshots/mcp-admin-zh-dark-390.png"
+  ],
+  "segments": [
+    {
+      "name": "owner-role",
+      "startedAt": "2026-10-26T10:36:21.818Z",
+      "finishedAt": "2026-10-26T10:36:23.131Z"
+    },
+    {
+      "name": "admin-paging-delete",
+      "startedAt": "2026-10-26T10:36:23.932Z",
+      "finishedAt": "2026-10-26T10:36:24.803Z"
+    },
+    {
+      "name": "catalog-editor",
+      "startedAt": "2026-10-26T10:36:24.803Z",
+      "finishedAt": "2026-10-26T10:36:31.058Z"
+    },
+    {
+      "name": "guarded-mutations",
+      "startedAt": "2026-10-26T10:36:31.058Z",
+      "finishedAt": "2026-10-26T10:36:33.554Z"
+    },
+    {
+      "name": "create-secrets-responsive",
+      "startedAt": "2026-10-26T10:36:33.554Z",
+      "finishedAt": "2026-10-26T10:36:49.160Z"
+    }
+  ],
+  "finishedAt": "2026-10-26T10:36:49.162Z"
+}

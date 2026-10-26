@@ -1,0 +1,121 @@
+{
+  "runId": "users-1793011403879",
+  "startedAt": "2026-10-26T10:43:23.879Z",
+  "checks": {
+    "routeAndNavigation": true,
+    "listReadWithoutOptions": true,
+    "createDialogFailureDraftAndRetry": true,
+    "dialogOpen": true,
+    "updateFullRow": true,
+    "resetFailureDraftRetryAndPasswordMasking": true,
+    "deleteCancelNoWrite": true,
+    "longValuesResponsive": [
+      {
+        "width": 1440,
+        "loginInside": true,
+        "inputInside": true,
+        "actionsInside": true,
+        "documentWidth": 1440,
+        "viewportWidth": 1440
+      },
+      {
+        "width": 1024,
+        "loginInside": true,
+        "inputInside": true,
+        "actionsInside": true,
+        "documentWidth": 1024,
+        "viewportWidth": 1024
+      },
+      {
+        "width": 768,
+        "loginInside": true,
+        "inputInside": true,
+        "actionsInside": true,
+        "documentWidth": 768,
+        "viewportWidth": 768
+      },
+      {
+        "width": 390,
+        "loginInside": true,
+        "inputInside": true,
+        "actionsInside": true,
+        "documentWidth": 390,
+        "viewportWidth": 390
+      }
+    ],
+    "paginationDistinctRowsAndQuery": true,
+    "pageSizePersistence": true,
+    "deletePageCorrection": true,
+    "scenarioCoverage": {
+      "route-render": true,
+      "admin-denial": true,
+      "pagination": true,
+      "dialog-open": true,
+      "mutation-create": true,
+      "mutation-update": true,
+      "mutation-delete": true,
+      "mutation-failure-draft": true,
+      "long-values": true
+    },
+    "localeThemeRendering": {
+      "zhDark": {
+        "dark": true,
+        "lang": "zh-CN",
+        "colorScheme": "dark"
+      },
+      "enLight": {
+        "dark": false,
+        "lang": "en-US",
+        "colorScheme": "light"
+      }
+    },
+    "adminDenial": {
+      "redirectedToApiKeys": true,
+      "hiddenNavigation": true,
+      "adminApiCalls": 0
+    },
+    "createPayloads": [
+      {
+        "login_name": " fixture-created-user ",
+        "display_name": " Fixture Created ",
+        "is_admin": true,
+        "passwordIsRaw": true
+      },
+      {
+        "login_name": " fixture-created-user ",
+        "display_name": " Fixture Created ",
+        "is_admin": true,
+        "passwordIsRaw": true
+      }
+    ],
+    "updatePayloads": [
+      {
+        "user_id": 2,
+        "display_name": "Operator Updated",
+        "is_admin": true,
+        "is_active": false
+      }
+    ],
+    "resetPayloads": [
+      {
+        "passwordIsRaw": true
+      },
+      {
+        "passwordIsRaw": true
+      }
+    ],
+    "expectedApiFailures": [
+      "503 POST /api/v1/admin/users",
+      "503 POST /api/v1/admin/users/2/reset-password"
+    ],
+    "apiFailures": [],
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/users-admin-en-light-1440.png",
+    "e2e/foundation/screenshots/users-admin-zh-dark-1440.png",
+    "e2e/foundation/screenshots/users-admin-en-light-1440-final.png"
+  ],
+  "finishedAt": "2026-10-26T10:43:34.604Z"
+}

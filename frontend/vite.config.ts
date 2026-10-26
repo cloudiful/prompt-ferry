@@ -1,83 +1,7 @@
 import tailwindcss from '@tailwindcss/vite'
-import { NuxtIconBundle } from '@nuxt/icon/vite'
-import ui from '@nuxt/ui/vite'
-import vue from '@vitejs/plugin-vue'
+import react from '@vitejs/plugin-react'
 import path from 'node:path'
 import { defineConfig } from 'vite'
-
-const bundledLucideIcons = [
-  'activity',
-  'arrow-down',
-  'arrow-left',
-  'arrow-right',
-  'arrow-up',
-  'arrow-up-right',
-  'blocks',
-  'cable',
-  'chart-column',
-  'chart-no-axes-column',
-  'check',
-  'chevron-down',
-  'chevron-left',
-  'chevron-right',
-  'chevron-up',
-  'chevrons-left',
-  'chevrons-right',
-  'circle-alert',
-  'circle-check',
-  'circle-x',
-  'clipboard-check',
-  'clipboard-list',
-  'clock',
-  'copy',
-  'copy-check',
-  'database',
-  'database-zap',
-  'ellipsis',
-  'eye',
-  'eye-off',
-  'file',
-  'folder',
-  'folder-open',
-  'grip-vertical',
-  'hash',
-  'info',
-  'key',
-  'key-round',
-  'lightbulb',
-  'loader-circle',
-  'log-in',
-  'log-out',
-  'menu',
-  'minus',
-  'monitor',
-  'moon',
-  'network',
-  'panel-left-close',
-  'panel-left-open',
-  'pencil',
-  'plug',
-  'plug-zap',
-  'plus',
-  'refresh-cw',
-  'rotate-ccw',
-  'save',
-  'search',
-  'server',
-  'settings',
-  'settings-2',
-  'shield',
-  'shield-check',
-  'square',
-  'sun',
-  'trash-2',
-  'triangle-alert',
-  'upload',
-  'users',
-  'users-round',
-  'workflow',
-  'x',
-]
 
 export default defineConfig({
   resolve: {
@@ -85,35 +9,14 @@ export default defineConfig({
       '@': path.resolve(import.meta.dirname, './src'),
     },
   },
-  plugins: [
-    vue(),
-    tailwindcss(),
-    NuxtIconBundle({
-      icons: bundledLucideIcons.map((name) => `lucide:${name}`),
-    }),
-    ui({
-      // The app owns `<html class="dark">` through `prompt-ferry:theme-mode`;
-      // Nuxt UI's color-mode controller would restore the system preference and
-      // drop the class the first-paint script set.
-      colorMode: false,
-      experimental: { componentDetection: true },
-      ui: {
-        colors: {
-          primary: 'sky',
-          neutral: 'mist',
-        },
-        table: {
-          slots: {
-            th: 'whitespace-nowrap',
-          },
-        },
-      },
-    }),
-  ],
+  plugins: [react(), tailwindcss()],
   server: {
     port: 5171,
     proxy: {
       '/api/': 'http://127.0.0.1:8789',
+    },
+    watch: {
+      ignored: ['**/.playwright-cli/**'],
     },
   },
 })

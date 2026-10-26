@@ -1,0 +1,2 @@
+﻿request_id,model,user,amount,currency,status
+req-charge-1,minimax-m2,operator,0.004210,USD,priced

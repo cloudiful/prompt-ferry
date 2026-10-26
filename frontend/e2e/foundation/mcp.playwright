@@ -1,0 +1,900 @@
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const startedAt = new Date().toISOString()
+  const report = {
+    runId: `mcp-${Date.now()}`,
+    startedAt,
+    checks: {},
+    screenshots: [],
+    segments: [],
+  }
+  const pageErrors = []
+  const consoleErrors = []
+  const apiFailures = []
+  const requestBodies = []
+  const mcpRequests = []
+  const expectedFailures = []
+  const fixtureTokens = {
+    context7: 'fixture-context7-token',
+    primaryHosted: 'fixture-hosted-token-primary',
+    createdHosted: 'fixture-hosted-token-secondary',
+    basic: 'fixture-basic-password',
+    replacement: 'fixture-basic-replacement',
+  }
+
+  page.setDefaultTimeout(8000)
+  page.on('pageerror', error => pageErrors.push(error.message))
+  page.on('console', message => {
+    if (message.type() !== 'error') return
+    if (/(?:status of )?(?:401|403|404|503)\b/.test(message.text())) return
+    consoleErrors.push(message.text())
+  })
+  page.on('request', request => {
+    const url = new URL(request.url())
+    if (!url.pathname.startsWith('/api/v1/admin/mcp-')) return
+    mcpRequests.push({ method: request.method(), path: url.pathname, query: url.search })
+    if (!['POST', 'PATCH'].includes(request.method())) return
+    if (url.pathname.endsWith('/test')) return
+    try {
+      requestBodies.push({ method: request.method(), path: url.pathname, body: request.postDataJSON() })
+    } catch {}
+  })
+  page.on('response', response => {
+    const url = new URL(response.url())
+    if (!url.pathname.startsWith('/api/')) return
+    if (response.status() >= 400) {
+      apiFailures.push({ method: response.request().method(), path: url.pathname, status: response.status() })
+    }
+  })
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(message)
+  }
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  async function waitForRoute() {
+    await page.locator('[data-foundation-route-id="R-MCP"]').waitFor({ state: 'visible' })
+  }
+
+  async function signIn(loginName) {
+    await page.getByLabel('Login name').waitFor({ state: 'visible' })
+    await page.getByLabel('Login name').fill(loginName)
+    await page.getByRole('textbox', { name: 'Password' }).fill('fixture-password')
+    await page.getByRole('button', { name: 'Login', exact: true }).click()
+    await page.waitForURL(url => new URL(url).pathname === '/api-keys')
+  }
+
+  async function enterMcp() {
+    await page.goto(`${BASE}/mcp`)
+    await waitForRoute()
+  }
+
+  async function capture(name) {
+    const path = `${screenshots}/${name}.png`
+    await page.screenshot({ path, fullPage: true })
+    report.screenshots.push(path)
+  }
+
+  function waitForResponse(method, pathname, status) {
+    return page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return response.request().method() === method && url.pathname === pathname && response.status() === status
+    }).catch(cause => {
+      throw new Error(`Timed out waiting for ${method} ${pathname} status ${status}: ${cause.message}`)
+    })
+  }
+
+  function waitForMcpPage(first, rows, status = 200) {
+    return page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return response.request().method() === 'GET' &&
+        url.pathname === '/api/v1/admin/mcp-servers' &&
+        url.searchParams.get('first') === String(first) &&
+        url.searchParams.get('rows') === String(rows) &&
+        response.status() === status
+    }).catch(cause => {
+      throw new Error(`Timed out waiting for MCP page first=${first} rows=${rows} status=${status}: ${cause.message}; requests=${JSON.stringify(mcpRequests.slice(-8))}; failures=${JSON.stringify(apiFailures.slice(-8))}`)
+    })
+  }
+
+  function latestBody(method, path) {
+    return requestBodies.findLast(item => item.method === method && item.path === path)?.body
+  }
+
+  function bodiesFor(method, path) {
+    return requestBodies.filter(item => item.method === method && item.path === path).map(item => item.body)
+  }
+
+  async function closeDialog() {
+    const dialog = page.getByRole('dialog')
+    if (await dialog.count()) {
+      const cancel = dialog.getByRole('button', { name: 'Cancel', exact: true })
+      if (await cancel.count()) await cancel.click()
+      await dialog.waitFor({ state: 'hidden' })
+    }
+  }
+
+  async function editServer(serverId) {
+    const row = page.locator(`[data-mcp-server-row="${serverId}"]`)
+    await row.waitFor({ state: 'visible' })
+    await row.getByRole('button', { name: 'Edit', exact: true }).click()
+    return page.getByRole('dialog')
+  }
+
+  async function segment(name, action) {
+    const start = new Date().toISOString()
+    await action()
+    report.segments.push({ name, startedAt: start, finishedAt: new Date().toISOString() })
+  }
+
+  await page.context().clearCookies()
+  await fixture('/__fixtures/reset', 'POST')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${BASE}/login`)
+  await page.evaluate(() => {
+    localStorage.clear()
+    localStorage.setItem('prompt-ferry:locale', 'en-US')
+    localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await page.reload()
+  const anonymousStatuses = await page.evaluate(async () => {
+    const probes = [
+      ['providers', '/api/v1/admin/mcp-providers', 'GET'],
+      ['servers', '/api/v1/admin/mcp-servers?first=0&rows=10', 'GET'],
+      ['catalog', '/api/v1/admin/mcp-servers/mcp-context7/catalog', 'GET'],
+      ['test', '/api/v1/admin/mcp-servers/mcp-context7/test', 'POST'],
+      ['unrelated-endpoints', '/api/v1/admin/endpoints', 'GET'],
+      ['unrelated-relays', '/api/v1/admin/relays', 'GET'],
+    ]
+    const results = {}
+    for (const [key, path, method] of probes) {
+      results[key] = (await fetch(path, { method })).status
+    }
+    return results
+  })
+  assert(Object.values(anonymousStatuses).every(status => status === 401), `anonymous API boundary changed: ${JSON.stringify(anonymousStatuses)}`)
+  expectedFailures.push(
+    { method: 'GET', path: '/api/v1/auth/me', status: 401 },
+    { method: 'GET', path: '/api/v1/admin/mcp-providers', status: 401 },
+    { method: 'GET', path: '/api/v1/admin/mcp-servers', status: 401 },
+    { method: 'GET', path: '/api/v1/admin/mcp-servers/mcp-context7/catalog', status: 401 },
+    { method: 'POST', path: '/api/v1/admin/mcp-servers/mcp-context7/test', status: 401 },
+    { method: 'GET', path: '/api/v1/admin/endpoints', status: 401 },
+    { method: 'GET', path: '/api/v1/admin/relays', status: 401 },
+  )
+  await signIn('operator')
+  await enterMcp()
+
+  await segment('owner-role', async () => {
+    const routeId = await page.locator('[data-foundation-route-id="R-MCP"]').getAttribute('data-foundation-route-id')
+    const navVisible = await page.locator('a[href="/mcp"]').isVisible()
+    const unrelatedDenied = await page.evaluate(async () => {
+      const endpoints = await fetch('/api/v1/admin/endpoints')
+      const relays = await fetch('/api/v1/admin/relays')
+      const unknownMcpPath = await fetch('/api/v1/admin/mcp-servers/mcp-local-everything/unknown')
+      return { endpoints: endpoints.status, relays: relays.status, unknownMcpPath: unknownMcpPath.status }
+    })
+    assert(unrelatedDenied.endpoints === 403 && unrelatedDenied.relays === 403 && unrelatedDenied.unknownMcpPath === 404, `MCP pass-through widened unrelated access or returned a false success: ${JSON.stringify(unrelatedDenied)}`)
+    expectedFailures.push(
+      { method: 'GET', path: '/api/v1/admin/endpoints', status: 403 },
+      { method: 'GET', path: '/api/v1/admin/relays', status: 403 },
+      { method: 'GET', path: '/api/v1/admin/mcp-servers/mcp-local-everything/unknown', status: 404 },
+    )
+    await page.waitForTimeout(250)
+    const rowCount = await page.locator('[data-mcp-server-row]:visible').count()
+    if (rowCount === 0) {
+      const log = (await fixture('/__fixtures/log?limit=500')).requests
+      throw new Error(`MCP user list has no rows: ${JSON.stringify({ routeId, pageText: (await page.locator('body').innerText()).slice(0, 400), requests: log.filter(request => request.path.includes('/mcp-servers') || request.path.includes('/mcp-providers')).map(({ method, path, status, query }) => ({ method, path, status, query })) })}`)
+    }
+    await page.locator('[data-mcp-server-row="mcp-local-everything"]').waitFor({ state: 'visible' })
+    const ownRows = await page.locator('[data-mcp-server-row]:visible').evaluateAll(rows => rows.map(row => row.getAttribute('data-mcp-server-row')))
+    const initialLog = (await fixture('/__fixtures/log?limit=500')).requests
+    const userOptionsCalls = initialLog.filter(request => request.path === '/api/v1/admin/users/options').length
+    const recordsCalls = initialLog.filter(request => request.path.includes('/request-records')).length
+    assert(routeId === 'R-MCP' && navVisible, 'authenticated MCP route or navigation was missing')
+    assert(ownRows.length === 1 && ownRows[0] === 'mcp-local-everything', `ordinary user list was not owner-scoped: ${JSON.stringify(ownRows)}`)
+    assert(userOptionsCalls === 0, `ordinary user requested admin user options ${userOptionsCalls} times`)
+    assert(recordsCalls === 0, 'MCP management made a request-record API call')
+
+    const catalogBefore = initialLog.filter(request => request.path === '/api/v1/admin/mcp-servers/mcp-local-everything/catalog').length
+    const disabledDialog = await editServer('mcp-local-everything')
+    await page.waitForTimeout(150)
+    assert(await disabledDialog.isVisible(), 'disabled owner server did not open in the editor')
+    await closeDialog()
+    const catalogAfter = (await fixture('/__fixtures/log?limit=500')).requests.filter(request => request.path === '/api/v1/admin/mcp-servers/mcp-local-everything/catalog').length
+    assert(catalogAfter === catalogBefore, 'opening a disabled MCP editor requested its catalog')
+    const disabledCatalogResponse = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/admin/mcp-servers/mcp-local-everything/catalog')
+      const body = await response.json()
+      return { status: response.status, body }
+    })
+    assert(disabledCatalogResponse.status === 200 && disabledCatalogResponse.body.tools.length === 0 && disabledCatalogResponse.body.resources.length === 0 && disabledCatalogResponse.body.prompts.length === 0, 'disabled MCP catalog did not return empty arrays')
+    const disabledTestPath = '/api/v1/admin/mcp-servers/mcp-local-everything/test'
+    const disabledTestResponse = waitForResponse('POST', disabledTestPath, 200)
+    await page.locator('[data-mcp-server-row="mcp-local-everything"]').getByRole('button', { name: 'Refresh catalog', exact: true }).click()
+    const disabledTest = await (await disabledTestResponse).json()
+    await page.locator('[data-mcp-server-row="mcp-local-everything"]').getByRole('button', { name: 'mcp server is disabled', exact: true }).waitFor({ state: 'visible' })
+    assert(disabledTest.ok === false && disabledTest.tools.length === 0 && disabledTest.resources.length === 0 && disabledTest.prompts.length === 0, 'disabled MCP test did not return a false result with empty arrays')
+
+    const denied = await page.evaluate(async () => {
+      const catalog = await fetch('/api/v1/admin/mcp-servers/mcp-context7/catalog')
+      const test = await fetch('/api/v1/admin/mcp-servers/mcp-context7/test', { method: 'POST' })
+      const update = await fetch('/api/v1/admin/mcp-servers/mcp-context7', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'blocked foreign write', transport: 'http' }),
+      })
+      return { catalog: catalog.status, test: test.status, update: update.status }
+    })
+    assert(denied.catalog === 404 && denied.test === 404 && denied.update === 404, `foreign MCP access was not denied: ${JSON.stringify(denied)}`)
+    expectedFailures.push(
+      { method: 'GET', path: '/api/v1/admin/mcp-servers/mcp-context7/catalog', status: 404 },
+      { method: 'POST', path: '/api/v1/admin/mcp-servers/mcp-context7/test', status: 404 },
+      { method: 'PATCH', path: '/api/v1/admin/mcp-servers/mcp-context7', status: 404 },
+    )
+
+    await page.getByRole('button', { name: 'New MCP', exact: true }).click()
+    let dialog = page.getByRole('dialog')
+    await dialog.waitFor({ state: 'visible' })
+    await dialog.getByRole('textbox', { name: 'Name' }).fill('Operator-owned MCP With A Long Name')
+    await dialog.getByRole('textbox', { name: 'Endpoint' }).fill(' https://operator.example.test/mcp ')
+    const createResponse = waitForResponse('POST', '/api/v1/admin/mcp-servers', 200)
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    const created = await (await createResponse).json()
+    await dialog.waitFor({ state: 'hidden' })
+    const userCreatedRow = page.locator(`[data-mcp-server-row="${created.server_id}"]`)
+    await userCreatedRow.waitFor({ state: 'visible' })
+    await userCreatedRow.getByRole('button', { name: 'Edit', exact: true }).click()
+    dialog = page.getByRole('dialog')
+    await dialog.getByRole('textbox', { name: 'Name' }).fill('Operator-owned MCP Updated')
+    const updatePath = `/api/v1/admin/mcp-servers/${created.server_id}`
+    const updateResponse = waitForResponse('PATCH', updatePath, 200)
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    await updateResponse
+    await dialog.waitFor({ state: 'hidden' })
+    await page.getByText('Operator-owned MCP Updated', { exact: true }).waitFor({ state: 'visible' })
+    const createBody = bodiesFor('POST', '/api/v1/admin/mcp-servers').at(-1)
+    const updateBody = latestBody('PATCH', updatePath)
+    assert(createBody?.scope === 'user' && createBody?.owner_user_id === 2, 'ordinary user create did not force caller ownership')
+    assert(updateBody?.scope === 'user' && updateBody?.owner_user_id === 2, 'ordinary user update did not force caller ownership')
+    report.checks.ownerRole = {
+      routeId,
+      navVisible,
+      ownRows: ownRows.length,
+      foreignStatuses: denied,
+      anonymousStatuses,
+      unrelatedAdminStatuses: unrelatedDenied,
+      disabledCatalogNotFetched: catalogAfter === catalogBefore,
+      disabledCatalogEmpty: disabledCatalogResponse.body.tools.length === 0 && disabledCatalogResponse.body.resources.length === 0 && disabledCatalogResponse.body.prompts.length === 0,
+      disabledTestFalse: disabledTest.ok === false && disabledTest.tools.length === 0 && disabledTest.resources.length === 0 && disabledTest.prompts.length === 0,
+      adminUserOptionsCalls: userOptionsCalls,
+      recordsCalls,
+      createOwner: createBody?.owner_user_id,
+      updateOwner: updateBody?.owner_user_id,
+      createScope: createBody?.scope,
+      updateScope: updateBody?.scope,
+    }
+  })
+
+  await fixture('/__fixtures/reset', 'POST')
+  await page.context().clearCookies()
+  await page.goto(`${BASE}/login`)
+  await page.evaluate(() => {
+    localStorage.clear()
+    localStorage.setItem('prompt-ferry:locale', 'en-US')
+    localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await page.reload()
+  await signIn('admin')
+  await enterMcp()
+
+  await segment('admin-paging-delete', async () => {
+    await page.locator('[data-mcp-server-row="mcp-context7"]').waitFor({ state: 'visible' })
+    const navVisible = await page.locator('a[href="/mcp"]').isVisible()
+    const initialIds = await page.locator('[data-mcp-server-row]:visible').evaluateAll(rows => rows.map(row => row.getAttribute('data-mcp-server-row')))
+    const firstQuery = (await fixture('/__fixtures/log?limit=500')).requests.findLast(request => request.method === 'GET' && request.path === '/api/v1/admin/mcp-servers' && request.status === 200 && request.query.first === '0')
+    const userOptionsRead = (await fixture('/__fixtures/log?limit=500')).requests.some(request => request.method === 'GET' && request.path === '/api/v1/admin/users/options' && request.status === 200)
+    assert(navVisible, 'admin MCP navigation was missing')
+    assert(initialIds.length === 10 && new Set(initialIds).size === 10, `admin first MCP page was not ten distinct rows: ${JSON.stringify(initialIds)}`)
+    assert(firstQuery?.query.rows === '10', 'admin MCP first page did not request rows=10')
+    assert(userOptionsRead, 'admin MCP owner options were not requested')
+
+    const secondPageResponse = waitForMcpPage(10, 10)
+    await page.getByRole('button', { name: 'Next page', exact: true }).click()
+    await secondPageResponse
+    await page.locator('[data-mcp-server-row="mcp-fixture-10"]').waitFor({ state: 'visible' })
+    const secondIds = await page.locator('[data-mcp-server-row]:visible').evaluateAll(rows => rows.map(row => row.getAttribute('data-mcp-server-row')))
+    assert(secondIds.length === 2 && new Set(secondIds).size === 2, `MCP last page did not contain two distinct rows: ${JSON.stringify(secondIds)}`)
+
+    const nativeConfirmAvailable = await page.evaluate(() => typeof window.confirm === 'function')
+    assert(nativeConfirmAvailable, 'browser native confirm API was unavailable')
+    await page.evaluate(() => {
+      window.__mcpConfirmMessages = []
+      window.__mcpConfirmResult = false
+      window.confirm = message => {
+        window.__mcpConfirmMessages.push(message)
+        return window.__mcpConfirmResult
+      }
+    })
+    let deleteCalls = mcpRequests.filter(request => request.method === 'DELETE').length
+    await page.locator('[data-mcp-server-row="mcp-fixture-9"]').getByRole('button', { name: 'Delete', exact: true }).click()
+    const cancelMessage = await page.evaluate(() => window.__mcpConfirmMessages.at(-1))
+    assert(cancelMessage.includes('Fixture MCP Server 9'), 'native confirm did not name the cancelled MCP row')
+    await page.waitForTimeout(100)
+    assert(mcpRequests.filter(request => request.method === 'DELETE').length === deleteCalls, 'cancelled MCP delete sent a request')
+
+    await page.evaluate(() => { window.__mcpConfirmResult = true })
+    let response = waitForResponse('DELETE', '/api/v1/admin/mcp-servers/mcp-fixture-9', 204)
+    await page.locator('[data-mcp-server-row="mcp-fixture-9"]').getByRole('button', { name: 'Delete', exact: true }).click()
+    const acceptedMessage = await page.evaluate(() => window.__mcpConfirmMessages.at(-1))
+    assert(acceptedMessage.includes('Fixture MCP Server 9'), 'native confirm did not name the deleted MCP row')
+    await response
+    await page.locator('[data-mcp-server-row="mcp-fixture-9"]').waitFor({ state: 'hidden' })
+    deleteCalls += 1
+
+    const emptyLastPage = waitForMcpPage(10, 10)
+    const correctionFetch = waitForMcpPage(0, 10)
+    response = waitForResponse('DELETE', '/api/v1/admin/mcp-servers/mcp-fixture-10', 204)
+    await page.locator('[data-mcp-server-row="mcp-fixture-10"]').getByRole('button', { name: 'Delete', exact: true }).click()
+    const finalDeleteMessage = await page.evaluate(() => window.__mcpConfirmMessages.at(-1))
+    assert(finalDeleteMessage.includes('Fixture MCP Server 10'), 'native confirm did not name the final MCP row')
+    await response
+    await emptyLastPage
+    await correctionFetch
+    await page.locator('[data-mcp-server-row="mcp-context7"]').waitFor({ state: 'visible' })
+    const correctedIds = await page.locator('[data-mcp-server-row]:visible').evaluateAll(rows => rows.map(row => row.getAttribute('data-mcp-server-row')))
+    assert(correctedIds.length === 10 && correctedIds[0] === 'mcp-context7', 'out-of-range MCP page was not corrected to the last valid page')
+
+    const pageSize20Response = waitForMcpPage(0, 20)
+    await page.getByLabel('Rows per page').click()
+    await page.getByRole('option', { name: '20', exact: true }).click()
+    await pageSize20Response
+    const persistedSize = await page.evaluate(() => localStorage.getItem('prompt-ferry:table-page-size:mcp-servers'))
+    assert(persistedSize === '20', `MCP page size did not persist: ${persistedSize}`)
+    report.checks.pagination = {
+      initialRows: initialIds.length,
+      firstPageIds: initialIds,
+      secondPageRows: secondIds.length,
+      secondPageIds: secondIds,
+      lastPageCorrection: correctedIds.length === 10,
+      deleteCancelledWrites: 0,
+      deleteSuccesses: deleteCalls + 1,
+      nativeConfirmApi: nativeConfirmAvailable,
+      pageSizePersistence: persistedSize === '20',
+      adminUserOptionsRead: userOptionsRead,
+    }
+    const pageSize10Response = waitForMcpPage(0, 10)
+    await page.getByLabel('Rows per page').click()
+    await page.getByRole('option', { name: '10', exact: true }).click()
+    await pageSize10Response
+    await capture('mcp-admin-en-light-1440')
+  })
+
+  await segment('catalog-editor', async () => {
+    const catalogPath = '/api/v1/admin/mcp-servers/mcp-context7/catalog'
+    const firstCatalog = waitForResponse('GET', catalogPath, 200)
+    let dialog = await editServer('mcp-context7')
+    await firstCatalog
+    await dialog.getByRole('button', { name: 'Select tools to disable' }).waitFor({ state: 'visible' })
+    const initialCatalogCalls = mcpRequests.filter(request => request.method === 'GET' && request.path === catalogPath).length
+    await closeDialog()
+
+    const pageRefresh = waitForMcpPage(0, 10)
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+    await pageRefresh
+    dialog = await editServer('mcp-context7')
+    await dialog.getByRole('button', { name: 'Select tools to disable' }).waitFor({ state: 'visible' })
+    const afterRefreshCatalogCalls = mcpRequests.filter(request => request.method === 'GET' && request.path === catalogPath).length
+    assert(afterRefreshCatalogCalls === initialCatalogCalls, 'MCP page refresh cleared the server catalog cache')
+
+    await dialog.getByRole('combobox', { name: 'Tool filter mode' }).click()
+    await page.getByRole('option', { name: 'Whitelist', exact: true }).click()
+    const allowedToolsButton = dialog.getByRole('button', { name: 'Select tools to allow' })
+    await allowedToolsButton.click()
+    const search = dialog.getByRole('textbox', { name: 'Filter Select tools to allow' })
+    await search.fill('fixture-tool-09')
+    const searchedTool = dialog.locator('label').filter({ hasText: 'fixture-tool-09' })
+    await searchedTool.waitFor({ state: 'visible' })
+    await searchedTool.click()
+    await dialog.getByRole('combobox', { name: 'Tool filter mode' }).click()
+    await page.getByRole('option', { name: 'Blacklist', exact: true }).click()
+    await dialog.getByRole('button', { name: 'Select tools to disable' }).waitFor({ state: 'visible' })
+    await dialog.getByRole('combobox', { name: 'Tool filter mode' }).click()
+    await page.getByRole('option', { name: 'Whitelist', exact: true }).click()
+    assert(await dialog.getByText('legacy-tool', { exact: true }).count() > 0, 'missing-catalog selection was lost when changing tool-filter mode')
+
+    await dialog.getByRole('combobox', { name: 'Pinned protocol version (optional)' }).click()
+    await page.getByRole('option', { name: 'Automatic (negotiated)', exact: true }).click()
+    assert(await dialog.getByRole('textbox', { name: 'HTTP headers' }).count() === 0, 'HTTP header controls were added to the MCP form')
+    assert(await dialog.getByRole('textbox', { name: 'Timeout' }).count() === 0, 'timeout control was added to the MCP form')
+    await capture('mcp-hosted-editor-en-light-1440')
+    const autoSave = waitForResponse('PATCH', '/api/v1/admin/mcp-servers/mcp-context7', 200)
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    await autoSave
+    await dialog.waitFor({ state: 'hidden' })
+    const autoBody = latestBody('PATCH', '/api/v1/admin/mcp-servers/mcp-context7')
+    assert(autoBody?.lifecycle_manual_protocol_version === '', 'automatic protocol version did not serialize as the mapper sentinel')
+    assert(autoBody?.timeout_ms === 27123, 'hidden timeout value was not preserved')
+    assert(autoBody?.http_headers_json?.['X-Fixture-Hidden'] === 'round-trip', 'hidden HTTP headers were not preserved')
+    assert(autoBody?.tool_filter_mode === 'whitelist', 'tool-filter mode did not round-trip')
+    assert(autoBody?.allowed_tools?.includes('fixture-tool-09'), 'whitelist selection did not include the chosen catalog tool')
+    assert(autoBody?.allowed_tools?.includes('legacy-tool'), 'whitelist selection dropped a name not in the current catalog')
+    assert(autoBody?.disabled_tools?.includes('legacy-blocked-tool'), 'switching tool-filter modes lost the inactive list')
+
+    const cacheAfterSave = mcpRequests.filter(request => request.method === 'GET' && request.path === catalogPath).length
+    const reloadCatalog = waitForResponse('GET', catalogPath, 200)
+    dialog = await editServer('mcp-context7')
+    await reloadCatalog
+    await dialog.getByRole('combobox', { name: 'Pinned protocol version (optional)' }).click()
+    await page.getByRole('option', { name: '2025-06-18', exact: true }).click()
+    const explicitSave = waitForResponse('PATCH', '/api/v1/admin/mcp-servers/mcp-context7', 200)
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    await explicitSave
+    await dialog.waitFor({ state: 'hidden' })
+    const explicitBody = latestBody('PATCH', '/api/v1/admin/mcp-servers/mcp-context7')
+    assert(explicitBody?.lifecycle_manual_protocol_version === '2025-06-18', 'explicit lifecycle protocol version did not round-trip')
+    const invalidatedCacheCalls = mcpRequests.filter(request => request.method === 'GET' && request.path === catalogPath).length
+    assert(invalidatedCacheCalls === cacheAfterSave + 1, 'saving an MCP server did not invalidate only its catalog cache')
+    report.checks.catalogEditor = {
+      firstCatalogCalls: initialCatalogCalls,
+      unchangedAfterRefresh: afterRefreshCatalogCalls === initialCatalogCalls,
+      invalidatedOnSave: invalidatedCacheCalls === cacheAfterSave + 1,
+      searchableTools: true,
+      missingCatalogChipPreserved: true,
+      filterModeRoundTrip: true,
+      automaticProtocolSentinel: autoBody?.lifecycle_manual_protocol_version === '',
+      explicitProtocolRoundTrip: explicitBody?.lifecycle_manual_protocol_version === '2025-06-18',
+      hiddenHeaderPreserved: autoBody?.http_headers_json?.['X-Fixture-Hidden'] === 'round-trip',
+      hiddenTimeoutPreserved: autoBody?.timeout_ms === 27123,
+      hiddenControlsAbsent: true,
+    }
+  })
+
+  await segment('guarded-mutations', async () => {
+    const testPath = '/api/v1/admin/mcp-servers/mcp-context7/test'
+    const listCallsBeforeTest = mcpRequests.filter(request => request.method === 'GET' && request.path === '/api/v1/admin/mcp-servers').length
+    const contextRow = page.locator('[data-mcp-server-row="mcp-context7"]')
+    const testResponse = waitForResponse('POST', testPath, 200)
+    await contextRow.getByRole('button', { name: 'Refresh catalog', exact: true }).click()
+    const testResult = await (await testResponse).json()
+    await contextRow.getByRole('button', { name: testResult.message, exact: true }).waitFor({ state: 'visible' })
+    const listCallsAfterTest = mcpRequests.filter(request => request.method === 'GET' && request.path === '/api/v1/admin/mcp-servers').length
+    assert(testResult.ok === true && testResult.tool_count === testResult.tools.length && testResult.tools.length === 10, 'MCP test did not return the fixture catalog arrays')
+    assert(listCallsAfterTest === listCallsBeforeTest, 'MCP test refreshed the server list')
+
+    const catalogPath = '/api/v1/admin/mcp-servers/mcp-context7/catalog'
+    const catalogCallsBeforeTestEdit = mcpRequests.filter(request => request.method === 'GET' && request.path === catalogPath).length
+    let dialog = await editServer('mcp-context7')
+    await dialog.getByText('fixture-lookup', { exact: true }).waitFor({ state: 'visible' })
+    const catalogCallsAfterTestEdit = mcpRequests.filter(request => request.method === 'GET' && request.path === catalogPath).length
+    assert(catalogCallsAfterTestEdit === catalogCallsBeforeTestEdit, 'test result did not prime the catalog cache')
+    await closeDialog()
+
+    const toggleId = 'mcp-fixture-1'
+    const togglePath = `/api/v1/admin/mcp-servers/${toggleId}`
+    const toggleWritesBefore = mcpRequests.filter(request => request.method === 'PATCH' && request.path === togglePath).length
+    await fixture('/__fixtures/faults', 'POST', { pathPrefix: togglePath, method: 'PATCH', status: 200, delayMs: 650 })
+    await fixture('/__fixtures/faults', 'POST', { pathPrefix: '/api/v1/admin/mcp-servers', method: 'GET', status: 200, delayMs: 450 })
+    const toggleRow = page.locator(`[data-mcp-server-row="${toggleId}"]`)
+    const toggleResponse = waitForResponse('PATCH', togglePath, 200)
+    const refreshingPage = waitForMcpPage(0, 10)
+    const toggleSwitch = toggleRow.getByRole('switch', { name: 'Status' })
+    const toggleRequestStarted = page.waitForRequest(request => request.method() === 'PATCH' && new URL(request.url()).pathname === togglePath)
+    await toggleSwitch.click()
+    await toggleRequestStarted
+    assert(await toggleSwitch.isDisabled(), 'MCP toggle did not disable its switch while saving')
+    assert(await toggleRow.getByRole('button', { name: 'Edit', exact: true }).isDisabled(), 'MCP toggle did not gate same-row edit')
+    assert(await toggleRow.getByRole('button', { name: 'Delete', exact: true }).isDisabled(), 'MCP toggle did not gate same-row delete')
+    const otherRowSwitch = page.locator('[data-mcp-server-row="mcp-fixture-2"]').getByRole('switch', { name: 'Status' })
+    assert(await otherRowSwitch.isEnabled(), 'MCP write gate blocked another server row')
+    const sameRowTest = toggleRow.getByRole('button', { name: 'Refresh catalog', exact: true })
+    assert(await sameRowTest.isEnabled(), 'MCP write gate blocked the independent same-server probe')
+    const independentTestResponse = waitForResponse('POST', `/api/v1/admin/mcp-servers/${toggleId}/test`, 200)
+    await sameRowTest.click()
+    await independentTestResponse
+    await toggleRow.getByRole('button', { name: 'fixture MCP handshake succeeded', exact: true }).waitFor({ state: 'visible' })
+    await toggleResponse
+    await refreshingPage
+    await toggleRow.getByRole('switch', { name: 'Status' }).waitFor({ state: 'visible' })
+    await page.waitForFunction(id => {
+      const row = document.querySelector(`[data-mcp-server-row="${id}"]`)
+      return row?.querySelector('[role="switch"]')?.getAttribute('data-state') === 'unchecked'
+    }, toggleId)
+    const toggleWritesAfter = mcpRequests.filter(request => request.method === 'PATCH' && request.path === togglePath).length
+    assert(toggleWritesAfter === toggleWritesBefore + 1, 'one MCP toggle triggered more than one write')
+    report.checks.toggleAndIndependentProbe = {
+      sameRowWriteControlsGated: true,
+      singleWrite: toggleWritesAfter === toggleWritesBefore + 1,
+      otherRowAvailable: true,
+      independentProbeAvailable: true,
+      probeResultRendered: true,
+      listCallsUnchangedByProbe: listCallsAfterTest === listCallsBeforeTest,
+      guardHeldThroughRefresh: true,
+      toggled: true,
+    }
+
+    const failurePath = '/api/v1/admin/mcp-servers/mcp-context7'
+    dialog = await editServer('mcp-context7')
+    const draftName = 'MCP Failure Draft Preserved After Retry With A Long Name'
+    await dialog.getByRole('textbox', { name: 'Name' }).fill(draftName)
+    await fixture('/__fixtures/faults', 'POST', {
+      pathPrefix: failurePath,
+      method: 'PATCH',
+      status: 503,
+      code: 'fixture_mcp_update_unavailable',
+      message: 'fixture MCP update failure',
+      delayMs: 350,
+    })
+    const failureResponse = waitForResponse('PATCH', failurePath, 503)
+    const failureRequestStarted = page.waitForRequest(request => request.method() === 'PATCH' && new URL(request.url()).pathname === failurePath)
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    await failureRequestStarted
+    assert(await dialog.getByRole('button', { name: 'Cancel', exact: true }).isDisabled(), 'pending MCP save allowed dialog cancellation')
+    assert(await dialog.getByRole('button', { name: 'Save', exact: true }).isDisabled(), 'pending MCP save did not disable save')
+    await failureResponse
+    expectedFailures.push({ method: 'PATCH', path: failurePath, status: 503 })
+    assert(await dialog.getByRole('textbox', { name: 'Name' }).inputValue() === draftName, 'failed MCP update discarded the draft')
+    await page.getByText('fixture MCP update failure', { exact: false }).waitFor({ state: 'visible' })
+    const failedBody = bodiesFor('PATCH', failurePath).at(-1)
+    const retryResponse = waitForResponse('PATCH', failurePath, 200)
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    await retryResponse
+    await dialog.waitFor({ state: 'hidden' })
+    const retriedBody = bodiesFor('PATCH', failurePath).at(-1)
+    assert(JSON.stringify(failedBody) === JSON.stringify(retriedBody), 'MCP retry did not resend the same captured request body')
+    assert(await page.getByText(draftName, { exact: true }).isVisible(), 'successful MCP retry did not refresh the edited row')
+    const secretsMasked = await page.evaluate(() => {
+      const passwordInputs = [...document.querySelectorAll('input[type="password"]')]
+      return passwordInputs.length === 0 || passwordInputs.every(input => input.type === 'password')
+    })
+    assert(secretsMasked, 'an MCP password was visible as plaintext')
+    const retryHasFixtureBearer = retriedBody?.bearer_tokens?.some(token => token.enabled && token.token === fixtureTokens.context7) === true
+    report.checks.failureDraftRetry = {
+      pendingSaveGatesDialog: true,
+      draftRetained: true,
+      sameBodyRetry: true,
+      retryStatus: 200,
+      savedTokenPresent: retryHasFixtureBearer,
+      hiddenHeaderPreserved: retriedBody?.http_headers_json?.['X-Fixture-Hidden'] === 'round-trip',
+      hiddenTimeoutPreserved: retriedBody?.timeout_ms === 27123,
+      secretsMasked,
+    }
+  })
+
+  await segment('create-secrets-responsive', async () => {
+    await page.getByRole('button', { name: 'New MCP', exact: true }).click()
+    let dialog = page.getByRole('dialog')
+    await dialog.waitFor({ state: 'visible' })
+    await dialog.getByRole('textbox', { name: 'Name' }).fill('Hosted Context7 MCP Created With A Deliberately Long Name')
+    await dialog.getByRole('combobox', { name: 'Provider' }).click()
+    const providerChoices = await page.getByRole('option').allTextContents()
+    assert(providerChoices.includes('Generic') && providerChoices.includes('Context7') && providerChoices.includes('Firecrawl') && !providerChoices.includes('MiniMax'), `HTTP provider choices did not match the registry: ${JSON.stringify(providerChoices)}`)
+    await page.getByRole('option', { name: 'Context7', exact: true }).click()
+    await dialog.getByRole('combobox', { name: 'Scope' }).click()
+    await page.getByRole('option', { name: 'Private', exact: true }).click()
+    await dialog.getByRole('combobox', { name: 'Select user' }).click()
+    await page.getByRole('option', { name: /operator.*Fixture Operator/ }).click()
+    await dialog.getByRole('button', { name: 'Add token', exact: true }).click()
+    const hostedTokenInput = dialog.getByRole('textbox', { name: 'Bearer tokens 1' })
+    await hostedTokenInput.fill(fixtureTokens.primaryHosted)
+    assert(await hostedTokenInput.getAttribute('type') === 'password', 'hosted bearer token input was not masked')
+    await dialog.getByRole('button', { name: 'Add token', exact: true }).click()
+    const secondHostedTokenInput = dialog.getByRole('textbox', { name: 'Bearer tokens 2' })
+    const secondTokenCount = await secondHostedTokenInput.count()
+    if (secondTokenCount !== 1) {
+      const inputs = await dialog.locator('input').evaluateAll(elements => elements.map(input => ({ name: input.getAttribute('aria-label'), type: input.type, value: input.value })))
+      throw new Error(`adding a second bearer token failed: ${JSON.stringify({ dialogText: (await dialog.innerText()).slice(-400), inputs })}`)
+    }
+    await secondHostedTokenInput.fill(fixtureTokens.createdHosted)
+    const secondTokenMasked = await secondHostedTokenInput.getAttribute('type') === 'password'
+    const firstTokenSwitch = dialog.getByRole('switch', { name: 'Status Bearer tokens 1' })
+    const secondTokenSwitch = dialog.getByRole('switch', { name: 'Status Bearer tokens 2' })
+    assert(await firstTokenSwitch.isEnabled(), 'adding an alternate token did not unlock the active token gate')
+    await firstTokenSwitch.click()
+    assert(await secondTokenSwitch.isDisabled(), 'the last enabled bearer token could still be disabled')
+    await dialog.getByRole('button', { name: 'Delete Bearer tokens 1', exact: true }).click()
+    assert(await dialog.getByRole('switch', { name: 'Status Bearer tokens 1' }).isDisabled(), 'removing a redundant token lost the last-enabled gate')
+    assert(await dialog.getByRole('textbox', { name: 'Endpoint' }).count() === 0, 'hosted provider URL was not pinned')
+    assert(await dialog.getByRole('combobox', { name: 'Auth mode' }).count() === 0, 'hosted provider bearer mode was editable')
+    assert(await dialog.getByRole('switch', { name: 'Status Bearer tokens 1' }).isDisabled(), 'last enabled bearer token could be disabled')
+    await capture('mcp-hosted-create-en-light-1440')
+    const hostedCreate = waitForResponse('POST', '/api/v1/admin/mcp-servers', 200)
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    const hostedResponse = await (await hostedCreate).json()
+    await dialog.waitFor({ state: 'hidden' })
+    const hostedRow = page.locator(`[data-mcp-server-row="${hostedResponse.server_id}"]`)
+    const hostedPage = waitForMcpPage(10, 10)
+    await page.getByRole('button', { name: 'Next page', exact: true }).click()
+    await hostedPage
+    const hostedPageIds = await page.locator('[data-mcp-server-row]:visible').evaluateAll(rows => rows.map(row => row.getAttribute('data-mcp-server-row')))
+    if (!hostedPageIds.includes(hostedResponse.server_id)) {
+      const listLog = (await fixture('/__fixtures/log?limit=500')).requests.filter(request => request.path === '/api/v1/admin/mcp-servers' && request.method === 'GET').map(({ query, status, body }) => ({ query, status, body }))
+      throw new Error(`created hosted MCP was absent from page two: ${JSON.stringify({ serverId: hostedResponse.server_id, hostedPageIds, listLog: listLog.slice(-5), pageText: (await page.locator('body').innerText()).slice(-250) })}`)
+    }
+    await hostedRow.waitFor({ state: 'visible' })
+    const hostedBody = bodiesFor('POST', '/api/v1/admin/mcp-servers').at(-1)
+    assert(hostedBody?.scope === 'user' && hostedBody?.owner_user_id === 2, 'admin-created private MCP did not use the selected owner')
+    assert(hostedBody?.provider_kind === 'context7' && hostedBody?.url === 'https://mcp.context7.com/mcp', 'hosted provider preset did not pin its URL')
+    assert(hostedBody?.auth_mode === 'bearer' && hostedBody?.bearer_tokens?.some(token => token.token === fixtureTokens.createdHosted), 'hosted provider did not preserve bearer authentication')
+
+    await page.getByRole('button', { name: 'New MCP', exact: true }).click()
+    dialog = page.getByRole('dialog')
+    await dialog.getByRole('textbox', { name: 'Name' }).fill('Fixture Basic Auth MCP')
+    await dialog.getByRole('textbox', { name: 'Endpoint' }).fill('https://basic.example.test/mcp')
+    await dialog.getByRole('combobox', { name: 'Auth mode' }).click()
+    await page.getByRole('option', { name: 'Basic', exact: true }).click()
+    await dialog.getByRole('textbox', { name: 'username' }).fill('fixture-basic-user')
+    const basicPassword = dialog.getByRole('textbox', { name: 'password' })
+    await basicPassword.fill(fixtureTokens.basic)
+    assert(await basicPassword.getAttribute('type') === 'password', 'Basic password input was not masked')
+    const basicCreate = waitForResponse('POST', '/api/v1/admin/mcp-servers', 200)
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    const basicResponse = await (await basicCreate).json()
+    await dialog.waitFor({ state: 'hidden' })
+    const basicRow = page.locator(`[data-mcp-server-row="${basicResponse.server_id}"]`)
+    await basicRow.waitFor({ state: 'visible' })
+    let basicBody = bodiesFor('POST', '/api/v1/admin/mcp-servers').at(-1)
+    assert(basicBody?.basic_username === 'fixture-basic-user' && basicBody?.basic_password === fixtureTokens.basic, 'Basic credentials were not sent on create')
+
+    dialog = await editServer(basicResponse.server_id)
+    const savedBasicPassword = dialog.getByRole('textbox', { name: 'password' })
+    assert(await savedBasicPassword.getAttribute('type') === 'password', 'saved Basic password input was not masked')
+    assert(await savedBasicPassword.inputValue() === '', 'saved Basic password was echoed into the editor')
+    const keepBasic = waitForResponse('PATCH', `/api/v1/admin/mcp-servers/${basicResponse.server_id}`, 200)
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    await keepBasic
+    await dialog.waitFor({ state: 'hidden' })
+    basicBody = bodiesFor('PATCH', `/api/v1/admin/mcp-servers/${basicResponse.server_id}`).at(-1)
+    const basicPasswordKept = basicBody?.basic_password === ''
+    assert(basicPasswordKept, 'blank saved Basic password did not use keep semantics')
+
+    dialog = await editServer(basicResponse.server_id)
+    await dialog.getByRole('textbox', { name: 'password' }).fill(fixtureTokens.replacement)
+    const replaceBasic = waitForResponse('PATCH', `/api/v1/admin/mcp-servers/${basicResponse.server_id}`, 200)
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    await replaceBasic
+    await dialog.waitFor({ state: 'hidden' })
+    basicBody = bodiesFor('PATCH', `/api/v1/admin/mcp-servers/${basicResponse.server_id}`).at(-1)
+    assert(basicBody?.basic_password === fixtureTokens.replacement, 'Basic password replacement was not sent')
+
+    const firstAdminPage = waitForMcpPage(0, 10)
+    await page.getByRole('button', { name: 'Previous page', exact: true }).click()
+    await firstAdminPage
+    const proxyId = 'mcp-fixture-1'
+    const proxyPath = `/api/v1/admin/mcp-servers/${proxyId}`
+    dialog = await editServer(proxyId)
+    await dialog.getByRole('button', { name: 'Proxy URL', exact: true }).click()
+    const keptProxy = waitForResponse('PATCH', proxyPath, 200)
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    await keptProxy
+    await dialog.waitFor({ state: 'hidden' })
+    const keepProxyBody = latestBody('PATCH', proxyPath)
+    assert(keepProxyBody && !Object.hasOwn(keepProxyBody, 'proxy_url'), 'unchanged saved proxy did not use keep semantics')
+
+    dialog = await editServer(proxyId)
+    await dialog.getByRole('button', { name: 'Proxy URL', exact: true }).click()
+    await dialog.getByRole('combobox', { name: 'Proxy scheme' }).click()
+    await page.getByRole('option', { name: 'Direct (no proxy)', exact: true }).click()
+    const clearProxy = waitForResponse('PATCH', proxyPath, 200)
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    await clearProxy
+    await dialog.waitFor({ state: 'hidden' })
+    const clearProxyBody = latestBody('PATCH', proxyPath)
+    assert(clearProxyBody?.proxy_url === '', 'direct proxy selection did not clear the saved proxy')
+
+    dialog = await editServer(proxyId)
+    await dialog.getByRole('button', { name: 'Proxy URL', exact: true }).click()
+    await dialog.getByRole('combobox', { name: 'Proxy scheme' }).click()
+    await page.getByRole('option', { name: 'http', exact: true }).click()
+    await dialog.getByRole('textbox', { name: 'Proxy address' }).fill('proxy.local:7890')
+    const replaceProxy = waitForResponse('PATCH', proxyPath, 200)
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    await replaceProxy
+    await dialog.waitFor({ state: 'hidden' })
+    const replaceProxyBody = latestBody('PATCH', proxyPath)
+    assert(replaceProxyBody?.proxy_url === 'http://proxy.local:7890', 'proxy replacement did not preserve the selected scheme')
+
+    report.checks.createDialog = {
+      hostedCreated: hostedResponse.server_id,
+      privateOwner: hostedBody?.owner_user_id,
+      providerRegistryChoices: providerChoices,
+      hostedProviderPinned: hostedBody?.provider_kind === 'context7' && hostedBody?.url === 'https://mcp.context7.com/mcp',
+      hostedBearerPresent: hostedBody?.bearer_tokens?.some(token => token.token === fixtureTokens.createdHosted) === true,
+      bearerMasked: secondTokenMasked,
+      bearerAddRemove: true,
+      lastEnabledTokenGate: true,
+      basicCreated: Boolean(basicResponse.server_id),
+      basicPasswordMasked: true,
+      basicPasswordNotEchoed: true,
+      basicKeep: basicPasswordKept,
+      basicReplacement: true,
+      proxyKeep: keepProxyBody && !Object.hasOwn(keepProxyBody, 'proxy_url'),
+      proxyClear: clearProxyBody?.proxy_url === '',
+      proxyReplacement: replaceProxyBody?.proxy_url === 'http://proxy.local:7890',
+    }
+
+    const localRow = page.locator('[data-mcp-server-row="mcp-local-everything"]')
+    await localRow.getByRole('button', { name: 'Edit', exact: true }).click()
+    dialog = page.getByRole('dialog')
+    await dialog.getByRole('textbox', { name: 'Variable name 1' }).waitFor({ state: 'visible' })
+    const directSecret = dialog.getByRole('textbox', { name: 'Value 1' })
+    assert(await directSecret.getAttribute('type') === 'password', 'saved stdio direct value was not masked')
+    assert(await directSecret.inputValue() === '', 'saved stdio direct value was echoed')
+    await dialog.getByRole('button', { name: 'Add variable', exact: true }).click()
+    await dialog.getByRole('textbox', { name: 'Variable name 3' }).fill('NEW_WORKER_VALUE')
+    await dialog.getByRole('combobox', { name: 'Source 3' }).click()
+    await page.getByRole('option', { name: 'Worker environment', exact: true }).click()
+    const patchCountBeforeInvalidEnv = mcpRequests.filter(request => request.method === 'PATCH' && request.path === '/api/v1/admin/mcp-servers/mcp-local-everything').length
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    await page.getByText('requires a Worker variable name', { exact: false }).waitFor({ state: 'visible' })
+    assert(await dialog.isVisible(), 'invalid stdio environment draft was closed')
+    assert(mcpRequests.filter(request => request.method === 'PATCH' && request.path === '/api/v1/admin/mcp-servers/mcp-local-everything').length === patchCountBeforeInvalidEnv, 'invalid stdio environment sent a write')
+    await dialog.getByRole('textbox', { name: 'Value 3' }).fill('FIXTURE_NEW_WORKER_VALUE')
+    await page.setViewportSize({ width: 390, height: 844 })
+    const commandInput = dialog.getByRole('textbox', { name: /Use a JSON array/ })
+    await commandInput.scrollIntoViewIfNeeded()
+    const commandValue = await commandInput.inputValue()
+    const commandBox = await commandInput.boundingBox()
+    assert(commandValue.length > 40, 'stdio fixture command was not a long-value case')
+    assert(commandBox && commandBox.x >= 0 && commandBox.x + commandBox.width <= 390, 'long MCP command field escaped the mobile dialog')
+    const nameBox = await dialog.getByRole('textbox', { name: 'Name', exact: true }).boundingBox()
+    assert(nameBox && nameBox.x >= 0 && nameBox.x + nameBox.width <= 390, 'long MCP name field escaped the mobile dialog')
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const stdioSave = waitForResponse('PATCH', '/api/v1/admin/mcp-servers/mcp-local-everything', 200)
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    await stdioSave
+    await dialog.waitFor({ state: 'hidden' })
+    const stdioBody = latestBody('PATCH', '/api/v1/admin/mcp-servers/mcp-local-everything')
+    assert(stdioBody?.env_json?.FIXTURE_API_KEY === null, 'blank saved direct stdio value did not use keep semantics')
+    assert(stdioBody?.env_json?.WORKER_API_KEY === '{env:FIXTURE_WORKER_API_KEY}', 'existing Worker environment reference was not preserved')
+    assert(stdioBody?.env_json?.NEW_WORKER_VALUE === '{env:FIXTURE_NEW_WORKER_VALUE}', 'new Worker environment mapping was not serialized')
+    report.checks.stdioEnvironment = {
+      savedDirectMasked: true,
+      directKeep: stdioBody?.env_json?.FIXTURE_API_KEY === null,
+      workerReferenceRoundTrip: stdioBody?.env_json?.WORKER_API_KEY === '{env:FIXTURE_WORKER_API_KEY}',
+      workerCreate: stdioBody?.env_json?.NEW_WORKER_VALUE === '{env:FIXTURE_NEW_WORKER_VALUE}',
+      invalidWorkerValueBlocked: true,
+    }
+
+    const lateCatalogPath = '/api/v1/admin/mcp-servers/mcp-context7/catalog'
+    await fixture('/__fixtures/faults', 'POST', { pathPrefix: lateCatalogPath, method: 'GET', status: 200, delayMs: 700 })
+    const lateContextRequest = page.waitForRequest(request => request.method() === 'GET' && new URL(request.url()).pathname === lateCatalogPath)
+    const lateContextResponse = waitForResponse('GET', lateCatalogPath, 200)
+    dialog = await editServer('mcp-context7')
+    await lateContextRequest
+    await closeDialog()
+    const otherCatalogPath = '/api/v1/admin/mcp-servers/mcp-fixture-3/catalog'
+    const otherCatalogResponse = waitForResponse('GET', otherCatalogPath, 200)
+    dialog = await editServer('mcp-fixture-3')
+    await otherCatalogResponse
+    await dialog.getByText('fixture-server-three-only', { exact: true }).waitFor({ state: 'visible' })
+    await lateContextResponse
+    assert(await dialog.getByText('fixture-server-three-only', { exact: true }).isVisible(), 'late catalog response replaced the other MCP editor catalog')
+    report.checks.dialogGenerationLateAnswer = true
+    await closeDialog()
+
+    const responsive = []
+    let longNameLength = 0
+    let longEndpointLength = 0
+    for (const width of [1440, 1024, 768, 390]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.locator('[data-mcp-server-row="mcp-context7"]').waitFor({ state: 'visible' })
+      const state = await page.evaluate(() => ({
+        viewport: window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+      }))
+      const row = page.locator('[data-mcp-server-row="mcp-context7"]')
+      const titleSpans = row.locator('span[title]')
+      const longName = await titleSpans.nth(0).getAttribute('title')
+      const longEndpoint = await page.locator('[data-mcp-server-row="mcp-fixture-1"] span[title]').nth(1).getAttribute('title')
+      longNameLength = longName?.length ?? 0
+      longEndpointLength = longEndpoint?.length ?? 0
+      const actionControls = [
+        row.getByRole('button', { name: 'Refresh catalog', exact: true }),
+        row.getByRole('button', { name: 'Edit', exact: true }),
+        row.getByRole('button', { name: 'Delete', exact: true }),
+        row.getByRole('switch', { name: 'Status' }),
+      ]
+      const actionsReachable = []
+      for (const control of actionControls) {
+        await control.scrollIntoViewIfNeeded()
+        const box = await control.boundingBox()
+        actionsReachable.push(Boolean(
+          box && box.x >= 0 && box.x + box.width <= width,
+        ))
+      }
+      const contained = state.documentWidth <= state.viewport && actionsReachable.every(Boolean)
+      assert(contained, `MCP table overflowed or hid actions at ${width}px: ${JSON.stringify({ state, actionsReachable })}`)
+      responsive.push({ width, contained, actionsReachable })
+      if (width === 390) {
+        await page.locator('[data-slot="table-container"]').evaluate(element => { element.scrollLeft = 0 })
+        await capture('mcp-admin-en-light-390')
+      }
+    }
+    assert(longNameLength > 40 && longEndpointLength > 60, 'long MCP name or endpoint coverage was missing')
+    report.checks.longValues = {
+      longNameLength,
+      longEndpointLength,
+      longCommand: commandValue.length,
+      nameAndCommandContainedAt390: true,
+    }
+    report.checks.responsiveContainment = responsive
+
+    await page.evaluate(() => {
+      localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+      localStorage.setItem('prompt-ferry:theme-mode', 'dark')
+    })
+    await page.reload()
+    await waitForRoute()
+    await page.locator('[data-mcp-server-row="mcp-context7"]').waitFor({ state: 'visible' })
+    const localized = await page.evaluate(() => ({
+      lang: document.documentElement.lang,
+      dark: document.documentElement.classList.contains('dark'),
+      colorScheme: document.documentElement.style.colorScheme,
+    }))
+    assert(localized.lang === 'zh-CN' && localized.dark && localized.colorScheme === 'dark', 'MCP route did not retain Chinese dark rendering')
+    await capture('mcp-admin-zh-dark-390')
+    report.checks.localeThemeRendering = localized
+  })
+
+  const currentFixtureLog = (await fixture('/__fixtures/log?limit=500')).requests
+  const finalRequestRecordCalls = currentFixtureLog.filter(request => request.path.includes('/request-records')).length
+  assert(finalRequestRecordCalls === 0, `MCP management reached a request-record endpoint ${finalRequestRecordCalls} times`)
+  report.checks.requestRecordCalls = finalRequestRecordCalls
+
+  const expectedApiFailures = expectedFailures
+  const actualExpectedFailures = apiFailures.filter(failure =>
+    expectedApiFailures.some(expected =>
+      expected.method === failure.method &&
+      expected.path === failure.path &&
+      expected.status === failure.status,
+    ),
+  )
+  const unexpectedApiFailures = apiFailures.filter(failure => !expectedApiFailures.some(expected =>
+    expected.method === failure.method && expected.path === failure.path && expected.status === failure.status,
+  ))
+  assert(unexpectedApiFailures.length === 0, `unexpected API failures: ${JSON.stringify(unexpectedApiFailures)}`)
+  assert(pageErrors.length === 0, `browser page errors: ${JSON.stringify(pageErrors)}`)
+  assert(consoleErrors.length === 0, `browser console errors: ${JSON.stringify(consoleErrors)}`)
+
+  report.checks.expectedApiFailures = actualExpectedFailures.map(({ method, path, status }) => ({ method, path, status }))
+  report.checks.apiFailures = unexpectedApiFailures
+  report.checks.consoleErrors = consoleErrors
+  report.checks.pageErrors = pageErrors
+  report.checks.secretSafety = {
+    fixtureCredentialValuesExcluded: !JSON.stringify(report).includes(fixtureTokens.context7) &&
+      !JSON.stringify(report).includes(fixtureTokens.createdHosted) &&
+      !JSON.stringify(report).includes(fixtureTokens.primaryHosted) &&
+      !JSON.stringify(report).includes(fixtureTokens.basic) &&
+      !JSON.stringify(report).includes(fixtureTokens.replacement),
+    requestBodiesNotSerialized: !JSON.stringify(report).includes('round-trip'),
+    inputPasswordsMasked: true,
+  }
+  assert(report.checks.secretSafety.fixtureCredentialValuesExcluded && report.checks.secretSafety.requestBodiesNotSerialized, 'MCP report included secret or request-body values')
+
+  const checks = report.checks
+  checks.scenarioCoverage = {
+    'route-render': checks.ownerRole?.routeId === 'R-MCP' && checks.ownerRole?.navVisible === true,
+    pagination: checks.pagination?.secondPageRows === 2 && checks.pagination?.lastPageCorrection === true,
+    'dialog-open': checks.catalogEditor?.firstCatalogCalls > 0 && checks.createDialog?.basicCreated === true,
+    'mutation-create': checks.createDialog?.hostedCreated != null && checks.ownerRole?.createOwner === 2,
+    'mutation-toggle': checks.toggleAndIndependentProbe?.toggled === true,
+    'mutation-delete': checks.pagination?.deleteCancelledWrites === 0 && checks.pagination?.deleteSuccesses >= 2,
+    'mutation-failure-draft': checks.failureDraftRetry?.draftRetained === true && checks.failureDraftRetry?.sameBodyRetry === true,
+    'long-values': checks.responsiveContainment?.length === 4 && checks.ownerRole?.updateScope === 'user',
+  }
+  assert(Object.values(checks.scenarioCoverage).every(Boolean), `MCP scenario coverage incomplete: ${JSON.stringify(checks.scenarioCoverage)}`)
+  report.finishedAt = new Date().toISOString()
+  return report
+}

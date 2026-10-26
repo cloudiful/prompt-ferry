@@ -1,10 +1,19 @@
+import path from 'node:path'
 import { defineConfig } from 'vitest/config'
 
-// #569 Phase 4: Vitest runs only the new admin-mapper form tests. The existing
-// frontend/tests suites stay on `bun:test` and must not be migrated or picked
-// up here.
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@': path.resolve(import.meta.dirname, './src'),
+    },
+  },
   test: {
-    include: ['src/admin-mappers/forms/**/*.test.ts'],
+    environment: 'jsdom',
+    include: [
+      'src/admin-mappers/forms/**/*.test.ts',
+      'src/react-tests/**/*.test.ts',
+      'src/react-tests/**/*.test.tsx',
+    ],
+    setupFiles: ['src/react-tests/setup.ts'],
   },
 })

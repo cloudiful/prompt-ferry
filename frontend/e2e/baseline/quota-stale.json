@@ -1,0 +1,10 @@
+{
+  "scenario": "R-ENDPOINTS-UPSTREAMS:quota-stale",
+  "startedAt": "2026-10-23T16:31:55.309Z",
+  "failures": [],
+  "checks": {
+    "staleText": "套餐用量 / MiniMax Platform China Production\nprimary\n可用\n最低剩余 62.0% · 2 个窗口\nminimax-m2\n观测时间：2026年10月23日 20:00\n缓存观测\n刷新失败，仍显示最近一次成功观测。\n下次重试：2026年10月24日 20:00\n5 小时窗口\n还有 28 分钟重置\n剩余 62.0%\n38.00 / 100.00\n周窗口\n-\n—\n按键额度历史",
+    "freshText": "套餐用量 / MiniMax Platform China Production\nprimary\n可用\n最低剩余 62.0% · 2 个窗口\nminimax-m2\n观测时间：2026年10月23日 20:00\n5 小时窗口\n还有 27 分钟重置\n剩余 62.0%\n38.00 / 100.00\n周窗口\n-\n—\n按键额度历史"
+  },
+  "finishedAt": "2026-10-23T16:32:01.698Z"
+}

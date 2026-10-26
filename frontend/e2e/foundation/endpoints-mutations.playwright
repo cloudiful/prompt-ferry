@@ -1,0 +1,93 @@
+async page => {
+  const report = { startedAt: new Date().toISOString(), checks: {}, screenshots: [] }
+  function assert(condition, message) {
+    if (!condition) throw new Error(message)
+  }
+  const consoleErrors = []
+  const pageErrors = []
+  const updatePayloads = []
+  page.setDefaultTimeout(7000)
+  const onConsole = message => {
+    if (message.type() === 'error' && !/(?:status of )?(?:401|500|503)\b/.test(message.text())) consoleErrors.push(message.text())
+  }
+  const onPageError = error => pageErrors.push(error.message)
+  page.on('console', onConsole)
+  page.on('pageerror', onPageError)
+
+  async function waitForResponse(method, pathname, status) {
+    return page.waitForResponse(response => response.request().method() === method && new URL(response.url()).pathname === pathname && response.status() === status, { timeout: 7000 })
+  }
+
+  const createdId = await page.evaluate(() => sessionStorage.getItem('p4c4-created-endpoint-id'))
+  assert(createdId, 'created endpoint id was not carried into the key browser slice')
+  const row = page.locator(`[data-endpoint-row="${createdId}"]`)
+  page.on('request', request => {
+    const url = new URL(request.url())
+    if (request.method() !== 'PATCH' || url.pathname !== `/api/v1/admin/endpoints/${createdId}`) return
+    const body = request.postDataJSON()
+    updatePayloads.push({
+      proxy_present: Object.hasOwn(body, 'proxy_url'),
+      proxy_empty: body.proxy_url === '',
+      windows_present: Object.hasOwn(body, 'active_windows'),
+      windows: body.active_windows,
+      api_keys: (body.api_keys ?? []).map(key => ({ key_id: key.key_id, key_label: key.key_label, enabled: key.enabled, api_key_present: Boolean(key.api_key) })),
+    })
+  })
+
+  let dialog = page.getByRole('dialog').last()
+  await row.getByRole('button', { name: 'Edit', exact: true }).click()
+  await dialog.waitFor({ state: 'visible' })
+  await dialog.getByLabel('API key 1').fill('pf_fixture_endpoint_key_replacement_only')
+  const replacementResponse = waitForResponse('PATCH', `/api/v1/admin/endpoints/${createdId}`, 200)
+  await dialog.getByRole('button', { name: 'Save endpoint', exact: true }).click()
+  await replacementResponse
+  await dialog.waitFor({ state: 'hidden' })
+  const replacementPayload = updatePayloads.at(-1)
+  assert(replacementPayload?.api_keys?.[0]?.api_key_present === true && replacementPayload.api_keys[0].key_id, 'saved API key replacement did not preserve the row identity')
+
+  dialog = page.getByRole('dialog').last()
+  await row.getByRole('button', { name: 'Edit', exact: true }).click()
+  await dialog.getByText('Saved', { exact: true }).waitFor({ state: 'visible' })
+  await dialog.getByRole('button', { name: 'Add API key', exact: true }).click()
+  await dialog.getByLabel('Name 2').fill('Replacement-only key')
+  await dialog.getByLabel('API key 2').fill('pf_fixture_second_key_do_not_persist')
+  await dialog.getByRole('button', { name: 'Delete Primary fixture key', exact: true }).click()
+  const removeResponse = waitForResponse('PATCH', `/api/v1/admin/endpoints/${createdId}`, 200)
+  await dialog.getByRole('button', { name: 'Save endpoint', exact: true }).click()
+  await removeResponse
+  await dialog.waitFor({ state: 'hidden' })
+  const removePayload = updatePayloads.at(-1)
+  assert(removePayload?.api_keys?.length === 1 && removePayload.api_keys[0].key_label === 'Replacement-only key', 'saved key removal did not preserve the remaining row')
+  report.checks.keyRowsBehavior = { replacementSent: replacementPayload?.api_keys?.[0]?.api_key_present === true, replacementReopenedSaved: true, removedSavedRow: removePayload?.api_keys?.length === 1 }
+
+  dialog = page.getByRole('dialog').last()
+  await row.getByRole('button', { name: 'Edit', exact: true }).click()
+  await dialog.getByRole('button', { name: /Endpoint settings/ }).click()
+  const firstScheduleRow = dialog.locator('input[type="time"]').first().locator('xpath=../../..')
+  await firstScheduleRow.getByRole('button', { name: 'Delete', exact: true }).click()
+  const remainingScheduleRow = dialog.locator('input[type="time"]').first().locator('xpath=../../..')
+  await remainingScheduleRow.getByRole('button', { name: 'Delete', exact: true }).click()
+  assert(await dialog.locator('input[type="time"]').count() === 0, 'removing every schedule row did not produce the empty schedule')
+  await dialog.getByRole('button', { name: 'Clear saved proxy', exact: true }).click()
+  const clearResponse = waitForResponse('PATCH', `/api/v1/admin/endpoints/${createdId}`, 200)
+  await dialog.getByRole('button', { name: 'Save endpoint', exact: true }).click()
+  await clearResponse
+  await dialog.waitFor({ state: 'hidden' })
+  const clearPayload = updatePayloads.at(-1)
+  assert(clearPayload?.proxy_present === true && clearPayload.proxy_empty === true, 'explicit proxy clear did not send an empty value')
+  assert(clearPayload?.windows_present === true && Array.isArray(clearPayload.windows) && clearPayload.windows.length === 0, 'empty schedule was not sent explicitly')
+  dialog = page.getByRole('dialog').last()
+  await row.getByRole('button', { name: 'Edit', exact: true }).click()
+  await dialog.getByRole('button', { name: /Endpoint settings/ }).click()
+  assert((await dialog.getByLabel('Proxy scheme').innerText()).includes('Direct'), 'cleared proxy did not reopen as direct')
+  assert(await dialog.locator('input[type="time"]').count() === 0, 'empty schedule did not survive reopening')
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).last().click()
+  report.checks.proxyClearAndScheduleEmpty = { proxyEmptySent: clearPayload.proxy_empty, emptyScheduleSent: clearPayload.windows.length === 0, settingsReopened: true }
+  report.checks.consoleErrors = consoleErrors
+  report.checks.pageErrors = pageErrors
+  assert(pageErrors.length === 0, `browser page errors: ${JSON.stringify(pageErrors)}`)
+  page.off('console', onConsole)
+  page.off('pageerror', onPageError)
+  report.finishedAt = new Date().toISOString()
+  return report
+}

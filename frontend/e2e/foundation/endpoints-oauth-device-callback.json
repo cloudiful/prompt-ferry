@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-10-26T10:35:18.792Z",
+  "checks": {
+    "deviceOAuthCompletion": {
+      "pollStatuses": [200, 200],
+      "pendingThenComplete": true,
+      "clearRestoredKeylessState": true,
+      "noVerificationNavigation": true
+    },
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  "screenshots": [],
+  "finishedAt": "2026-10-26T10:35:21.520Z"
+}

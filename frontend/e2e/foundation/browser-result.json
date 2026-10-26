@@ -1,0 +1,292 @@
+{
+  "startedAt": "2026-10-26T10:31:50.245Z",
+  "checks": {
+    "loginRouteId": true,
+    "firstPaint": {
+      "colorScheme": "dark",
+      "dark": true,
+      "lang": "zh-CN"
+    },
+    "invalidLogin": true,
+    "adminRedirect": "/request-records/ai?filter=seed&order=desc",
+    "persistedPreferences": {
+      "colorScheme": "light",
+      "dark": false,
+      "lang": "en-US",
+      "locale": "en-US",
+      "theme": "light"
+    },
+    "responsiveShell": [
+      {
+        "width": 1440,
+        "desktopSidebar": true,
+        "horizontalOverflow": false
+      },
+      {
+        "width": 1024,
+        "desktopSidebar": true,
+        "horizontalOverflow": false
+      },
+      {
+        "width": 768,
+        "desktopSidebar": false,
+        "horizontalOverflow": false
+      },
+      {
+        "width": 390,
+        "desktopSidebar": false,
+        "horizontalOverflow": false
+      }
+    ],
+    "pendingRouteIds": [],
+    "mobileLogout": [
+      {
+        "width": 390,
+        "logoutStatuses": [204],
+        "directGuard": "/login?redirect=%2Fapi-keys"
+      },
+      {
+        "width": 768,
+        "logoutStatuses": [503, 204],
+        "directGuard": "/login?redirect=%2Fapi-keys"
+      }
+    ],
+    "expectedLogoutFailures": ["503 /api/v1/auth/logout"],
+    "desktopLogout": true,
+    "nonAdminDirectGuard": "/api-keys",
+    "relayRouteId": true,
+    "relayHostLocaleTheme": {
+      "colorScheme": "dark",
+      "dark": true,
+      "lang": "zh-CN"
+    },
+    "relayHost": {
+      "routeId": "R-RELAY-HOST",
+      "initialReads": {
+        "host": 1,
+        "settings": 1,
+        "status": 1
+      },
+      "noFocusRefetch": true,
+      "disconnectedWorkerAlert": true,
+      "hostControlsRemainUsable": true,
+      "blankBodyNoRestart": true,
+      "loopbackValidationAndDraft": true,
+      "settingsFailureRetry": true,
+      "settingsPayloads": [
+        {},
+        {
+          "admin_bind": "0.0.0.0:9445"
+        },
+        {
+          "admin_bind": "127.0.0.1:9550"
+        },
+        {
+          "admin_bind": "127.0.0.1:9550"
+        }
+      ],
+      "settingsRereadCounts": {
+        "before": {
+          "host": 2,
+          "settings": 2,
+          "status": 2
+        },
+        "after": {
+          "host": 3,
+          "settings": 2,
+          "status": 3
+        }
+      },
+      "settingsNewerDraftPreserved": true,
+      "refreshShowsRunningBind": true,
+      "roleFailureRetry": true,
+      "rolePayloads": ["worker", "worker"],
+      "roleResponseNoRefetch": true,
+      "roleNewerDraftPreserved": true,
+      "restartStatuses": [503, 202, 202],
+      "restartOriginsExclusive": true,
+      "restartNoImplicitReload": true,
+      "responsive": [
+        {
+          "locale": "en-US",
+          "width": 1440,
+          "contained": true,
+          "reachable": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "locale": "en-US",
+          "width": 1024,
+          "contained": true,
+          "reachable": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "locale": "en-US",
+          "width": 768,
+          "contained": true,
+          "reachable": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "locale": "en-US",
+          "width": 390,
+          "contained": true,
+          "reachable": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "locale": "zh-CN",
+          "width": 1440,
+          "contained": true,
+          "reachable": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "locale": "zh-CN",
+          "width": 1024,
+          "contained": true,
+          "reachable": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "locale": "zh-CN",
+          "width": 768,
+          "contained": true,
+          "reachable": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "locale": "zh-CN",
+          "width": 390,
+          "contained": true,
+          "reachable": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+          ]
+        }
+      ],
+      "localeThemeRendering": {
+        "colorScheme": "dark",
+        "dark": true,
+        "lang": "zh-CN"
+      },
+      "scenarioCoverage": {
+        "route-render": true,
+        "relay-independent-auth": true,
+        "mutation-update": true,
+        "mutation-failure-draft": true,
+        "responsive-width": true
+      }
+    },
+    "relayIndependence": true,
+    "relayRoleAndRestart": true,
+    "consoleErrors": [],
+    "pageErrors": [],
+    "apiFailures": [],
+    "expectedRelayFailures": [
+      "400 /api/v1/relay/settings",
+      "503 /api/v1/relay/settings",
+      "503 /api/v1/relay/host/role",
+      "503 /api/v1/relay/host/restart"
+    ],
+    "relayRestartStatuses": [503, 202, 202]
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/login-zh-dark-390.png",
+    "e2e/foundation/screenshots/shell-en-light-1440.png",
+    "e2e/foundation/screenshots/shell-mobile-menu-390.png",
+    "e2e/foundation/screenshots/shell-mobile-menu-768.png",
+    "e2e/foundation/screenshots/shell-mobile-logout-retry-768.png",
+    "e2e/foundation/screenshots/relay-token-login-en-light-390.png",
+    "e2e/foundation/screenshots/relay-host-en-light-1440.png",
+    "e2e/foundation/screenshots/relay-host-en-light-390.png",
+    "e2e/foundation/screenshots/relay-host-zh-dark-1440.png",
+    "e2e/foundation/screenshots/relay-host-zh-dark-390.png"
+  ],
+  "placeholderRouteIds": [],
+  "rolePayload": "worker",
+  "finishedAt": "2026-10-26T10:32:14.674Z"
+}

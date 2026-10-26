@@ -1,0 +1,1499 @@
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const startedAt = new Date().toISOString()
+  const report = {
+    runId: `usage-${Date.now()}`,
+    startedAt,
+    finishedAt: null,
+    checks: {},
+    scenarios: { 'R-USAGE-AI': {}, 'R-USAGE-MCP': {} },
+    screenshots: [],
+    requests: [],
+    expectedApiFailures: [],
+    apiFailures: [],
+    consoleErrorCount: 0,
+    pageErrorCount: 0,
+    headerChecks: [],
+    widthChecks: [],
+    foldChecks: null,
+    sortChecks: null,
+    detailChecks: null,
+    sessionChecks: null,
+    clearChecks: null,
+    roleChecks: null,
+    limitations: [],
+  }
+  let stage = 'startup'
+
+  page.setDefaultTimeout(15000)
+  await page.goto(`${BASE}/login`)
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'en-US')
+    localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await page.addInitScript(() => {
+    window.__usageConfirm = false
+    window.__usageConfirmCalls = 0
+    window.confirm = () => {
+      window.__usageConfirmCalls += 1
+      return window.__usageConfirm === true
+    }
+  })
+
+  page.on('pageerror', () => report.pageErrorCount++)
+  page.on('console', (message) => {
+    if (message.type() !== 'error') return
+    if (/(?:status of )?(?:400|401|403|404|409|500|503)\b/.test(message.text()))
+      return
+    report.consoleErrorCount++
+  })
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (!url.pathname.startsWith('/api/v1/admin/request-records') &&
+        !url.pathname.startsWith('/api/v1/admin/conversations'))
+      return
+    const normalize = (path) =>
+      path
+        .replace(/\/request-records\/\d+(\/request-full|\/session-route-options|\/reset-session-affinity)?$/, (_, tail) => `/request-records/:id${tail ?? ''}`)
+        .replace(/\/conversations\/[^/]+\/endpoint-override$/, '/conversations/:id/endpoint-override')
+    report.requests.push({
+      method: request.method(),
+      path: normalize(url.pathname),
+      first: url.searchParams.get('first'),
+      rows: url.searchParams.get('rows'),
+      sortField: url.searchParams.get('sort_field'),
+      sortOrder: url.searchParams.get('sort_order'),
+      range: url.searchParams.get('range'),
+      start: url.searchParams.get('start'),
+      end: url.searchParams.get('end'),
+      search: url.searchParams.get('search'),
+      user: url.searchParams.get('user'),
+      model: url.searchParams.get('model'),
+      clientKeyId: url.searchParams.get('client_key_id'),
+      state: url.searchParams.get('request_state'),
+      redaction: url.searchParams.get('redaction_applied'),
+      endpointId: url.searchParams.get('endpoint_id'),
+      mcpServerId: url.searchParams.get('mcp_server_id'),
+      mcpSlot: url.searchParams.get('mcp_bearer_token_slot'),
+      perspective: url.searchParams.get('perspective'),
+      category: url.searchParams.get('request_category'),
+      mcpScope: url.searchParams.get('mcp_scope'),
+      cursor: url.searchParams.get('cursor'),
+      limit: url.searchParams.get('limit'),
+      order: url.searchParams.get('order'),
+    })
+  })
+  page.on('response', (response) => {
+    const url = new URL(response.url())
+    if (!url.pathname.startsWith('/api/v1/admin/request-records') &&
+        !url.pathname.startsWith('/api/v1/admin/conversations'))
+      return
+    const status = response.status()
+    if (status < 400) return
+    const entry = `${status} ${response.request().method()} ${url.pathname}`
+    if (report.expectedApiFailures.includes(entry)) return
+    report.expectedApiFailures.push(entry)
+  })
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(`${stage}: ${message}`)
+  }
+
+  async function act(action) {
+    try {
+      return await action()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`${stage}: ${message}`)
+    }
+  }
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  async function api(path, method = 'GET', body) {
+    return page.evaluate(
+      async ({ path, method, body }) => {
+        const response = await fetch(path, {
+          method,
+          headers: { 'content-type': 'application/json' },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        })
+        const json = await response.json().catch(() => null)
+        return { status: response.status, json }
+      },
+      { path, method, body },
+    )
+  }
+
+  async function capture(name) {
+    const path = `${screenshots}/${name}.png`
+    await page.screenshot({ path, fullPage: true })
+    report.screenshots.push(path)
+  }
+
+  async function signIn(loginName) {
+    await page.goto(`${BASE}/login`)
+    await page.getByLabel('Login name').waitFor({ state: 'visible' })
+    await page.getByLabel('Login name').fill(loginName)
+    await page.getByRole('textbox', { name: 'Password' }).fill('fixture-password')
+    await page.getByRole('button', { name: 'Login' }).click()
+    await page.waitForURL((url) => new URL(url).pathname === '/api-keys')
+  }
+
+  async function signOut() {
+    await page.getByRole('button', { name: 'Logout' }).click()
+    await page.waitForURL((url) => new URL(url).pathname === '/login')
+  }
+
+  async function go(path, routeId) {
+    await page.goto(`${BASE}${path}`)
+    await page.waitForSelector(`[data-foundation-route-id="${routeId}"]`)
+    await page.waitForTimeout(350)
+  }
+
+  async function selectOption(triggerName, optionName) {
+    await page.getByRole('combobox', { name: triggerName }).click()
+    await page.getByRole('option', { name: optionName, exact: true }).click()
+    await page.waitForTimeout(200)
+  }
+
+  async function mode(name) {
+    try {
+      await page.getByRole('button', { name, exact: true }).click()
+    } catch (error) {
+      throw new Error(
+        `${stage}: mode(${name}) failed: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`,
+      )
+    }
+    await page.waitForTimeout(250)
+  }
+
+  function pass(rowId, scenario, evidence) {
+    report.scenarios[rowId][scenario] = { passed: true, evidence }
+  }
+
+  function requestsFor(method, path) {
+    return report.requests.filter((item) => item.method === method && item.path === path)
+  }
+
+  function lastRequest(method, path) {
+    return [...requestsFor(method, path)].reverse()[0]
+  }
+
+  async function overviewData(perspective = 'model') {
+    return page.evaluate(
+      async ({ perspective }) => {
+        const response = await fetch(
+          `/api/v1/admin/request-records/overview?request_category=ai&perspective=${perspective}&range=24h`,
+        )
+        return response.json()
+      },
+      { perspective },
+    )
+  }
+
+  stage = 'operator-sign-in'
+  await signIn('operator')
+  await go('/request-records/ai', 'R-USAGE-AI')
+  assert((await page.title()).includes('AI requests'), 'AI route title is not localized')
+
+  stage = 'ai-route-render'
+  const aiCards = await page.locator('[data-usage-metric]').count()
+  assert(aiCards === 10, `AI metric cards: expected 10, got ${aiCards}`)
+  assert(await page.locator('[data-usage-chart] canvas').count() > 0, 'AI trend chart did not render an ECharts canvas')
+  assert(await page.locator('[data-usage-breakdown-row]').count() > 0, 'AI distribution rows are missing')
+  assert((await page.getByRole('combobox', { name: 'View' }).count()) === 1, 'AI perspective select missing')
+  assert((await page.getByRole('combobox', { name: 'All users' }).count()) === 0, 'operator sees the admin user filter')
+  report.checks.aiRouteRender = { cards: aiCards, chartCanvas: true, distributionRows: true }
+  pass('R-USAGE-AI', 'route-render', 'rendered AI overview cards, chart and distribution for an operator')
+  await capture('usage-ai-overview-en-light-1440')
+
+  stage = 'ai-overview-and-drilldown'
+  const firstOverviewRequest = lastRequest('GET', '/api/v1/admin/request-records/overview')
+  assert(firstOverviewRequest?.perspective === 'model' && firstOverviewRequest.category === 'ai', 'initial overview query is not AI/model')
+  await selectOption('View', 'By upstream')
+  const upstreamRequest = lastRequest('GET', '/api/v1/admin/request-records/overview')
+  assert(upstreamRequest?.perspective === 'upstream', 'upstream perspective did not query perspective=upstream')
+  await page.locator('[data-usage-breakdown-row]').first().click()
+  await page.waitForTimeout(500)
+  assert((await page.locator('[data-usage-column="model"]').count()) === 1, 'model drilldown did not switch to the records table')
+  const drilldownList = lastRequest('GET', '/api/v1/admin/request-records')
+  assert(drilldownList?.first === '0' && drilldownList.model === null, 'upstream drilldown must set first=0 without a model filter')
+  assert(drilldownList.endpointId !== null, 'upstream drilldown did not set the endpoint filter')
+  assert(drilldownList.search === null, 'drilldown did not clear the search filter')
+  report.checks.drilldown = { mode: 'records', endpoint: drilldownList.endpointId, first: drilldownList.first }
+  pass('R-USAGE-AI', 'dialog-open', 'distribution row opened the records table with the endpoint filter')
+  // A category round-trip resets the drilldown-only filters, exactly as the
+  // store contract says a category change does.
+  await go('/request-records/mcp', 'R-USAGE-MCP')
+  await go('/request-records/ai', 'R-USAGE-AI')
+  await mode('Overview')
+
+  stage = 'mode-local'
+  const requestsBeforeMode = report.requests.length
+  await mode('Records')
+  await mode('Overview')
+  assert(report.requests.length === requestsBeforeMode, 'switching the mode issued a request')
+  report.checks.modeLocal = { requests: 0 }
+
+  stage = 'ai-records-pagination'
+  await mode('Records')
+  const defaultRows = await page.locator('[data-usage-record-row]').count()
+  assert(defaultRows === 25, `default page rows: expected 25, got ${defaultRows}`)
+  await page.getByRole('combobox', { name: 'Rows per page' }).click()
+  await page.getByRole('option', { name: '10', exact: true }).click()
+  await page.waitForTimeout(500)
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.rows === '10', 'page-size change did not query rows=10')
+  const pageOne = await page.locator('[data-usage-record-row]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-usage-record-row')))
+  assert(pageOne.length === 10, `page one rows: expected 10, got ${pageOne.length}`)
+  await page.getByRole('button', { name: 'Next page' }).click()
+  await page.waitForTimeout(500)
+  const pageTwo = await page.locator('[data-usage-record-row]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-usage-record-row')))
+  assert(pageTwo.length === 10 && pageTwo.every((id) => !pageOne.includes(id)), 'page two did not show distinct rows')
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.first === '10', 'page two did not query first=10')
+  await page.reload()
+  await page.waitForSelector('[data-usage-record-row]')
+  assert(
+    (await page.getByRole('combobox', { name: 'Rows per page' }).textContent()).includes('10'),
+    'page size did not persist across reload',
+  )
+  report.checks.pagination = { pageOne: pageOne.length, pageTwo: pageTwo.length, persistedRows: 10 }
+  pass('R-USAGE-AI', 'pagination', 'page two had distinct rows and the page size persisted')
+
+  stage = 'ai-sort-keyboard'
+  await page.waitForTimeout(300)
+  await page.getByRole('button', { name: 'Next page' }).click()
+  await page.waitForTimeout(450)
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.first === '10', 'the page did not move before the sort cycle')
+  const dateHeader = page.locator('[data-usage-column="request_date"]')
+  const dateButton = dateHeader.getByRole('button')
+  assert((await dateButton.count()) === 1, 'Date header is missing its sort button')
+  assert((await page.locator('[data-usage-column="redaction"] button').count()) === 0, 'redaction header gained a sort control')
+  assert((await page.locator('[data-usage-column="throughput"] button').count()) === 0, 'throughput header gained a sort control')
+  // The header button is reached with Tab from the page's own search control,
+  // so the proof is real tab order rather than a programmatic focus call.
+  await page.getByPlaceholder('Search').click()
+  let tabReachedDate = false
+  for (let step = 0; step < 12; step += 1) {
+    await page.keyboard.press('Tab')
+    tabReachedDate = await page.evaluate(
+      () => document.activeElement?.closest('[data-usage-column="request_date"]') !== null,
+    )
+    if (tabReachedDate) break
+  }
+  assert(tabReachedDate, 'the Date sort button is not reachable with Tab')
+  await page.keyboard.press('Space')
+  await page.waitForTimeout(450)
+  assert((await dateHeader.getAttribute('aria-sort')) === 'ascending', 'Space did not set Date aria-sort=ascending')
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.sortField === 'usage_date', 'Date did not sort by usage_date')
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.sortOrder === '1', 'Date did not send ascending order')
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.first === '10', 'the sort did not keep the current first offset')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(450)
+  assert((await dateHeader.getAttribute('aria-sort')) === 'descending', 'Enter did not cycle Date to descending')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(450)
+  assert((await dateHeader.getAttribute('aria-sort')) === 'none', 'the third keyboard cycle did not reach unsorted')
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.sortField === 'usage_date', 'the sort field was not retained at order 0')
+
+  const timeHeader = page.locator('[data-usage-column="created_at"]')
+  const timeButton = timeHeader.getByRole('button')
+  await timeButton.focus()
+  await page.keyboard.press('Space')
+  await page.waitForTimeout(500)
+  assert((await timeHeader.getAttribute('aria-sort')) === 'ascending', 'Time did not sort ascending')
+  const rowsAscending = await page.locator('[data-usage-record-row]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-usage-record-row')))
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.sortField === 'created_at', 'Time did not sort by created_at')
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.first === '10', 'the Time sort did not keep the current first offset')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(500)
+  assert((await timeHeader.getAttribute('aria-sort')) === 'descending', 'Enter did not cycle Time to descending')
+  const rowsDescending = await page.locator('[data-usage-record-row]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-usage-record-row')))
+  assert(JSON.stringify(rowsDescending) !== JSON.stringify(rowsAscending), 'the server-sorted row order did not change')
+  report.sortChecks = { ascending: true, descending: true, unsorted: true, usageDate: true, createdAt: true, rowOrderChanged: true, keptFirst: 10, tabReachable: true }
+  pass('R-USAGE-AI', 'mutation-update', 'keyboard sorting changed aria-sort, query params and row order')
+
+  stage = 'ai-search-and-filters'
+  await page.getByRole('button', { name: 'First page' }).click().catch(() => {})
+  await page.waitForTimeout(250)
+  const search = page.getByPlaceholder('Search')
+  const listBeforeSearch = requestsFor('GET', '/api/v1/admin/request-records').length
+  await search.fill('fixture')
+  await page.waitForTimeout(250)
+  assert(requestsFor('GET', '/api/v1/admin/request-records').length === listBeforeSearch, 'typing in the search issued a request')
+  await search.press('Enter')
+  await page.waitForTimeout(450)
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.search === 'fixture', 'Enter did not apply the search filter')
+  await selectOption('All request keys', 'primary (operator)')
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.clientKeyId === '1', 'client-key select did not apply immediately')
+  await selectOption('All request keys', 'All request keys')
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.clientKeyId === null, 'clearing the client key did not send a null filter')
+  const facetsBefore = requestsFor('GET', '/api/v1/admin/request-records/facets').length
+  await selectOption('All status', 'Failed')
+  await page.waitForTimeout(350)
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.state === 'failed', 'state select did not apply immediately')
+  assert(requestsFor('GET', '/api/v1/admin/request-records/facets').length === facetsBefore, 'a record filter refreshed the facets')
+  report.checks.filters = { searchEnterOnly: true, clientKey: true, state: true }
+
+  stage = 'ai-range'
+  await page.getByRole('button', { name: 'Time range' }).click()
+  await page.getByRole('button', { name: 'Last 7d' }).click()
+  await page.waitForTimeout(450)
+  const sevenDayList = lastRequest('GET', '/api/v1/admin/request-records')
+  const sevenDayOverview = lastRequest('GET', '/api/v1/admin/request-records/overview')
+  const sevenDayFacets = lastRequest('GET', '/api/v1/admin/request-records/facets')
+  assert(sevenDayList?.range === '7d' && sevenDayList.start === null, 'the list did not use the 7d preset without bounds')
+  assert(sevenDayOverview?.range === '7d' && sevenDayOverview.start !== null, 'the overview did not use the 7d range window')
+  assert(sevenDayFacets?.range === null && sevenDayFacets.start !== null && sevenDayFacets.end !== null, 'the facets did not use the resolved 7d window')
+  await page.getByRole('button', { name: 'Time range' }).click()
+  await page.getByLabel('Custom 1').fill('2026-01-01')
+  await page.getByLabel('Custom 2').fill('2026-01-03')
+  await page.waitForTimeout(500)
+  const customList = lastRequest('GET', '/api/v1/admin/request-records')
+  assert(customList?.range === 'custom' && customList.start === '2026-01-01T00:00:00.000Z' && customList.end === '2026-01-04T00:00:00.000Z', 'custom range bounds are not the half-open UTC window')
+  report.checks.range = { preset: '7d', custom: customList.range }
+
+  stage = 'ai-empty-state'
+  await page.waitForTimeout(500)
+  assert(await page.getByText('No request records').count() === 1, 'a past custom window did not render the honest empty state')
+  report.checks.aiEmpty = true
+  pass('R-USAGE-AI', 'empty-state', 'past custom window rendered the empty state')
+
+  stage = 'ai-error-retry'
+  await page.getByRole('button', { name: 'Time range' }).click()
+  await page.getByRole('button', { name: 'Last 24h' }).click()
+  await page.waitForTimeout(400)
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/request-records/overview',
+    method: 'GET',
+    status: 503,
+    delayMs: 350,
+    count: 1,
+  })
+  await page.getByRole('button', { name: 'Refresh' }).click()
+  await page.getByRole('alert').first().waitFor({ state: 'visible' })
+  assert((await page.getByRole('alert').first().innerText()).length > 0, 'the failed overview read reported no error')
+  await fixture('/__fixtures/faults', 'DELETE')
+  await page.getByRole('button', { name: 'Refresh' }).click()
+  await page.locator('[data-usage-record-row]').first().waitFor({ state: 'visible' })
+  assert(await page.getByRole('alert').count() >= 1, 'the error notification disappeared before the retry')
+  report.checks.errorRetry = true
+  pass('R-USAGE-AI', 'error-state', '503 notification shown and a retry restored the overview')
+
+  stage = 'ai-loading-state'
+  await mode('Overview')
+  await page.waitForTimeout(350)
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/request-records/overview',
+    method: 'GET',
+    status: 200,
+    delayMs: 1000,
+    count: 1,
+  })
+  await page.getByRole('button', { name: 'Refresh' }).click()
+  await page.locator('[aria-busy="true"]').first().waitFor({ state: 'visible' })
+  const busyWhileLoading = await page.locator('[aria-busy="true"]').count()
+  assert(busyWhileLoading >= 1, 'no surface reported a loading state during a slow read')
+  await page.waitForTimeout(1400)
+  assert((await page.locator('[aria-busy="true"]').count()) === 0, 'the loading state did not clear')
+  await fixture('/__fixtures/faults', 'DELETE')
+  report.checks.loadingState = { busy: busyWhileLoading }
+  pass('R-USAGE-AI', 'loading-state', 'a delayed overview kept a busy surface until the read resolved')
+
+  stage = 'ai-stale-read'
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/request-records/overview',
+    method: 'GET',
+    status: 200,
+    delayMs: 700,
+    count: 1,
+  })
+  await page.getByRole('button', { name: 'Time range' }).click()
+  await page.getByRole('button', { name: 'Last 30d' }).click()
+  await page.getByRole('button', { name: 'Time range' }).click()
+  await page.getByRole('button', { name: 'Last 7d' }).click()
+  await page.waitForTimeout(1400)
+  assert(lastRequest('GET', '/api/v1/admin/request-records/overview')?.range === '7d', 'the newest range did not win')
+  assert((await page.getByRole('alert').count()) === 1, 'the stale delayed read raised a new error')
+  report.checks.staleRead = true
+  pass('R-USAGE-AI', 'stale-response', 'a delayed older overview did not replace the newer range')
+  await fixture('/__fixtures/faults', 'DELETE')
+
+  stage = 'ai-fold-model-matrix'
+  await mode('Overview')
+  await selectOption('View', 'By model')
+  await page.waitForTimeout(450)
+  const foldTarget = page.locator('[data-usage-breakdown-row="usage-zero-fixture"]')
+  assert((await foldTarget.count()) === 1, 'the four-upstream fold model row is missing')
+  const foldTrigger = foldTarget.getByRole('button', { name: 'Upstream breakdown' })
+  await foldTrigger.focus()
+  assert(
+    await page.evaluate(
+      () =>
+        document.activeElement?.getAttribute('aria-label') === 'Upstream breakdown',
+    ),
+    'the fold trigger did not take keyboard focus',
+  )
+  await page.keyboard.press('Space')
+  const popover = page.locator('[data-slot="popover-content"]')
+  await popover.waitFor({ state: 'visible' })
+  await page.waitForTimeout(300)
+  assert(
+    (await page.locator('[data-usage-record-row]').count()) === 0,
+    'opening the fold with the keyboard switched to the records view',
+  )
+  report.checks.foldTriggerKeyboard = { focused: true, opened: true, noDrilldown: true }
+
+  async function popoverCells() {
+    return popover.locator('tbody tr').evaluateAll((rows) =>
+      rows.map((row) =>
+        [...row.querySelectorAll('td')].map((cell) => (cell.textContent ?? '').trim()),
+      ),
+    )
+  }
+
+  const modelTotalsBefore = await overviewData('model')
+  const modelCollapsedRows = await popover.locator('tbody tr').count()
+  assert(modelCollapsedRows === 1, `model collapsed rows: expected 1 visible, got ${modelCollapsedRows}`)
+  const modelCollapsedText = await popover.innerText()
+  assert(
+    modelCollapsedText.includes('8 zero-token requests hidden'),
+    'the model fold does not report 8 hidden requests',
+  )
+  assert(
+    (await popover.locator('[data-usage-zero-token-footer]').getAttribute('data-usage-zero-token-footer')) === 'collapsed',
+    'the collapsed model footer is not marked collapsed',
+  )
+  const modelCollapsedCells = await popoverCells()
+  assert(
+    modelCollapsedCells[0][0].includes('Fixture Upstream 1'),
+    'the collapsed model fold does not show the positive upstream first',
+  )
+  assert(
+    modelCollapsedCells[0][4] === '1.1K',
+    `the visible positive upstream does not keep its compact token total: ${JSON.stringify(modelCollapsedCells)}`,
+  )
+  await capture('usage-fold-en-light-1440-collapsed')
+
+  const requestsBeforeModelExpand = report.requests.length
+  await popover.getByRole('button', { name: 'Show', exact: true }).click()
+  await page.waitForTimeout(400)
+  assert(report.requests.length === requestsBeforeModelExpand, 'expanding the model fold issued a request')
+  const modelExpandedCells = await popoverCells()
+  assert(modelExpandedCells.length === 4, `model expanded rows: expected 4, got ${modelExpandedCells.length}`)
+  const modelTotalsAfter = await overviewData('model')
+  assert(
+    JSON.stringify(modelTotalsBefore) === JSON.stringify(modelTotalsAfter),
+    'expanding the model fold changed the server overview totals',
+  )
+  assert(
+    modelExpandedCells[0][0].includes('Fixture Upstream 1') && modelExpandedCells[0][4] === '1.1K',
+    'the model fold does not list the positive upstream first with its total',
+  )
+  const modelFolded = modelExpandedCells.slice(1)
+  assert(
+    modelFolded.map((cells) => cells[0]).join('|') ===
+      [
+        'Fixture Upstream 3 With A Long Operational Name',
+        'Fixture Upstream 5 With A Long Operational Name',
+        'Fixture Upstream 7 With A Long Operational Name',
+      ].join('|'),
+    `the model fold order is wrong: ${JSON.stringify(modelFolded.map((cells) => cells[0]))}`,
+  )
+  for (const cells of modelFolded) {
+    assert(cells[4] === '0', `a folded model upstream did not render a literal 0 total: ${JSON.stringify(cells)}`)
+  }
+  assert(modelFolded[0][2] === '1', 'the success-only zero-token upstream lost its request count')
+  assert(modelFolded[0][7] === '0%', 'the success-only zero-token upstream reports a failure rate')
+  assert(modelFolded[1][2] === '5', 'the mixed zero-token upstream lost its request count')
+  assert(modelFolded[1][7] === '60%', `the mixed zero-token upstream failure rate is wrong: ${modelFolded[1][7]}`)
+  assert(modelFolded[2][2] === '2', 'the all-failed zero-token upstream lost its request count')
+  assert(modelFolded[2][7] === '100%', `the all-failed zero-token upstream failure rate is wrong: ${modelFolded[2][7]}`)
+  const modelExpandedText = await popover.innerText()
+  assert(
+    modelExpandedText.includes('8 zero-token requests') &&
+      !modelExpandedText.includes('8 zero-token requests hidden'),
+    `the expanded model footer still claims a hidden count: ${JSON.stringify(modelExpandedText)}`,
+  )
+  assert(
+    (await popover.locator('[data-usage-zero-token-footer]').getAttribute('data-usage-zero-token-footer')) === 'expanded',
+    'the expanded model footer is not marked expanded',
+  )
+  await capture('usage-fold-en-light-1440-expanded')
+  await popover.getByRole('button', { name: 'Hide', exact: true }).click()
+  await page.waitForTimeout(250)
+  assert((await popover.locator('tbody tr').count()) === 1, 'collapsing the model fold did not hide the folded rows')
+  report.foldChecks = {
+    model: {
+      collapsedFooterHidden: true,
+      collapsedRows: modelCollapsedRows,
+      expandedCopyNeutral: true,
+      expandedRows: modelExpandedCells.length,
+      hiddenRequestCount: 8,
+      variants: ['positive', 'success-zero', 'mixed-60%-zero', 'all-failed-zero'],
+      visibleFirst: true,
+      literalZero: true,
+      noRequestOnExpand: true,
+      totalsUnchanged: true,
+    },
+  }
+  pass('R-USAGE-AI', 'zero-token-fold', 'the model fold hides 8 zero-token requests across all three variants and expands without a read')
+
+  stage = 'ai-fold-upstream-matrix'
+  await page.keyboard.press('Escape')
+  await popover.waitFor({ state: 'hidden' }).catch(() => {})
+  await selectOption('View', 'By upstream')
+  await page.waitForTimeout(500)
+  const upstreamTarget = page.locator('[data-usage-breakdown-row="ep-fixture-1"]')
+  assert((await upstreamTarget.count()) === 1, 'the four-model upstream row is missing')
+  await upstreamTarget.getByRole('button', { name: 'Model breakdown' }).click()
+  await popover.waitFor({ state: 'visible' })
+  await page.waitForTimeout(300)
+  const upstreamTotalsBefore = await overviewData('upstream')
+  const upstreamCollapsedRows = await popover.locator('tbody tr').count()
+  assert(upstreamCollapsedRows === 1, `upstream collapsed rows: expected 1 visible, got ${upstreamCollapsedRows}`)
+  const upstreamCollapsedCells = await popoverCells()
+  assert(
+    upstreamCollapsedCells[0][0] === 'usage-zero-fixture',
+    'the collapsed upstream fold does not show the positive model first',
+  )
+  assert(upstreamCollapsedCells[0][3] === '1.1K', `the visible positive model lost its compact token total: ${JSON.stringify(upstreamCollapsedCells)}`)
+  assert(
+    (await popover.innerText()).includes('8 zero-token requests hidden'),
+    'the upstream fold does not report 8 hidden requests',
+  )
+  const requestsBeforeUpstreamExpand = report.requests.length
+  await popover.getByRole('button', { name: 'Show', exact: true }).click()
+  await page.waitForTimeout(400)
+  assert(report.requests.length === requestsBeforeUpstreamExpand, 'expanding the upstream fold issued a request')
+  const upstreamExpandedCells = await popoverCells()
+  assert(upstreamExpandedCells.length === 4, `upstream expanded rows: expected 4, got ${upstreamExpandedCells.length}`)
+  const upstreamTotalsAfter = await overviewData('upstream')
+  assert(
+    JSON.stringify(upstreamTotalsBefore) === JSON.stringify(upstreamTotalsAfter),
+    'expanding the upstream fold changed the server overview totals',
+  )
+  assert(
+    upstreamExpandedCells.map((cells) => cells[0]).join('|') ===
+      [
+        'usage-zero-fixture',
+        'usage-zero-fixture-b',
+        'usage-zero-fixture-mixed',
+        'usage-zero-fixture-failed',
+      ].join('|'),
+    `the upstream fold order is wrong: ${JSON.stringify(upstreamExpandedCells.map((cells) => cells[0]))}`,
+  )
+  for (const cells of upstreamExpandedCells.slice(1)) {
+    assert(cells[3] === '0', `a folded upstream model did not render a literal 0 total: ${JSON.stringify(cells)}`)
+  }
+  assert(upstreamExpandedCells[1][1] === '1' && upstreamExpandedCells[1][6] === '0%', 'the upstream success-only zero-token model is wrong')
+  assert(upstreamExpandedCells[2][1] === '5' && upstreamExpandedCells[2][6] === '60%', 'the upstream mixed zero-token model is wrong')
+  assert(upstreamExpandedCells[3][1] === '2' && upstreamExpandedCells[3][6] === '100%', 'the upstream all-failed zero-token model is wrong')
+  const upstreamExpandedText = await popover.innerText()
+  assert(
+    upstreamExpandedText.includes('8 zero-token requests') &&
+      !upstreamExpandedText.includes('8 zero-token requests hidden'),
+    `the expanded upstream footer still claims a hidden count: ${JSON.stringify(upstreamExpandedText)}`,
+  )
+  assert(
+    (await popover.locator('[data-usage-zero-token-footer]').getAttribute('data-usage-zero-token-footer')) === 'expanded',
+    'the expanded upstream footer is not marked expanded',
+  )
+  await capture('usage-fold-upstream-en-light-1440-expanded')
+  await popover.getByRole('button', { name: 'Hide', exact: true }).click()
+  await page.waitForTimeout(250)
+  assert((await popover.locator('tbody tr').count()) === 1, 'collapsing the upstream fold did not hide the folded rows')
+  report.foldChecks.upstream = {
+    collapsedFooterHidden: true,
+    collapsedRows: upstreamCollapsedRows,
+    expandedCopyNeutral: true,
+    expandedRows: upstreamExpandedCells.length,
+    hiddenRequestCount: 8,
+    variants: ['positive', 'success-zero', 'mixed-60%-zero', 'all-failed-zero'],
+    visibleFirst: true,
+    literalZero: true,
+    noRequestOnExpand: true,
+    totalsUnchanged: true,
+  }
+  pass('R-USAGE-AI', 'zero-token-fold', 'the upstream fold hides 8 zero-token requests across all three variants and expands without a read')
+
+  stage = 'ai-fold-unknown-probe'
+  await page.keyboard.press('Escape')
+  await popover.waitFor({ state: 'hidden' }).catch(() => {})
+  // The backend aggregate is non-null by contract, so an unknown popover total
+  // is exercised as a client-robustness probe: the response is copied in the
+  // browser and only one entry's total is replaced with null.
+  let unknownProbeArmed = false
+  const unknownRoute = async (route) => {
+    const response = await route.fetch()
+    const json = await response.json()
+    const row = (json?.breakdown ?? []).find((item) => item.label === 'usage-zero-fixture')
+    const entry = (row?.upstream_breakdown ?? []).find((item) => item.endpoint_id === 'ep-fixture-3')
+    if (entry) entry.total_tokens = null
+    await route.fulfill({ json, response })
+  }
+  await page.route('**/api/v1/admin/request-records/overview**', unknownRoute)
+  unknownProbeArmed = true
+  await selectOption('View', 'By model')
+  await page.getByRole('button', { name: 'Refresh' }).click()
+  await page.waitForTimeout(700)
+  await foldTarget.getByRole('button', { name: 'Upstream breakdown' }).click()
+  await popover.waitFor({ state: 'visible' })
+  await page.waitForTimeout(300)
+  const unknownCollapsedCells = await popoverCells()
+  assert(unknownCollapsedCells.length === 2, `unknown probe visible rows: expected 2, got ${unknownCollapsedCells.length}`)
+  assert(unknownCollapsedCells[1][0].includes('Fixture Upstream 3'), 'the unknown-token upstream is not the second visible row')
+  assert(unknownCollapsedCells[1][4] === '-', `the unknown token total is not a dash: ${JSON.stringify(unknownCollapsedCells[1])}`)
+  assert(unknownCollapsedCells[1][4] !== '0', 'the unknown token total was coerced to 0')
+  const unknownText = await popover.innerText()
+  // The unknown entry is no longer folded, so the hidden count drops by exactly
+  // that entry's one request and still equals the sum of the folded counts.
+  assert(
+    unknownText.includes('7 zero-token requests hidden'),
+    `the unknown-token entry did not adjust the hidden request count: ${JSON.stringify(unknownText)}`,
+  )
+  await capture('usage-fold-unknown-probe-en-light-1440')
+  await popover.getByRole('button', { name: 'Show', exact: true }).click()
+  await page.waitForTimeout(350)
+  const unknownExpanded = await popoverCells()
+  assert(unknownExpanded.length === 4, `unknown probe expanded rows: expected 4, got ${unknownExpanded.length}`)
+  assert(unknownExpanded[0][4] === '1.1K', 'the positive entry lost its total during the unknown probe')
+  assert(unknownExpanded[1][4] === '-', 'the unknown entry lost its dash on expand')
+  const unknownFoldedSum = unknownExpanded
+    .slice(2)
+    .reduce((sum, cells) => sum + Number(cells[2]), 0)
+  assert(unknownFoldedSum === 7, `the unknown probe folded request sum is wrong: ${unknownFoldedSum}`)
+  await popover.getByRole('button', { name: 'Hide', exact: true }).click()
+  await page.waitForTimeout(250)
+  report.foldChecks.unknown = {
+    source: 'browser-interception-client-robustness',
+    visibleRows: unknownCollapsedCells.length,
+    dash: true,
+    coercedToZero: false,
+    hiddenRequestCount: 7,
+    foldedRequestSum: 7,
+    positivePreserved: true,
+  }
+  await page.unroute('**/api/v1/admin/request-records/overview**', unknownRoute)
+  unknownProbeArmed = false
+  await page.keyboard.press('Escape')
+  await popover.waitFor({ state: 'hidden' }).catch(() => {})
+  await page.getByRole('button', { name: 'Refresh' }).click()
+  await page.waitForTimeout(700)
+  assert(!unknownProbeArmed, 'the unknown-token probe route was left installed')
+
+  stage = 'ai-nullable-cells'
+  await mode('Records')
+  await page.waitForTimeout(400)
+  await selectOption('All status', 'All status')
+  await page.waitForTimeout(400)
+  const search4 = page.getByPlaceholder('Search')
+  await search4.fill('req-fixture-4')
+  await search4.press('Enter')
+  await page.waitForTimeout(600)
+  await page.waitForSelector('[data-usage-record-row]')
+  const nullRowsAfterSearch = await page
+    .locator('[data-usage-record-row]')
+    .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-usage-record-row')))
+  const nullRow = page.locator('[data-usage-record-row="4"]')
+  assert(
+    (await nullRow.count()) === 1,
+    `the nullable-token record is missing from the searched list: ${JSON.stringify({ rows: nullRowsAfterSearch, request: lastRequest('GET', '/api/v1/admin/request-records') })}`,
+  )
+  assert((await nullRow.locator('[data-usage-cell="total_tokens"]').innerText()).trim() === '- / - / -', 'the null list token cell is not a dash triple')
+  assert((await nullRow.locator('[data-usage-cell="throughput"]').innerText()).trim() === '-', 'the null output rate is not a dash')
+  await nullRow.locator('[data-usage-cell="details"] button').click()
+  const nullDialog = page.getByRole('dialog')
+  await nullDialog.waitFor({ state: 'visible' })
+  await page.waitForTimeout(600)
+  assert((await nullDialog.innerText()).includes('Request context'), 'the nullable-token detail did not open its context')
+  assert(!(await nullDialog.innerText()).includes('0'), 'the nullable-token detail fabricated a zero value')
+  await nullDialog.getByRole('button', { name: 'Close' }).click()
+  await page.waitForTimeout(300)
+  report.checks.nullableCells = { listTokenCell: '- / - / -', listOutputRate: '-', detailNoFabricatedZero: true }
+  await search4.fill('')
+  await search4.press('Enter')
+  await page.waitForTimeout(500)
+
+  stage = 'ai-detail-variants'
+  async function openSearchedRecord(recordId) {
+    const search = page.getByPlaceholder('Search')
+    await search.fill(`req-fixture-${recordId}`)
+    await search.press('Enter')
+    await page.waitForTimeout(600)
+    await page.locator(`[data-usage-record-row="${recordId}"] [data-usage-cell="details"] button`).click()
+    const dialog = page.getByRole('dialog')
+    await dialog.waitFor({ state: 'visible' })
+    await page.waitForTimeout(700)
+    return dialog
+  }
+  async function contextField(dialog, label) {
+    return dialog.locator('[data-usage-context-section] > div > div').evaluateAll(
+      (fields, wanted) => {
+        for (const field of fields) {
+          const name = field.querySelector('span')?.textContent?.trim()
+          if (name === wanted) return field.querySelector('strong')?.textContent?.trim() ?? null
+        }
+        return null
+      },
+      label,
+    )
+  }
+  const messagesDialog = await openSearchedRecord(27)
+  const messagesReasoning = await contextField(messagesDialog, 'Reasoning effort')
+  assert(messagesReasoning === 'low', `the /v1/messages caller effort is not shown alone: ${messagesReasoning}`)
+  assert(!messagesReasoning.includes('→'), 'the /v1/messages path merged the applied override into the caller effort')
+  await capture('usage-detail-messages-en-light-1440')
+  await messagesDialog.getByRole('button', { name: 'Close' }).click()
+  await page.waitForTimeout(400)
+
+  const responsesDialog = await openSearchedRecord(28)
+  const responsesReasoning = await contextField(responsesDialog, 'Reasoning effort')
+  assert(
+    responsesReasoning === 'low → high',
+    `the /v1/responses caller-to-override effort is wrong: ${responsesReasoning}`,
+  )
+  await responsesDialog.getByRole('button', { name: 'Close' }).click()
+  await page.waitForTimeout(400)
+
+  const parentDialog = await openSearchedRecord(36)
+  const parentText = await parentDialog.innerText()
+  assert(parentText.includes('Sub-session'), 'the sub-session badge is missing')
+  assert(parentText.includes('Parent session ID'), 'the parent session field is missing')
+  assert(parentText.includes('session-fixture-parent-36'), 'the parent session id is not rendered')
+  const parentReasoning = await contextField(parentDialog, 'Reasoning effort')
+  assert(parentReasoning === 'medium → high', `the sub-session caller-to-override effort is wrong: ${parentReasoning}`)
+  await capture('usage-detail-parent-session-en-light-1440')
+  await parentDialog.getByRole('button', { name: 'Close' }).click()
+  await page.waitForTimeout(300)
+  report.detailVariants = {
+    messages: messagesReasoning,
+    responses: responsesReasoning,
+    parentSession: parentReasoning,
+  }
+
+  stage = 'ai-header-boxes'
+  await mode('Overview')
+  await selectOption('View', 'By model')
+  await page.waitForTimeout(450)
+  await foldTarget.getByRole('button', { name: 'Upstream breakdown' }).click()
+  await popover.waitFor({ state: 'visible' })
+  await page.waitForTimeout(300)
+  async function measureHeaders(localeTag) {
+    const viewport = await page.evaluate(() => window.innerWidth)
+    const headerMetrics = await popover.locator('thead th').evaluateAll((headers) =>
+      headers.map((header) => {
+        const rect = header.getBoundingClientRect()
+        return {
+          text: (header.textContent ?? '').trim(),
+          width: rect.width,
+          scrollWidth: header.scrollWidth,
+          clientWidth: header.clientWidth,
+          left: rect.left,
+          right: rect.right,
+        }
+      }),
+    )
+    assert(headerMetrics.length === 9, `popover headers: expected 9, got ${headerMetrics.length}`)
+    const headerTexts = headerMetrics.map((header) => header.text)
+    const expectedHeaders = headerMetrics[0].text.startsWith('Upstream')
+      ? [
+          'Upstream endpoint',
+          'Model',
+          'Requests',
+          'Request share',
+          'Total tokens',
+          'Token share',
+          'Cache token coverage',
+          'Error rate',
+          'Avg output rate',
+        ]
+      : [
+          '上游节点',
+          '模型',
+          '请求',
+          '请求占比',
+          '总 token',
+          'token 占比',
+          '缓存 token 覆盖率',
+          '错误率',
+          '平均输出速度',
+        ]
+    assert(
+      JSON.stringify(headerTexts) === JSON.stringify(expectedHeaders),
+      `the ${localeTag} popover headers are not the two identifiers plus the seven metrics once: ${JSON.stringify(headerTexts)}`,
+    )
+    for (const header of headerMetrics) {
+      assert(header.scrollWidth <= header.clientWidth + 1, `header "${header.text}" clips its wrapped text at ${localeTag}/${viewport}`)
+      assert(header.width > 0, `header "${header.text}" has no width`)
+    }
+    const overlaps = []
+    for (let index = 0; index < headerMetrics.length; index += 1) {
+      for (let next = index + 1; next < headerMetrics.length; next += 1) {
+        const a = headerMetrics[index]
+        const b = headerMetrics[next]
+        if (a.right > b.left + 1 && b.right > a.left + 1) overlaps.push([a.text, b.text])
+      }
+    }
+    assert(overlaps.length === 0, `popover headers intersect: ${JSON.stringify(overlaps)}`)
+    const geometry = await popover.evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      const scroller = element.querySelector('[data-slot="table-container"]')
+      const table = scroller?.querySelector('table')
+      return {
+        clientWidth: element.clientWidth,
+        documentOverflow: document.documentElement.scrollWidth > window.innerWidth,
+        intrinsicWidth: Number(
+          element.getAttribute('data-usage-popover-intrinsic-width') ?? '0',
+        ),
+        rectLeft: Math.round(rect.left),
+        rectRight: Math.round(rect.right),
+        scrollerClientWidth: scroller?.clientWidth ?? 0,
+        scrollerScrollWidth: scroller?.scrollWidth ?? 0,
+        tableWidth: table ? Math.round(table.getBoundingClientRect().width) : 0,
+        viewport: window.innerWidth,
+      }
+    })
+    const expectedWidth = Math.min(
+      geometry.intrinsicWidth,
+      geometry.viewport - 32,
+    )
+    assert(
+      Math.abs(geometry.clientWidth - expectedWidth) <= 6,
+      `the ${localeTag} popover width at ${viewport}px is ${geometry.clientWidth} instead of ${expectedWidth}`,
+    )
+    assert(
+      geometry.rectLeft >= -1 && geometry.rectRight <= geometry.viewport + 1,
+      `the ${localeTag} popover at ${viewport}px escapes the viewport: ${JSON.stringify(geometry)}`,
+    )
+    assert(
+      geometry.documentOverflow === false,
+      `the ${localeTag} popover at ${viewport}px overflows the document`,
+    )
+    if (geometry.intrinsicWidth + 32 <= geometry.viewport) {
+      assert(
+        geometry.scrollerScrollWidth <= geometry.scrollerClientWidth + 1,
+        `the ${localeTag} popover at ${viewport}px pans horizontally although every metric fits: ${JSON.stringify(geometry)}`,
+      )
+    } else {
+      assert(
+        geometry.scrollerScrollWidth > geometry.scrollerClientWidth,
+        `the ${localeTag} popover at ${viewport}px does not keep a controlled scroll: ${JSON.stringify(geometry)}`,
+      )
+    }
+    report.widthChecks.push({
+      ...geometry,
+      expectedWidth,
+      locale: localeTag,
+    })
+    const pinnedCells = await popover.locator('tbody tr').first().locator('td').evaluateAll((cells) =>
+      cells.map((cell) => {
+        const style = getComputedStyle(cell)
+        return {
+          sticky: style.position === 'sticky',
+          opaque:
+            style.backgroundColor !== 'rgba(0, 0, 0, 0)' &&
+            style.backgroundColor !== 'transparent',
+        }
+      }),
+    )
+    const pinned = pinnedCells.some((cell) => cell.sticky)
+    assert(pinned, 'no identifier cell is pinned')
+    assert(
+      pinnedCells.every((cell) => !cell.sticky || cell.opaque),
+      'a pinned identifier has no opaque background',
+    )
+    const overflow = await page.evaluate(() => {
+      const width = window.innerWidth
+      const offenders = [...document.querySelectorAll('*')]
+        .map((element) => {
+          const rect = element.getBoundingClientRect()
+          return {
+            tag: element.tagName,
+            cls: String(element.className ?? '').slice(0, 90),
+            left: Math.round(rect.left),
+            right: Math.round(rect.right),
+          }
+        })
+        .filter((item) => item.right > width + 1 || item.left < -1)
+        .slice(0, 12)
+      return { width, scrollWidth: document.documentElement.scrollWidth, offenders }
+    })
+    assert(
+      !(overflow.scrollWidth > overflow.width),
+      `the page overflows horizontally at ${localeTag}/${viewport}px: ${JSON.stringify(overflow)}`,
+    )
+    report.headerChecks.push({
+      locale: localeTag,
+      viewport,
+      headers: headerMetrics.length,
+      overlaps,
+      pinned,
+      scrollWidth: overflow.scrollWidth,
+    })
+    return headerMetrics.length
+  }
+
+  const widths = [1440, 1024, 768, 390]
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.waitForTimeout(250)
+    await measureHeaders('en')
+    await capture(`usage-fold-en-light-${width}`)
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.waitForTimeout(200)
+  await page.keyboard.press('Escape')
+  await popover.waitFor({ state: 'hidden' }).catch(() => {})
+
+  stage = 'ai-locale-and-responsive'
+  await page.getByRole('button', { name: 'Language' }).click()
+  await page.waitForTimeout(500)
+  assert(
+    (await page.locator('[data-foundation-route-id="R-USAGE-AI"] h1').innerText()) === 'AI 请求',
+    'the locale switch did not translate the page',
+  )
+  await page.getByRole('button', { name: '暗色' }).click()
+  await page.waitForTimeout(400)
+  await capture('usage-ai-zh-dark-1440')
+  pass('R-USAGE-AI', 'locale-switch', 'the page followed the locale toggle and translated the fold matrix copy')
+
+  stage = 'ai-zh-fold-matrix'
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await selectOption('视角', '按模型')
+  await page.waitForTimeout(450)
+  const zhRow = page.locator('[data-usage-breakdown-row="usage-zero-fixture"]')
+  await zhRow.scrollIntoViewIfNeeded()
+  await zhRow.getByRole('button', { name: '上游明细' }).click()
+  await popover.waitFor({ state: 'visible' })
+  await page.waitForTimeout(300)
+  assert(
+    (await popover.locator('tbody tr').count()) === 1,
+    'the zero-token fold did not stay collapsed in the Chinese locale',
+  )
+  assert(
+    (await popover.innerText()).includes('已折叠 8 次零 Token 请求'),
+    'the Chinese folded request count copy is missing',
+  )
+  await capture('usage-fold-zh-dark-1440-collapsed')
+  await popover.getByRole('button', { name: '展开', exact: true }).click()
+  await page.waitForTimeout(300)
+  const zhExpanded = await popover.locator('tbody tr').evaluateAll((rows) =>
+    rows.map((row) =>
+      [...row.querySelectorAll('td')].map((cell) => (cell.textContent ?? '').trim()),
+    ),
+  )
+  assert(zhExpanded.length === 4, `the Chinese expand did not reveal the folded rows: ${zhExpanded.length}`)
+  for (const cells of zhExpanded.slice(1)) {
+    assert(cells[4] === '0', `a Chinese folded row did not render a literal 0 total: ${JSON.stringify(cells)}`)
+  }
+  assert(zhExpanded[1][7] === '0%' && zhExpanded[2][7] === '60%' && zhExpanded[3][7] === '100%', 'the Chinese folded failure rates are wrong')
+  const zhExpandedText = await popover.innerText()
+  assert(
+    zhExpandedText.includes('8 次零 Token 请求') && !zhExpandedText.includes('已折叠'),
+    `the expanded Chinese footer still claims a hidden count: ${JSON.stringify(zhExpandedText)}`,
+  )
+  await capture('usage-fold-zh-dark-1440-expanded')
+  await popover.getByRole('button', { name: '收起', exact: true }).click()
+  await page.waitForTimeout(300)
+  assert(
+    (await popover.locator('tbody tr').count()) === 1,
+    'the Chinese collapse did not hide the folded row again',
+  )
+  report.foldChecks.zh = {
+    collapsedFooterHidden: true,
+    collapsedRows: 1,
+    expandedCopyNeutral: true,
+    expandedRows: 4,
+    hiddenRequestCount: 8,
+    literalZero: true,
+    rates: ['0%', '60%', '100%'],
+  }
+  await popover.getByRole('button', { name: '展开', exact: true }).click()
+  await page.waitForTimeout(300)
+  await page.keyboard.press('Escape')
+  await popover.waitFor({ state: 'hidden' }).catch(() => {})
+
+  stage = 'ai-zh-fold-upstream'
+  await selectOption('视角', '按上游')
+  await page.waitForTimeout(500)
+  const zhUpstreamRow = page.locator('[data-usage-breakdown-row="ep-fixture-1"]')
+  assert((await zhUpstreamRow.count()) === 1, 'the Chinese upstream fold row is missing')
+  await zhUpstreamRow.getByRole('button', { name: '模型明细' }).click()
+  await popover.waitFor({ state: 'visible' })
+  await page.waitForTimeout(300)
+  assert((await popover.locator('tbody tr').count()) === 1, 'the Chinese upstream fold did not stay collapsed')
+  assert(
+    (await popover.innerText()).includes('已折叠 8 次零 Token 请求'),
+    'the Chinese upstream folded request count copy is missing',
+  )
+  await popover.getByRole('button', { name: '展开', exact: true }).click()
+  await page.waitForTimeout(300)
+  const zhUpstreamExpanded = await popover.locator('tbody tr').evaluateAll((rows) =>
+    rows.map((row) =>
+      [...row.querySelectorAll('td')].map((cell) => (cell.textContent ?? '').trim()),
+    ),
+  )
+  assert(zhUpstreamExpanded.length === 4, `the Chinese upstream expand did not reveal four rows: ${zhUpstreamExpanded.length}`)
+  for (const cells of zhUpstreamExpanded.slice(1)) {
+    assert(cells[3] === '0', `a Chinese folded upstream model did not render a literal 0 total: ${JSON.stringify(cells)}`)
+  }
+  assert(
+    zhUpstreamExpanded[1][1] === '1' &&
+      zhUpstreamExpanded[1][6] === '0%' &&
+      zhUpstreamExpanded[2][1] === '5' &&
+      zhUpstreamExpanded[2][6] === '60%' &&
+      zhUpstreamExpanded[3][1] === '2' &&
+      zhUpstreamExpanded[3][6] === '100%',
+    `the Chinese upstream fold matrix is wrong: ${JSON.stringify(zhUpstreamExpanded.slice(1))}`,
+  )
+  const zhUpstreamExpandedText = await popover.innerText()
+  assert(
+    zhUpstreamExpandedText.includes('8 次零 Token 请求') &&
+      !zhUpstreamExpandedText.includes('已折叠'),
+    `the expanded Chinese upstream footer still claims a hidden count: ${JSON.stringify(zhUpstreamExpandedText)}`,
+  )
+  report.foldChecks.zhUpstream = {
+    collapsedFooterHidden: true,
+    collapsedRows: 1,
+    expandedCopyNeutral: true,
+    expandedRows: 4,
+    hiddenRequestCount: 8,
+    literalZero: true,
+    rates: ['0%', '60%', '100%'],
+  }
+  await popover.getByRole('button', { name: '收起', exact: true }).click()
+  await page.waitForTimeout(250)
+  assert((await popover.locator('tbody tr').count()) === 1, 'the Chinese upstream collapse did not hide the folded rows')
+  await popover.getByRole('button', { name: '展开', exact: true }).click()
+  await page.waitForTimeout(300)
+  await selectOption('视角', '按模型')
+  await page.waitForTimeout(400)
+  await page.locator('[data-usage-breakdown-row="usage-zero-fixture"]').getByRole('button', { name: '上游明细' }).click()
+  await popover.waitFor({ state: 'visible' })
+  await page.waitForTimeout(300)
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.waitForTimeout(250)
+    await measureHeaders('zh')
+    await capture(`usage-fold-zh-dark-${width}`)
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: '语言' }).click()
+  await page.waitForTimeout(400)
+  await page.getByRole('button', { name: 'Light' }).click()
+  await page.waitForTimeout(250)
+
+  stage = 'ai-responsive-records'
+  await go('/request-records/ai', 'R-USAGE-AI')
+  await mode('Records')
+  await page.waitForTimeout(400)
+  await page.getByRole('combobox', { name: 'Rows per page' }).click()
+  await page.getByRole('option', { name: '50', exact: true }).click()
+  await page.waitForTimeout(500)
+  const longRow = page
+    .locator('[data-usage-record-row]')
+    .filter({ hasText: 'OpenAI ChatGPT Subscription' })
+    .first()
+  assert((await longRow.count()) === 1, 'no row carries the long upstream identifier')
+  const longCell = longRow.locator('[data-usage-cell="target"]')
+  assert(
+    (await longCell.innerText()).includes(
+      'OpenAI ChatGPT Subscription — Integration Workspace With A Long Name',
+    ),
+    'the long upstream identifier is missing from its cell',
+  )
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.waitForTimeout(300)
+    const overflow = await page.evaluate(() => ({
+      width: window.innerWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+      containers: [...document.querySelectorAll('[data-slot="table-container"]')].map(
+        (element) => ({
+          client: element.clientWidth,
+          scroll: element.scrollWidth,
+        }),
+      ),
+    }))
+    assert(
+      !(overflow.scrollWidth > overflow.width),
+      `the records page overflows at ${width}px (${overflow.scrollWidth})`,
+    )
+    assert(
+      overflow.containers.some((item) => item.scroll > item.client),
+      `the wide table does not scroll inside its own container at ${width}px`,
+    )
+  }
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.waitForTimeout(200)
+  const longCellAt390 = await longCell.evaluate((cell) => {
+    const container = cell.closest('[data-slot="table-container"]')
+    return {
+      text: (cell.textContent ?? '').trim(),
+      containerInside:
+        container !== null &&
+        cell.getBoundingClientRect().right <=
+          container.getBoundingClientRect().right + container.scrollWidth,
+    }
+  })
+  assert(longCellAt390.text.length > 60, 'the long upstream identifier was truncated out of the DOM')
+  assert(longCellAt390.containerInside, 'the long value escaped its table scroller')
+  report.checks.longValues = { label: longCellAt390.text }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  pass('R-USAGE-AI', 'responsive-width', 'no document overflow at 1440/1024/768/390')
+  pass('R-USAGE-AI', 'long-values', 'long endpoint/model identifiers stayed inside the controlled table scroller')
+
+  stage = 'ai-detail'
+  await go('/request-records/ai', 'R-USAGE-AI')
+  await mode('Records')
+  await page.waitForTimeout(400)
+  await page.locator('[data-usage-record-row="1"] [data-usage-column="details"] button').or(
+    page.locator('[data-usage-record-row="1"] [data-usage-cell="details"] button'),
+  ).first().click()
+  const aiDialog = page.getByRole('dialog')
+  await aiDialog.waitFor({ state: 'visible' })
+  await page.waitForTimeout(700)
+  const aiContextText = await aiDialog.innerText()
+  assert(aiContextText.includes('Request context'), 'the AI detail context section is missing')
+  assert(aiContextText.includes('Session header ID'), 'the session header id field is missing')
+  assert(aiContextText.includes('session-fixture-1'), 'the session header id is not rendered')
+  assert(aiContextText.includes('conversation-1'), 'the conversation id is not rendered')
+  const transcriptRequest = lastRequest('GET', '/api/v1/admin/request-records/:id/request-full')
+  assert(transcriptRequest?.limit === '10' && transcriptRequest.order === 'desc', 'the first transcript page is not limit 10 desc')
+  await aiDialog.getByText('(10/12)').waitFor({ state: 'visible' })
+  const itemsBefore = await aiDialog.locator('[data-usage-transcript-item]').count()
+  const messagesBefore = await aiDialog.locator('[data-usage-transcript-item^="request-"]').count()
+  assert(messagesBefore === 10, `first transcript page messages: expected 10, got ${messagesBefore}`)
+  assert(itemsBefore === 11, `first transcript page items: expected 10 messages + assistant, got ${itemsBefore}`)
+  await aiDialog.getByRole('button', { name: 'Show more' }).click()
+  await page.waitForTimeout(700)
+  const itemsAfter = await aiDialog.locator('[data-usage-transcript-item]').count()
+  const messagesAfter = await aiDialog.locator('[data-usage-transcript-item^="request-"]').count()
+  assert(messagesAfter === 12, `appended transcript messages: expected 12, got ${messagesAfter}`)
+  assert(itemsAfter === 13, `appended transcript items: expected 12 messages + assistant, got ${itemsAfter}`)
+  assert(lastRequest('GET', '/api/v1/admin/request-records/:id/request-full')?.cursor === '10', 'the load-more did not send cursor=10')
+  await aiDialog.locator('[data-usage-transcript-item]').first().getByRole('button').click()
+  assert(await aiDialog.locator('[data-usage-json]').count() > 0, 'expanding a transcript item did not render JSON')
+  report.detailChecks = { transcriptFirst: itemsBefore, transcriptAll: itemsAfter, cursor: '10' }
+  await aiDialog.getByRole('button', { name: 'Close' }).click()
+  await page.waitForTimeout(400)
+  assert((await page.getByRole('dialog').count()) === 0, 'the AI detail did not close')
+  pass('R-USAGE-AI', 'dialog-open', 'the AI detail opened the transcript and paged it')
+
+  stage = 'ai-abort-error'
+  await page.locator('[data-usage-record-row="5"] [data-usage-cell="details"] button').click()
+  const abortDialog = page.getByRole('dialog')
+  await abortDialog.waitFor({ state: 'visible' })
+  await page.waitForTimeout(600)
+  const abortText = await abortDialog.innerText()
+  assert(abortText.includes('Abort details'), 'abort details are missing')
+  assert(abortText.includes('Downstream response channel closed'), 'the abort source is missing')
+  assert(abortText.includes('Aborted by downstream client'), 'the abort summary is missing')
+  assert(abortText.includes('Upstream error body'), 'the abort record upstream body section is missing')
+  await abortDialog.getByRole('button', { name: 'Close' }).click()
+  await page.locator('[data-usage-record-row="2"] [data-usage-cell="details"] button').click()
+  const errorDialog = page.getByRole('dialog')
+  await errorDialog.waitFor({ state: 'visible' })
+  await page.waitForTimeout(600)
+  const errorText = await errorDialog.innerText()
+  assert(errorText.includes('upstream_rate_limited: Fixture upstream rate limit'), 'the error summary is missing')
+  assert(
+    errorText.includes('upstream returned 429: fixture rate limit exceeded'),
+    'the upstream error body text is missing',
+  )
+  await capture('usage-detail-error-en-light-1440')
+  report.detailChecks.error = true
+  report.detailChecks.abort = true
+  await errorDialog.getByRole('button', { name: 'Close' }).click()
+  pass('R-USAGE-AI', 'dialog-open', 'the AI error and abort blocks rendered their evidence')
+
+  stage = 'mcp-route'
+  await go('/request-records/mcp', 'R-USAGE-MCP')
+  assert((await page.locator('[data-usage-metric]').count()) === 5, 'MCP metric cards are not five')
+  assert((await page.getByRole('combobox', { name: 'MCP record scope' }).count()) === 1, 'MCP scope select missing')
+  assert((await page.getByRole('combobox', { name: 'View' }).count()) === 0, 'MCP shows the model perspective select')
+  await mode('Records')
+  await page.waitForTimeout(400)
+  const mcpColumns = await page.locator('[data-usage-column]').evaluateAll((cells) => cells.map((cell) => cell.getAttribute('data-usage-column')))
+  for (const column of ['details', 'target', 'provider_kind', 'mcp_method', 'mcp_operation', 'error']) {
+    assert(mcpColumns.includes(column), `MCP table is missing the ${column} column`)
+  }
+  assert(!mcpColumns.includes('redaction') && !mcpColumns.includes('total_tokens'), 'MCP table shows AI-only metrics')
+  report.checks.mcpRoute = { cards: 5, columns: mcpColumns }
+  pass('R-USAGE-MCP', 'route-render', 'MCP route rendered its five cards, scope and table')
+  await capture('usage-mcp-records-en-light-1440')
+  await selectOption('MCP record scope', 'Gateway requests')
+  const gatewayQuery = lastRequest('GET', '/api/v1/admin/request-records')
+  assert(gatewayQuery?.mcpScope === 'gateway' && gatewayQuery.mcpServerId === null && gatewayQuery.model === null, 'gateway scope did not drop server/model filters')
+  report.checks.mcpScope = 'gateway'
+  pass('R-USAGE-MCP', 'mutation-update', 'the gateway scope switched the server query and filters')
+  await selectOption('MCP record scope', 'Service calls')
+  await page.waitForTimeout(800)
+  const mcpTimeHeader = page.locator('[data-usage-column="created_at"]')
+  const mcpTimeButton = mcpTimeHeader.getByRole('button')
+  assert((await mcpTimeButton.count()) === 1, 'the MCP Time header lost its sort button')
+  assert((await page.locator('[data-usage-column="details"] button').count()) === 0, 'the MCP details header gained a sort control')
+  await mcpTimeButton.scrollIntoViewIfNeeded()
+  await mcpTimeButton.focus()
+  assert(
+    await page.evaluate(() => {
+      const active = document.activeElement
+      return active?.closest('[data-usage-column="created_at"]') !== null
+    }),
+    'the MCP Time sort button did not take the focus',
+  )
+  assert(
+    (await mcpTimeHeader.getAttribute('aria-sort')) === 'descending',
+    'the MCP Time header did not start from the default descending order',
+  )
+  await page.keyboard.press('Space')
+  await page.waitForTimeout(500)
+  assert((await mcpTimeHeader.getAttribute('aria-sort')) === 'none', 'the MCP Time header did not cycle to unsorted')
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.sortOrder === '0', 'the MCP unsorted cycle did not send order 0')
+  await page.keyboard.press('Space')
+  await page.waitForTimeout(500)
+  assert((await mcpTimeHeader.getAttribute('aria-sort')) === 'ascending', 'the MCP Time header did not sort ascending')
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.sortField === 'created_at', 'the MCP Time header did not query created_at')
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.sortOrder === '1', 'the MCP ascending cycle did not send order 1')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(500)
+  assert((await mcpTimeHeader.getAttribute('aria-sort')) === 'descending', 'the MCP Time header did not cycle to descending')
+  assert(lastRequest('GET', '/api/v1/admin/request-records')?.sortOrder === '-1', 'the MCP descending cycle did not send order -1')
+  report.checks.mcpSort = { field: 'created_at', ascending: true, descending: true, unsorted: true }
+
+  stage = 'mcp-detail'
+  await page.waitForTimeout(300)
+  await page.locator('[data-usage-record-row="101"] [data-usage-cell="details"] button').click()
+  const mcpDialog = page.getByRole('dialog')
+  await mcpDialog.waitFor({ state: 'visible' })
+  await page.waitForTimeout(600)
+  const mcpText = await mcpDialog.innerText()
+  assert(mcpText.includes('Request payload') && mcpText.includes('Response payload'), 'MCP payload sections are missing')
+  assert(!mcpText.includes('Raw messages') && !mcpText.includes('Session routing'), 'MCP detail shows AI-only sections')
+  assert(await mcpDialog.locator('[data-usage-json]').count() >= 1, 'MCP payload is not rendered as JSON')
+  await capture('usage-mcp-detail-en-light-1440')
+  await mcpDialog.getByRole('button', { name: 'Close' }).click()
+  await page.waitForTimeout(300)
+  await selectOption('MCP record scope', 'Gateway requests')
+  await page.waitForTimeout(500)
+  await page.getByPlaceholder('Search').fill('resources/read')
+  await page.getByPlaceholder('Search').press('Enter')
+  await page.waitForTimeout(500)
+  const errorLink = page.locator('[data-usage-record-row="102"] [data-usage-cell="error"] button')
+  await errorLink.click()
+  const mcpErrorDialog = page.getByRole('dialog')
+  await mcpErrorDialog.waitFor({ state: 'visible' })
+  await page.waitForTimeout(500)
+  assert((await mcpErrorDialog.innerText()).includes('gateway rejected unmapped operation'), 'the MCP error payload dialog did not open from the error link')
+  await mcpErrorDialog.getByRole('button', { name: 'Close' }).click()
+  report.checks.mcpDetail = { details: true, errorLink: true }
+  pass('R-USAGE-MCP', 'dialog-open', 'MCP details and error link both opened the raw payload dialog')
+
+  stage = 'mcp-pagination-and-empty'
+  await go('/request-records/mcp', 'R-USAGE-MCP')
+  await mode('Records')
+  await page.waitForTimeout(450)
+  await selectOption('MCP record scope', 'All records')
+  await page.waitForTimeout(400)
+  await page.getByRole('combobox', { name: 'Rows per page' }).click()
+  await page.getByRole('option', { name: '10', exact: true }).click()
+  await page.waitForTimeout(500)
+  const mcpPageOne = await page.locator('[data-usage-record-row]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-usage-record-row')))
+  await page.getByRole('button', { name: 'Next page' }).click()
+  await page.waitForTimeout(450)
+  const mcpPageTwo = await page.locator('[data-usage-record-row]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-usage-record-row')))
+  assert(mcpPageTwo.length > 0 && mcpPageTwo.every((id) => !mcpPageOne.includes(id)), 'MCP page two did not change rows')
+  pass('R-USAGE-MCP', 'pagination', 'MCP page two queried a distinct row set')
+  await page.getByRole('button', { name: 'Time range' }).click()
+  await page.getByLabel('Custom 1').fill('2026-01-01')
+  await page.getByLabel('Custom 2').fill('2026-01-02')
+  await page.waitForTimeout(600)
+  assert((await page.getByText('No MCP call records').count()) === 1, 'the MCP empty state did not render')
+  pass('R-USAGE-MCP', 'empty-state', 'a past custom window rendered the MCP empty state')
+
+  stage = 'operator-role-reads'
+  await go('/request-records/ai', 'R-USAGE-AI')
+  await mode('Records')
+  await page.waitForTimeout(400)
+  const operatorRows = await page.locator('[data-usage-record-row]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-usage-record-row')))
+  assert(operatorRows.length > 0 && !operatorRows.includes('10'), 'the operator list exposed the admin-owned record')
+  const forged = await api('/api/v1/admin/request-records/10', 'GET')
+  assert(forged.status === 404, `foreign detail read: expected 404, got ${forged.status}`)
+  const forgedPut = await api('/api/v1/admin/conversations/conversation-1/endpoint-override', 'PUT', { endpoint_id: 'ep-minimax-cn', endpoint_key_id: null })
+  assert(forgedPut.status === 403, `forged override PUT: expected 403, got ${forgedPut.status}`)
+  const forgedDelete = await api('/api/v1/admin/conversations/conversation-1/endpoint-override', 'DELETE')
+  assert(forgedDelete.status === 403, `forged override DELETE: expected 403, got ${forgedDelete.status}`)
+  const forgedReset = await api('/api/v1/admin/request-records/1/reset-session-affinity', 'POST')
+  assert(forgedReset.status === 403, `forged reset: expected 403, got ${forgedReset.status}`)
+  await page.locator('[data-usage-record-row="1"] [data-usage-cell="details"] button').click()
+  const operatorDialog = page.getByRole('dialog')
+  await operatorDialog.waitFor({ state: 'visible' })
+  await page.waitForTimeout(600)
+  assert((await operatorDialog.getByRole('button', { name: 'Set override' }).count()) === 0, 'a non-admin sees the override save control')
+  assert((await operatorDialog.getByRole('button', { name: 'Reset session binding' }).count()) === 0, 'a non-admin sees the affinity reset control')
+  report.roleChecks = { selfScope: true, foreign404: true, writes403: true, sessionReadOnly: true }
+  pass('R-USAGE-AI', 'long-values', 'operator self-scope and hidden admin session controls verified')
+  await operatorDialog.getByRole('button', { name: 'Close' }).click()
+
+  stage = 'clear-cancel-and-role'
+  await page.getByRole('button', { name: 'Clear history' }).click()
+  const clearDialog = page.getByRole('dialog')
+  await clearDialog.waitFor({ state: 'visible' })
+  const writesBeforeCancel = requestsFor('POST', '/api/v1/admin/request-records/clear').length
+  await clearDialog.getByRole('button', { name: 'Cancel' }).click()
+  await page.waitForTimeout(300)
+  assert(requestsFor('POST', '/api/v1/admin/request-records/clear').length === writesBeforeCancel, 'cancel issued a clear request')
+  pass('R-USAGE-MCP', 'destructive-confirm', 'cancel issued no clear request')
+
+  stage = 'admin-sign-in'
+  await signOut()
+  await signIn('admin')
+  await go('/request-records/ai', 'R-USAGE-AI')
+  assert((await page.getByRole('combobox', { name: 'All users' }).count()) === 1, 'admin user filter missing')
+
+  stage = 'admin-session-routing'
+  await mode('Records')
+  await page.waitForTimeout(400)
+  await page.locator('[data-usage-record-row="1"] [data-usage-cell="details"] button').click()
+  const adminDialog = page.getByRole('dialog')
+  await adminDialog.waitFor({ state: 'visible' })
+  await page.waitForTimeout(700)
+  assert((await adminDialog.getByText('Session routing').count()) === 1, 'session routing section missing')
+  await page.getByRole('combobox', { name: 'Select upstream', exact: true }).click()
+  await page.getByRole('option', { name: 'OpenRouter Shared Pool', exact: true }).click()
+  await page.waitForTimeout(250)
+  await adminDialog.getByRole('button', { name: 'Set override' }).click()
+  await page.waitForTimeout(900)
+  assert(lastRequest('PUT', '/api/v1/admin/conversations/:id/endpoint-override') !== undefined, 'the override save did not issue a PUT')
+  assert((await page.getByRole('status').count()) >= 1, 'the override save did not report success')
+  assert((await adminDialog.innerText()).includes('OpenRouter Shared Pool'), 'the override did not refresh from the options')
+  await adminDialog.getByRole('button', { name: 'Clear override' }).click()
+  await page.waitForTimeout(800)
+  assert(lastRequest('DELETE', '/api/v1/admin/conversations/:id/endpoint-override') !== undefined, 'the override clear did not issue a DELETE')
+  await page.evaluate(() => { window.__usageConfirm = false; window.__usageConfirmCalls = 0 })
+  const resetsBeforeCancel = requestsFor('POST', '/api/v1/admin/request-records/:id/reset-session-affinity').length
+  await adminDialog.getByRole('button', { name: 'Reset session binding' }).click()
+  await page.waitForTimeout(300)
+  assert((await page.evaluate(() => window.__usageConfirmCalls)) === 1, 'reset did not ask for native confirmation')
+  assert(
+    requestsFor('POST', '/api/v1/admin/request-records/:id/reset-session-affinity').length === resetsBeforeCancel,
+    'a cancelled reset issued a POST',
+  )
+  await page.evaluate(() => { window.__usageConfirm = true })
+  await adminDialog.getByRole('button', { name: 'Reset session binding' }).click()
+  await page.waitForTimeout(800)
+  assert(
+    requestsFor('POST', '/api/v1/admin/request-records/:id/reset-session-affinity').length === resetsBeforeCancel + 1,
+    'a confirmed reset issued no POST',
+  )
+  report.sessionChecks = { save: true, clear: true, confirmCancel: true, confirm: true }
+  pass('R-USAGE-AI', 'mutation-update', 'admin override save/clear and reset confirmation verified')
+
+  stage = 'admin-session-guard'
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/request-records',
+    method: 'POST',
+    status: 200,
+    delayMs: 900,
+    count: 1,
+  })
+  const writesBeforeGuard = requestsFor('POST', '/api/v1/admin/request-records/:id/reset-session-affinity').length
+  await page.evaluate(() => { window.__usageConfirm = true })
+  await adminDialog.getByRole('button', { name: 'Reset session binding' }).click()
+  await page.waitForTimeout(250)
+  assert((await adminDialog.getByRole('button', { name: 'Reset session binding' }).isDisabled()) === true, 'the controls were not frozen while a write was pending')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  assert((await page.getByRole('dialog').count()) === 1, 'the pending write allowed the dialog to close')
+  await adminDialog.locator('form').count().catch(() => {})
+  await adminDialog.getByRole('button', { name: 'Reset session binding' }).click({ force: true }).catch(() => {})
+  await page.waitForTimeout(1200)
+  assert(requestsFor('POST', '/api/v1/admin/request-records/:id/reset-session-affinity').length === writesBeforeGuard + 1, 'a duplicate write escaped the guard')
+  await fixture('/__fixtures/faults', 'DELETE')
+  report.sessionChecks.pendingGuard = true
+
+  stage = 'admin-session-errors'
+  const invalidEndpoint = await api('/api/v1/admin/conversations/conversation-1/endpoint-override', 'PUT', { endpoint_id: 'missing-endpoint', endpoint_key_id: null })
+  assert(invalidEndpoint.status === 400 && invalidEndpoint.json?.error?.code === 'invalid_endpoint', 'invalid endpoint did not return 400 invalid_endpoint')
+  const invalidKey = await api('/api/v1/admin/conversations/conversation-1/endpoint-override', 'PUT', { endpoint_id: 'ep-minimax-cn', endpoint_key_id: 'key-openrouter-1' })
+  assert(invalidKey.status === 400 && invalidKey.json?.error?.code === 'invalid_endpoint_key', 'invalid key did not return 400 invalid_endpoint_key')
+  const noConversation = await api('/api/v1/admin/request-records/14/reset-session-affinity', 'POST')
+  assert(noConversation.status === 400 && noConversation.json?.error?.code === 'no_conversation_id', 'a conversation-less reset did not return 400')
+  report.sessionChecks.errors = true
+  await adminDialog.getByRole('button', { name: 'Close' }).click()
+  await page.waitForTimeout(300)
+
+  stage = 'admin-clear'
+  await page.getByRole('button', { name: 'Clear history' }).click()
+  const adminClear = page.getByRole('dialog')
+  await adminClear.waitFor({ state: 'visible' })
+  await adminClear.getByRole('combobox', { name: 'Clear scope' }).click()
+  const scopeOptions = await page.getByRole('option').allTextContents()
+  assert(scopeOptions.includes('Selected user') && scopeOptions.includes('All records'), 'admin clear scopes are incomplete')
+  await page.keyboard.press('Escape')
+  const clearDates = adminClear.locator('input[type="datetime-local"]')
+  await adminClear.getByRole('checkbox').click()
+  assert(await clearDates.nth(0).isDisabled(), 'delete-all did not disable the start input')
+  assert(await clearDates.nth(1).isDisabled(), 'delete-all did not disable the end input')
+  await adminClear.getByRole('checkbox').click()
+  await clearDates.nth(0).fill('2026-01-01T10:00')
+  await clearDates.nth(1).fill('2026-01-02T10:00')
+  const clearBefore = requestsFor('POST', '/api/v1/admin/request-records/clear').length
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/request-records/clear',
+    method: 'POST',
+    status: 503,
+    delayMs: 200,
+    count: 1,
+  })
+  await adminClear.getByRole('button', { name: 'Clear', exact: true }).click()
+  await page.waitForTimeout(900)
+  assert(requestsFor('POST', '/api/v1/admin/request-records/clear').length === clearBefore + 1, 'the failed clear issued more than one POST')
+  assert((await page.getByRole('dialog').count()) === 1, 'the failed clear closed the dialog')
+  assert(
+    (await clearDates.nth(0).inputValue()) === '2026-01-01T10:00' &&
+      (await clearDates.nth(1).inputValue()) === '2026-01-02T10:00',
+    'the failed clear lost its draft',
+  )
+  await fixture('/__fixtures/faults', 'DELETE')
+  await adminClear.getByRole('button', { name: 'Clear', exact: true }).click()
+  await page.waitForTimeout(1500)
+  assert(requestsFor('POST', '/api/v1/admin/request-records/clear').length === clearBefore + 2, 'the retried clear issued no second POST')
+  await page.waitForTimeout(500)
+  assert((await page.getByRole('dialog').count()) === 0, 'the successful clear did not close the dialog')
+  assert((await page.getByRole('status').count()) >= 1, 'the successful clear reported no deleted count')
+  const clearRequest = requestsFor('POST', '/api/v1/admin/request-records/clear')[0]
+  report.clearChecks = { row: true, clearRequest: clearRequest.path, failedRetry: true, singleWrite: true }
+  await page.waitForTimeout(200)
+  const rangeRequired = await api('/api/v1/admin/request-records/clear', 'POST', { scope: 'current_user', delete_all: false })
+  assert(rangeRequired.status === 400 && rangeRequired.json?.error?.code === 'range_required', 'range_required was not enforced')
+  const invalidRange = await api('/api/v1/admin/request-records/clear', 'POST', { scope: 'current_user', start_at: '2026-01-02T00:00:00Z', end_at: '2026-01-01T00:00:00Z' })
+  assert(invalidRange.status === 400 && invalidRange.json?.error?.code === 'invalid_range', 'invalid_range was not enforced')
+  const userRequired = await api('/api/v1/admin/request-records/clear', 'POST', { scope: 'target_user', delete_all: true })
+  assert(userRequired.status === 400 && userRequired.json?.error?.code === 'user_required', 'user_required was not enforced')
+  report.clearChecks.errors = true
+  pass('R-USAGE-AI', 'destructive-confirm', 'admin clear scopes, delete-all and validation errors verified')
+
+  stage = 'finish'
+  report.checks.officialPendingRoutes = 0
+  report.limitations.push(
+    'Evidence is synthetic-fixture rendered UI and request behavior only: no live aggregation, persistence, provider, account, or database claim.',
+    'The aggregated popover total is non-null by backend contract, so the unknown-token popover case is a browser-interception client-robustness probe; the actual nullable measurement is proven on the record 4 list cells.',
+    'The loading and stale assertions measure the rendered busy surface and the newest request winning, not backend latency.',
+  )
+  report.checks.limitations = report.limitations
+  report.finishedAt = new Date().toISOString()
+  return report
+}

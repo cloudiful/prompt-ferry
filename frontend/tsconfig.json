@@ -7,11 +7,11 @@
       "@/*": ["./src/*"]
     },
     "strict": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "skipLibCheck": true,
     "allowSyntheticDefaultImports": true,
     "noEmit": true,
-    "types": ["vite/client", "@nuxt/icon/client"]
+    "types": ["vite/client"]
   },
-  "include": ["src/**/*.ts", "auto-imports.d.ts", "components.d.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

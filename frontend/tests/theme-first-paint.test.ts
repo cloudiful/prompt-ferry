@@ -5,6 +5,7 @@ import {
   readStorage,
   writeStorage,
 } from '../src/storage'
+import { applyThemeToDocument, resolveThemeMode } from '../src/lib/theme'
 
 const indexHtml = readFileSync(
   new URL('../index.html', import.meta.url),
@@ -262,13 +263,6 @@ async function withGlobals<T>(
   }
 }
 
-let loadCounter = 0
-/** A fresh module instance, so every case runs its own startup path. */
-function loadThemeModule(): Promise<typeof import('../src/theme/appTheme')> {
-  loadCounter += 1
-  return import(`../src/theme/appTheme?case=${loadCounter}`)
-}
-
 function documentStub(element: DocumentElementStub): Globals {
   return { document: { documentElement: element } }
 }
@@ -294,7 +288,7 @@ test('a blocked store never breaks a read or a write', async () => {
 test('the theme module starts dark and writes nothing when storage is blocked', async () => {
   const writes: Array<[string, string]> = []
 
-  const theme = await withGlobals(
+  await withGlobals(
     {
       localStorage: {
         getItem() {
@@ -303,40 +297,42 @@ test('the theme module starts dark and writes nothing when storage is blocked', 
         setItem: (key: string, value: string) => writes.push([key, value]),
       },
     },
-    loadThemeModule,
+    () => {
+      expect(resolveThemeMode(readStorage(THEME_MODE_STORAGE_KEY))).toBe('dark')
+    },
   )
 
-  expect(theme.themeMode.value).toBe('dark')
   expect(writes).toEqual([])
 })
 
 test('the theme module starts from the persisted mode without rewriting it', async () => {
   const writes: Array<[string, string]> = []
+  const element = createDocumentElement()
 
-  const theme = await withGlobals(
+  await withGlobals(
     {
+      ...documentStub(element),
       localStorage: {
         getItem: (key: string) =>
           key === THEME_MODE_STORAGE_KEY ? 'light' : null,
         setItem: (key: string, value: string) => writes.push([key, value]),
       },
     },
-    loadThemeModule,
+    () => {
+      const stored = readStorage(THEME_MODE_STORAGE_KEY)
+      expect(resolveThemeMode(stored)).toBe('light')
+      // The runtime applies the resolved mode to the document without
+      // persisting it, so a correct first paint is never undone.
+      applyThemeToDocument(resolveThemeMode(stored))
+    },
   )
 
-  expect(theme.themeMode.value).toBe('light')
-  // Module initialization must not undo a correct first paint by persisting.
   expect(writes).toEqual([])
-
-  const element = createDocumentElement()
-  await withGlobals(documentStub(element), () => theme.initTheme())
-
   expect(element.classList.contains('dark')).toBe(false)
   expect(element.style.colorScheme).toBe('light')
 })
 
 test('the inline init and the runtime resolve every stored value identically', async () => {
-  const theme = await loadThemeModule()
   const cases: Array<string | null> = [
     'dark',
     'light',
@@ -353,9 +349,9 @@ test('the inline init and the runtime resolve every stored value identically', a
     const inline = runThemeInit(stored)
     const runtime = createDocumentElement()
 
-    await withGlobals(documentStub(runtime), () =>
-      theme.applyThemeToDocument(theme.resolveThemeMode(stored)),
-    )
+    await withGlobals(documentStub(runtime), () => {
+      applyThemeToDocument(resolveThemeMode(stored))
+    })
 
     expect(runtime.classList.contains('dark')).toBe(
       inline.classList.contains('dark'),
@@ -375,25 +371,31 @@ test('the served HTML carries the dark default on the root before any script', (
 
 // --- P1: the app theme stays the only `<html class="dark">` controller ---
 
-/** The plugin list `src/main.ts` installs through `@nuxt/ui/vue-plugin`. */
-async function nuxtUiRuntimePlugins(): Promise<string> {
-  const { default: config } = await import('../vite.config')
-  const plugins = (config.plugins ?? []).flat(Infinity) as Array<{
-    name?: string
-    resolveId?: (id: string) => string | undefined
-    load?: (id: string) => string | undefined
-  }>
-  const plugin = plugins.find((entry) => entry.name === 'nuxt:ui:plugins')
-  if (!plugin?.resolveId || !plugin.load) {
-    throw new Error('vite.config.ts no longer exposes the Nuxt UI plugins')
-  }
-  return plugin.load(plugin.resolveId('@nuxt/ui/vue-plugin')) ?? ''
+function reactModuleEntry(): string {
+  const entry = indexHtml.match(
+    /<script\b[^>]*type="module"[^>]*src="([^"]+)"[^>]*><\/script>/,
+  )?.[1]
+  if (!entry) throw new Error('index.html is missing its module entry')
+  return entry
 }
 
-test('Nuxt UI installs no color-mode controller that could fight the app theme', async () => {
-  const module = await nuxtUiRuntimePlugins()
+test('the current React entry mounts the root with no Nuxt color-mode controller', () => {
+  const entry = reactModuleEntry()
+  expect(entry).toBe('/src/main.tsx')
 
-  expect(module).not.toContain('color-mode')
-  // Disabling the controller must leave Nuxt UI's other runtime plugins in place.
-  expect(module).toContain('plugins/colors.js')
+  const entrySource = readFileSync(
+    new URL(`..${entry}`, import.meta.url),
+    'utf8',
+  )
+
+  expect(entrySource).toMatch(/\bcreateRoot\s*\(/)
+  for (const retired of [
+    '@nuxt/ui',
+    'nuxt:ui',
+    '@nuxtjs/color-mode',
+    'color-mode',
+    'useColorMode',
+  ]) {
+    expect(entrySource).not.toContain(retired)
+  }
 })

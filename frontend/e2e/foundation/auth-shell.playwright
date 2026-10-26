@@ -1,0 +1,1085 @@
+async (page) => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const consoleErrors = []
+  const pageErrors = []
+  const apiFailures = []
+  const expectedLogoutFailures = []
+  const expectedRelayFailures = []
+  const rolePayloads = []
+  const settingsPayloads = []
+  const restartStatuses = []
+  const report = {
+    startedAt: new Date().toISOString(),
+    checks: {},
+    screenshots: [],
+    placeholderRouteIds: [],
+    rolePayload: null,
+  }
+
+  page.setDefaultTimeout(12000)
+  page.on('console', (message) => {
+    if (message.type() !== 'error') return
+    if (
+      message.text().includes('status of 400 (Bad Request)') ||
+      message.text().includes('status of 401 (Unauthorized)') ||
+      message.text().includes('status of 503 (Service Unavailable)')
+    ) {
+      return
+    }
+    consoleErrors.push(message.text())
+  })
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  page.on('response', (response) => {
+    const url = new URL(response.url())
+    if (!url.pathname.startsWith('/api/') || response.status() < 400) return
+    const expected401 =
+      response.status() === 401 &&
+      (url.pathname === '/api/v1/auth/me' ||
+        url.pathname === '/api/v1/auth/login')
+    const expectedLogoutFailure =
+      response.status() === 503 && url.pathname === '/api/v1/auth/logout'
+    if (expectedLogoutFailure) {
+      expectedLogoutFailures.push(`${response.status()} ${url.pathname}`)
+      return
+    }
+    if (!expected401) {
+      const expectedRelayFailure =
+        [400, 503].includes(response.status()) &&
+        [
+          '/api/v1/relay/settings',
+          '/api/v1/relay/host/role',
+          '/api/v1/relay/host/restart',
+        ].includes(url.pathname)
+      if (expectedRelayFailure) {
+        expectedRelayFailures.push(`${response.status()} ${url.pathname}`)
+      } else {
+        apiFailures.push(`${response.status()} ${url.pathname}`)
+      }
+    }
+  })
+  page.on('response', (response) => {
+    const url = new URL(response.url())
+    if (url.pathname === '/api/v1/relay/host/restart') {
+      restartStatuses.push(response.status())
+    }
+  })
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (url.pathname === '/api/v1/relay/host/role') {
+      const body = request.postData()
+      rolePayloads.push(body ? JSON.parse(body).role : null)
+    }
+    if (
+      request.method() === 'PATCH' &&
+      url.pathname === '/api/v1/relay/settings'
+    ) {
+      const body = request.postData()
+      settingsPayloads.push(body ? JSON.parse(body) : null)
+    }
+  })
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(message)
+  }
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok)
+      throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  async function capture(name) {
+    const file = `${screenshots}/${name}.png`
+    await page.screenshot({ path: file, fullPage: true })
+    report.screenshots.push(file)
+  }
+
+  async function waitForRouteId(id) {
+    await page
+      .locator(
+        `[data-foundation-route-id="${id}"], [data-foundation-placeholder="${id}"]`,
+      )
+      .waitFor({ state: 'visible' })
+  }
+
+  function waitForRelayResponse(method, pathname, status) {
+    return page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return (
+        response.request().method() === method &&
+        url.pathname === pathname &&
+        response.status() === status
+      )
+    })
+  }
+
+  async function workerLogoutRequests() {
+    const log = await fixture('/__fixtures/log?limit=500')
+    return log.requests.filter(
+      (request) =>
+        request.method === 'POST' && request.path === '/api/v1/auth/logout',
+    )
+  }
+
+  async function signInWorker(loginName) {
+    await page.getByLabel('Login name').waitFor({ state: 'visible' })
+    await page.waitForFunction(() => {
+      const input = document.querySelector('#login-name')
+      return input && !input.disabled
+    })
+    await page.getByLabel('Login name').fill(loginName)
+    await page
+      .getByRole('textbox', { name: 'Password' })
+      .fill('fixture-password')
+    await page.getByRole('button', { name: 'Login', exact: true }).click()
+    await page.waitForURL((url) => new URL(url).pathname === '/api-keys')
+    await waitForRouteId('R-API-KEYS')
+  }
+
+  await page.context().clearCookies()
+  await fixture('/__fixtures/reset', 'POST')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`${BASE}/login`)
+  await page
+    .locator('[data-foundation-route-id="R-LOGIN"]')
+    .waitFor({ state: 'visible' })
+  report.checks.loginRouteId = true
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    localStorage.setItem('prompt-ferry:theme-mode', 'dark')
+  })
+  await page.reload()
+  await page.getByLabel('登录名').waitFor({ state: 'visible' })
+  const firstPaint = await page.evaluate(() => ({
+    colorScheme: document.documentElement.style.colorScheme,
+    dark: document.documentElement.classList.contains('dark'),
+    lang: document.documentElement.lang,
+  }))
+  assert(
+    firstPaint.dark && firstPaint.colorScheme === 'dark',
+    'dark first paint was not retained',
+  )
+  assert(
+    firstPaint.lang === 'zh-CN',
+    'locale provider did not set the document language',
+  )
+  await capture('login-zh-dark-390')
+  report.checks.firstPaint = firstPaint
+
+  await page.goto(`${BASE}/request-records/ai?filter=seed&order=desc`)
+  await page.getByLabel('登录名').waitFor({ state: 'visible' })
+  const redirect = new URL(page.url()).searchParams.get('redirect')
+  assert(
+    redirect === '/request-records/ai?filter=seed&order=desc',
+    `login redirect did not preserve pathname and query: ${redirect}`,
+  )
+  await page.getByLabel('登录名').fill('invalid-user')
+  await page.getByRole('textbox', { name: '密码' }).fill('invalid-password')
+  await page.getByRole('button', { name: '登录' }).click()
+  const loginError = page.getByRole('alert')
+  await loginError.waitFor({ state: 'visible' })
+  assert(
+    (await loginError.innerText()).includes('invalid_credentials'),
+    'invalid login error was not rendered',
+  )
+  report.checks.invalidLogin = true
+
+  await page.getByLabel('登录名').fill('admin')
+  await page.getByRole('textbox', { name: '密码' }).fill('fixture-password')
+  await page.getByRole('button', { name: '登录' }).click()
+  await page.waitForURL((url) => {
+    const current = new URL(url)
+    return (
+      current.pathname === '/request-records/ai' &&
+      current.search === '?filter=seed&order=desc'
+    )
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await waitForRouteId('R-USAGE-AI')
+  assert(
+    (await page.title()).includes('AI 请求'),
+    'localized page title did not follow the route',
+  )
+  report.checks.adminRedirect = page.url().replace(BASE, '')
+
+  await page.getByRole('button', { name: '语言' }).click()
+  await page.getByRole('button', { name: 'Light' }).click()
+  await page.waitForFunction(
+    () =>
+      document.documentElement.lang === 'en-US' &&
+      document.documentElement.style.colorScheme === 'light' &&
+      !document.documentElement.classList.contains('dark'),
+  )
+  assert(
+    (await page.title()).includes('AI requests'),
+    'English route title did not update',
+  )
+  await capture('shell-en-light-1440')
+  await page.reload()
+  await waitForRouteId('R-USAGE-AI')
+  const persistedPreferences = await page.evaluate(() => ({
+    colorScheme: document.documentElement.style.colorScheme,
+    dark: document.documentElement.classList.contains('dark'),
+    lang: document.documentElement.lang,
+    locale: localStorage.getItem('prompt-ferry:locale'),
+    theme: localStorage.getItem('prompt-ferry:theme-mode'),
+  }))
+  assert(
+    persistedPreferences.lang === 'en-US' &&
+      persistedPreferences.locale === 'en-US',
+    'locale did not persist',
+  )
+  assert(
+    persistedPreferences.colorScheme === 'light' &&
+      persistedPreferences.theme === 'light' &&
+      !persistedPreferences.dark,
+    'theme did not persist',
+  )
+  report.checks.persistedPreferences = persistedPreferences
+
+  const responsiveChecks = []
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    const desktopSidebar = await page.locator('aside').isVisible()
+    if (width >= 1024) {
+      assert(desktopSidebar, `desktop navigation missing at ${width}px`)
+      assert(
+        await page
+          .getByRole('link', { name: 'Users', exact: true })
+          .isVisible(),
+        'admin navigation item missing',
+      )
+    } else {
+      assert(
+        !desktopSidebar,
+        `desktop navigation should be hidden at ${width}px`,
+      )
+      const menuButton = page.getByRole('button', { name: 'Expand navigation' })
+      assert(
+        await menuButton.isVisible(),
+        `mobile navigation button missing at ${width}px`,
+      )
+      await menuButton.click()
+      const mobileNavigation = page.getByRole('navigation')
+      await mobileNavigation.waitFor({ state: 'visible' })
+      if (width === 768) {
+        await mobileNavigation
+          .getByRole('link', { name: 'Users', exact: true })
+          .click()
+        await waitForRouteId('R-USERS')
+      } else {
+        await mobileNavigation
+          .getByRole('link', { name: 'API Keys', exact: true })
+          .click()
+        await waitForRouteId('R-API-KEYS')
+      }
+    }
+    const horizontalOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    )
+    assert(!horizontalOverflow, `shell overflows horizontally at ${width}px`)
+    responsiveChecks.push({ width, desktopSidebar, horizontalOverflow })
+  }
+  report.checks.responsiveShell = responsiveChecks
+
+  // No settings route is a placeholder any more: the archive was the last one,
+  // and its own focused run proves it.
+  report.checks.pendingRouteIds = report.placeholderRouteIds
+
+  const mobileLogoutChecks = []
+  for (const width of [390, 768]) {
+    if (width === 768) await signInWorker('admin')
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`${BASE}/api-keys`)
+    await waitForRouteId('R-API-KEYS')
+
+    const menuButton = page.getByRole('button', { name: 'Expand navigation' })
+    await menuButton.click()
+    await page.getByRole('navigation').waitFor({ state: 'visible' })
+    const logoutButton = page.getByRole('button', {
+      name: 'Logout',
+      exact: true,
+    })
+    await logoutButton.waitFor({ state: 'visible' })
+    assert(
+      await logoutButton.isEnabled(),
+      `mobile logout disabled at ${width}px`,
+    )
+    const logoutInViewport = await logoutButton.evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      return rect.top >= 0 && rect.bottom <= window.innerHeight
+    })
+    assert(logoutInViewport, `mobile logout is offscreen at ${width}px`)
+    await capture(`shell-mobile-menu-${width}`)
+
+    const beforeLogout = await workerLogoutRequests()
+    const unauthorizedMeBefore = (
+      await fixture('/__fixtures/log?limit=500')
+    ).requests.filter(
+      (request) =>
+        request.method === 'GET' &&
+        request.path === '/api/v1/auth/me' &&
+        request.status === 401,
+    ).length
+    const mobileCheck = { width, logoutStatuses: [] }
+
+    if (width === 768) {
+      await fixture('/__fixtures/faults', 'POST', {
+        pathPrefix: '/api/v1/auth/logout',
+        method: 'POST',
+        status: 503,
+        code: 'fixture_logout_unavailable',
+        message: 'fixture logout failure',
+        delayMs: 800,
+      })
+      await logoutButton.click()
+      assert(
+        await logoutButton.isDisabled(),
+        'pending mobile logout stayed enabled',
+      )
+      assert(
+        (await logoutButton.locator('span.animate-spin').count()) === 1,
+        'mobile logout did not show its pending indicator',
+      )
+      assert(
+        await page
+          .getByRole('button', { name: 'Cancel', exact: true })
+          .isDisabled(),
+        'mobile menu close button stayed enabled while logout was pending',
+      )
+      await page.keyboard.press('Escape')
+      assert(
+        await page.getByRole('navigation').isVisible(),
+        'mobile menu dismissed while logout was pending',
+      )
+      const logoutError = page.getByRole('alert').last()
+      await logoutError.waitFor({ state: 'visible' })
+      assert(
+        (await logoutError.innerText()).includes('fixture logout failure'),
+        'mobile logout failure was not surfaced',
+      )
+      await waitForRouteId('R-API-KEYS')
+      const afterFailure = await workerLogoutRequests()
+      assert(
+        afterFailure.length - beforeLogout.length === 1 &&
+          afterFailure.at(-1)?.status === 503,
+        'failed mobile logout did not make exactly one failed request',
+      )
+      mobileCheck.logoutStatuses.push(afterFailure.at(-1).status)
+
+      await page.getByRole('button', { name: 'Expand navigation' }).click()
+      await page.getByRole('navigation').waitFor({ state: 'visible' })
+      await capture('shell-mobile-logout-retry-768')
+      assert(
+        await page
+          .getByRole('button', { name: 'Logout', exact: true })
+          .isEnabled(),
+        'mobile logout was not retryable after failure',
+      )
+    }
+
+    const beforeSuccessfulLogout = await workerLogoutRequests()
+    await page.getByRole('button', { name: 'Logout', exact: true }).click()
+    await page.waitForURL((url) => new URL(url).pathname === '/login')
+    await page.getByLabel('Login name').waitFor({ state: 'visible' })
+    const afterSuccessfulLogout = await workerLogoutRequests()
+    assert(
+      afterSuccessfulLogout.length - beforeSuccessfulLogout.length === 1 &&
+        afterSuccessfulLogout.at(-1)?.status === 204,
+      `mobile logout did not make exactly one successful request at ${width}px`,
+    )
+    mobileCheck.logoutStatuses.push(afterSuccessfulLogout.at(-1).status)
+
+    const requestsAfterLogout = (await fixture('/__fixtures/log?limit=500'))
+      .requests
+    const unauthorizedMeAfter = requestsAfterLogout.filter(
+      (request) =>
+        request.method === 'GET' &&
+        request.path === '/api/v1/auth/me' &&
+        request.status === 401,
+    ).length
+    assert(
+      unauthorizedMeAfter > unauthorizedMeBefore,
+      `Worker session remained active after mobile logout at ${width}px`,
+    )
+
+    await page.goto(`${BASE}/api-keys`)
+    await page.getByLabel('Login name').waitFor({ state: 'visible' })
+    const directGuard = new URL(page.url())
+    assert(
+      directGuard.pathname === '/login' &&
+        directGuard.searchParams.get('redirect') === '/api-keys',
+      `protected route did not require login after mobile logout at ${width}px`,
+    )
+    mobileCheck.directGuard = directGuard.pathname + directGuard.search
+    mobileLogoutChecks.push(mobileCheck)
+  }
+  assert(
+    expectedLogoutFailures.length === 1 &&
+      expectedLogoutFailures[0] === '503 /api/v1/auth/logout',
+    `expected one injected logout failure, saw ${JSON.stringify(expectedLogoutFailures)}`,
+  )
+  report.checks.mobileLogout = mobileLogoutChecks
+  report.checks.expectedLogoutFailures = expectedLogoutFailures
+
+  await signInWorker('admin')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const beforeDesktopLogout = await workerLogoutRequests()
+  await page.getByRole('button', { name: 'Logout', exact: true }).click()
+  await page.waitForURL((url) => new URL(url).pathname === '/login')
+  const afterDesktopLogout = await workerLogoutRequests()
+  assert(
+    afterDesktopLogout.length - beforeDesktopLogout.length === 1 &&
+      afterDesktopLogout.at(-1)?.status === 204,
+    'desktop logout did not make exactly one successful request',
+  )
+  report.checks.desktopLogout = true
+
+  await signInWorker('operator')
+  assert(
+    (await page.getByRole('link', { name: 'Users', exact: true }).count()) ===
+      0,
+    'non-admin navigation exposed Users',
+  )
+  await page.goto(`${BASE}/users`)
+  await page.waitForURL((url) => new URL(url).pathname === '/api-keys')
+  await waitForRouteId('R-API-KEYS')
+  report.checks.nonAdminDirectGuard = page.url().replace(BASE, '')
+
+  await page.context().clearCookies()
+  await fixture('/__fixtures/reset', 'POST')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`${BASE}/relay-host`)
+  await page
+    .locator('[data-foundation-route-id="R-RELAY-HOST"]')
+    .waitFor({ state: 'visible' })
+  await page.getByLabel('Enter management token').waitFor({ state: 'visible' })
+  report.checks.relayRouteId = true
+  await capture('relay-token-login-en-light-390')
+  const relayBeforeLogin = await fixture('/__fixtures/log?limit=100')
+  assert(
+    !relayBeforeLogin.requests.some(
+      (request) => request.path === '/api/v1/auth/me',
+    ),
+    'relay host issued a Worker auth probe',
+  )
+  await page.getByLabel('Enter management token').fill('relay-fixture-token')
+  await page.getByRole('button', { name: 'Login', exact: true }).click()
+  let bindInput = page.getByLabel('Management bind')
+  await bindInput.waitFor({ state: 'visible' })
+  await page.getByText('Worker disconnected', { exact: true }).waitFor({
+    state: 'visible',
+  })
+  await page.getByText('Saved', { exact: true }).waitFor({ state: 'visible' })
+
+  function relayReadCounts(requests) {
+    const count = (path) =>
+      requests.filter(
+        (request) => request.method === 'GET' && request.path === path,
+      ).length
+    return {
+      host: count('/api/v1/relay/host'),
+      settings: count('/api/v1/relay/settings'),
+      status: count('/api/v1/relay/status'),
+    }
+  }
+
+  const initialRelayLog = await fixture('/__fixtures/log?limit=500')
+  const initialRelayReads = relayReadCounts(initialRelayLog.requests)
+  assert(
+    initialRelayReads.host === 1 &&
+      initialRelayReads.status === 1 &&
+      initialRelayReads.settings === 1,
+    `relay login duplicated or omitted a host read: ${JSON.stringify(initialRelayReads)}`,
+  )
+  assert(
+    (await page.getByLabel('Worker: 0').count()) === 1 &&
+      (await page
+        .getByRole('button', { name: 'In use', exact: true })
+        .isDisabled()),
+    'relay host did not render the disconnected worker count and disabled current role',
+  )
+  const workerRoleCard = page
+    .locator('[data-slot="card"]')
+    .filter({ hasText: 'Worker only' })
+  const workerRoleButton = workerRoleCard.getByRole('button', {
+    name: 'Use this mode',
+    exact: true,
+  })
+  const initialSettingsSave = page.getByRole('button', {
+    name: 'Save',
+    exact: true,
+  })
+  assert(
+    (await workerRoleButton.count()) === 1 &&
+      !(await workerRoleButton.isDisabled()) &&
+      !(await initialSettingsSave.isDisabled()),
+    'worker disconnection blocked host role or settings controls',
+  )
+  await page.bringToFront()
+  await page.waitForTimeout(100)
+  const afterFocusLog = await fixture('/__fixtures/log?limit=500')
+  assert(
+    JSON.stringify(relayReadCounts(afterFocusLog.requests)) ===
+      JSON.stringify(initialRelayReads),
+    'relay host refetched on window focus',
+  )
+
+  await bindInput.fill('   ')
+  const blankSettingsRequest = page.waitForRequest(
+    (request) =>
+      request.method() === 'PATCH' &&
+      new URL(request.url()).pathname === '/api/v1/relay/settings',
+  )
+  const blankSettingsResponse = waitForRelayResponse(
+    'PATCH',
+    '/api/v1/relay/settings',
+    200,
+  )
+  await initialSettingsSave.click()
+  const emptySettingsPayload = JSON.parse(
+    (await blankSettingsRequest).postData() ?? 'null',
+  )
+  await blankSettingsResponse
+  await page.waitForFunction(
+    () =>
+      document.querySelector('#relay-host-admin-bind')?.value ===
+      '127.0.0.1:9444',
+  )
+  assert(
+    JSON.stringify(emptySettingsPayload) === '{}',
+    `blank host bind sent a non-empty settings body: ${JSON.stringify(emptySettingsPayload)}`,
+  )
+  assert(
+    (await page.getByText('Restart required', { exact: true }).count()) === 0 &&
+      (await bindInput.inputValue()) === '127.0.0.1:9444',
+    'blank settings save introduced a restart or lost the running bind',
+  )
+
+  await bindInput.fill('0.0.0.0:9445')
+  const invalidBindResponse = waitForRelayResponse(
+    'PATCH',
+    '/api/v1/relay/settings',
+    400,
+  )
+  await initialSettingsSave.click()
+  await invalidBindResponse
+  await page.getByText(/loopback address/).waitFor({ state: 'visible' })
+  assert(
+    (await bindInput.inputValue()) === '0.0.0.0:9445',
+    'invalid relay bind did not retain the settings draft',
+  )
+  const settingsAfterInvalidBind = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/relay/settings')
+    return response.json()
+  })
+  assert(
+    settingsAfterInvalidBind.relay.admin_bind === '127.0.0.1:9444' &&
+      settingsAfterInvalidBind.restart_required === false,
+    'invalid relay bind changed the saved overlay or running address',
+  )
+
+  await fixture('/__fixtures/faults', 'POST', {
+    method: 'PATCH',
+    message: 'fixture settings unavailable',
+    pathPrefix: '/api/v1/relay/settings',
+    status: 503,
+  })
+  await bindInput.fill('  127.0.0.1:9550  ')
+  const failedSettingsResponse = waitForRelayResponse(
+    'PATCH',
+    '/api/v1/relay/settings',
+    503,
+  )
+  await initialSettingsSave.click()
+  await failedSettingsResponse
+  await page.getByText(/fixture settings unavailable/).waitFor({
+    state: 'visible',
+  })
+  assert(
+    (await bindInput.inputValue()) === '  127.0.0.1:9550  ',
+    'failed host settings save did not retain the bind draft',
+  )
+  const readsBeforeSettingsRetry = relayReadCounts(
+    (await fixture('/__fixtures/log?limit=500')).requests,
+  )
+  await fixture('/__fixtures/faults', 'POST', {
+    delayMs: 350,
+    method: 'PATCH',
+    pathPrefix: '/api/v1/relay/settings',
+    status: 200,
+  })
+  const settingsRetryRequest = page.waitForRequest(
+    (request) =>
+      request.method() === 'PATCH' &&
+      new URL(request.url()).pathname === '/api/v1/relay/settings',
+  )
+  const settingsRetryResponse = waitForRelayResponse(
+    'PATCH',
+    '/api/v1/relay/settings',
+    200,
+  )
+  await initialSettingsSave.click()
+  const retriedSettingsRequest = await settingsRetryRequest
+  const retriedSettingsPayload = JSON.parse(
+    retriedSettingsRequest.postData() ?? 'null',
+  )
+  assert(
+    JSON.stringify(retriedSettingsPayload) ===
+      JSON.stringify({ admin_bind: '127.0.0.1:9550' }),
+    'host settings retry did not send the trimmed original payload',
+  )
+  assert(
+    (await initialSettingsSave.isDisabled()) &&
+      (await bindInput.isDisabled()) &&
+      (await workerRoleButton.isDisabled()),
+    'host settings save did not gate conflicting controls',
+  )
+  const newerBind = '127.0.0.1:9660'
+  await page.evaluate((value) => {
+    const input = document.querySelector('#relay-host-admin-bind')
+    if (!(input instanceof HTMLInputElement))
+      throw new Error('missing bind input')
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value',
+    )?.set
+    if (!setter) throw new Error('missing input value setter')
+    setter.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  }, newerBind)
+  await settingsRetryResponse
+  assert(
+    (await bindInput.inputValue()) === newerBind,
+    'settings completion replaced a newer bind edit typed during the request',
+  )
+  const readsAfterSettingsRetry = relayReadCounts(
+    (await fixture('/__fixtures/log?limit=500')).requests,
+  )
+  assert(
+    readsAfterSettingsRetry.host === readsBeforeSettingsRetry.host + 1 &&
+      readsAfterSettingsRetry.status === readsBeforeSettingsRetry.status + 1 &&
+      readsAfterSettingsRetry.settings === readsBeforeSettingsRetry.settings,
+    `settings save did not reread exactly host and status: ${JSON.stringify({ before: readsBeforeSettingsRetry, after: readsAfterSettingsRetry })}`,
+  )
+  const settingsPayloadsAfterRetry = settingsPayloads.slice(-2)
+  assert(
+    JSON.stringify(settingsPayloadsAfterRetry) ===
+      JSON.stringify([
+        { admin_bind: '127.0.0.1:9550' },
+        { admin_bind: '127.0.0.1:9550' },
+      ]),
+    `settings retry payloads differed: ${JSON.stringify(settingsPayloadsAfterRetry)}`,
+  )
+
+  const refreshHost = page.getByRole('button', { name: 'Refresh', exact: true })
+  const refreshHostResponse = waitForRelayResponse(
+    'GET',
+    '/api/v1/relay/host',
+    200,
+  )
+  const refreshStatusResponse = waitForRelayResponse(
+    'GET',
+    '/api/v1/relay/status',
+    200,
+  )
+  const refreshSettingsResponse = waitForRelayResponse(
+    'GET',
+    '/api/v1/relay/settings',
+    200,
+  )
+  await refreshHost.click()
+  await Promise.all([
+    refreshHostResponse,
+    refreshStatusResponse,
+    refreshSettingsResponse,
+  ])
+  assert(
+    (await bindInput.inputValue()) === '127.0.0.1:9444',
+    'refresh showed the pending bind instead of the running bind',
+  )
+
+  await fixture('/__fixtures/faults', 'POST', {
+    method: 'PUT',
+    message: 'fixture role unavailable',
+    pathPrefix: '/api/v1/relay/host/role',
+    status: 503,
+  })
+  const workerButton = workerRoleCard.getByRole('button', {
+    name: 'Use this mode',
+    exact: true,
+  })
+  const failedRoleResponse = waitForRelayResponse(
+    'PUT',
+    '/api/v1/relay/host/role',
+    503,
+  )
+  await workerButton.click()
+  await failedRoleResponse
+  await page.getByText(/fixture role unavailable/).waitFor({
+    state: 'visible',
+  })
+  assert(
+    !(await workerButton.isDisabled()),
+    'failed host role write blocked its retry',
+  )
+  const readsBeforeRoleRetry = relayReadCounts(
+    (await fixture('/__fixtures/log?limit=500')).requests,
+  )
+  await fixture('/__fixtures/faults', 'POST', {
+    delayMs: 350,
+    method: 'PUT',
+    pathPrefix: '/api/v1/relay/host/role',
+    status: 200,
+  })
+  const roleRetryResponse = waitForRelayResponse(
+    'PUT',
+    '/api/v1/relay/host/role',
+    200,
+  )
+  const roleRetryRequest = page.waitForRequest(
+    (request) =>
+      request.method() === 'PUT' &&
+      new URL(request.url()).pathname === '/api/v1/relay/host/role',
+  )
+  await workerButton.click()
+  const retriedRoleRequest = await roleRetryRequest
+  assert(
+    JSON.stringify(JSON.parse(retriedRoleRequest.postData() ?? 'null')) ===
+      JSON.stringify({ role: 'worker' }),
+    'role retry body was not only the requested role',
+  )
+  assert(
+    (await workerButton.isDisabled()) && (await bindInput.isDisabled()),
+    'pending role save did not disable conflicting controls',
+  )
+  const roleNewerBind = '127.0.0.1:9770'
+  await page.evaluate((value) => {
+    const input = document.querySelector('#relay-host-admin-bind')
+    if (!(input instanceof HTMLInputElement))
+      throw new Error('missing bind input')
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value',
+    )?.set
+    if (!setter) throw new Error('missing input value setter')
+    setter.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  }, roleNewerBind)
+  await roleRetryResponse
+  await page.getByText('Restart required', { exact: true }).waitFor({
+    state: 'visible',
+  })
+  assert(
+    (await bindInput.inputValue()) === roleNewerBind,
+    'role response replaced a newer bind edit',
+  )
+  assert(
+    (await page
+      .getByRole('button', { name: 'In use', exact: true })
+      .count()) === 1 &&
+      (await page
+        .getByRole('button', { name: 'In use', exact: true })
+        .isDisabled()),
+    'role response did not mark and disable the saved current role',
+  )
+  assert(
+    (await workerRoleCard.getByText('Current', { exact: true }).count()) === 1 &&
+      (await workerRoleCard.getByText('Pending restart', { exact: true }).count()) === 1,
+    'role response did not show current and pending badges from the returned state',
+  )
+  assert(
+    JSON.stringify(rolePayloads.slice(-2)) ===
+      JSON.stringify(['worker', 'worker']),
+    `role retries changed the requested role: ${JSON.stringify(rolePayloads)}`,
+  )
+  const readsAfterRoleRetry = relayReadCounts(
+    (await fixture('/__fixtures/log?limit=500')).requests,
+  )
+  assert(
+    JSON.stringify(readsAfterRoleRetry) ===
+      JSON.stringify(readsBeforeRoleRetry),
+    `role save performed an unnecessary refetch: ${JSON.stringify({ before: readsBeforeRoleRetry, after: readsAfterRoleRetry })}`,
+  )
+
+  const restartBanner = page
+    .locator('[role="alert"]')
+    .filter({ hasText: 'Restart required' })
+  const bannerRestart = restartBanner.getByRole('button', {
+    name: 'Restart now',
+    exact: true,
+  })
+  const settingsRestart = page
+    .locator('[data-slot="card"]')
+    .filter({ has: page.locator('#relay-host-admin-bind') })
+    .getByRole('button', { name: 'Restart now', exact: true })
+  await fixture('/__fixtures/faults', 'POST', {
+    delayMs: 250,
+    method: 'POST',
+    message: 'fixture restart unavailable',
+    pathPrefix: '/api/v1/relay/host/restart',
+    status: 503,
+  })
+  const failedRestartResponse = waitForRelayResponse(
+    'POST',
+    '/api/v1/relay/host/restart',
+    503,
+  )
+  await bannerRestart.click()
+  await failedRestartResponse
+  await page.getByText(/fixture restart unavailable/).waitFor({
+    state: 'visible',
+  })
+  await fixture('/__fixtures/faults', 'POST', {
+    delayMs: 350,
+    method: 'POST',
+    pathPrefix: '/api/v1/relay/host/restart',
+    status: 200,
+  })
+  const bannerRestartResponse = waitForRelayResponse(
+    'POST',
+    '/api/v1/relay/host/restart',
+    202,
+  )
+  await bannerRestart.click()
+  await page.waitForFunction(() => {
+    const banner = [...document.querySelectorAll('[role="alert"]')].find(
+      (item) => item.textContent?.includes('Restart required'),
+    )
+    const action = banner?.querySelector('button')
+    const settingsCard = [
+      ...document.querySelectorAll('[data-slot="card"]'),
+    ].find((item) => item.querySelector('#relay-host-admin-bind'))
+    const settingsAction = settingsCard?.querySelectorAll('button')[1]
+    return (
+      action?.disabled === true &&
+      action.querySelector('.animate-spin') !== null &&
+      settingsAction?.disabled === true &&
+      settingsAction.querySelector('.animate-spin') === null
+    )
+  })
+  await bannerRestartResponse
+  await page.getByText('Host restart requested', { exact: true }).waitFor({
+    state: 'visible',
+  })
+  await fixture('/__fixtures/faults', 'POST', {
+    delayMs: 350,
+    method: 'POST',
+    pathPrefix: '/api/v1/relay/host/restart',
+    status: 200,
+  })
+  const settingsRestartResponse = waitForRelayResponse(
+    'POST',
+    '/api/v1/relay/host/restart',
+    202,
+  )
+  await settingsRestart.click()
+  await page.waitForFunction(() => {
+    const banner = [...document.querySelectorAll('[role="alert"]')].find(
+      (item) => item.textContent?.includes('Restart required'),
+    )
+    const bannerAction = banner?.querySelector('button')
+    const settingsCard = [
+      ...document.querySelectorAll('[data-slot="card"]'),
+    ].find((item) => item.querySelector('#relay-host-admin-bind'))
+    const settingsAction = settingsCard?.querySelectorAll('button')[1]
+    return (
+      settingsAction?.disabled === true &&
+      settingsAction.querySelector('.animate-spin') !== null &&
+      bannerAction?.disabled === true &&
+      bannerAction.querySelector('.animate-spin') === null
+    )
+  })
+  await settingsRestartResponse
+  assert(
+    JSON.stringify(restartStatuses.slice(-3)) ===
+      JSON.stringify([503, 202, 202]),
+    `restart contract returned unexpected statuses: ${JSON.stringify(restartStatuses)}`,
+  )
+  const readsAfterRestarts = relayReadCounts(
+    (await fixture('/__fixtures/log?limit=500')).requests,
+  )
+  assert(
+    JSON.stringify(readsAfterRestarts) === JSON.stringify(readsAfterRoleRetry),
+    'restart action implicitly reloaded or mutated role/settings',
+  )
+
+  const responsive = []
+  await page
+    .locator('[aria-live="polite"] [role="status"]')
+    .last()
+    .waitFor({ state: 'detached' })
+  for (const [locale, widths] of [
+    ['en-US', [1440, 1024, 768, 390]],
+    ['zh-CN', [1440, 1024, 768, 390]],
+  ]) {
+    if (locale === 'zh-CN') {
+      await page.evaluate(() => {
+        localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+        localStorage.setItem('prompt-ferry:theme-mode', 'dark')
+      })
+      await page.reload()
+      await page
+        .locator('[data-foundation-route-id="R-RELAY-HOST"]')
+        .waitFor({ state: 'visible' })
+      bindInput = page.getByLabel('管理监听地址')
+      await bindInput.waitFor({ state: 'visible' })
+      const rendering = await page.evaluate(() => ({
+        colorScheme: document.documentElement.style.colorScheme,
+        dark: document.documentElement.classList.contains('dark'),
+        lang: document.documentElement.lang,
+      }))
+      assert(
+        rendering.lang === 'zh-CN' &&
+          rendering.dark &&
+          rendering.colorScheme === 'dark',
+        `relay host locale/theme did not render: ${JSON.stringify(rendering)}`,
+      )
+      report.checks.relayHostLocaleTheme = rendering
+    }
+
+    for (const width of widths) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.waitForTimeout(50)
+      const controls = page.locator('button[data-slot="button"]:visible')
+      const controlCount = await controls.count()
+      const reachable = []
+      for (let index = 0; index < controlCount; index += 1) {
+        const control = controls.nth(index)
+        await control.scrollIntoViewIfNeeded()
+        const box = await control.boundingBox()
+        reachable.push(Boolean(box && box.x >= 0 && box.x + box.width <= width))
+      }
+      await bindInput.scrollIntoViewIfNeeded()
+      const bindBox = await bindInput.boundingBox()
+      const documentWidth = await page.evaluate(
+        () => document.documentElement.scrollWidth,
+      )
+      const contained =
+        documentWidth <= width &&
+        Boolean(
+          bindBox && bindBox.x >= 0 && bindBox.x + bindBox.width <= width,
+        ) &&
+        reachable.length >= 8 &&
+        reachable.every(Boolean)
+      assert(
+        contained,
+        `relay host content/actions overflowed at ${locale} ${width}px: ${JSON.stringify({ documentWidth, reachable })}`,
+      )
+      responsive.push({ locale, width, contained, reachable })
+      if (width === 1440) {
+        await capture(
+          `relay-host-${locale === 'en-US' ? 'en-light' : 'zh-dark'}-1440`,
+        )
+      }
+      if (width === 390) {
+        await capture(
+          `relay-host-${locale === 'en-US' ? 'en-light' : 'zh-dark'}-390`,
+        )
+      }
+    }
+  }
+  report.checks.relayHost = {
+    routeId: 'R-RELAY-HOST',
+    initialReads: initialRelayReads,
+    noFocusRefetch: true,
+    disconnectedWorkerAlert: true,
+    hostControlsRemainUsable: true,
+    blankBodyNoRestart: true,
+    loopbackValidationAndDraft: true,
+    settingsFailureRetry: true,
+    settingsPayloads,
+    settingsRereadCounts: {
+      before: readsBeforeSettingsRetry,
+      after: readsAfterSettingsRetry,
+    },
+    settingsNewerDraftPreserved: true,
+    refreshShowsRunningBind: true,
+    roleFailureRetry: true,
+    rolePayloads: rolePayloads.slice(-2),
+    roleResponseNoRefetch: true,
+    roleNewerDraftPreserved: true,
+    restartStatuses: restartStatuses.slice(-3),
+    restartOriginsExclusive: true,
+    restartNoImplicitReload: true,
+    responsive,
+    localeThemeRendering: report.checks.relayHostLocaleTheme,
+  }
+  report.rolePayload = rolePayloads.at(-1)
+
+  const relayRequestsAfterInteractions = await fixture(
+    '/__fixtures/log?limit=500',
+  )
+  assert(
+    !relayRequestsAfterInteractions.requests.some(
+      (request) => request.path === '/api/v1/auth/me',
+    ),
+    'relay session called the Worker auth API',
+  )
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page
+    .getByRole('button', {
+      name: '退出登录',
+      exact: true,
+    })
+    .click()
+  await page.locator('#relay-admin-token').waitFor({ state: 'visible' })
+  const relayRequestsAfterLogout = await fixture('/__fixtures/log?limit=500')
+  assert(
+    !relayRequestsAfterLogout.requests.some(
+      (request) => request.path === '/api/v1/auth/me',
+    ),
+    'relay logout called the Worker auth API',
+  )
+  report.checks.relayIndependence = true
+  report.checks.relayRoleAndRestart = true
+  const relayHostScenarios = {
+    'route-render':
+      report.checks.relayRouteId === true &&
+      report.checks.relayHost.routeId === 'R-RELAY-HOST',
+    'relay-independent-auth': report.checks.relayIndependence === true,
+    'mutation-update':
+      report.checks.relayHost.blankBodyNoRestart === true &&
+      report.checks.relayHost.roleResponseNoRefetch === true &&
+      report.checks.relayHost.settingsNewerDraftPreserved === true,
+    'mutation-failure-draft':
+      report.checks.relayHost.settingsFailureRetry === true &&
+      report.checks.relayHost.roleFailureRetry === true,
+    'responsive-width':
+      responsive.length === 8 && responsive.every((state) => state.contained),
+  }
+  assert(
+    Object.values(relayHostScenarios).every(Boolean),
+    `R-RELAY-HOST current-run scenario coverage is incomplete: ${JSON.stringify(relayHostScenarios)}`,
+  )
+  report.checks.relayHost.scenarioCoverage = relayHostScenarios
+
+  assert(
+    consoleErrors.length === 0,
+    `browser console errors: ${consoleErrors.join(' | ')}`,
+  )
+  assert(
+    pageErrors.length === 0,
+    `browser page errors: ${pageErrors.join(' | ')}`,
+  )
+  assert(
+    apiFailures.length === 0,
+    `unexpected API failures: ${apiFailures.join(' | ')}`,
+  )
+  report.checks.consoleErrors = consoleErrors
+  report.checks.pageErrors = pageErrors
+  report.checks.apiFailures = apiFailures
+  report.checks.expectedRelayFailures = expectedRelayFailures
+  report.checks.relayRestartStatuses = restartStatuses
+  report.finishedAt = new Date().toISOString()
+  return report
+}

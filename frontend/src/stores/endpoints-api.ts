@@ -34,9 +34,11 @@ import type {
 import {
   endpointFormToRequest,
   endpointToForm,
+} from '../admin-mappers/forms/endpoint'
+import {
   modelRouteFormToRequest,
   modelRouteToForm,
-} from '../admin-mappers'
+} from '../admin-mappers/forms/model-route'
 import { expectData, withData } from '../api'
 
 export async function fetchEndpointsPage(

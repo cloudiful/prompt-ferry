@@ -1,0 +1,958 @@
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const startedAt = new Date().toISOString()
+  const report = {
+    runId: `approvals-${Date.now()}`,
+    startedAt,
+    checks: {},
+    screenshots: [],
+    expectedApiFailures: [],
+    apiFailures: [],
+    consoleErrorCount: 0,
+    pageErrorCount: 0,
+    approvalRequests: [],
+    decisionWrites: [],
+  }
+  let stage = 'startup'
+  let expectingAnonymous = false
+  let expectingDenied = false
+
+  page.setDefaultTimeout(15000)
+  await page.addInitScript(() => {
+    const key = 'pf-approvals-intervals'
+    let count = 0
+    try {
+      count = Number(window.sessionStorage.getItem(key) ?? '0')
+    } catch {}
+    const originalSet = window.setInterval.bind(window)
+    const originalClear = window.clearInterval.bind(window)
+    window.setInterval = (handler, timeout, ...args) => {
+      const id = originalSet(handler, timeout, ...args)
+      count += 1
+      try {
+        window.sessionStorage.setItem(key, String(count))
+      } catch {}
+      return id
+    }
+    window.clearInterval = (id) => {
+      count -= 1
+      try {
+        window.sessionStorage.setItem(key, String(count))
+      } catch {}
+      return originalClear(id)
+    }
+    window.__approvalsIntervalCount = () => count
+  })
+  page.on('pageerror', () => report.pageErrorCount++)
+  page.on('console', (message) => {
+    if (message.type() !== 'error') return
+    if (/(?:status of )?(?:400|401|403|404|409|500|503)\b/.test(message.text()))
+      return
+    report.consoleErrorCount++
+  })
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (!url.pathname.startsWith('/api/v1/admin/approvals')) return
+    const item = {
+      method: request.method(),
+      path: url.pathname.replace(
+        /\/approvals\/[^/]+(\/(approve|reject))?$/,
+        '/approvals/:id$1',
+      ),
+      rawPath: url.pathname,
+      status: url.searchParams.get('status'),
+      first: url.searchParams.get('first'),
+      rows: url.searchParams.get('rows'),
+      body: null,
+    }
+    if (request.method() === 'POST') {
+      try {
+        item.body = request.postData()
+      } catch {
+        item.body = null
+      }
+      report.decisionWrites.push({
+        method: item.method,
+        path: item.rawPath,
+        body: item.body,
+      })
+    }
+    report.approvalRequests.push(item)
+  })
+  page.on('response', (response) => {
+    const url = new URL(response.url())
+    const method = response.request().method()
+    if (!url.pathname.startsWith('/api/v1/admin/approvals')) return
+    if (response.status() < 400) return
+    const label = `${response.status()} ${method} ${url.pathname.replace(
+      /\/approvals\/[^/]+(\/(approve|reject))?$/,
+      '/approvals/:id$1',
+    )}`
+    if (expectingAnonymous && response.status() === 401) {
+      report.expectedApiFailures.push(label)
+      return
+    }
+    if (expectingDenied && response.status() === 403) {
+      report.expectedApiFailures.push(label)
+      return
+    }
+    if (
+      response.status() === 503 ||
+      response.status() === 404 ||
+      response.status() === 409
+    ) {
+      report.expectedApiFailures.push(label)
+      return
+    }
+    report.apiFailures.push(label)
+  })
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(`${stage}: ${message}`)
+  }
+
+  async function act(action) {
+    try {
+      return await action()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`${stage}: ${message}`)
+    }
+  }
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok)
+      throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  async function clearFaults() {
+    await fixture('/__fixtures/faults', 'DELETE')
+  }
+
+  async function injectFault(fault) {
+    await clearFaults()
+    await fixture('/__fixtures/faults', 'POST', fault)
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+  }
+
+  async function capture(name) {
+    const path = `${screenshots}/${name}.png`
+    await page.screenshot({ path, fullPage: true })
+    report.screenshots.push(path)
+  }
+
+  async function signIn(loginName) {
+    await page.getByLabel('Login name').waitFor({ state: 'visible' })
+    await page.getByLabel('Login name').fill(loginName)
+    await page
+      .getByRole('textbox', { name: 'Password' })
+      .fill('fixture-password')
+    await page.getByRole('button', { name: 'Login' }).click()
+    await page.waitForURL((url) => new URL(url).pathname === '/api-keys')
+  }
+
+  function listReads() {
+    return report.approvalRequests.filter(
+      (item) => item.method === 'GET' && item.path === '/api/v1/admin/approvals',
+    )
+  }
+
+  function detailReads() {
+    return report.approvalRequests.filter(
+      (item) =>
+        item.method === 'GET' && item.path === '/api/v1/admin/approvals/:id',
+    )
+  }
+
+  function writesFor(rawPath) {
+    return report.decisionWrites.filter((item) => item.path === rawPath)
+  }
+
+  function visibleRows() {
+    return page.locator('[data-approval-row]:visible')
+  }
+
+  function rowActions(id, action) {
+    return page.locator(
+      `[data-approval-row="${id}"]:visible [data-approval-action="${action}"]`,
+    )
+  }
+
+  function reasonButton(id) {
+    return page.locator(`[data-approval-reason="${id}"]:visible`)
+  }
+
+  function remainingCell(id) {
+    return page
+      .locator(`[data-approval-remaining="${id}"]:visible`)
+      .first()
+      .textContent()
+  }
+
+  async function selectFilter(optionLabel) {
+    await page.getByRole('combobox', { name: 'Approvals' }).click()
+    await page.getByRole('option', { name: optionLabel, exact: true }).click()
+    await page.waitForTimeout(250)
+  }
+
+  async function selectPageSize(size) {
+    await page.getByRole('combobox', { name: 'Rows per page' }).click()
+    await page.getByRole('option', { name: String(size), exact: true }).click()
+    await page.waitForTimeout(250)
+  }
+
+  function successToast() {
+    return page.locator('[aria-live="polite"] [role="status"]')
+  }
+
+  function errorToast() {
+    return page.locator('[aria-live="polite"] [role="alert"]')
+  }
+
+  try {
+    await page.context().clearCookies()
+    await fixture('/__fixtures/reset', 'POST')
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await page.goto(`${BASE}/login`)
+    await page.evaluate(() => {
+      localStorage.clear()
+      localStorage.setItem('prompt-ferry:locale', 'en-US')
+      localStorage.setItem('prompt-ferry:theme-mode', 'light')
+      localStorage.setItem('prompt-ferry:display-time-zone', 'UTC')
+    })
+    await page.reload()
+    await signIn('admin')
+
+    stage = 'route-render'
+    const readsBeforeRoute = listReads().length
+    await page.goto(`${BASE}/approvals`)
+    await page
+      .locator('[data-foundation-route-id="R-APPROVALS"]')
+      .waitFor({ state: 'visible' })
+    assert(
+      (await page.locator('[data-foundation-placeholder]').count()) === 0,
+      'the approvals route still renders a foundation placeholder',
+    )
+    await visibleRows().first().waitFor({ state: 'visible' })
+    const routeReads = listReads().slice(readsBeforeRoute)
+    assert(
+      routeReads.length === 1,
+      `the approvals route did not read the list exactly once (${routeReads.length})`,
+    )
+    assert(
+      routeReads[0].status === 'pending' &&
+        routeReads[0].first === '0' &&
+        routeReads[0].rows === '10',
+      `the approvals route did not read the pending first page (${JSON.stringify(routeReads[0])})`,
+    )
+    const rowCount = await visibleRows().count()
+    assert(rowCount === 10, `the pending page did not show 10 rows (${rowCount})`)
+    const pendingBadges = await page
+      .locator('[data-approval-row]:visible')
+      .first()
+      .getByText('Pending', { exact: true })
+      .count()
+    assert(pendingBadges > 0, 'the pending rows do not carry the pending badge')
+    const firstRemaining = await remainingCell('approval-1')
+    assert(
+      /^\d+m? ?\d*s$/.test((firstRemaining ?? '').trim()),
+      `the pending row does not show a remaining wait (${firstRemaining})`,
+    )
+    report.checks.routeRender = {
+      routeId: true,
+      noPlaceholder: true,
+      pendingDefault: true,
+      singleRead: true,
+      rowCount,
+      remainingWait: true,
+    }
+    await capture('approvals-en-light-1440')
+
+    stage = 'pagination'
+    const readsBeforePage = listReads().length
+    await page.getByRole('button', { name: 'Page 2' }).click()
+    await page.waitForTimeout(400)
+    const pageReads = listReads().slice(readsBeforePage)
+    assert(
+      pageReads.some((item) => item.first === '10' && item.rows === '10'),
+      `the pager did not read the second page (${JSON.stringify(pageReads)})`,
+    )
+    const secondPageRows = await visibleRows().count()
+    assert(
+      secondPageRows === 1,
+      `the second pending page did not show the last row (${secondPageRows})`,
+    )
+    const range = await page
+      .locator('[data-approval-desktop]')
+      .getByText('11-11 / 11', { exact: false })
+      .count()
+    assert(range > 0, 'the desktop pager does not show the first, rows and total')
+    await page.getByRole('combobox', { name: 'Rows per page' }).click()
+    const sizeOptions = await page.getByRole('option').allTextContents()
+    assert(
+      ['10', '25', '50'].every((size) => sizeOptions.includes(size)),
+      `the page size options are not 10, 25 and 50 (${sizeOptions.join(',')})`,
+    )
+    await page.keyboard.press('Escape')
+    const readsBeforeSize = listReads().length
+    await selectPageSize(25)
+    const sizeReads = listReads().slice(readsBeforeSize)
+    assert(
+      sizeReads.some((item) => item.rows === '25' && item.first === '0'),
+      `the page size did not read 25 rows from the first page (${JSON.stringify(sizeReads)})`,
+    )
+    const resizedRows = await visibleRows().count()
+    assert(
+      resizedRows === 11,
+      `the 25 row page did not show every pending row (${resizedRows})`,
+    )
+    await page.setViewportSize({ width: 390, height: 1000 })
+    await page.waitForTimeout(200)
+    const mobilePagerWithoutOverflow = await page
+      .locator('[data-approval-mobile-pager]')
+      .isVisible()
+    assert(
+      mobilePagerWithoutOverflow === false,
+      'the mobile pager stayed visible when every row fits on one page',
+    )
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await page.waitForTimeout(200)
+    await selectPageSize(10)
+    await page.setViewportSize({ width: 390, height: 1000 })
+    await page.waitForTimeout(200)
+    const mobilePagerWithOverflow = await page
+      .locator('[data-approval-mobile-pager]')
+      .isVisible()
+    assert(
+      mobilePagerWithOverflow === true,
+      'the mobile pager is missing when the rows overflow one page',
+    )
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await page.waitForTimeout(200)
+    report.checks.pagination = {
+      secondPageRead: true,
+      secondPageRows: secondPageRows,
+      pageSizeOptions: ['10', '25', '50'],
+      pageSizeRead: true,
+      range: true,
+      mobilePagerOnlyWhenOverflowing: true,
+    }
+
+    stage = 'filter'
+    const readsBeforeFilter = listReads().length
+    await selectFilter('Resolved')
+    const filterReads = listReads().slice(readsBeforeFilter)
+    assert(
+      filterReads.some(
+        (item) => item.status === 'resolved' && item.first === '0',
+      ),
+      `the filter did not reset to the first resolved page (${JSON.stringify(filterReads)})`,
+    )
+    const resolvedRows = await visibleRows().count()
+    assert(
+      resolvedRows === 4,
+      `the resolved filter did not show every resolved approval (${resolvedRows})`,
+    )
+    const resolvedApprove = await page
+      .locator('[data-approval-row]:visible [data-approval-action="approve"]')
+      .count()
+    assert(
+      resolvedApprove === 0,
+      'the resolved rows still offer an approval answer',
+    )
+    const resolvedRemaining = await remainingCell('approval-2')
+    assert(
+      (resolvedRemaining ?? '').trim() === '-',
+      `the resolved row does not show a dash for the remaining wait (${resolvedRemaining})`,
+    )
+    const resolvedBadge = await page
+      .locator('[data-approval-row="approval-2"]:visible')
+      .getByText('Resolved', { exact: true })
+      .count()
+    assert(resolvedBadge > 0, 'the resolved rows do not carry the resolved badge')
+    const readsBeforePending = listReads().length
+    await selectFilter('Pending')
+    const pendingReads = listReads().slice(readsBeforePending)
+    assert(
+      pendingReads.some((item) => item.status === 'pending' && item.first === '0'),
+      `the pending filter did not reset to the first page (${JSON.stringify(pendingReads)})`,
+    )
+    report.checks.filter = {
+      resolvedRead: true,
+      resolvedRows,
+      resolvedHasNoAnswers: true,
+      resolvedRemainingDash: true,
+      pendingResetsFirst: true,
+    }
+
+    stage = 'responsive'
+    const responsive = []
+    async function checkWidths(locale, theme) {
+      for (const width of [1440, 1024, 768, 390]) {
+        await page.setViewportSize({ width, height: 1000 })
+        await page.waitForTimeout(200)
+        const result = await page.evaluate(() => {
+          const route = document.querySelector(
+            '[data-foundation-route-id="R-APPROVALS"]',
+          )
+          const desktop = route?.querySelector('[data-approval-desktop]')
+          const mobile = route?.querySelector('[data-approval-mobile]')
+          const desktopPager = route?.querySelector(
+            '[data-approval-desktop-pager]',
+          )
+          const mobilePager = route?.querySelector('[data-approval-mobile-pager]')
+          const mobileCard = route?.querySelector(
+            '[data-approval-mobile] [data-approval-row]',
+          )
+          const visible = (node) =>
+            Boolean(node && node.getBoundingClientRect().height > 0)
+          return {
+            documentWidth: document.documentElement.scrollWidth,
+            viewportWidth: window.innerWidth,
+            desktopVisible: visible(desktop),
+            mobileVisible: visible(mobile),
+            desktopPagerVisible: visible(desktopPager),
+            mobilePagerVisible: visible(mobilePager),
+            mobileCardVisible: visible(mobileCard),
+            mobileCardHasAnswer: Boolean(
+              mobileCard?.querySelector('[data-approval-action="approve"]'),
+            ),
+            lang: document.documentElement.lang,
+            storedLocale: window.localStorage.getItem('prompt-ferry:locale'),
+            storedTheme: window.localStorage.getItem('prompt-ferry:theme-mode'),
+          }
+        })
+        assert(
+          result.documentWidth <= width,
+          `the approvals page overflows horizontally at ${width}px`,
+        )
+        assert(
+          result.desktopVisible === width >= 768,
+          `the desktop table visibility is wrong at ${width}px (${JSON.stringify(result)})`,
+        )
+        assert(
+          result.mobileVisible === width < 768,
+          `the mobile cards visibility is wrong at ${width}px (${JSON.stringify(result)})`,
+        )
+        assert(
+          result.desktopPagerVisible === width >= 768,
+          `the desktop pager visibility is wrong at ${width}px (${JSON.stringify(result)})`,
+        )
+        assert(
+          result.mobilePagerVisible === width < 768,
+          `the mobile pager visibility is wrong at ${width}px (${JSON.stringify(result)})`,
+        )
+        if (width < 768) {
+          assert(
+            result.mobileCardVisible && result.mobileCardHasAnswer,
+            `the mobile card lost its controls at ${width}px (${JSON.stringify(result)})`,
+          )
+        }
+        responsive.push({ locale, theme, width, ...result })
+      }
+    }
+    await checkWidths('en-US', 'light')
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await capture('approvals-responsive-en-light-1440')
+    await page.getByRole('button', { name: 'Language' }).click()
+    await page.getByRole('button', { name: '语言' }).waitFor({ state: 'visible' })
+    await page.getByRole('button', { name: '暗色' }).click()
+    await checkWidths('zh-CN', 'dark')
+    await page.setViewportSize({ width: 390, height: 1000 })
+    await capture('approvals-zh-dark-390')
+    await page.getByRole('button', { name: '语言' }).click()
+    await page.getByRole('button', { name: 'Light' }).click()
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    report.checks.responsive = responsive
+
+    stage = 'dialog-open'
+    const detailReadsBefore = detailReads().length
+    await reasonButton('approval-1').click()
+    await page.getByRole('dialog').waitFor({ state: 'visible' })
+    const detailRead = detailReads().slice(detailReadsBefore)
+    assert(
+      detailRead.length === 1 &&
+        detailRead[0].rawPath === '/api/v1/admin/approvals/approval-1',
+      `the detail did not read the approval once (${JSON.stringify(detailRead)})`,
+    )
+    const dialog = page.getByRole('dialog')
+    const dialogText = (await dialog.textContent()) ?? ''
+    assert(
+      dialogText.includes('operator') &&
+        dialogText.includes('integration-key') &&
+        dialogText.includes('gpt-5.1-codex-preview'),
+      'the detail does not show the user, client key and model',
+    )
+    assert(
+      dialogText.includes('confidentiality') &&
+        dialogText.includes('policy'),
+      'the detail does not show the review categories',
+    )
+    assert(
+      dialogText.includes('Please summarise this long internal document'),
+      'the detail does not show the request preview',
+    )
+    assert(
+      dialogText.includes('"model": "gpt-5.1-codex-preview"'),
+      'the detail does not show the request payload',
+    )
+    assert(
+      !dialogText.includes('req-approval-1') &&
+        !dialogText.includes('/v1/responses') &&
+        !dialogText.includes('review_decision'),
+      'the detail shows a field it must not show',
+    )
+    await capture('approvals-detail-en-light-1440')
+    await page.keyboard.press('Escape')
+    await page.getByRole('dialog').waitFor({ state: 'hidden' })
+    const detailReadsBeforeFixture = detailReads().length
+    await reasonButton('approval-fixture-2').click()
+    await page.getByRole('dialog').waitFor({ state: 'visible' })
+    const fixtureDialogText = (await page.getByRole('dialog').textContent()) ?? ''
+    assert(
+      !fixtureDialogText.includes('"model"'),
+      'the detail shows a payload for an approval without one',
+    )
+    const fixtureDetailReads = detailReads().slice(detailReadsBeforeFixture)
+    assert(
+      fixtureDetailReads.length === 1,
+      'the second detail did not read the approval once',
+    )
+    await page.keyboard.press('Escape')
+    await page.getByRole('dialog').waitFor({ state: 'hidden' })
+    report.checks.dialogOpen = {
+      detailRead: true,
+      showsUserKeyModel: true,
+      showsCategories: true,
+      showsPreview: true,
+      showsPayload: true,
+      hidesForbiddenFields: true,
+      hidesEmptyPayload: true,
+    }
+
+    stage = 'last-page-correction'
+    await page.getByRole('button', { name: 'Page 2' }).click()
+    await page.waitForTimeout(400)
+    const correctionRows = await visibleRows().count()
+    assert(
+      correctionRows === 1,
+      `the last page did not hold a single row (${correctionRows})`,
+    )
+    const readsBeforeCorrection = listReads().length
+    await rowActions('approval-fixture-10', 'approve').click()
+    await page.waitForTimeout(900)
+    const correctionReads = listReads().slice(readsBeforeCorrection)
+    assert(
+      correctionReads.some((item) => item.first === '10') &&
+        correctionReads.some((item) => item.first === '0'),
+      `the empty last page was not corrected to the last page with rows (${JSON.stringify(correctionReads)})`,
+    )
+    const correctedRows = await visibleRows().count()
+    assert(
+      correctedRows === 10,
+      `the corrected page did not show the remaining rows (${correctedRows})`,
+    )
+    report.checks.lastPageCorrection = {
+      emptyPageRead: true,
+      correctedRead: true,
+      correctedRows,
+    }
+
+    stage = 'mutation-approve'
+    const readsBeforeApprove = listReads().length
+    const detailReadsBeforeApprove = detailReads().length
+    await reasonButton('approval-1').click()
+    await page.getByRole('dialog').waitFor({ state: 'visible' })
+    await page
+      .getByRole('dialog')
+      .locator('[data-approval-action="approve"]')
+      .click()
+    await successToast().first().waitFor({ state: 'visible' })
+    const approveWrites = writesFor(
+      '/api/v1/admin/approvals/approval-1/approve',
+    )
+    assert(
+      approveWrites.length === 1,
+      `the approval was not written exactly once (${approveWrites.length})`,
+    )
+    assert(
+      approveWrites[0].body === null || approveWrites[0].body === '',
+      `the approval write carried a body (${approveWrites[0].body})`,
+    )
+    await page.waitForTimeout(600)
+    const approveReads = listReads().slice(readsBeforeApprove)
+    assert(
+      approveReads.some((item) => item.status === 'pending'),
+      'the approval did not refresh the list',
+    )
+    const approveDetailReads = detailReads().slice(detailReadsBeforeApprove)
+    assert(
+      approveDetailReads.some(
+        (item) => item.rawPath === '/api/v1/admin/approvals/approval-1',
+      ),
+      'the approval did not reload the matching detail',
+    )
+    const dialogAfterApprove = (await page.getByRole('dialog').textContent()) ?? ''
+    assert(
+      dialogAfterApprove.includes('Resolved'),
+      'the reloaded detail does not show the decided status',
+    )
+    const remainingApproval = await page
+      .locator('[data-approval-row="approval-1"]:visible')
+      .count()
+    assert(
+      remainingApproval === 0,
+      'the approved request stayed in the pending list',
+    )
+    await page.keyboard.press('Escape')
+    await page.getByRole('dialog').waitFor({ state: 'hidden' })
+    report.checks.mutationApprove = {
+      singleWrite: true,
+      noBody: true,
+      listRefreshed: true,
+      detailReloaded: true,
+      toast: true,
+      leftPendingList: true,
+    }
+
+    stage = 'mutation-reject'
+    const writesBeforeReject = report.decisionWrites.length
+    await rowActions('approval-fixture-2', 'reject').click()
+    await successToast().first().waitFor({ state: 'visible' })
+    const rejectWrites = report.decisionWrites.slice(writesBeforeReject)
+    assert(
+      rejectWrites.length === 1 &&
+        rejectWrites[0].path ===
+          '/api/v1/admin/approvals/approval-fixture-2/reject',
+      `the rejection was not written exactly once (${JSON.stringify(rejectWrites)})`,
+    )
+    await page.waitForTimeout(500)
+    const rejectedRow = await page
+      .locator('[data-approval-row="approval-fixture-2"]:visible')
+      .count()
+    assert(rejectedRow === 0, 'the rejected request stayed in the pending list')
+    const readsBeforeRejectedFilter = listReads().length
+    await selectFilter('Resolved')
+    const rejectedResolved = await page
+      .locator('[data-approval-row="approval-fixture-2"]:visible')
+      .count()
+    assert(
+      rejectedResolved === 1,
+      'the rejected request did not move into the resolved list',
+    )
+    const resolvedFilterReads = listReads().slice(readsBeforeRejectedFilter)
+    assert(
+      resolvedFilterReads.some((item) => item.status === 'resolved'),
+      'the resolved filter did not read the resolved page',
+    )
+    await selectFilter('Pending')
+    report.checks.mutationReject = {
+      singleWrite: true,
+      toast: true,
+      leftPendingList: true,
+      movedToResolved: true,
+    }
+
+    stage = 'conflict-guard'
+    await injectFault({
+      pathPrefix: '/api/v1/admin/approvals/approval-fixture-3/approve',
+      method: 'POST',
+      status: 200,
+      delayMs: 1500,
+    })
+    const writesBeforeGuard = report.decisionWrites.length
+    const approveButton = rowActions('approval-fixture-3', 'approve')
+    await approveButton.click()
+    await page.waitForTimeout(200)
+    const disabledDuringWrite = await approveButton.isDisabled()
+    assert(
+      disabledDuringWrite,
+      'the answered row did not disable its own approve control',
+    )
+    const rejectDisabled = await rowActions(
+      'approval-fixture-3',
+      'reject',
+    ).isDisabled()
+    assert(
+      rejectDisabled,
+      'the answered row did not disable its own reject control',
+    )
+    const otherRowEnabled = await rowActions(
+      'approval-fixture-4',
+      'approve',
+    ).isDisabled()
+    assert(
+      otherRowEnabled === false,
+      'the guard disabled a row that was not answered',
+    )
+    await approveButton.click({ force: true })
+    await page.waitForTimeout(200)
+    const guardWrites = report.decisionWrites.slice(writesBeforeGuard)
+    assert(
+      guardWrites.length === 1,
+      `a delayed double trigger sent more than one write (${guardWrites.length})`,
+    )
+    await page.waitForTimeout(1800)
+    report.checks.conflictGuard = {
+      singleWrite: true,
+      ownRowDisabled: true,
+      otherRowEnabled: true,
+    }
+
+    stage = 'modal-guard'
+    await reasonButton('approval-fixture-4').click()
+    await page.getByRole('dialog').waitFor({ state: 'visible' })
+    await injectFault({
+      pathPrefix: '/api/v1/admin/approvals/approval-fixture-4/approve',
+      method: 'POST',
+      status: 200,
+      delayMs: 1500,
+    })
+    const dialogApprove = page
+      .getByRole('dialog')
+      .locator('[data-approval-action="approve"]')
+    await dialogApprove.click()
+    await page.waitForTimeout(250)
+    const cancelDisabled = await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Cancel' })
+      .isDisabled()
+    assert(cancelDisabled, 'the answered dialog did not disable its cancel control')
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(300)
+    const dialogStillOpen = await page.getByRole('dialog').isVisible()
+    assert(
+      dialogStillOpen,
+      'the answered dialog could be dismissed while the answer was in flight',
+    )
+    await page.waitForTimeout(1800)
+    await page.keyboard.press('Escape')
+    await page.getByRole('dialog').waitFor({ state: 'hidden' })
+    await clearFaults()
+    report.checks.modalGuard = {
+      cancelDisabled: true,
+      dismissalBlocked: true,
+    }
+
+    stage = 'error-state'
+    await injectFault({
+      pathPrefix: '/api/v1/admin/approvals',
+      method: 'GET',
+      status: 503,
+    })
+    await page.getByRole('button', { name: 'Refresh' }).click()
+    await errorToast().first().waitFor({ state: 'visible' })
+    const rowsAfterFailure = await visibleRows().count()
+    assert(
+      rowsAfterFailure === 0,
+      `the failed list read kept stale rows (${rowsAfterFailure})`,
+    )
+    await clearFaults()
+    await page.getByRole('button', { name: 'Refresh' }).click()
+    await visibleRows().first().waitFor({ state: 'visible' })
+    const rowsAfterRetry = await visibleRows().count()
+    assert(
+      rowsAfterRetry > 0,
+      'the refresh did not recover the failed list read',
+    )
+    await injectFault({
+      pathPrefix: '/api/v1/admin/approvals/approval-fixture-5',
+      method: 'GET',
+      status: 404,
+    })
+    await reasonButton('approval-fixture-5').click()
+    await errorToast().first().waitFor({ state: 'visible' })
+    const dialogAfterFailure = await page.getByRole('dialog').count()
+    assert(
+      dialogAfterFailure === 0,
+      'the failed detail read still opened the dialog',
+    )
+    await clearFaults()
+    const conflictStatus = await page.evaluate(async () => {
+      const response = await fetch(
+        '/api/v1/admin/approvals/approval-fixture-6/approve',
+        { method: 'POST' },
+      )
+      return response.status
+    })
+    assert(
+      conflictStatus === 200,
+      `the forged approval write did not succeed (${conflictStatus})`,
+    )
+    const readsBeforeConflict = listReads().length
+    await rowActions('approval-fixture-6', 'approve').click()
+    await errorToast().first().waitFor({ state: 'visible' })
+    const conflictReads = listReads().slice(readsBeforeConflict)
+    assert(
+      conflictReads.length === 0,
+      `the refused approval refreshed the list (${JSON.stringify(conflictReads)})`,
+    )
+    await injectFault({
+      pathPrefix: '/api/v1/admin/approvals/approval-fixture-7/approve',
+      method: 'POST',
+      status: 503,
+    })
+    const readsBeforeFailure = listReads().length
+    await rowActions('approval-fixture-7', 'approve').click()
+    await errorToast().first().waitFor({ state: 'visible' })
+    const failureReads = listReads().slice(readsBeforeFailure)
+    assert(
+      failureReads.length === 0,
+      `the failed approval refreshed the list (${JSON.stringify(failureReads)})`,
+    )
+    await clearFaults()
+    report.checks.errorState = {
+      listFailureClearsRows: true,
+      listRetryRecovers: true,
+      detailFailureKeepsDialogClosed: true,
+      conflictRejected: true,
+      conflictNoRefresh: true,
+      writeFailureNoRefresh: true,
+    }
+
+    stage = 'latest-wins'
+    await injectFault({
+      pathPrefix: '/api/v1/admin/approvals',
+      method: 'GET',
+      status: 200,
+      delayMs: 1500,
+    })
+    await page.getByRole('button', { name: 'Refresh' }).click()
+    await page.waitForTimeout(150)
+    await selectFilter('Resolved')
+    await page.waitForTimeout(2200)
+    const staleRows = await visibleRows().count()
+    const staleAnswers = await page
+      .locator('[data-approval-row]:visible [data-approval-action="approve"]')
+      .count()
+    const stalePendingBadges = await page
+      .locator('[data-approval-row]:visible')
+      .getByText('Pending', { exact: true })
+      .count()
+    assert(
+      staleAnswers === 0 && stalePendingBadges === 0 && staleRows > 0,
+      `a stale list read replaced the newer resolved page (${staleRows}/${staleAnswers}/${stalePendingBadges})`,
+    )
+    await selectFilter('Pending')
+    await page.waitForTimeout(400)
+    await injectFault({
+      pathPrefix: '/api/v1/admin/approvals/approval-fixture-8',
+      method: 'GET',
+      status: 200,
+      delayMs: 1500,
+    })
+    await reasonButton('approval-fixture-8').click()
+    await page.waitForTimeout(150)
+    await reasonButton('approval-fixture-9').click()
+    await page.getByRole('dialog').waitFor({ state: 'visible' })
+    await page.waitForTimeout(2200)
+    const latestDialog = (await page.getByRole('dialog').textContent()) ?? ''
+    assert(
+      latestDialog.includes('fixture-key-9'),
+      `a stale detail read replaced the newer detail (${latestDialog.slice(0, 120)})`,
+    )
+    await page.keyboard.press('Escape')
+    await page.getByRole('dialog').waitFor({ state: 'hidden' })
+    report.checks.latestWins = {
+      listKeepsNewest: true,
+      detailKeepsNewest: true,
+    }
+
+    stage = 'timer-cleanup'
+    const intervalsOnApprovals = await page.evaluate(() =>
+      window.__approvalsIntervalCount(),
+    )
+    await page.getByRole('link', { name: 'API Keys' }).click()
+    await page
+      .locator('[data-foundation-route-id="R-API-KEYS"]')
+      .waitFor({ state: 'visible' })
+    const intervalsAfterLeave = await page.evaluate(() =>
+      window.__approvalsIntervalCount(),
+    )
+    assert(
+      intervalsAfterLeave === intervalsOnApprovals - 1,
+      `the remaining wait ticker was not cleared on leave (${intervalsOnApprovals} -> ${intervalsAfterLeave})`,
+    )
+    report.checks.timerCleanup = {
+      tickerRan: true,
+      clearedOnLeave: true,
+    }
+
+    stage = 'admin-denial'
+    await page.getByRole('button', { name: 'Logout' }).click()
+    await page.waitForURL((url) => new URL(url).pathname === '/login')
+    await signIn('operator')
+    const readsBeforeDenied = listReads().length
+    await page.goto(`${BASE}/approvals`)
+    await page.waitForTimeout(900)
+    assert(
+      new URL(page.url()).pathname === '/api-keys',
+      `the ordinary user was not redirected away from the approvals route (${page.url()})`,
+    )
+    const deniedReads = listReads().slice(readsBeforeDenied)
+    assert(
+      deniedReads.length === 0,
+      `the ordinary user reached the approvals reads (${JSON.stringify(deniedReads)})`,
+    )
+    expectingDenied = true
+    const deniedStatus = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/admin/approvals')
+      return response.status
+    })
+    expectingDenied = false
+    assert(
+      deniedStatus === 403,
+      `the forged ordinary user was not rejected (${deniedStatus})`,
+    )
+    report.checks.adminDenial = {
+      redirected: true,
+      noApprovalReads: true,
+      forged403: true,
+    }
+
+    stage = 'anonymous-scope'
+    await page.getByRole('button', { name: 'Logout' }).click()
+    await page.waitForURL((url) => new URL(url).pathname === '/login')
+    expectingAnonymous = true
+    const anonymousStatus = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/admin/approvals')
+      return response.status
+    })
+    expectingAnonymous = false
+    assert(
+      anonymousStatus === 401,
+      `the anonymous caller was not rejected (${anonymousStatus})`,
+    )
+    report.checks.anonymousScope = { list401: true }
+
+    report.finishedAt = new Date().toISOString()
+    assert(
+      report.apiFailures.length === 0,
+      `unexpected API failures: ${report.apiFailures.join(', ')}`,
+    )
+    assert(report.consoleErrorCount === 0, 'console errors were reported')
+    assert(report.pageErrorCount === 0, 'page errors were reported')
+    return report
+
+  } catch (error) {
+    report.stage = stage
+    report.error = error instanceof Error ? error.message : String(error)
+    report.url = page.url()
+    report.bodyText = await page
+      .evaluate(() => document.body.innerText.slice(0, 2000))
+      .catch(() => '')
+    report.finishedAt = new Date().toISOString()
+    return report
+  }
+}

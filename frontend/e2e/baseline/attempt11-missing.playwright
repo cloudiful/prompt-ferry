@@ -1,0 +1,674 @@
+async (page) => {
+  const result = {
+    startedAt: new Date().toISOString(),
+    failures: [],
+    checks: {},
+  }
+  const requests = []
+  const keyPageResponses = []
+  const redactionPageResponses = []
+  const recordResponse = (response) => {
+    const url = new URL(response.url())
+    if (url.pathname === '/api/v1/me/client-keys') {
+      keyPageResponses.push(
+        response
+          .json()
+          .then((data) => ({
+            query: Object.fromEntries(url.searchParams),
+            keys: data.keys.map((key) => ({
+              id: key.key_id,
+              enabled: key.enabled,
+              label: key.label,
+            })),
+          }))
+          .catch(() => null),
+      )
+    }
+    if (url.pathname === '/api/v1/settings/redaction/custom-strings') {
+      redactionPageResponses.push(
+        response
+          .json()
+          .then((data) => ({
+            query: Object.fromEntries(url.searchParams),
+            patterns: data.items.map((item) => item.pattern),
+          }))
+          .catch(() => null),
+      )
+    }
+  }
+  page.on('response', recordResponse)
+  const recordRequest = (request) => {
+    const url = new URL(request.url())
+    if (!url.pathname.startsWith('/api/')) return
+    let body
+    try {
+      body = request.postDataJSON()
+    } catch {}
+    requests.push({
+      method: request.method(),
+      path: url.pathname,
+      query: Object.fromEntries(url.searchParams),
+      body,
+    })
+  }
+  page.on('request', recordRequest)
+  page.setDefaultTimeout(8000)
+  const api = async (path, body) =>
+    (
+      await fetch(`http://127.0.0.1:8789${path}`, {
+        method: body === undefined ? 'GET' : 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      })
+    ).json()
+  const reset = async (route) => {
+    await api('/__fixtures/reset', {})
+    requests.length = 0
+    await page.context().clearCookies()
+    await page.goto('http://127.0.0.1:5171/login')
+    await page.evaluate(() => {
+      localStorage.clear()
+      localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    })
+    await page.reload()
+    await page.getByRole('textbox', { name: /登录名/ }).fill('admin')
+    await page.getByRole('textbox', { name: /密码/ }).fill('fixture-password')
+    await page.getByRole('button', { name: '登录', exact: true }).click()
+    await page.waitForTimeout(700)
+    if (route) await visit(route)
+  }
+  const visit = async (route) => {
+    await page.goto(`http://127.0.0.1:5171${route}`, {
+      waitUntil: 'domcontentloaded',
+    })
+    await page.waitForTimeout(700)
+  }
+  const fault = (pathPrefix, method, extra = {}) =>
+    api('/__fixtures/faults', {
+      pathPrefix,
+      method,
+      count: 1,
+      status: 503,
+      message: 'attempt11 synthetic failure',
+      ...extra,
+    })
+  const log = async () => (await api('/__fixtures/log?limit=500')).requests
+  const body = () => page.locator('body').innerText()
+  const run = async (id, fn) => {
+    try {
+      result.checks[id] = await fn()
+    } catch (error) {
+      result.failures.push({ id, error: String(error) })
+    }
+  }
+  try {
+    await reset('/api-keys')
+    await run('R-API-KEYS:mutation-toggle', async () => {
+      await page.setViewportSize({ width: 390, height: 844 })
+      keyPageResponses.length = 0
+      const toggle = page.getByRole('switch').first()
+      const before = await toggle.isChecked()
+      await toggle.click()
+      await page.waitForTimeout(700)
+      const afterDisable = await toggle.isChecked()
+      await toggle.click()
+      await page.waitForTimeout(700)
+      const afterEnable = await toggle.isChecked()
+      const writes = requests.filter(
+        (item) =>
+          item.method === 'PATCH' &&
+          item.path.startsWith('/api/v1/me/client-keys/'),
+      )
+      const outcomes = (await log()).filter(
+        (item) =>
+          item.method === 'PATCH' &&
+          item.path.startsWith('/api/v1/me/client-keys/'),
+      )
+      const keyId = writes[0]?.path.split('/').at(-1)
+      const refreshed = (await Promise.all(keyPageResponses))
+        .filter(Boolean)
+        .flatMap((item) => item.keys)
+      const targetStates = refreshed
+        .filter((key) => key.id === keyId)
+        .map((key) => key.enabled)
+      return {
+        before,
+        afterDisable,
+        afterEnable,
+        statuses: outcomes.map((item) => item.status),
+        payloads: writes.map((item) => item.body),
+        targetStates,
+      }
+    })
+    await run('R-API-KEYS:mutation-conflict-guard', async () => {
+      const toggle = page.getByRole('switch').nth(1)
+      const before = await toggle.isChecked()
+      await fault('/api/v1/me/client-keys/key-2', 'PATCH', { delayMs: 850 })
+      await toggle.evaluate((element) => {
+        element.click()
+        element.click()
+      })
+      await page.waitForTimeout(100)
+      const pendingDisabled = await toggle.isDisabled()
+      await page.waitForTimeout(950)
+      const writes = (await log()).filter(
+        (item) =>
+          item.method === 'PATCH' &&
+          item.path === '/api/v1/me/client-keys/key-2',
+      )
+      const request = requests.filter(
+        (item) =>
+          item.method === 'PATCH' &&
+          item.path === '/api/v1/me/client-keys/key-2',
+      )
+      return {
+        before,
+        pendingDisabled,
+        count: writes.length,
+        status: writes[0]?.status,
+        body: request[0]?.body,
+      }
+    })
+    await run('R-API-KEYS:pagination', async () => {
+      await reset('/api-keys')
+      keyPageResponses.length = 0
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await page.reload()
+      await page.waitForTimeout(700)
+      const rows = page.locator('table tbody tr')
+      const firstPage = await rows.allInnerTexts()
+      await page
+        .getByRole('button', { name: /下一页/ })
+        .first()
+        .click()
+      await page.waitForTimeout(800)
+      const secondPage = await rows.allInnerTexts()
+      const query = requests
+        .filter(
+          (item) =>
+            item.method === 'GET' && item.path === '/api/v1/me/client-keys',
+        )
+        .at(-1)
+      const apiPages = (await Promise.all(keyPageResponses)).filter(Boolean)
+      const firstIds =
+        apiPages
+          .find((item) => item.query.first === '0')
+          ?.keys?.map((key) => key.id) ?? []
+      const secondIds =
+        apiPages
+          .find((item) => item.query.first === '10')
+          ?.keys?.map((key) => key.id) ?? []
+      return {
+        query: query?.query,
+        firstRowSet: firstPage,
+        secondRowSet: secondPage,
+        firstIds,
+        secondIds,
+        changed: JSON.stringify(firstIds) !== JSON.stringify(secondIds),
+        count: secondPage.length,
+      }
+    })
+
+    await reset('/endpoints/upstreams')
+    await run('R-ENDPOINTS-UPSTREAMS:mutation-failure-draft', async () => {
+      await page
+        .getByRole('button', { name: /新增上游节点/ })
+        .first()
+        .click()
+      const dialog = page.getByRole('dialog').last()
+      await dialog.getByPlaceholder('名称').fill('Attempt 11 Retry Endpoint')
+      await dialog
+        .getByPlaceholder('基础地址')
+        .fill('https://attempt11.example.invalid/v1')
+      await fault('/api/v1/admin/endpoints', 'POST')
+      await dialog
+        .getByRole('button', { name: '保存上游节点', exact: true })
+        .click()
+      await page.waitForTimeout(350)
+      const retained =
+        (await dialog.isVisible()) &&
+        (await dialog.getByPlaceholder('名称').inputValue()) ===
+          'Attempt 11 Retry Endpoint' &&
+        (await dialog.getByPlaceholder('基础地址').inputValue()) ===
+          'https://attempt11.example.invalid/v1'
+      const failureText = await body()
+      await dialog
+        .getByRole('button', { name: '保存上游节点', exact: true })
+        .click()
+      await page.waitForTimeout(700)
+      const post = (await log()).filter(
+        (item) =>
+          item.method === 'POST' && item.path === '/api/v1/admin/endpoints',
+      )
+      return {
+        retained,
+        errorVisible: /attempt11 synthetic failure/.test(failureText),
+        writes: post.map((item) => ({ status: item.status, body: item.body })),
+        samePayloadRetry:
+          post.length === 2 &&
+          JSON.stringify(post[0].body) === JSON.stringify(post[1].body),
+        closedAfterRetry: !(await dialog.isVisible().catch(() => false)),
+      }
+    })
+    await run('R-ENDPOINTS-UPSTREAMS:update-failure-draft', async () => {
+      await reset('/endpoints/upstreams')
+      const row = page
+        .locator('table tbody tr')
+        .filter({ hasText: 'MiniMax Platform China Production' })
+        .first()
+      await row.getByRole('button', { name: '编辑', exact: true }).click()
+      const dialog = page.getByRole('dialog').last()
+      const name = dialog.getByPlaceholder('名称')
+      await name.fill('MiniMax Attempt 11 Retry')
+      await fault('/api/v1/admin/endpoints/ep-minimax-cn', 'PATCH')
+      await dialog
+        .getByRole('button', { name: '保存上游节点', exact: true })
+        .click()
+      await page.waitForTimeout(350)
+      const retained =
+        (await dialog.isVisible()) &&
+        (await name.inputValue()) === 'MiniMax Attempt 11 Retry'
+      const failureText = await body()
+      await dialog
+        .getByRole('button', { name: '保存上游节点', exact: true })
+        .click()
+      await page.waitForTimeout(700)
+      const writes = (await log()).filter(
+        (item) =>
+          item.method === 'PATCH' &&
+          item.path === '/api/v1/admin/endpoints/ep-minimax-cn',
+      )
+      return {
+        retained,
+        errorVisible: /attempt11 synthetic failure/.test(failureText),
+        writes: writes.map((item) => ({
+          status: item.status,
+          body: item.body,
+        })),
+        samePayloadRetry:
+          writes.length === 2 &&
+          JSON.stringify(writes[0].body) === JSON.stringify(writes[1].body),
+        closedAfterRetry: !(await dialog.isVisible().catch(() => false)),
+      }
+    })
+    await run('R-ENDPOINTS-UPSTREAMS:error-state', async () => {
+      await reset()
+      await fault('/api/v1/admin/endpoints', 'GET')
+      await visit('/endpoints/upstreams')
+      const errorText = await body()
+      const errorRows = await page.locator('table tbody tr').allInnerTexts()
+      const failedRead = (await log()).some(
+        (item) =>
+          item.method === 'GET' &&
+          item.path === '/api/v1/admin/endpoints' &&
+          item.status === 503,
+      )
+      await page.getByRole('button', { name: /刷新/ }).first().click()
+      await page.waitForTimeout(700)
+      const successRead = (await log()).some(
+        (item) =>
+          item.method === 'GET' &&
+          item.path === '/api/v1/admin/endpoints' &&
+          item.status === 200,
+      )
+      return {
+        failedRead,
+        errorVisible:
+          /attempt11 synthetic failure|请求失败|加载失败|error/i.test(
+            errorText,
+          ),
+        errorRows,
+        noStaleRows: errorRows.every(
+          (text) =>
+            !/MiniMax Platform|OpenAI ChatGPT|OpenRouter Shared/.test(text),
+        ),
+        successRead,
+        rows: await page.locator('table tbody tr').count(),
+      }
+    })
+
+    await run('R-ENDPOINTS-ROUTES:mutation-conflict-guard', async () => {
+      await reset('/endpoints/routes')
+      const row = page.locator('table tbody tr').first()
+      const toggle = row.getByRole('switch').first()
+      await fault('/api/v1/admin/model-routes/', 'PATCH', { delayMs: 850 })
+      await toggle.evaluate((element) => {
+        element.click()
+        element.click()
+      })
+      await page.waitForTimeout(100)
+      const pendingDisabled = await toggle.isDisabled()
+      await page.waitForTimeout(1000)
+      const patches = (await log()).filter(
+        (item) =>
+          item.method === 'PATCH' &&
+          item.path.startsWith('/api/v1/admin/model-routes/'),
+      )
+      return {
+        patchCount: patches.length,
+        pendingDisabled,
+        path: patches[0]?.path,
+        status: patches[0]?.status,
+        body: patches[0]?.body,
+      }
+    })
+
+    await run('R-RELAYS:mutation-conflict-guard', async () => {
+      await reset('/relays')
+      const row = page.locator('table tbody tr').first()
+      const reconnect = row.getByRole('button', { name: /重连|reconnect/i })
+      await fault('/api/v1/admin/relays/', 'POST', { delayMs: 850 })
+      await reconnect.evaluate((element) => {
+        element.click()
+        element.click()
+      })
+      await page.waitForTimeout(100)
+      const pendingDisabled = await reconnect.isDisabled()
+      await page.waitForTimeout(1000)
+      const writes = (await log()).filter(
+        (item) =>
+          item.method === 'POST' &&
+          /\/api\/v1\/admin\/relays\/[^/]+\/reconnect$/.test(item.path),
+      )
+      return {
+        writeCount: writes.length,
+        pendingDisabled,
+        path: writes[0]?.path,
+        status: writes[0]?.status,
+      }
+    })
+
+    await run(
+      'R-REDACTION-RULES:mutation-toggle+mutation-failure-draft',
+      async () => {
+        await reset('/redaction/rules')
+        const checkbox = page.getByRole('checkbox').first()
+        const id = await checkbox.getAttribute('id')
+        const before = await checkbox.isChecked()
+        await checkbox.click()
+        const save = page.getByRole('button', { name: /^保存$/ }).first()
+        await save.click()
+        await page.waitForTimeout(600)
+        const success = requests.find(
+          (item) =>
+            item.method === 'PATCH' &&
+            item.path === '/api/v1/settings/redaction',
+        )
+        const toggled =
+          success?.body?.rules?.[id?.replace('redaction-rule-', '') ?? ''] ===
+          !before
+        await checkbox.click()
+        await page.waitForTimeout(200)
+        await fault('/api/v1/settings/redaction', 'PATCH')
+        await save.click()
+        await page.waitForTimeout(350)
+        const dirtyText = await body()
+        const dirty = /未保存|有变更|unsaved|changes/i.test(dirtyText)
+        const failureVisible = /attempt11 synthetic failure/.test(dirtyText)
+        const retained = (await checkbox.isChecked()) === before
+        const failed = requests
+          .filter(
+            (item) =>
+              item.method === 'PATCH' &&
+              item.path === '/api/v1/settings/redaction',
+          )
+          .at(-1)
+        await save.click()
+        await page.waitForTimeout(700)
+        const writes = (await log()).filter(
+          (item) =>
+            item.method === 'PATCH' &&
+            item.path === '/api/v1/settings/redaction',
+        )
+        const retry = requests
+          .filter(
+            (item) =>
+              item.method === 'PATCH' &&
+              item.path === '/api/v1/settings/redaction',
+          )
+          .at(-1)
+        return {
+          id,
+          toggled,
+          toggleBody: success?.body,
+          retained,
+          dirtyBadge: dirty,
+          failureVisible,
+          writes: writes.map((item) => item.status),
+          failedBody: failed?.body,
+          retryBody: retry?.body,
+          samePayloadRetry:
+            JSON.stringify(failed?.body) === JSON.stringify(retry?.body),
+        }
+      },
+    )
+
+    await run('R-REDACTION-RULES:pagination', async () => {
+      await reset('/redaction/rules')
+      redactionPageResponses.length = 0
+      await page.reload()
+      await page.waitForTimeout(700)
+      const rows = page.locator('table tbody tr')
+      const firstPage = await rows.allInnerTexts()
+      await page
+        .getByRole('button', { name: /下一页/ })
+        .first()
+        .click()
+      await page.waitForTimeout(700)
+      const secondPage = await rows.allInnerTexts()
+      const pages = (await Promise.all(redactionPageResponses)).filter(Boolean)
+      const firstPatterns =
+        pages.find((item) => item.query.first === '0')?.patterns ?? []
+      const secondPatterns =
+        pages.find((item) => item.query.first === '10')?.patterns ?? []
+      return {
+        query: pages.at(-1)?.query,
+        firstPage,
+        secondPage,
+        firstPatterns,
+        secondPatterns,
+        changed:
+          JSON.stringify(firstPatterns) !== JSON.stringify(secondPatterns),
+        count: secondPage.length,
+      }
+    })
+
+    await run('R-REDACTION-PREVIEW:mutation-conflict-guard', async () => {
+      await reset('/redaction/preview')
+      const text = page.locator('textarea').first()
+      await text.fill('Attempt 11 user@example.com')
+      const preview = page.getByRole('button', { name: /预览/ }).first()
+      await fault('/api/v1/settings/redaction/preview', 'POST', {
+        delayMs: 800,
+      })
+      await preview.evaluate((element) => {
+        element.click()
+        element.click()
+      })
+      await page.waitForTimeout(100)
+      const busy =
+        (await preview.isDisabled()) ||
+        (await preview.getAttribute('aria-busy')) === 'true'
+      await page.waitForTimeout(950)
+      const calls = (await log()).filter(
+        (item) =>
+          item.method === 'POST' &&
+          item.path === '/api/v1/settings/redaction/preview',
+      )
+      const previewText = await body()
+      return {
+        count: calls.length,
+        status: calls[0]?.status,
+        busy,
+        failureVisible: /attempt11 synthetic failure/.test(previewText),
+        input: 'Attempt 11 user@example.com',
+      }
+    })
+
+    await run('R-USAGE-AI:loading-state', async () => {
+      await reset()
+      await fault('/api/v1/admin/request-records/overview', 'GET', {
+        delayMs: 1500,
+      })
+      await page.goto('http://127.0.0.1:5171/request-records/ai', {
+        waitUntil: 'domcontentloaded',
+      })
+      await page.waitForTimeout(350)
+      const loadingNodes = await page
+        .locator(
+          '[aria-busy="true"], [role="status"], [data-slot="skeleton"], .animate-spin',
+        )
+        .count()
+      const loadingText = await body()
+      const loadingVisible =
+        loadingNodes > 0 || /加载中|loading/i.test(loadingText)
+      await page.waitForTimeout(1600)
+      const loaded = await body()
+      await page
+        .getByRole('button', { name: '刷新', exact: true })
+        .first()
+        .click()
+      await page.waitForTimeout(850)
+      return {
+        loadingNodes,
+        loadingText: /加载中|loading/i.test(loadingText),
+        loadingVisible,
+        loaded: /概览|服务调用|overview/i.test(loaded),
+        overviewResponses: (await log())
+          .filter(
+            (item) =>
+              item.method === 'GET' &&
+              item.path === '/api/v1/admin/request-records/overview',
+          )
+          .map((item) => item.status),
+      }
+    })
+
+    await run('R-BILLING:mutation-toggle+mutation-conflict-guard', async () => {
+      await reset('/billing')
+      const rulesTable = page
+        .locator('table')
+        .filter({
+          has: page.getByRole('button', {
+            name: /停用价格版本|disable price rule/i,
+          }),
+        })
+        .first()
+      const ruleRow = rulesTable
+        .locator('tbody tr')
+        .filter({ hasText: 'minimax-m2' })
+        .first()
+      const toggle = ruleRow.getByRole('button', {
+        name: /停用价格版本|disable price rule/i,
+      })
+      const before = await ruleRow.innerText()
+      await fault('/api/v1/admin/billing/price-rules/', 'PATCH', {
+        delayMs: 850,
+      })
+      await toggle.evaluate((element) => {
+        element.click()
+        element.click()
+      })
+      await page.waitForTimeout(100)
+      const pendingDisabled = await toggle.isDisabled()
+      await page.waitForTimeout(1000)
+      const firstBurst = (await log()).filter(
+        (item) =>
+          item.method === 'PATCH' &&
+          item.path.startsWith('/api/v1/admin/billing/price-rules/'),
+      )
+      await ruleRow
+        .getByRole('button', { name: /停用价格版本|disable price rule/i })
+        .click()
+      await page.waitForTimeout(750)
+      const outcomes = (await log()).filter(
+        (item) =>
+          item.method === 'PATCH' &&
+          item.path.startsWith('/api/v1/admin/billing/price-rules/'),
+      )
+      const writes = requests.filter(
+        (item) =>
+          item.method === 'PATCH' &&
+          item.path.startsWith('/api/v1/admin/billing/price-rules/'),
+      )
+      const after = await ruleRow.innerText()
+      return {
+        firstBurstCount: firstBurst.length,
+        count: outcomes.length,
+        pendingDisabled,
+        writes: writes.map((item, index) => ({
+          status: outcomes[index]?.status,
+          body: item.body,
+        })),
+        stateChanged: before !== after,
+        before,
+        after,
+      }
+    })
+
+    await run('R-APPROVALS:mutation-conflict-guard', async () => {
+      await reset('/approvals')
+      await page.setViewportSize({ width: 390, height: 844 })
+      const card = page
+        .locator('article')
+        .filter({ hasText: 'pending' })
+        .first()
+      const approve = card.getByRole('button', { name: /批准|通过|approve/i })
+      await fault('/api/v1/admin/approvals/', 'POST', { delayMs: 850 })
+      await approve.evaluate((element) => {
+        element.click()
+        element.click()
+      })
+      await page.waitForTimeout(100)
+      const reject = card.getByRole('button', { name: /拒绝|reject/i })
+      const alternativeDisabled = await reject.isDisabled()
+      await page.waitForTimeout(1000)
+      const writes = (await log()).filter(
+        (item) =>
+          item.method === 'POST' &&
+          /\/api\/v1\/admin\/approvals\/[^/]+\/(approve|reject)$/.test(
+            item.path,
+          ),
+      )
+      return {
+        count: writes.length,
+        alternativeDisabled,
+        path: writes[0]?.path,
+        status: writes[0]?.status,
+      }
+    })
+    await run('R-APPROVALS:error-state', async () => {
+      await reset()
+      await fault('/api/v1/admin/approvals', 'GET')
+      await visit('/approvals')
+      const errorText = await body()
+      const errorRows = await page.locator('table tbody tr').allInnerTexts()
+      const first = (await log()).filter(
+        (item) =>
+          item.method === 'GET' && item.path === '/api/v1/admin/approvals',
+      )
+      await page.getByRole('button', { name: /刷新/ }).first().click()
+      await page.waitForTimeout(700)
+      const reads = (await log()).filter(
+        (item) =>
+          item.method === 'GET' && item.path === '/api/v1/admin/approvals',
+      )
+      return {
+        failed: first.some((item) => item.status === 503),
+        errorVisible:
+          /attempt11 synthetic failure|请求失败|加载失败|error/i.test(
+            errorText,
+          ),
+        errorRows,
+        noStaleRows: errorRows.length === 0,
+        retrySuccess: reads.some((item) => item.status === 200),
+        rowCount: await page.locator('table tbody tr').count(),
+      }
+    })
+  } finally {
+    page.off('request', recordRequest)
+    page.off('response', recordResponse)
+  }
+  result.finishedAt = new Date().toISOString()
+  return JSON.stringify(result)
+}

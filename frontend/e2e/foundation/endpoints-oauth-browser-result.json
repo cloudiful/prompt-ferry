@@ -1,0 +1,23 @@
+{
+  "startedAt": "2026-10-25T13:43:53.453Z",
+  "checks": {
+    "browserOAuth": {
+      "startFailureVisible": true,
+      "completionStatuses": [503, 200],
+      "redirectMasked": true,
+      "redirectDraftRetained": true,
+      "dismissDisabledWhilePending": true,
+      "noExternalNavigation": true
+    },
+    "oauthGenerationGuards": {
+      "providerChangeBrowserVerified": true,
+      "providerDuringStatus": true,
+      "oauthSectionRemoved": true,
+      "endpointSwitchRetained": true
+    },
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  "screenshots": [],
+  "finishedAt": "2026-10-25T13:43:56.722Z"
+}

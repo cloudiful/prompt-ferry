@@ -1,0 +1,105 @@
+{
+  "runId": "general-settings-1793010955188",
+  "startedAt": "2026-10-26T10:35:55.188Z",
+  "finishedAt": "2026-10-26T10:36:15.361Z",
+  "checks": {
+    "zeroRequests": {
+      "settings": 0,
+      "during": "operator preferences page"
+    },
+    "timeZoneDefault": {
+      "label": "自动（Asia/Shanghai）",
+      "browserZone": "Asia/Shanghai"
+    },
+    "timeZoneSelect": {
+      "persisted": "Asia/Tokyo",
+      "filtered": 2
+    },
+    "crossPage": {
+      "rawInstant": "2026-10-26T10:35:53.966Z",
+      "rendered": "19:35:53",
+      "expectedTokyo": "19:35:53",
+      "utc": "10:35:53",
+      "zoneKept": true
+    },
+    "timeZoneClear": {
+      "clearedToAuto": true,
+      "reselected": "Asia/Tokyo"
+    },
+    "responsive": [
+      {
+        "width": 1440,
+        "twoColumns": true,
+        "documentWidth": 1440
+      },
+      {
+        "width": 1024,
+        "twoColumns": true,
+        "documentWidth": 1024
+      },
+      {
+        "width": 768,
+        "twoColumns": true,
+        "documentWidth": 768
+      },
+      {
+        "width": 390,
+        "twoColumns": false,
+        "documentWidth": 390
+      }
+    ],
+    "admin": {
+      "cards": 3,
+      "adminNavVisible": true
+    },
+    "settingsApiRequests": 0,
+    "officialPendingRoutes": 0,
+    "limitations": [
+      "Evidence is synthetic-fixture rendered UI, document state and local storage behavior; there is no server-side preference or live session claim.",
+      "The general tab owns no server read or write, so its proof is the rendered state plus the empty request ledger rather than an API assertion."
+    ]
+  },
+  "scenarios": {
+    "R-SETTINGS-GENERAL": {
+      "route-render": {
+        "passed": true,
+        "evidence": "three preference cards render with their ids and no server save action"
+      },
+      "nav-visibility": {
+        "passed": true,
+        "evidence": "an ordinary user reaches the general tab from the only settings link it sees"
+      },
+      "locale-switch": {
+        "passed": true,
+        "evidence": "the language preference applied to the document, persisted, and survived navigation and reload"
+      },
+      "theme-switch": {
+        "passed": true,
+        "evidence": "the theme preference applied to the document, persisted, and survived a reload"
+      }
+    }
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/settings-general-en-light-1440.png",
+    "e2e/foundation/screenshots/settings-general-en-light-390.png",
+    "e2e/foundation/screenshots/settings-general-zh-dark-1440.png",
+    "e2e/foundation/screenshots/settings-general-zh-dark-390.png",
+    "e2e/foundation/screenshots/settings-general-admin-en-light-1440.png"
+  ],
+  "apiFailures": [],
+  "expectedApiFailures": [
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me"
+  ],
+  "expectedConsoleStatusErrors": 5,
+  "unexpectedRequests": [],
+  "consoleErrorCount": 0,
+  "pageErrorCount": 0,
+  "limitations": [
+    "Evidence is synthetic-fixture rendered UI, document state and local storage behavior; there is no server-side preference or live session claim.",
+    "The general tab owns no server read or write, so its proof is the rendered state plus the empty request ledger rather than an API assertion."
+  ]
+}

@@ -1,0 +1,80 @@
+async page => {
+  const base = 'http://127.0.0.1:5171'
+  const result = { checks: {}, failures: [], captures: [], startedAt: new Date().toISOString() }
+  const api = async (path, body) => (await fetch('http://127.0.0.1:8789' + path, {method:body?'POST':'GET',headers:{'content-type':'application/json'},body:body?JSON.stringify(body):undefined})).json()
+  const since = async t => (await api('/__fixtures/log?limit=500')).requests.filter(r=>Date.parse(r.at)>=t)
+  const run = async (name, fn) => { try {await fn()} catch(e) {result.failures.push({name,error:String(e)})} }
+  const open = async () => {
+    await page.goto(base+'/endpoints/routes');await page.waitForTimeout(900)
+    await page.locator('table tbody tr').filter({hasText:'text-embedding-3-large'}).getByRole('button',{name:'编辑',exact:true}).click()
+    await page.getByRole('button',{name:'目标设置',exact:true}).click()
+    return page.getByRole('dialog').last()
+  }
+  const save = async d => {
+    const t=Date.now();await d.getByRole('button',{name:'保存',exact:true}).click();await page.waitForTimeout(800)
+    return (await since(t)).find(r=>r.method==='PATCH' && r.path.includes('/model-routes/'))
+  }
+  await api('/__fixtures/reset',{})
+  await page.context().clearCookies();await page.goto(base+'/login')
+  await page.evaluate(()=>{localStorage.clear();localStorage.setItem('prompt-ferry:locale','zh-CN')});await page.reload()
+  await page.getByRole('textbox',{name:/登录名/}).fill('admin');await page.getByRole('textbox',{name:/密码/}).fill('fixture-password');await page.getByRole('button',{name:'登录',exact:true}).click();await page.waitForTimeout(1000)
+  await run('dimension-schedule',async()=>{
+    let d=await open()
+    const dim=d.locator('#target-embedding-dimensions')
+    await dim.fill('0');await page.waitForTimeout(200)
+    const t=Date.now()
+    const disabled=await d.getByRole('button',{name:'保存',exact:true}).isDisabled()
+    const invalid=await dim.getAttribute('aria-invalid')
+    const invalidRequests=(await since(t)).filter(r=>r.method==='PATCH').length
+    await dim.fill('1536')
+    await d.getByRole('button',{name:'新增时间段',exact:true}).click()
+    await d.getByRole('button',{name:'工作日',exact:true}).click()
+    const positive=await save(d)
+    d=await open()
+    const roundtrip=await d.locator('#target-embedding-dimensions').inputValue()
+    const windows=await d.locator('input').evaluateAll(els=>els.filter(e=>e.type==='time'||e.placeholder==='HH:MM').map(e=>e.value))
+    await d.locator('#target-embedding-dimensions').fill('')
+    await d.getByRole('button',{name:'删除',exact:true}).click()
+    const cleared=await save(d)
+    result.checks.dimensions={invalid,disabled,invalidRequests,positive,roundtrip,windows,cleared}
+  })
+  await run('chat-overrides',async()=>{
+    const d=await open()
+    const t=Date.now()
+    await d.getByRole('combobox').first().click()
+    await page.getByRole('option',{name:'Chat',exact:true}).click()
+    await page.waitForTimeout(400)
+    await d.getByRole('combobox').nth(2).click()
+    await page.getByRole('option',{name:'high',exact:true}).click()
+    await d.getByRole('combobox').nth(3).click()
+    await page.getByRole('option',{name:'自研摘要',exact:true}).click()
+    await d.getByRole('switch').first().click()
+    await d.getByRole('switch').nth(1).click()
+    const saved=await save(d)
+    const reopened=await open()
+    result.checks.chatControls={saved,text:await reopened.innerText(),combos:await reopened.getByRole('combobox').allTextContents(),requests:await since(t)}
+    const path='e2e/baseline/screenshots/form5_chat_controls.png';await page.screenshot({path});result.captures.push({path})
+  })
+  await run('target-order-enabled',async()=>{
+    await page.keyboard.press('Escape');await page.goto(base+'/endpoints/routes');await page.waitForTimeout(900)
+    await page.locator('table tbody tr').filter({hasText:'gpt-5.1-codex-preview*'}).getByRole('button',{name:'编辑',exact:true}).click()
+    const d=page.getByRole('dialog').last()
+    const before=await d.locator('tbody tr').allTextContents()
+    await d.getByRole('button',{name:'目标',exact:true}).first().press('ArrowDown')
+    await d.locator('tbody tr').first().getByRole('switch').click()
+    await d.getByRole('button',{name:'新增目标',exact:true}).click()
+    await d.locator('tbody tr').last().getByRole('button',{name:'删除',exact:true}).click()
+    const t=Date.now()
+    await d.getByRole('button',{name:'Show popup',exact:true}).first().click()
+    await page.waitForTimeout(500)
+    const suggestions=await since(t)
+    await d.getByPlaceholder('模型匹配').click()
+    await page.waitForTimeout(250)
+    const after=await d.locator('tbody tr').allTextContents()
+    const saved=await save(d)
+    result.checks.targets={before,after,saved,suggestions}
+  })
+  result.checks.modelSuggestionQueries=(await api('/__fixtures/log?limit=500')).requests.filter(r=>r.path.endsWith('/models') && r.path.includes('/endpoints/'))
+  result.finishedAt=new Date().toISOString()
+  return JSON.stringify(result)
+}

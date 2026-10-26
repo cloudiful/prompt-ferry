@@ -3,9 +3,12 @@
 //!
 //! Two claims are kept apart on purpose. The first is about structure — an
 //! index exists, PostgreSQL trusts it, and it leads with the foreign key column
-//! — and that is asserted. The second is about the planner choosing it, and
-//! that is asserted only under a large enough owned fixture for the choice to
-//! be about the index rather than about the table being tiny.
+//! — and that is asserted from the catalog alone. The second is about the
+//! planner choosing that index for a lookup, and that is asserted against an
+//! owned population in which the looked-up key is rare: the fixture writes rows
+//! it owns that the lookup does not match, and refreshes the statistics of the
+//! two tables it wrote, so the planner judges the data that is actually there
+//! rather than whatever the last autovacuum happened to record.
 //!
 //! The other half is what the index must leave alone. The foreign keys are
 //! `ON DELETE SET NULL`, so deleting a key has to keep the rows and clear their
@@ -20,19 +23,29 @@ mod usage;
 
 use std::fs;
 
-use fk::{cleanup, index_leads_with, index_state, owned_endpoint, pool};
+use fk::{Owned, cleanup, index_leads_with, index_state, owned_endpoint, pool};
 use usage::{
-    Table, count, explain_lookup, fill_conversation_overrides_n, fill_usage_charges_n,
-    fixture_keys, rows_pointing_at,
+    PlanSummary, Table, analyze_table, count, explain_lookup, fill_conversation_overrides_n,
+    fill_usage_charges_n, fixture_keys, rows_pointing_at,
 };
 use uuid::Uuid;
 
 const USAGES_INDEX: &str = "idx_usage_charges_endpoint_key_id";
 const OVERRIDES_INDEX: &str = "idx_conversation_endpoint_overrides_endpoint_key_id";
 
-/// Enough rows that using the index is cheaper than scanning, which is the
-/// volume at which the planner's choice says something about the index.
-const PLAN_ROWS: i64 = 30_000;
+/// The rows the looked-up key matches.
+///
+/// Few enough that the index is the cheaper path, and counted against the rows
+/// themselves rather than against a plan's own row count.
+const PLAN_MATCHING_ROWS: i64 = 300;
+
+/// The rows the fixture owns that the looked-up key does not match.
+///
+/// They are what makes the lookup selective. A table whose every row shares
+/// one key value is answered correctly by a sequential scan, so the index
+/// could never be the cheaper path there and the planner would be right to
+/// ignore it.
+const PLAN_DECOY_ROWS: i64 = 30_000;
 
 #[test]
 fn each_migration_is_one_non_transactional_concurrent_statement() {
@@ -129,87 +142,308 @@ async fn both_indexes_are_present_trusted_and_lead_with_the_key_column() -> anyh
 }
 
 #[tokio::test]
-async fn a_large_owned_fixture_makes_the_key_lookups_index_eligible() -> anyhow::Result<()> {
+async fn the_planner_prefers_the_key_index_for_a_selective_owned_lookup() -> anyhow::Result<()> {
     let pool = pool(2).await;
     let owned = owned_endpoint(&pool, "plan").await;
-    fill_usage_charges_n(&pool, &owned, PLAN_ROWS).await;
-    fill_conversation_overrides_n(&pool, &owned, PLAN_ROWS).await;
+    // A second owned key carries the rows the lookup does not match. Without
+    // them the owned key would match every row the fixture owns, and a
+    // sequential scan would be the correct answer for that table.
+    let decoy = owned_endpoint(&pool, "plan-decoy").await;
 
-    for table in [Table::Charges, Table::Overrides] {
-        let plan = explain_lookup(&pool, table, owned.key_id).await;
-        // The row count is asserted rather than the duration: the plan is the
-        // claim, the milliseconds are context.
+    // The measurement runs as its own task, so a failure inside it is
+    // reported instead of unwinding past the cleanup: the fixture is removed
+    // by its own ids first, and only then does the failure travel on.
+    let measured = tokio::spawn({
+        let owned = parts_of(&owned);
+        let decoy = parts_of(&decoy);
+        let pool = pool.clone();
+        async move {
+            let owned = Owned {
+                endpoint_id: owned.0,
+                key_id: owned.1,
+                user_id: owned.2,
+            };
+            let decoy = Owned {
+                endpoint_id: decoy.0,
+                key_id: decoy.1,
+                user_id: decoy.2,
+            };
+            measure_plan_case(&pool, &owned, &decoy).await
+        }
+    })
+    .await;
+
+    let measurements = match measured {
+        Ok(Ok(measurements)) => measurements,
+        Ok(Err(error)) => {
+            cleanup(&pool, &owned).await;
+            cleanup(&pool, &decoy).await;
+            pool.close().await;
+            return Err(error);
+        }
+        Err(join_error) => {
+            cleanup(&pool, &owned).await;
+            cleanup(&pool, &decoy).await;
+            pool.close().await;
+            std::panic::resume_unwind(join_error.into_panic());
+        }
+    };
+
+    // The fixture owns every row it wrote, so it is removed by its own ids
+    // before the assertions run. A failing assertion then cannot leave rows
+    // behind for the next run to measure against.
+    cleanup(&pool, &owned).await;
+    cleanup(&pool, &decoy).await;
+    pool.close().await;
+
+    for measurement in &measurements {
+        let table = measurement.table;
         assert_eq!(
-            plan.total_rows,
-            PLAN_ROWS as f64,
-            "{} should match every fixture row",
+            measurement.matching_rows,
+            PLAN_MATCHING_ROWS,
+            "{} must match exactly the fixture's own matching rows",
             table.name()
         );
         assert!(
-            plan.uses_index,
-            "{} at {PLAN_ROWS} rows should use its endpoint_key_id index, chose {:?}",
+            measurement.matching_rows * 100 <= measurement.owned_population,
+            "{} matches {} of {} owned rows, which is not selective enough for \
+             the index to be the cheaper path",
             table.name(),
-            plan.node_types
+            measurement.matching_rows,
+            measurement.owned_population
+        );
+        assert!(
+            measurement.owned_population >= PLAN_DECOY_ROWS,
+            "{} owns only {} rows, too few for the planner's choice to say \
+             anything about the index",
+            table.name(),
+            measurement.owned_population
+        );
+        // The plan is the claim: the row count is asserted above, against the
+        // rows themselves, so what is left to assert here is the choice.
+        assert!(
+            measurement.plan.uses_index,
+            "{} should use its endpoint_key_id index for a selective lookup, \
+             chose {:?}",
+            table.name(),
+            measurement.plan.node_types
         );
     }
-
-    cleanup(&pool, &owned).await;
     Ok(())
+}
+
+/// What the lookup was measured against, read independently of the plan.
+struct PlanMeasurement {
+    table: Table,
+    plan: PlanSummary,
+    /// The rows that carry the looked-up key.
+    matching_rows: i64,
+    /// The rows the fixture owns, matching and not.
+    owned_population: i64,
+}
+
+/// The owned endpoints' ids, in the form a task can carry.
+fn parts_of(owned: &Owned) -> (Uuid, Uuid, i64) {
+    (owned.endpoint_id, owned.key_id, owned.user_id)
+}
+
+/// Fill the owned population, refresh its statistics and read the plans.
+///
+/// Everything the assertions need is collected here so that the caller can
+/// remove the fixture before it asserts anything.
+async fn measure_plan_case(
+    pool: &sqlx::PgPool,
+    owned: &Owned,
+    decoy: &Owned,
+) -> anyhow::Result<Vec<PlanMeasurement>> {
+    for table in [Table::Charges, Table::Overrides] {
+        fill_table(pool, table, owned, PLAN_MATCHING_ROWS).await;
+        fill_table(pool, table, decoy, PLAN_DECOY_ROWS).await;
+    }
+
+    // The statistics of the two tables the fixture wrote are refreshed, so the
+    // planner judges the population that is actually there instead of the one
+    // the last autovacuum happened to record.
+    analyze_table(pool, Table::Charges).await?;
+    analyze_table(pool, Table::Overrides).await?;
+
+    let mut measurements = Vec::new();
+    for table in [Table::Charges, Table::Overrides] {
+        let plan = explain_lookup(pool, table, owned.key_id).await;
+        // The row count comes from the rows, not from the plan: a plan's own
+        // root count is the number of rows it returned, which is the same
+        // number under either plan shape and so says nothing about the
+        // fixture being complete.
+        let matching_rows = rows_pointing_at(pool, table, owned.key_id).await;
+        let owned_population = count(pool, table, owned.endpoint_id).await
+            + count(pool, table, decoy.endpoint_id).await;
+        measurements.push(PlanMeasurement {
+            table,
+            plan,
+            matching_rows,
+            owned_population,
+        });
+    }
+    Ok(measurements)
+}
+
+/// Fill one of the two referencing tables with rows pointing at `owned`'s key.
+async fn fill_table(pool: &sqlx::PgPool, table: Table, owned: &Owned, rows: i64) {
+    match table {
+        Table::Charges => {
+            fill_usage_charges_n(pool, owned, rows).await;
+        }
+        Table::Overrides => {
+            fill_conversation_overrides_n(pool, owned, rows).await;
+        }
+    }
 }
 
 #[tokio::test]
 async fn deleting_a_key_nulls_both_references_and_keeps_the_rows() -> anyhow::Result<()> {
     let pool = pool(2).await;
     let owned = owned_endpoint(&pool, "setnull").await;
-    let charges = fill_usage_charges_n(&pool, &owned, 500).await;
-    let overrides = fill_conversation_overrides_n(&pool, &owned, 500).await;
-
     // A second endpoint's rows, so the deletion can be shown to stay inside its
     // own fixture rather than merely appearing to.
     let neighbour = owned_endpoint(&pool, "neighbour").await;
-    let neighbour_charges = fill_usage_charges_n(&pool, &neighbour, 50).await;
 
-    sqlx::query("DELETE FROM endpoint_api_keys WHERE key_id = $1")
-        .bind(owned.key_id)
-        .execute(&pool)
-        .await
-        .expect("delete the owned key");
+    // As in the plan case, the work runs as its own task so that a failure
+    // inside it is reported only after the fixture has been removed.
+    let observed = tokio::spawn({
+        let owned = parts_of(&owned);
+        let neighbour = parts_of(&neighbour);
+        let pool = pool.clone();
+        async move {
+            let owned = Owned {
+                endpoint_id: owned.0,
+                key_id: owned.1,
+                user_id: owned.2,
+            };
+            let neighbour = Owned {
+                endpoint_id: neighbour.0,
+                key_id: neighbour.1,
+                user_id: neighbour.2,
+            };
+            observe_set_null(&pool, &owned, &neighbour).await
+        }
+    })
+    .await;
 
-    for (table, before) in [(Table::Charges, charges), (Table::Overrides, overrides)] {
+    let observations = match observed {
+        Ok(Ok(observations)) => observations,
+        Ok(Err(error)) => {
+            cleanup(&pool, &owned).await;
+            cleanup(&pool, &neighbour).await;
+            pool.close().await;
+            return Err(error);
+        }
+        Err(join_error) => {
+            cleanup(&pool, &owned).await;
+            cleanup(&pool, &neighbour).await;
+            pool.close().await;
+            std::panic::resume_unwind(join_error.into_panic());
+        }
+    };
+
+    for observation in &observations.tables {
+        let table = observation.table;
         assert_eq!(
-            rows_pointing_at(&pool, table, owned.key_id).await,
+            observation.still_pointing,
             0,
             "no {} row may still point at the deleted key",
             table.name()
         );
         assert_eq!(
-            count(&pool, table, owned.endpoint_id).await,
-            before,
+            observation.kept,
+            observation.before,
             "deleting a key must keep its {} rows, not cascade them away",
             table.name()
         );
         assert_eq!(
-            nulled(&pool, table, owned.endpoint_id).await,
-            before,
+            observation.nulled,
+            observation.before,
             "every {} row should now carry a null key reference",
             table.name()
         );
     }
 
     assert_eq!(
-        rows_pointing_at(&pool, Table::Charges, neighbour.key_id).await,
-        neighbour_charges,
+        observations.neighbour_pointing, observations.neighbour_charges,
         "the other endpoint's rows must be untouched"
     );
-    assert_eq!(
-        count(&pool, Table::Charges, neighbour.endpoint_id).await,
-        neighbour_charges
-    );
-
-    cleanup(&pool, &owned).await;
-    cleanup(&pool, &neighbour).await;
-    assert_eq!(fixture_keys(&pool, owned.endpoint_id).await, 0);
+    assert_eq!(observations.neighbour_total, observations.neighbour_charges);
+    assert_eq!(observations.remaining_keys, 0);
     Ok(())
+}
+
+/// What the deletion did, read before the fixture was removed.
+struct SetNullObservations {
+    tables: Vec<SetNullObservation>,
+    neighbour_pointing: i64,
+    neighbour_total: i64,
+    neighbour_charges: i64,
+    remaining_keys: i64,
+}
+
+/// What the deletion did to one of the two referencing tables.
+struct SetNullObservation {
+    table: Table,
+    /// The rows that still carry the deleted key.
+    still_pointing: i64,
+    /// The rows that are still there.
+    kept: i64,
+    /// The rows that now carry no key.
+    nulled: i64,
+    /// The rows there were before the deletion.
+    before: i64,
+}
+
+/// Delete the owned key and report what it did to the rows.
+///
+/// The counts are read before the fixture is removed, and the fixture is
+/// removed before the counts are handed back, so the caller can assert on them
+/// without the fixture's rows still being around to be asserted about.
+async fn observe_set_null(
+    pool: &sqlx::PgPool,
+    owned: &Owned,
+    neighbour: &Owned,
+) -> anyhow::Result<SetNullObservations> {
+    let charges = fill_usage_charges_n(pool, owned, 500).await;
+    let overrides = fill_conversation_overrides_n(pool, owned, 500).await;
+    let neighbour_charges = fill_usage_charges_n(pool, neighbour, 50).await;
+
+    sqlx::query("DELETE FROM endpoint_api_keys WHERE key_id = $1")
+        .bind(owned.key_id)
+        .execute(pool)
+        .await
+        .expect("delete the owned key");
+
+    let mut tables = Vec::new();
+    for (table, before) in [(Table::Charges, charges), (Table::Overrides, overrides)] {
+        tables.push(SetNullObservation {
+            table,
+            still_pointing: rows_pointing_at(pool, table, owned.key_id).await,
+            kept: count(pool, table, owned.endpoint_id).await,
+            nulled: nulled(pool, table, owned.endpoint_id).await,
+            before,
+        });
+    }
+    let neighbour_pointing = rows_pointing_at(pool, Table::Charges, neighbour.key_id).await;
+    let neighbour_total = count(pool, Table::Charges, neighbour.endpoint_id).await;
+
+    // The fixture is removed by its own ids before the results are handed
+    // back, so a failing assertion cannot leave rows behind.
+    cleanup(pool, owned).await;
+    cleanup(pool, neighbour).await;
+    let remaining_keys = fixture_keys(pool, owned.endpoint_id).await;
+
+    Ok(SetNullObservations {
+        tables,
+        neighbour_pointing,
+        neighbour_total,
+        neighbour_charges,
+        remaining_keys,
+    })
 }
 
 /// How many of the fixture's rows now carry no key reference.

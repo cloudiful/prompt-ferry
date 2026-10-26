@@ -1,0 +1,24 @@
+async page => {
+ const r={id:'R-BILLING:filters',startedAt:new Date().toISOString(),checks:{},failures:[]}
+ const api=async(path,body)=>(await fetch('http://127.0.0.1:8789'+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})).json()
+ const reqs=[]
+ const observe=req=>{if(req.url().includes('/admin/billing/charges?')&&req.method()==='GET')reqs.push({url:new URL(req.url()),first:reqs.length})}
+ page.on('request',observe)
+ try{
+  await api('/__fixtures/reset',{});await page.context().clearCookies();await page.goto('http://127.0.0.1:5171/login');await page.evaluate(()=>{localStorage.clear();localStorage.setItem('prompt-ferry:locale','zh-CN')});await page.reload();await page.getByRole('textbox',{name:/登录名/}).fill('admin');await page.getByRole('textbox',{name:/密码/}).fill('fixture-password');await page.getByRole('button',{name:'登录',exact:true}).click();await page.waitForTimeout(900);await page.goto('http://127.0.0.1:5171/billing');await page.waitForTimeout(900)
+  const combo=(name)=>page.getByRole('combobox',{name,exact:true})
+  await page.getByRole('spinbutton',{name:'请求 Key ID'}).fill('13')
+  await page.getByRole('textbox',{name:'公开模型'}).fill('gpt-5.1-codex-preview')
+  await combo('用户').click();await page.getByRole('option',{name:'operator',exact:true}).click()
+  await combo('上游节点').click();r.checks.endpointOptions=await page.getByRole('listbox').ariaSnapshot();await page.getByRole('option').filter({hasText:'OpenAI ChatGPT Subscription'}).click()
+  await combo('用量状态').click();await page.getByRole('option',{name:'用量未知',exact:true}).click()
+  await combo('计费状态').click();await page.getByRole('option',{name:'未定价',exact:true}).click()
+  await page.getByRole('button',{name:'应用筛选',exact:true}).click();await page.waitForTimeout(900)
+  const hit=reqs.at(-1)?.url
+  r.checks.query=hit?Object.fromEntries(['user_id','client_key_id','requested_model','endpoint_id','usage_status','pricing_status'].map(k=>[k,hit.searchParams.get(k)])):null
+  const rows=await page.locator('table').nth(2).locator('tbody tr').allInnerTexts()
+  r.checks.rows=rows.slice(0,3)
+  if(!hit||!['user_id','client_key_id','requested_model','endpoint_id','usage_status','pricing_status'].every(k=>hit.searchParams.has(k)))throw Error('billing filter query incomplete')
+ }catch(e){r.failures.push(String(e))}finally{page.off('request',observe)}
+ r.finishedAt=new Date().toISOString();return JSON.stringify(r)
+}

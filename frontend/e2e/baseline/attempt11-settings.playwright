@@ -1,0 +1,358 @@
+async (page) => {
+  const result = {
+    startedAt: new Date().toISOString(),
+    failures: [],
+    checks: {},
+  }
+  const requests = []
+  const listener = (request) => {
+    const url = new URL(request.url())
+    if (!url.pathname.startsWith('/api/v1/settings/')) return
+    let body
+    try {
+      body = request.postDataJSON()
+    } catch {}
+    requests.push({ method: request.method(), path: url.pathname, body })
+  }
+  page.on('request', listener)
+  page.setDefaultTimeout(8000)
+  const control = async (path, payload) =>
+    (
+      await fetch(`http://127.0.0.1:8789${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+    ).json()
+  const reset = async () => {
+    await control('/__fixtures/reset', {})
+    requests.length = 0
+    await page.context().clearCookies()
+    await page.goto('http://127.0.0.1:5171/login')
+    await page.evaluate(() => {
+      localStorage.clear()
+      localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    })
+    await page.reload()
+    await page.getByRole('textbox', { name: /登录名/ }).fill('admin')
+    await page.getByRole('textbox', { name: /密码/ }).fill('fixture-password')
+    await page.getByRole('button', { name: '登录', exact: true }).click()
+    await page.waitForTimeout(700)
+  }
+  const visit = async (route) => {
+    await page.goto(`http://127.0.0.1:5171${route}`, {
+      waitUntil: 'domcontentloaded',
+    })
+    await page.waitForTimeout(500)
+  }
+  const fault = (path) =>
+    control('/__fixtures/faults', {
+      pathPrefix: path,
+      method: 'PATCH',
+      count: 1,
+      status: 503,
+      message: 'attempt11 settings failure',
+    })
+  const settingsWrites = (path) =>
+    requests.filter((item) => item.method === 'PATCH' && item.path === path)
+  const selectMode = async (mode) => {
+    const control = page.getByRole('combobox', {
+      name: '记录模式',
+      exact: true,
+    })
+    await control.click()
+    await page.getByRole('option', { name: mode, exact: true }).click()
+  }
+  const ledgerWrites = async (path) =>
+    (
+      await (
+        await fetch('http://127.0.0.1:8789/__fixtures/log?limit=300')
+      ).json()
+    ).requests.filter((item) => item.method === 'PATCH' && item.path === path)
+  const run = async (id, fn) => {
+    try {
+      result.checks[id] = await fn()
+    } catch (error) {
+      result.failures.push({ id, error: String(error) })
+    }
+  }
+  try {
+    await reset()
+    await visit('/settings/requests')
+    await run('R-SETTINGS-REQUESTS:mutation-conflict-guard', async () => {
+      const mode = page.getByRole('combobox', { name: '记录模式', exact: true })
+      const currentMode = await mode.innerText()
+      const targetMode = currentMode === '关闭' ? '仅标准化内容' : '关闭'
+      const approvalDays = page.getByRole('spinbutton', {
+        name: /审批历史保留天数/,
+      })
+      await control('/__fixtures/faults', {
+        pathPrefix: '/api/v1/settings/request-content-logging',
+        method: 'PATCH',
+        count: 1,
+        status: 503,
+        delayMs: 650,
+        message: 'attempt11 shared retention failure',
+      })
+      await selectMode(targetMode)
+      await approvalDays
+        .locator('xpath=../..')
+        .getByRole('button', { name: '增加', exact: true })
+        .click()
+      await page.waitForTimeout(330)
+      const heldDisabled =
+        (await mode.isDisabled()) && (await approvalDays.isDisabled())
+      const activeBeforeRelease =
+        (await settingsWrites('/api/v1/settings/request-content-logging'))
+          .length +
+        (await settingsWrites('/api/v1/settings/usage-retention')).length
+      await page.waitForTimeout(1100)
+      const entries = (
+        await (
+          await fetch('http://127.0.0.1:8789/__fixtures/log?limit=300')
+        ).json()
+      ).requests.filter(
+        (item) =>
+          item.method === 'PATCH' &&
+          [
+            '/api/v1/settings/request-content-logging',
+            '/api/v1/settings/usage-retention',
+          ].includes(item.path),
+      )
+      const paths = entries.map((item) => item.path)
+      const serialized =
+        entries.length === 2 &&
+        entries[0].path === '/api/v1/settings/request-content-logging' &&
+        entries[1].path === '/api/v1/settings/usage-retention' &&
+        entries[0].status === 503 &&
+        entries[1].status === 200 &&
+        activeBeforeRelease === 1 &&
+        heldDisabled
+      return {
+        heldDisabled,
+        activeBeforeRelease,
+        paths,
+        statuses: entries.map((item) => item.status),
+        serialized,
+        entries: entries.map((item) => ({
+          at: item.at,
+          ms: item.ms,
+          status: item.status,
+        })),
+      }
+    })
+
+    await reset()
+    await visit('/settings/requests')
+    await run(
+      'R-SETTINGS-REQUESTS:request-content-logging-failure-retry',
+      async () => {
+        const mode = page.getByRole('combobox', {
+          name: '记录模式',
+          exact: true,
+        })
+        const originalMode = await mode.innerText()
+        const targetMode = originalMode === '关闭' ? '仅标准化内容' : '关闭'
+        await control('/__fixtures/faults', {
+          pathPrefix: '/api/v1/settings/request-content-logging',
+          method: 'PATCH',
+          count: 1,
+          status: 503,
+          message: 'attempt11 request logging failure',
+        })
+        await selectMode(targetMode)
+        await page.waitForTimeout(400)
+        const retained = await mode.innerText()
+        const failureVisible = /attempt11 request logging failure/.test(
+          await page.locator('body').innerText(),
+        )
+        const first = settingsWrites(
+          '/api/v1/settings/request-content-logging',
+        )[0]
+        await selectMode(originalMode)
+        await page.waitForTimeout(400)
+        await selectMode(targetMode)
+        await page.waitForTimeout(450)
+        const writes = settingsWrites(
+          '/api/v1/settings/request-content-logging',
+        )
+        const outcomes = await ledgerWrites(
+          '/api/v1/settings/request-content-logging',
+        )
+        return {
+          retained,
+          draftRetained: retained === targetMode,
+          failureVisible,
+          requests: writes.map((item) => item.body),
+          statuses: outcomes.map((item) => item.status),
+          failureThenRetry:
+            outcomes.length === 2 &&
+            outcomes[0].status === 503 &&
+            outcomes[1].status === 200 &&
+            JSON.stringify(first?.body) === JSON.stringify(writes.at(-1)?.body),
+        }
+      },
+    )
+
+    await reset()
+    await visit('/settings/requests')
+    await run('R-SETTINGS-REQUESTS:usage-retention-failure-retry', async () => {
+      const days = page.getByRole('spinbutton', { name: /审批历史保留天数/ })
+      const group = days.locator('xpath=../..')
+      const original = Number(await days.inputValue())
+      await control('/__fixtures/faults', {
+        pathPrefix: '/api/v1/settings/usage-retention',
+        method: 'PATCH',
+        count: 1,
+        status: 503,
+        message: 'attempt11 usage retention failure',
+      })
+      await group.getByRole('button', { name: '增加', exact: true }).click()
+      await page.waitForTimeout(400)
+      const retained = await days.inputValue()
+      const failureVisible = /attempt11 usage retention failure/.test(
+        await page.locator('body').innerText(),
+      )
+      const first = settingsWrites('/api/v1/settings/usage-retention')[0]
+      await group.getByRole('button', { name: '减少', exact: true }).click()
+      await page.waitForTimeout(400)
+      await group.getByRole('button', { name: '增加', exact: true }).click()
+      await page.waitForTimeout(450)
+      const writes = settingsWrites('/api/v1/settings/usage-retention')
+      const outcomes = await ledgerWrites('/api/v1/settings/usage-retention')
+      return {
+        retained,
+        draftRetained: Number(retained) === original + 1,
+        failureVisible,
+        requests: writes.map((item) => item.body),
+        statuses: outcomes.map((item) => item.status),
+        failureThenRetry:
+          outcomes.length === 2 &&
+          outcomes[0].status === 503 &&
+          outcomes[1].status === 200 &&
+          JSON.stringify(first?.body) === JSON.stringify(writes.at(-1)?.body),
+      }
+    })
+
+    await reset()
+    await visit('/settings/requests')
+    await run(
+      'R-SETTINGS-REQUESTS:stream-delta-batching-failure-retry',
+      async () => {
+        const enabled = page.getByRole('switch', {
+          name: '流式批处理',
+          exact: true,
+        })
+        const before = await enabled.isChecked()
+        await control('/__fixtures/faults', {
+          pathPrefix: '/api/v1/settings/stream-delta-batching',
+          method: 'PATCH',
+          count: 1,
+          status: 503,
+          message: 'attempt11 stream batching failure',
+        })
+        await enabled.click()
+        await page.waitForTimeout(400)
+        const retained = (await enabled.isChecked()) === !before
+        const failureVisible = /attempt11 stream batching failure/.test(
+          await page.locator('body').innerText(),
+        )
+        const first = settingsWrites(
+          '/api/v1/settings/stream-delta-batching',
+        )[0]
+        await enabled.click()
+        await page.waitForTimeout(400)
+        await enabled.click()
+        await page.waitForTimeout(450)
+        const writes = settingsWrites('/api/v1/settings/stream-delta-batching')
+        const outcomes = await ledgerWrites(
+          '/api/v1/settings/stream-delta-batching',
+        )
+        return {
+          retained,
+          draftRetained: retained,
+          failureVisible,
+          requests: writes.map((item) => item.body),
+          statuses: outcomes.map((item) => item.status),
+          failureThenRetry:
+            outcomes.length === 2 &&
+            outcomes[0].status === 503 &&
+            outcomes[1].status === 200 &&
+            JSON.stringify(first?.body) === JSON.stringify(writes.at(-1)?.body),
+        }
+      },
+    )
+
+    await reset()
+    await visit('/settings/review')
+    await run('R-SETTINGS-REVIEW:mutation-failure-draft', async () => {
+      const model = page.getByRole('textbox', { name: '审核模型', exact: true })
+      const targetModel = `attempt11-review-${Date.now()}`
+      await model.fill(targetModel)
+      const save = page.getByRole('button', { name: /^保存$/ }).first()
+      await control('/__fixtures/faults', {
+        pathPrefix: '/api/v1/settings/llm-review',
+        method: 'PATCH',
+        count: 1,
+        status: 503,
+        message: 'attempt11 review failure',
+      })
+      await save.click()
+      await page.waitForTimeout(250)
+      const retained = (await model.inputValue()) === targetModel
+      const failureVisible = /attempt11 review failure/.test(
+        await page.locator('body').innerText(),
+      )
+      const first = settingsWrites('/api/v1/settings/llm-review')[0]
+      await save.click()
+      await page.waitForTimeout(500)
+      const writes = settingsWrites('/api/v1/settings/llm-review')
+      const outcomes = await ledgerWrites('/api/v1/settings/llm-review')
+      return {
+        retained,
+        failureVisible,
+        requests: writes.map((item) => item.body),
+        statuses: outcomes.map((item) => item.status),
+        failureThenRetry:
+          outcomes.length === 2 &&
+          outcomes[0].status === 503 &&
+          outcomes[1].status === 200 &&
+          JSON.stringify(first?.body) === JSON.stringify(writes[1]?.body),
+      }
+    })
+
+    await reset()
+    await visit('/settings/general')
+    await run('R-SETTINGS-GENERAL:locale-switch+theme-switch', async () => {
+      const language = page.getByRole('combobox', { name: '语言', exact: true })
+      await language.click()
+      await page.getByRole('option', { name: 'English', exact: true }).click()
+      const localeStored = await page.evaluate(() =>
+        localStorage.getItem('prompt-ferry:locale'),
+      )
+      const theme = page.getByRole('combobox', { name: 'Theme', exact: true })
+      await theme.click()
+      await page.getByRole('option', { name: 'Light', exact: true }).click()
+      const themeStored = await page.evaluate(() =>
+        localStorage.getItem('prompt-ferry:theme-mode'),
+      )
+      const lightTheme = !(await page
+        .locator('html')
+        .evaluate((element) => element.classList.contains('dark')))
+      const settingsText = await page.locator('body').innerText()
+      const settingsEnglish = /Language/.test(settingsText) && /Theme/.test(settingsText)
+      await visit('/request-records/ai')
+      await page.getByRole('button', { name: 'Records', exact: true }).waitFor()
+      return {
+        localeStored,
+        themeStored,
+        lightTheme,
+        settingsEnglish,
+      }
+    })
+  } finally {
+    page.off('request', listener)
+  }
+  result.finishedAt = new Date().toISOString()
+  return JSON.stringify(result)
+}

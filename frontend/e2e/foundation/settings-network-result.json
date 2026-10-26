@@ -1,0 +1,444 @@
+{
+  "runId": "settings-network-1793011124851",
+  "startedAt": "2026-10-26T10:38:44.851Z",
+  "finishedAt": "2026-10-26T10:39:26.255Z",
+  "checks": {
+    "routeRender": {
+      "routeId": "R-SETTINGS-NETWORK",
+      "routeTab": "network",
+      "fields": {
+        "allowed": {
+          "id": "settings-allowed-cidrs",
+          "name": "settings-allowed-cidrs",
+          "rows": 5,
+          "value": "10.0.0.0/8\n192.168.0.0/16",
+          "monospace": true,
+          "resize": "vertical",
+          "scrolls": true
+        },
+        "trusted": {
+          "id": "settings-trusted-proxy-cidrs",
+          "name": "settings-trusted-proxy-cidrs",
+          "rows": 5,
+          "value": "127.0.0.1/32",
+          "monospace": true,
+          "resize": "vertical",
+          "scrolls": true
+        },
+        "textareas": 2
+      },
+      "readCount": 1
+    },
+    "noAutosave": {
+      "writes": 0
+    },
+    "mutationUpdate": {
+      "updateBody": {
+        "allowed_cidrs": ["10.0.0.0/8", "10.0.0.0/8", "192.168.0.0/16"],
+        "trusted_proxy_cidrs": []
+      },
+      "normalized": {
+        "allowed": "10.0.0.0/8\n192.168.0.0/16",
+        "trusted": ""
+      },
+      "stored": {
+        "allowed_cidrs": ["10.0.0.0/8", "192.168.0.0/16"],
+        "trusted_proxy_cidrs": []
+      },
+      "blankBody": {
+        "allowed_cidrs": [],
+        "trusted_proxy_cidrs": []
+      },
+      "storedBlank": {
+        "allowed_cidrs": [],
+        "trusted_proxy_cidrs": []
+      },
+      "validBody": {
+        "allowed_cidrs": ["2001:db8::/32", "::1", "10.0.0.1"],
+        "trusted_proxy_cidrs": ["127.0.0.1/32"]
+      },
+      "storedValid": {
+        "allowed_cidrs": ["2001:db8::/32", "::1", "10.0.0.1"],
+        "trusted_proxy_cidrs": ["127.0.0.1/32"]
+      },
+      "saves": 4
+    },
+    "doubleSave": {
+      "writes": 1
+    },
+    "newerDraft": {
+      "allowed": "10.4.0.0/16",
+      "trusted": "10.0.0.0/8",
+      "refreshDisabled": true
+    },
+    "validation400": {
+      "writes": 2,
+      "errorAlerts": 1,
+      "alertText": "bad_request: invalid relay IP whitelist: allowed_cidrs[0]: invalid IP or CIDR: 999.1.1.1",
+      "keptDraft": "999.1.1.1",
+      "corrected": {
+        "allowed_cidrs": ["10.0.0.0/8"],
+        "trusted_proxy_cidrs": []
+      }
+    },
+    "failureDraft": {
+      "writes": 2,
+      "transportAlerts": 1,
+      "retained": "10.0.0.0/8",
+      "retried": {
+        "allowed_cidrs": ["10.0.0.0/8"],
+        "trusted_proxy_cidrs": ["10.0.0.0/8"]
+      }
+    },
+    "scopedRefresh": {
+      "reads": 1,
+      "refreshWrites": 0,
+      "draftWrites": 1,
+      "disabledWhileDirty": true
+    },
+    "localeThemeNoRefetch": {
+      "reads": 0,
+      "writes": 0
+    },
+    "probes": {
+      "malformed": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "invalid relay IP whitelist: allowed_cidrs[0]: invalid IP or CIDR: 999.1.1.1"
+          }
+        }
+      },
+      "ipv4Prefix": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "invalid relay IP whitelist: allowed_cidrs[0]: invalid IP or CIDR: 10.0.0.0/33"
+          }
+        }
+      },
+      "ipv6Prefix": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "invalid relay IP whitelist: allowed_cidrs[0]: invalid IP or CIDR: 2001:db8::/129"
+          }
+        }
+      },
+      "trustedMalformed": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "invalid relay IP whitelist: trusted_proxy_cidrs[0]: invalid IP or CIDR: not-an-ip"
+          }
+        }
+      },
+      "omitted": {
+        "status": 200,
+        "payload": {
+          "allowed_cidrs": [],
+          "trusted_proxy_cidrs": []
+        }
+      },
+      "duplicates": {
+        "status": 200,
+        "payload": {
+          "allowed_cidrs": ["10.0.0.0/8", "192.168.0.0/16"],
+          "trusted_proxy_cidrs": ["127.0.0.1/32"]
+        }
+      }
+    },
+    "responsive": [
+      {
+        "width": 1440,
+        "documentWidth": 1440
+      },
+      {
+        "width": 1024,
+        "documentWidth": 1024
+      },
+      {
+        "width": 768,
+        "documentWidth": 768
+      },
+      {
+        "width": 390,
+        "documentWidth": 390
+      }
+    ],
+    "adminDenial": {
+      "navHidden": true,
+      "redirected": true,
+      "forgedPatch": 403,
+      "forgedRead": 403,
+      "generalIntact": true,
+      "redactionIntact": 200,
+      "anonymousRead": 401
+    },
+    "officialPendingRoutes": 0,
+    "unexpectedWindow": "mounted admin network tab stages",
+    "limitations": [
+      "Evidence is the synthetic fixture and its stored policy; no live relay policy enforcement, provider, database or production behaviour is claimed.",
+      "The 400, 401, 403 and 503 cases run against the fixture validation, role gate and fault injection, not a remote service."
+    ]
+  },
+  "scenarios": {
+    "R-SETTINGS-NETWORK": {
+      "route-render": {
+        "passed": true,
+        "evidence": "the admin network route renders the one card with two labelled monospace resizable textareas, its two descriptions and a Save button, from exactly one policy read and no write"
+      },
+      "admin-denial": {
+        "passed": true,
+        "evidence": "an ordinary user has no network link, is redirected away from the route without rendering it, is refused with 403 on forged policy reads and writes, and still reaches the general and redaction settings while an anonymous read is refused with 401"
+      },
+      "mutation-update": {
+        "passed": true,
+        "evidence": "one save sends both arrays with blank lines removed, the normalized policy replaces the textareas and the stored record, an unchanged form sends nothing, empty lists are explicit empty arrays, and an IPv6/IPv4 mix roundtrips"
+      },
+      "mutation-failure-draft": {
+        "passed": true,
+        "evidence": "a rejected 400 and a 503 transport failure each report one error, keep the draft, never confirm success, never retry themselves, and retry through the Save button"
+      }
+    }
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/settings-network-en-light-1440.png",
+    "e2e/foundation/screenshots/settings-network-validation-en-light-1440.png",
+    "e2e/foundation/screenshots/settings-network-failure-en-light-1440.png",
+    "e2e/foundation/screenshots/settings-network-en-light-390.png",
+    "e2e/foundation/screenshots/settings-network-zh-dark-1440.png",
+    "e2e/foundation/screenshots/settings-network-zh-dark-390.png"
+  ],
+  "apiFailures": [],
+  "expectedApiFailures": [
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "400 PATCH /api/v1/settings/relay-ip-whitelist",
+    "503 PATCH /api/v1/settings/relay-ip-whitelist",
+    "400 PATCH /api/v1/settings/relay-ip-whitelist",
+    "400 PATCH /api/v1/settings/relay-ip-whitelist",
+    "400 PATCH /api/v1/settings/relay-ip-whitelist",
+    "400 PATCH /api/v1/settings/relay-ip-whitelist",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "403 PATCH /api/v1/settings/relay-ip-whitelist",
+    "403 GET /api/v1/settings/relay-ip-whitelist",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/settings/relay-ip-whitelist",
+    "401 GET /api/v1/auth/me"
+  ],
+  "unexpectedRequests": [],
+  "settingsRequests": [
+    {
+      "stage": "route-render",
+      "method": "GET",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": null
+    },
+    {
+      "stage": "mutation-update",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[\"10.0.0.0/8\",\"10.0.0.0/8\",\"192.168.0.0/16\"],\"trusted_proxy_cidrs\":[]}"
+    },
+    {
+      "stage": "mutation-update",
+      "method": "GET",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": null
+    },
+    {
+      "stage": "mutation-update",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[\"10.0.0.0/8\",\"192.168.0.0/16\"],\"trusted_proxy_cidrs\":[]}"
+    },
+    {
+      "stage": "mutation-update",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[],\"trusted_proxy_cidrs\":[]}"
+    },
+    {
+      "stage": "mutation-update",
+      "method": "GET",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": null
+    },
+    {
+      "stage": "mutation-update",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[\"2001:db8::/32\",\"::1\",\"10.0.0.1\"],\"trusted_proxy_cidrs\":[\"127.0.0.1/32\"]}"
+    },
+    {
+      "stage": "mutation-update",
+      "method": "GET",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": null
+    },
+    {
+      "stage": "mutation-double-save",
+      "method": "GET",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": null
+    },
+    {
+      "stage": "mutation-double-save",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[\"10.0.0.0/8\"],\"trusted_proxy_cidrs\":[\"127.0.0.1/32\"]}"
+    },
+    {
+      "stage": "newer-draft",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[\"10.4.0.0/16\"],\"trusted_proxy_cidrs\":[\"127.0.0.1/32\"]}"
+    },
+    {
+      "stage": "validation-400",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[\"999.1.1.1\"],\"trusted_proxy_cidrs\":[]}"
+    },
+    {
+      "stage": "validation-400",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[\"10.0.0.0/8\"],\"trusted_proxy_cidrs\":[]}"
+    },
+    {
+      "stage": "validation-400",
+      "method": "GET",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": null
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[\"10.0.0.0/8\"],\"trusted_proxy_cidrs\":[\"10.0.0.0/8\"]}"
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[\"10.0.0.0/8\"],\"trusted_proxy_cidrs\":[\"10.0.0.0/8\"]}"
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "GET",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": null
+    },
+    {
+      "stage": "scoped-refresh",
+      "method": "GET",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": null
+    },
+    {
+      "stage": "scoped-refresh",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[\"172.16.0.0/12\"],\"trusted_proxy_cidrs\":[\"10.0.0.0/8\"]}"
+    },
+    {
+      "stage": "probes",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[\"999.1.1.1\"]}"
+    },
+    {
+      "stage": "probes",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[\"10.0.0.0/33\"]}"
+    },
+    {
+      "stage": "probes",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[\"2001:db8::/129\"]}"
+    },
+    {
+      "stage": "probes",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[],\"trusted_proxy_cidrs\":[\"not-an-ip\"]}"
+    },
+    {
+      "stage": "probes",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{}"
+    },
+    {
+      "stage": "probes",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[\" 10.0.0.0/8 \",\"10.0.0.0/8\",\"\",\"192.168.0.0/16\"],\"trusted_proxy_cidrs\":[\" 127.0.0.1/32 \"]}"
+    },
+    {
+      "stage": "responsive-en",
+      "method": "GET",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": null
+    },
+    {
+      "stage": "locale-zh",
+      "method": "GET",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "PATCH",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": "{\"allowed_cidrs\":[],\"trusted_proxy_cidrs\":[]}"
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/redaction",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/redaction/custom-strings",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/redaction",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": null
+    }
+  ],
+  "consoleErrorCount": 0,
+  "pageErrorCount": 0,
+  "limitations": [
+    "Evidence is the synthetic fixture and its stored policy; no live relay policy enforcement, provider, database or production behaviour is claimed.",
+    "The 400, 401, 403 and 503 cases run against the fixture validation, role gate and fault injection, not a remote service."
+  ]
+}

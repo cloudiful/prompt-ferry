@@ -1,0 +1,19 @@
+{
+  "startedAt": "2026-10-26T10:35:14.430Z",
+  "checks": {
+    "oauthStatusAndStartFailures": {
+      "refreshStatuses": [500, 200],
+      "refreshGuarded": true,
+      "refreshErrorVisible": true,
+      "subscriptionPlanDisabledWithoutOAuth": true,
+      "adminApiKeyFieldAbsent": true,
+      "noTokenQuotaAction": true,
+      "deviceStartFailureVisible": true,
+      "idlePollCancellation": true
+    },
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  "screenshots": [],
+  "finishedAt": "2026-10-26T10:35:17.338Z"
+}

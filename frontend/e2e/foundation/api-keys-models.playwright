@@ -1,0 +1,636 @@
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const consoleErrors = []
+  const pageErrors = []
+  const apiFailures = []
+  const expectedApiFailures = []
+  const createLabels = []
+  const report = {
+    runId: `api-keys-models-${Date.now()}`,
+    startedAt: new Date().toISOString(),
+    checks: {},
+    screenshots: [],
+  }
+
+  page.setDefaultTimeout(12000)
+  page.on('console', (message) => {
+    if (message.type() !== 'error') return
+    if (
+      message.text().includes('status of 401 (Unauthorized)') ||
+      message.text().includes('status of 503 (Service Unavailable)')
+    )
+      return
+    consoleErrors.push(message.text())
+  })
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  page.on('response', (response) => {
+    const url = new URL(response.url())
+    if (!url.pathname.startsWith('/api/') || response.status() < 400) return
+    const expectedUnauthorized =
+      response.status() === 401 &&
+      (url.pathname === '/api/v1/auth/me' ||
+        url.pathname === '/api/v1/auth/login')
+    if (expectedUnauthorized) return
+    if (
+      response.status() === 503 &&
+      url.pathname === '/api/v1/me/client-keys'
+    ) {
+      expectedApiFailures.push(`${response.status()} ${url.pathname}`)
+      return
+    }
+    apiFailures.push(`${response.status()} ${url.pathname}`)
+  })
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (
+      request.method() === 'POST' &&
+      url.pathname === '/api/v1/me/client-keys'
+    ) {
+      const body = request.postDataJSON()
+      createLabels.push(typeof body?.label === 'string' ? body.label : null)
+    }
+  })
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(message)
+  }
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok)
+      throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  async function capture(name) {
+    const file = `${screenshots}/${name}.png`
+    await page.screenshot({ path: file, fullPage: true })
+    report.screenshots.push(file)
+  }
+
+  async function waitForRouteId(id) {
+    await page.locator(`[data-foundation-route-id="${id}"]`).waitFor({
+      state: 'visible',
+    })
+  }
+
+  async function signIn(loginName, localized = true) {
+    const loginLabel = localized ? '登录名' : 'Login name'
+    await page.getByLabel(loginLabel).waitFor({ state: 'visible' })
+    await page.getByLabel(loginLabel).fill(loginName)
+    await page
+      .getByRole('textbox', { name: localized ? '密码' : 'Password' })
+      .fill('fixture-password')
+    await page
+      .getByRole('button', { name: localized ? '登录' : 'Login', exact: true })
+      .click()
+    await page.waitForURL((url) => new URL(url).pathname === '/api-keys')
+    await waitForRouteId('R-API-KEYS')
+  }
+
+  await page.context().clearCookies()
+  await fixture('/__fixtures/reset', 'POST')
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin: BASE,
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${BASE}/login`)
+  await page.locator('#login-name').waitFor({ state: 'visible' })
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    localStorage.setItem('prompt-ferry:theme-mode', 'dark')
+  })
+  await page.reload()
+  await page.getByLabel('登录名').waitFor({ state: 'visible' })
+  await signIn('admin')
+  const zhDarkPreferences = await page.evaluate(() => ({
+    colorScheme: document.documentElement.style.colorScheme,
+    dark: document.documentElement.classList.contains('dark'),
+    lang: document.documentElement.lang,
+  }))
+  assert(
+    zhDarkPreferences.lang === 'zh-CN' &&
+      zhDarkPreferences.dark &&
+      zhDarkPreferences.colorScheme === 'dark',
+    'API keys did not render in zh-CN dark mode',
+  )
+
+  const apiKeysRoute = page.locator('[data-foundation-route-id="R-API-KEYS"]')
+  await apiKeysRoute.waitFor({ state: 'visible' })
+  assert(
+    (await page
+      .locator('[data-foundation-placeholder="R-API-KEYS"]')
+      .count()) === 0,
+    'API keys remained a placeholder',
+  )
+  assert(
+    await page.getByRole('link', { name: 'API 密钥' }).isVisible(),
+    'API keys navigation is missing',
+  )
+  assert(
+    (await page.getByRole('textbox', { name: '名称' }).count()) >= 2,
+    'key labels did not render',
+  )
+  report.checks.apiKeysRouteAndNavigation = true
+  report.checks.ownerReads = await fixture('/__fixtures/log?limit=500').then(
+    ({ requests }) => ({
+      self: requests.some(
+        (request) =>
+          request.method === 'GET' && request.path === '/api/v1/me/client-keys',
+      ),
+      users: requests.some(
+        (request) =>
+          request.method === 'GET' &&
+          request.path === '/api/v1/admin/users/options',
+      ),
+    }),
+  )
+  assert(
+    report.checks.ownerReads.self && report.checks.ownerReads.users,
+    'expected self and admin-option reads were missing',
+  )
+  await capture('api-keys-zh-dark-1440')
+
+  const responsiveKeys = []
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    const row = page.locator('[data-key-row="key-2"]:visible')
+    await row.waitFor({ state: 'visible' })
+    const label = row.getByRole('textbox', { name: '名称' })
+    const geometry = await label.evaluate((element) => {
+      const input = element.getBoundingClientRect()
+      const row = element.closest('[data-key-row]')
+      const bounds = row.getBoundingClientRect()
+      return {
+        inputInsideRow:
+          input.left >= bounds.left && input.right <= bounds.right,
+        width: window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+      }
+    })
+    assert(
+      geometry.inputInsideRow,
+      `long key label escaped its row at ${width}px`,
+    )
+    assert(
+      geometry.documentWidth <= geometry.width,
+      `API keys overflow at ${width}px`,
+    )
+    if (width < 1024) {
+      const menu = page.getByRole('button', { name: '展开导航' })
+      await menu.click()
+      const navigation = page.getByRole('navigation')
+      assert(
+        await navigation.getByRole('link', { name: 'API 密钥' }).isVisible(),
+        `mobile API keys navigation missing at ${width}px`,
+      )
+      await page.getByRole('button', { name: '取消' }).click()
+    }
+    responsiveKeys.push(geometry)
+  }
+  report.checks.apiKeysResponsive = responsiveKeys
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  const pageSize = page.getByRole('combobox', { name: '每页条数' })
+  await pageSize.click()
+  await page.getByRole('option', { name: '20', exact: true }).click()
+  await page.waitForFunction(async () => {
+    const response = await fetch(
+      'http://127.0.0.1:8789/__fixtures/log?limit=500',
+    )
+    const log = await response.json()
+    return log.requests.some(
+      (request) =>
+        request.path === '/api/v1/me/client-keys' &&
+        request.query.rows === '20',
+    )
+  })
+  report.checks.apiKeysPagination = true
+
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/me/client-keys',
+    method: 'GET',
+    status: 200,
+    delayMs: 1000,
+  })
+  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await page.locator('button[aria-label="刷新"] span.animate-spin').waitFor({
+    state: 'visible',
+  })
+  await page.getByRole('combobox', { name: '选择用户' }).click()
+  await page.getByRole('option', { name: /^operator \// }).click()
+  const staleOwnerRow = page.locator('[data-key-row="key-3"]:visible')
+  await staleOwnerRow.waitFor({ state: 'visible' })
+  await page.waitForTimeout(1100)
+  assert(
+    await staleOwnerRow.isVisible(),
+    'stale self response replaced the selected owner',
+  )
+  assert(
+    (await page.locator('[data-key-row="key-1"]:visible').count()) === 0,
+    'stale self key appeared in the selected-owner view',
+  )
+  assert(
+    (await page.evaluate(() =>
+      localStorage.getItem('prompt-ferry:table-page-size:api-keys'),
+    )) === '20',
+    'stale page response overwrote the selected page size',
+  )
+  report.checks.staleOwnerAndPageResponses = true
+  await page.getByRole('combobox', { name: '选择用户' }).click()
+  await page.getByRole('option', { name: /本人/ }).click()
+  await page
+    .locator('[data-key-row="key-1"]:visible')
+    .waitFor({ state: 'visible' })
+
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/me/client-keys',
+    method: 'POST',
+    status: 503,
+    code: 'fixture_key_create_failed',
+    message: 'fixture key create failure',
+    delayMs: 700,
+  })
+  await page.getByRole('button', { name: '生成密钥', exact: true }).click()
+  const createDialog = page.getByRole('dialog')
+  await createDialog.waitFor({ state: 'visible' })
+  await capture('api-key-create-dialog-zh-dark-1440')
+  const labelInput = createDialog.getByRole('textbox', { name: '密钥标签' })
+  await labelInput.fill('  fixture-created-key  ')
+  await createDialog
+    .getByRole('button', { name: '生成密钥', exact: true })
+    .click()
+  assert(
+    await createDialog
+      .getByRole('button', { name: '生成密钥', exact: true })
+      .isDisabled(),
+    'create button was not disabled while pending',
+  )
+  assert(
+    await createDialog.getByRole('button', { name: '取消' }).isDisabled(),
+    'create dialog close remained enabled while pending',
+  )
+  await page.keyboard.press('Escape')
+  assert(
+    await createDialog.isVisible(),
+    'create dialog dismissed while pending',
+  )
+  const createFailure = page.getByRole('alert').last()
+  await createFailure.waitFor({ state: 'visible' })
+  assert(
+    (await createFailure.innerText()).includes('fixture key create failure'),
+    'create failure was not reported',
+  )
+  assert(
+    (await labelInput.inputValue()) === '  fixture-created-key  ',
+    'failed create did not preserve its draft',
+  )
+  report.checks.createFailureDraftAndDismissGuard = true
+
+  await createDialog
+    .getByRole('button', { name: '生成密钥', exact: true })
+    .click()
+  await createDialog
+    .getByText('pf_fixture_secret_revealed_once')
+    .waitFor({ state: 'visible' })
+  const clipboardResult = await page.evaluate(async () => {
+    const dialog = [...document.querySelectorAll('[role="dialog"]')][0]
+    const buttons = [...(dialog?.querySelectorAll('button') ?? [])]
+    const copy = buttons.find((button) => button.textContent?.trim() === '复制')
+    copy?.click()
+    const value = await navigator.clipboard.readText().catch(() => '')
+    return value === 'pf_fixture_secret_revealed_once'
+  })
+  assert(clipboardResult, 'create response secret could not be copied')
+  report.checks.flatCreateSecretDisplayedAndCopied = true
+  const createLog = await fixture('/__fixtures/log?limit=500')
+  const createRequests = createLog.requests.filter(
+    (request) =>
+      request.method === 'POST' && request.path === '/api/v1/me/client-keys',
+  )
+  assert(
+    createRequests.length === 2,
+    `expected one failed and one successful create, observed ${createRequests.length}`,
+  )
+  assert(
+    createLabels.join('|') === 'fixture-created-key|fixture-created-key',
+    'create label payload was not trimmed and reused',
+  )
+  report.checks.createPayloads = createLabels
+  report.checks.createRequestStatuses = createRequests.map(
+    (request) => request.status,
+  )
+  await createDialog.getByRole('button', { name: '取消' }).click()
+
+  const primaryRow = page.locator('[data-key-row="key-1"]:visible')
+  await primaryRow.getByRole('switch', { name: '状态' }).click()
+  await page.waitForFunction(async () => {
+    const response = await fetch(
+      'http://127.0.0.1:8789/__fixtures/log?limit=500',
+    )
+    const log = await response.json()
+    return log.requests.some(
+      (request) =>
+        request.method === 'PATCH' &&
+        request.path === '/api/v1/me/client-keys/key-1',
+    )
+  })
+  await primaryRow
+    .getByRole('textbox', { name: '名称' })
+    .fill('primary-renamed')
+  await primaryRow.getByRole('textbox', { name: '名称' }).press('Enter')
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll('[data-key-row="key-1"] input')].some(
+      (input) => input.value === 'primary-renamed',
+    ),
+  )
+  await page.waitForFunction(async () => {
+    const response = await fetch(
+      'http://127.0.0.1:8789/__fixtures/log?limit=500',
+    )
+    const log = await response.json()
+    return log.requests.some(
+      (request) =>
+        request.method === 'PATCH' &&
+        request.path === '/api/v1/me/client-keys/key-1',
+    )
+  })
+  const renamedValue = await primaryRow
+    .getByRole('textbox', { name: '名称' })
+    .inputValue()
+  assert(
+    renamedValue === 'primary-renamed',
+    `rename did not persist: ${renamedValue}`,
+  )
+  report.checks.keyRenameAndToggle = true
+
+  await page.evaluate(() => {
+    window.__deleteConfirmMessages = []
+    window.__deleteConfirmAccepted = false
+    window.confirm = (message) => {
+      window.__deleteConfirmMessages.push(message)
+      return window.__deleteConfirmAccepted
+    }
+  })
+  const beforeCancelDelete = await fixture('/__fixtures/log?limit=500')
+  await primaryRow.getByRole('button', { name: '删除' }).click()
+  const cancelledMessage = await page.evaluate(() =>
+    window.__deleteConfirmMessages.at(-1),
+  )
+  assert(
+    cancelledMessage === '删除 primary-renamed?',
+    'delete confirmation did not contain the renamed key',
+  )
+  const afterCancelDelete = await fixture('/__fixtures/log?limit=500')
+  assert(
+    afterCancelDelete.requests.filter(
+      (request) =>
+        request.method === 'DELETE' &&
+        request.path === '/api/v1/me/client-keys/key-1',
+    ).length ===
+      beforeCancelDelete.requests.filter(
+        (request) =>
+          request.method === 'DELETE' &&
+          request.path === '/api/v1/me/client-keys/key-1',
+      ).length,
+    'cancelled deletion still called the API',
+  )
+  await page.evaluate(() => {
+    window.__deleteConfirmAccepted = true
+  })
+  await primaryRow.getByRole('button', { name: '删除' }).click()
+  await page
+    .locator('[data-key-row="key-1"]:visible')
+    .waitFor({ state: 'detached' })
+  report.checks.deleteConfirmation = true
+
+  await page.getByRole('combobox', { name: '选择用户' }).click()
+  await page.getByRole('option', { name: /^operator \// }).click()
+  const ownerRow = page.locator('[data-key-row="key-3"]:visible')
+  await ownerRow.waitFor({ state: 'visible' })
+  await ownerRow.getByRole('textbox', { name: '名称' }).fill('operator-renamed')
+  await ownerRow.getByRole('textbox', { name: '名称' }).press('Enter')
+  await page.waitForFunction(async () => {
+    const response = await fetch(
+      'http://127.0.0.1:8789/__fixtures/log?limit=500',
+    )
+    const log = await response.json()
+    return log.requests.some(
+      (request) =>
+        request.method === 'PATCH' &&
+        request.path === '/api/v1/admin/users/2/client-keys/key-3',
+    )
+  })
+  const ownerReadLog = await fixture('/__fixtures/log?limit=500')
+  assert(
+    ownerReadLog.requests.some(
+      (request) =>
+        request.method === 'GET' &&
+        request.path === '/api/v1/admin/users/2/client-keys',
+    ),
+    'admin owner API path was not used',
+  )
+  report.checks.adminOwnerReadAndRename = true
+
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'en-US')
+    localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await page.reload()
+  await waitForRouteId('R-API-KEYS')
+  const enLightPreferences = await page.evaluate(() => ({
+    colorScheme: document.documentElement.style.colorScheme,
+    dark: document.documentElement.classList.contains('dark'),
+    lang: document.documentElement.lang,
+  }))
+  assert(
+    enLightPreferences.lang === 'en-US' &&
+      !enLightPreferences.dark &&
+      enLightPreferences.colorScheme === 'light',
+    'available models did not render in en-US light mode',
+  )
+  report.checks.localeThemeRendering = true
+  await page.goto(`${BASE}/available-models`)
+  await waitForRouteId('R-AVAILABLE-MODELS')
+  assert(
+    (await page
+      .locator('[data-foundation-placeholder="R-AVAILABLE-MODELS"]')
+      .count()) === 0,
+    'available models remained a placeholder',
+  )
+  await page.getByText('minimax-m2').waitFor({ state: 'visible' })
+  assert(
+    await page.getByText('MiniMax M2').isVisible(),
+    'model names did not render',
+  )
+  await page
+    .getByRole('link', { name: 'Available models' })
+    .waitFor({ state: 'visible' })
+  const modelReadLog = await fixture('/__fixtures/log?limit=500')
+  assert(
+    modelReadLog.requests.some(
+      (request) =>
+        request.method === 'GET' && request.path === '/api/v1/me/models',
+    ),
+    'model list did not use the self API',
+  )
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/me/models',
+    method: 'GET',
+    status: 200,
+    delayMs: 1000,
+  })
+  await page.getByRole('button', { name: 'Refresh' }).click()
+  await page.getByRole('combobox', { name: 'Rows per page' }).click()
+  await page.getByRole('option', { name: '20', exact: true }).click()
+  await page.waitForFunction(async () => {
+    const response = await fetch(
+      'http://127.0.0.1:8789/__fixtures/log?limit=500',
+    )
+    const log = await response.json()
+    return log.requests.some(
+      (request) =>
+        request.path === '/api/v1/me/models' && request.query.rows === '20',
+    )
+  })
+  await page.waitForTimeout(1100)
+  assert(
+    (await page.evaluate(() =>
+      localStorage.getItem('prompt-ferry:table-page-size:available-models'),
+    )) === '20',
+    'stale model page response overwrote the current page size',
+  )
+  report.checks.staleModelPageResponse = true
+  report.checks.modelsReadRefreshAndPagination = true
+  await capture('available-models-en-light-1440')
+
+  const emptyModelsResponse = async (route) => {
+    const url = new URL(route.request().url())
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        first: Number(url.searchParams.get('first') ?? 0),
+        models: [],
+        rows: Number(url.searchParams.get('rows') ?? 20),
+        total: 0,
+      }),
+    })
+  }
+  await page.route('**/api/v1/me/models*', emptyModelsResponse)
+  await page.getByRole('button', { name: 'Refresh' }).click()
+  await page.getByText('No data').waitFor({ state: 'visible' })
+  const englishEmptyTable = await page.evaluate(() => {
+    const tables = [...document.querySelectorAll('table')]
+    const bodies = tables.flatMap((table) => [...table.tBodies])
+    const rows = bodies.flatMap((body) => [...body.rows])
+    return {
+      tableCount: tables.length,
+      tbodyCount: bodies.length,
+      rowCount: rows.length,
+      cellText: rows[0]?.cells[0]?.textContent?.trim(),
+      columnSpan: rows[0]?.cells[0]?.colSpan,
+    }
+  })
+  assert(
+    englishEmptyTable.tableCount === 1 &&
+      englishEmptyTable.tbodyCount === 1 &&
+      englishEmptyTable.rowCount === 1 &&
+      englishEmptyTable.cellText === 'No data' &&
+      englishEmptyTable.columnSpan === 2,
+    'English empty catalog did not render one empty tbody row',
+  )
+  await capture('available-models-empty-en-light-1440')
+
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+  })
+  await page.reload()
+  await waitForRouteId('R-AVAILABLE-MODELS')
+  await page.getByText('没有数据').waitFor({ state: 'visible' })
+  const chineseEmptyTable = await page.evaluate(() => {
+    const tables = [...document.querySelectorAll('table')]
+    const bodies = tables.flatMap((table) => [...table.tBodies])
+    const rows = bodies.flatMap((body) => [...body.rows])
+    return {
+      tableCount: tables.length,
+      tbodyCount: bodies.length,
+      rowCount: rows.length,
+      cellText: rows[0]?.cells[0]?.textContent?.trim(),
+      columnSpan: rows[0]?.cells[0]?.colSpan,
+    }
+  })
+  assert(
+    chineseEmptyTable.tableCount === 1 &&
+      chineseEmptyTable.tbodyCount === 1 &&
+      chineseEmptyTable.rowCount === 1 &&
+      chineseEmptyTable.cellText === '没有数据' &&
+      chineseEmptyTable.columnSpan === 2,
+    'Chinese empty catalog did not render one empty tbody row',
+  )
+  await capture('available-models-empty-zh-light-1440')
+  await page.unroute('**/api/v1/me/models*', emptyModelsResponse)
+  await page.getByRole('button', { name: '刷新' }).click()
+  await page.getByText('minimax-m2').waitFor({ state: 'visible' })
+  report.checks.modelsRenderedEmptyState = {
+    en: englishEmptyTable,
+    zh: chineseEmptyTable,
+  }
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'en-US')
+  })
+  await page.reload()
+  await waitForRouteId('R-AVAILABLE-MODELS')
+  await page.getByText('minimax-m2').waitFor({ state: 'visible' })
+
+  const responsiveModels = []
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page
+      .locator('[data-foundation-route-id="R-AVAILABLE-MODELS"]')
+      .waitFor({ state: 'visible' })
+    const geometry = await page.evaluate(() => ({
+      width: window.innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+      tableWidth:
+        document.querySelector('table')?.getBoundingClientRect().width ?? 0,
+    }))
+    assert(
+      geometry.documentWidth <= geometry.width,
+      `available models overflow at ${width}px`,
+    )
+    responsiveModels.push(geometry)
+  }
+  report.checks.availableModelsResponsive = responsiveModels
+  report.checks.locales = ['zh-CN', 'en-US']
+  report.checks.themes = ['dark', 'light']
+  report.checks.expectedApiFailures = expectedApiFailures
+  assert(
+    expectedApiFailures.length === 1 &&
+      expectedApiFailures[0] === '503 /api/v1/me/client-keys',
+    `expected exactly one injected create error, saw ${JSON.stringify(expectedApiFailures)}`,
+  )
+  assert(
+    consoleErrors.length === 0,
+    `browser console errors: ${consoleErrors.join(' | ')}`,
+  )
+  assert(
+    pageErrors.length === 0,
+    `browser page errors: ${pageErrors.join(' | ')}`,
+  )
+  assert(
+    apiFailures.length === 0,
+    `unexpected API failures: ${apiFailures.join(' | ')}`,
+  )
+  report.checks.consoleErrors = consoleErrors
+  report.checks.pageErrors = pageErrors
+  report.checks.apiFailures = apiFailures
+  report.finishedAt = new Date().toISOString()
+  return report
+}

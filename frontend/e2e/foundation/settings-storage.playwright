@@ -1,0 +1,1097 @@
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const STORAGE = '/api/v1/settings/raw-object-store'
+  const CAPABILITY_CODE = 'sqlite_raw_object_store_unavailable'
+
+  const startedAt = new Date().toISOString()
+  const report = {
+    runId: `settings-storage-${Date.now()}`,
+    startedAt,
+    finishedAt: null,
+    checks: {},
+    scenarios: {
+      'R-SETTINGS-STORAGE': {
+        'route-render': null,
+        'admin-denial': null,
+        'mutation-update': null,
+        'mutation-failure-draft': null,
+      },
+    },
+    screenshots: [],
+    apiFailures: [],
+    expectedApiFailures: [],
+    unexpectedRequests: [],
+    settingsRequests: [],
+    consoleErrorCount: 0,
+    pageErrorCount: 0,
+    limitations: [],
+  }
+  let stage = 'startup'
+  let collecting = false
+
+  page.setDefaultTimeout(15000)
+  page.on('pageerror', () => report.pageErrorCount++)
+  page.on('console', message => {
+    if (message.type() !== 'error') return
+    if (/\b(400|401|403|501|503)\b/.test(message.text())) return
+    report.consoleErrorCount++
+  })
+  page.on('request', request => {
+    const url = new URL(request.url())
+    if (url.pathname.startsWith('/api/v1/settings/')) {
+      // The ledger keeps the request shape and a boolean for each secret; the
+      // stored or typed values themselves are never recorded.
+      const body = request.postData()
+      let shape = null
+      if (body) {
+        try {
+          const parsed = JSON.parse(body)
+          shape = {
+            keys: Object.keys(parsed).sort(),
+            backend: parsed.backend,
+            local_dir: parsed.local_dir,
+            s3_allow_http: parsed.s3_allow_http,
+            s3_bucket: parsed.s3_bucket,
+            s3_endpoint: parsed.s3_endpoint,
+            s3_path_style: parsed.s3_path_style,
+            s3_prefix: parsed.s3_prefix,
+            s3_region: parsed.s3_region,
+            access_mode: parsed.s3_access_key?.mode,
+            access_value_present: Boolean(parsed.s3_access_key?.value),
+            secret_mode: parsed.s3_secret_key?.mode,
+            secret_value_present: Boolean(parsed.s3_secret_key?.value),
+          }
+        } catch {
+          shape = { unparsable: true }
+        }
+      }
+      report.settingsRequests.push({
+        stage,
+        method: request.method(),
+        path: url.pathname,
+        body: shape,
+      })
+      return
+    }
+    if (!url.pathname.startsWith('/api/')) return
+    if (!collecting) return
+    if (
+      url.pathname.startsWith('/api/v1/auth/') ||
+      url.pathname.startsWith('/api/v1/relay/auth/') ||
+      url.pathname.startsWith('/api/v1/me/') ||
+      url.pathname === '/api/v1/bridge/status'
+    ) {
+      return
+    }
+    report.unexpectedRequests.push(`${request.method()} ${url.pathname}`)
+  })
+  page.on('response', response => {
+    const url = new URL(response.url())
+    if (!url.pathname.startsWith('/api/')) return
+    if (response.status() < 400) return
+    if (response.status() === 401 && url.pathname === '/api/v1/auth/me') {
+      report.expectedApiFailures.push('401 GET /api/v1/auth/me')
+      return
+    }
+    const entry = `${response.status()} ${response.request().method()} ${url.pathname}`
+    if (
+      url.pathname === STORAGE &&
+      [400, 401, 403, 501, 503].includes(response.status())
+    ) {
+      report.expectedApiFailures.push(entry)
+      return
+    }
+    report.apiFailures.push(entry)
+  })
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(`${stage}: ${message}`)
+  }
+
+  async function capture(name) {
+    const path = `${screenshots}/${name}.png`
+    await page.screenshot({ path, fullPage: true })
+    report.screenshots.push(path)
+  }
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) {
+      throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    }
+    return response.json()
+  }
+
+  async function clearFaults() {
+    await fixture('/__fixtures/faults', 'DELETE')
+  }
+
+  async function injectFault(fault) {
+    await clearFaults()
+    await fixture('/__fixtures/faults', 'POST', fault)
+  }
+
+  function requestsFor(requestStage) {
+    return report.settingsRequests.filter(entry => entry.stage === requestStage)
+  }
+
+  function readsFor(requestStage) {
+    return requestsFor(requestStage).filter(entry => entry.method === 'GET')
+  }
+
+  function writesFor(requestStage) {
+    return requestsFor(requestStage).filter(entry => entry.method === 'PATCH')
+  }
+
+  async function signIn(loginName) {
+    await page.goto(`${BASE}/login`)
+    const loginNameField = page.getByLabel(/^(Login name|登录名)$/)
+    await loginNameField.waitFor({ state: 'visible' })
+    await loginNameField.fill(loginName)
+    await page
+      .getByRole('textbox', { name: /^(Password|密码)$/ })
+      .fill('fixture-password')
+    await page.getByRole('button', { name: /^(Login|登录)$/ }).click()
+    await page.waitForURL(url => new URL(url).pathname === '/api-keys')
+  }
+
+  async function signOut() {
+    await page.getByRole('button', { name: /Logout|退出登录/ }).click()
+    await page.waitForURL(url => new URL(url).pathname === '/login')
+  }
+
+  async function openStorage() {
+    await page.goto(`${BASE}/settings/storage`)
+    await page.waitForSelector('[data-foundation-route-id="R-SETTINGS-STORAGE"]')
+    await page.waitForTimeout(250)
+  }
+
+  async function waitForLoadedForm() {
+    await page.waitForFunction(() => {
+      const save = document.getElementById('settings-storage-save')
+      return save !== null && !save.hasAttribute('disabled')
+    })
+    await page.waitForTimeout(150)
+  }
+
+  async function storedSettings() {
+    return page.evaluate(async () => {
+      const response = await fetch('/api/v1/settings/raw-object-store')
+      const body = await response.json()
+      return {
+        status: response.status,
+        backend: body.backend,
+        local_dir: body.local_dir,
+        s3_endpoint: body.s3_endpoint,
+        s3_bucket: body.s3_bucket,
+        s3_region: body.s3_region,
+        s3_prefix: body.s3_prefix,
+        s3_allow_http: body.s3_allow_http,
+        s3_path_style: body.s3_path_style,
+        has_s3_access_key: body.has_s3_access_key,
+        has_s3_secret_key: body.has_s3_secret_key,
+      }
+    })
+  }
+
+  function toastCount(text) {
+    return page.getByText(text, { exact: true }).count()
+  }
+
+  async function waitForNoToasts(text) {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if ((await toastCount(text)) === 0) return
+      await page.waitForTimeout(250)
+    }
+    throw new Error('a notification never cleared')
+  }
+
+  async function chooseBackend(label) {
+    await page.locator('#settings-storage-backend').click()
+    await page.getByRole('option', { name: label, exact: true }).click()
+    await page.waitForTimeout(200)
+  }
+
+  async function setText(id, value) {
+    await page.locator(`#${id}`).fill(value)
+  }
+
+  async function save() {
+    await page.locator('#settings-storage-save').click()
+  }
+
+  function passed(scenario, evidence) {
+    report.scenarios['R-SETTINGS-STORAGE'][scenario] = {
+      passed: true,
+      evidence,
+    }
+  }
+
+  stage = 'admin-sign-in'
+  await page.goto(`${BASE}/login`)
+  await page.evaluate(() => {
+    window.localStorage.setItem('prompt-ferry:locale', 'en-US')
+    window.localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await signIn('admin')
+  await clearFaults()
+  await page.waitForTimeout(600)
+  collecting = true
+
+  stage = 'route-render'
+  await openStorage()
+  await waitForLoadedForm()
+  const routeId = await page
+    .locator('[data-foundation-route-id]')
+    .getAttribute('data-foundation-route-id')
+  const routeTab = await page
+    .locator('[data-foundation-route-id]')
+    .getAttribute('data-settings-tab')
+  assert(
+    routeId === 'R-SETTINGS-STORAGE' && routeTab === 'storage',
+    `the storage route identity is wrong: ${routeId}/${routeTab}`,
+  )
+  assert(
+    (await page
+      .locator('[data-foundation-route-id="R-SETTINGS-STORAGE"] h1')
+      .innerText()) === 'Object storage',
+    'the storage heading is not localized',
+  )
+  const controls = await page.evaluate(() => {
+    const backend = document.getElementById('settings-storage-backend')
+    return {
+      backend: (backend?.textContent ?? '').trim(),
+      localDir: document.getElementById('settings-storage-local-dir')?.value,
+      saveDisabled: document
+        .getElementById('settings-storage-save')
+        ?.hasAttribute('disabled'),
+      refreshDisabled: document
+        .getElementById('settings-storage-refresh')
+        ?.hasAttribute('disabled'),
+      localHint: document.body.innerText.includes(
+        'Files are written directly to this directory.',
+      ),
+      cardTitle: (
+        document.querySelector('[data-settings-card] h2')?.textContent ?? ''
+      ).trim(),
+      s3Fields: document.getElementById('settings-storage-s3-bucket') !== null,
+      unavailable: document.body.innerText.includes(
+        'Object store settings are not available in this environment.',
+      ),
+    }
+  })
+  assert(controls.backend === 'Local file', `the backend is ${controls.backend}`)
+  assert(
+    controls.localDir === '/var/lib/prompt-ferry/raw',
+    `the stored local directory is ${controls.localDir}`,
+  )
+  assert(
+    controls.saveDisabled === false && controls.refreshDisabled === false,
+    'the save or refresh control is disabled on a loaded form',
+  )
+  assert(controls.localHint, 'the local directory hint is not visible')
+  assert(
+    controls.cardTitle === 'Raw payload store',
+    `the card title is ${controls.cardTitle}`,
+  )
+  assert(controls.s3Fields === false, 'the local branch renders the S3 fields')
+  assert(controls.unavailable === false, 'the capability warning is shown')
+  assert(
+    readsFor('route-render').length === 1 &&
+      readsFor('route-render')[0].path === STORAGE,
+    `the mount read ${JSON.stringify(readsFor('route-render'))}`,
+  )
+  assert(
+    writesFor('route-render').length === 0,
+    'mounting the storage tab saved the settings',
+  )
+  await capture('settings-storage-en-light-1440')
+  report.checks.routeRender = { routeId, routeTab, controls }
+  passed(
+    'route-render',
+    'the admin storage route renders one card with the Local file backend, the stored directory, the hint and an enabled Save from exactly one read and no write',
+  )
+
+  stage = 'backend-branches'
+  await chooseBackend('S3 compatible')
+  const s3 = await page.evaluate(() => {
+    const ids = [
+      'settings-storage-s3-endpoint',
+      'settings-storage-s3-bucket',
+      'settings-storage-s3-region',
+      'settings-storage-s3-prefix',
+      'settings-storage-s3-allow-http',
+      'settings-storage-s3-path-style',
+      'settings-storage-s3-access-key',
+      'settings-storage-s3-secret-key',
+    ]
+    return {
+      missing: ids.filter(id => document.getElementById(id) === null),
+      endpoint: document.getElementById('settings-storage-s3-endpoint')?.value,
+      bucket: document.getElementById('settings-storage-s3-bucket')?.value,
+      region: document.getElementById('settings-storage-s3-region')?.value,
+      prefix: document.getElementById('settings-storage-s3-prefix')?.value,
+      allowHttp: document
+        .getElementById('settings-storage-s3-allow-http')
+        ?.getAttribute('data-state'),
+      pathStyle: document
+        .getElementById('settings-storage-s3-path-style')
+        ?.getAttribute('data-state'),
+      accessType: document
+        .getElementById('settings-storage-s3-access-key')
+        ?.getAttribute('type'),
+      secretType: document
+        .getElementById('settings-storage-s3-secret-key')
+        ?.getAttribute('type'),
+      accessValue: document.getElementById('settings-storage-s3-access-key')
+        ?.value,
+      secretValue: document.getElementById('settings-storage-s3-secret-key')
+        ?.value,
+      present: [...document.querySelectorAll('[data-secret-present]')].map(node =>
+        node.getAttribute('data-secret-present'),
+      ),
+      hint: document.body.innerText.includes('Leave blank to keep.'),
+      localDir: document.getElementById('settings-storage-local-dir') !== null,
+    }
+  })
+  assert(s3.missing.length === 0, `missing S3 controls: ${s3.missing}`)
+  assert(
+    s3.endpoint === 'https://s3.example.internal' &&
+      s3.bucket === 'prompt-ferry-raw' &&
+      s3.region === 'eu-central-1' &&
+      s3.prefix === 'fixture/',
+    `the stored S3 fields are wrong: ${JSON.stringify(s3)}`,
+  )
+  assert(
+    s3.allowHttp === 'unchecked' && s3.pathStyle === 'unchecked',
+    `the S3 switches are wrong: ${JSON.stringify(s3)}`,
+  )
+  assert(
+    s3.accessType === 'password' &&
+      s3.secretType === 'password' &&
+      s3.accessValue === '' &&
+      s3.secretValue === '',
+    'a stored credential reached its input, or is not a password input',
+  )
+  assert(
+    JSON.stringify(s3.present) === JSON.stringify(['true', 'true']),
+    `the presence badges are wrong: ${JSON.stringify(s3.present)}`,
+  )
+  assert(s3.hint, 'the keep-if-blank hint is not visible')
+  assert(s3.localDir === false, 'the S3 branch still renders the local directory')
+
+  await chooseBackend('Disabled')
+  const disabled = await page.evaluate(() => ({
+    hint: document.body.innerText.includes(
+      'Payloads are not stored when disabled.',
+    ),
+    bucket: document.getElementById('settings-storage-s3-bucket') !== null,
+    localDir: document.getElementById('settings-storage-local-dir') !== null,
+  }))
+  assert(disabled.hint, 'the disabled hint is not visible')
+  assert(
+    disabled.bucket === false && disabled.localDir === false,
+    'the disabled branch still renders a storage field',
+  )
+  await chooseBackend('Local file')
+  report.checks.backendBranches = { s3, disabled }
+  await page.waitForTimeout(200)
+
+  stage = 'no-autosave'
+  await setText('settings-storage-local-dir', 'typed-directory')
+  await page.waitForTimeout(900)
+  assert(
+    writesFor('no-autosave').length === 0,
+    'editing a field autosaved the storage settings',
+  )
+  report.checks.noAutosave = { writes: 0 }
+
+  stage = 'mutation-update'
+  await setText('settings-storage-local-dir', '/srv/fixture-raw')
+  await save()
+  await page.waitForTimeout(900)
+  const updateWrites = writesFor('mutation-update')
+  assert(updateWrites.length === 1, `the save sent ${updateWrites.length} writes`)
+  const updateBody = updateWrites[0].body
+  assert(
+    JSON.stringify(updateBody.keys) ===
+      JSON.stringify([
+        'backend',
+        'local_dir',
+        's3_access_key',
+        's3_allow_http',
+        's3_bucket',
+        's3_endpoint',
+        's3_path_style',
+        's3_prefix',
+        's3_region',
+        's3_secret_key',
+      ]),
+    `the save body does not carry every field: ${JSON.stringify(updateBody.keys)}`,
+  )
+  assert(
+    updateBody.backend === 'local' &&
+      updateBody.local_dir === '/srv/fixture-raw' &&
+      updateBody.s3_bucket === 'prompt-ferry-raw' &&
+      updateBody.s3_region === 'eu-central-1',
+    `the saved values are wrong: ${JSON.stringify(updateBody)}`,
+  )
+  assert(
+    updateBody.access_mode === 'keep' &&
+      updateBody.secret_mode === 'keep' &&
+      updateBody.access_value_present === false &&
+      updateBody.secret_value_present === false,
+    'an untouched save did not keep both stored secrets',
+  )
+  const savedStored = await storedSettings()
+  assert(
+    savedStored.backend === 'local' &&
+      savedStored.local_dir === '/srv/fixture-raw' &&
+      savedStored.s3_prefix === 'fixture' &&
+      savedStored.has_s3_access_key === true &&
+      savedStored.has_s3_secret_key === true,
+    `the stored storage settings are wrong: ${JSON.stringify(savedStored)}`,
+  )
+  await page.waitForFunction(
+    () =>
+      document.getElementById('settings-storage-local-dir')?.value ===
+      '/srv/fixture-raw',
+  )
+  await waitForNoToasts('Object store settings saved')
+  report.checks.mutationUpdate = {
+    writes: updateWrites.length,
+    body: updateBody,
+    stored: savedStored,
+  }
+  passed(
+    'mutation-update',
+    'one manual save sends the whole object with the server prefix normalization, keeps both stored secrets, and the stored record matches',
+  )
+
+  stage = 'secret-replace'
+  await chooseBackend('S3 compatible')
+  await setText('settings-storage-s3-bucket', 'fixture-s3-bucket')
+  await setText(
+    'settings-storage-s3-access-key',
+    ' synthetic-browser-access ',
+  )
+  await setText('settings-storage-s3-secret-key', 'synthetic-browser-secret')
+  await save()
+  await page.waitForTimeout(900)
+  const replaceWrites = writesFor('secret-replace')
+  assert(replaceWrites.length === 1, 'the secret replace did not send one write')
+  assert(
+    replaceWrites[0].body.access_mode === 'replace' &&
+      replaceWrites[0].body.access_value_present === true &&
+      replaceWrites[0].body.secret_mode === 'replace' &&
+      replaceWrites[0].body.secret_value_present === true,
+    `the replace patches are wrong: ${JSON.stringify(replaceWrites[0].body)}`,
+  )
+  assert(
+    replaceWrites[0].body.access_mode !== 'clear' &&
+      replaceWrites[0].body.secret_mode !== 'clear',
+    'the form built a clear patch',
+  )
+  const afterReplace = await storedSettings()
+  assert(
+    afterReplace.has_s3_access_key === true &&
+      afterReplace.has_s3_secret_key === true,
+    'the fixture did not store the replaced secrets',
+  )
+  const secretVisibility = await page.evaluate(() => ({
+    accessValue: document.getElementById('settings-storage-s3-access-key')
+      ?.value,
+    secretValue: document.getElementById('settings-storage-s3-secret-key')
+      ?.value,
+    present: [...document.querySelectorAll('[data-secret-present]')].map(node =>
+      node.getAttribute('data-secret-present'),
+    ),
+    bodyLeak: document.body.innerText.includes('synthetic-browser'),
+    titleLeak: [...document.querySelectorAll('[title]')].some(node =>
+      (node.getAttribute('title') ?? '').includes('synthetic-browser'),
+    ),
+    storageLeak: Object.keys(window.localStorage).some(key =>
+      String(window.localStorage.getItem(key)).includes('synthetic-browser'),
+    ),
+    clearControl: [...document.querySelectorAll('button, a, label')].some(
+      node =>
+        /^(clear|清除|清除密钥)$/i.test((node.textContent ?? '').trim()),
+    ),
+  }))
+  assert(
+    secretVisibility.accessValue === '' && secretVisibility.secretValue === '',
+    'a consumed secret draft stayed in its input',
+  )
+  assert(
+    JSON.stringify(secretVisibility.present) ===
+      JSON.stringify(['true', 'true']),
+    `the presence badges after replace are wrong: ${JSON.stringify(secretVisibility.present)}`,
+  )
+  assert(
+    secretVisibility.bodyLeak === false &&
+      secretVisibility.titleLeak === false &&
+      secretVisibility.storageLeak === false,
+    `a secret reached text, a title or storage: ${JSON.stringify(secretVisibility)}`,
+  )
+  assert(
+    secretVisibility.clearControl === false,
+    'the storage tab exposes a clear-secret control',
+  )
+  report.checks.secretReplace = { body: replaceWrites[0].body, secretVisibility }
+  await waitForNoToasts('Object store settings saved')
+
+  stage = 'secret-keep'
+  await setText('settings-storage-s3-endpoint', 'https://s3b.example.internal')
+  await save()
+  await page.waitForTimeout(900)
+  const keepWrites = writesFor('secret-keep')
+  assert(keepWrites.length === 1, 'the keep save did not send one write')
+  assert(
+    keepWrites[0].body.access_mode === 'keep' &&
+      keepWrites[0].body.secret_mode === 'keep' &&
+      keepWrites[0].body.access_value_present === false &&
+      keepWrites[0].body.secret_value_present === false,
+    'a blank draft of a set secret did not keep it',
+  )
+  const afterKeep = await storedSettings()
+  assert(
+    afterKeep.has_s3_access_key === true &&
+      afterKeep.has_s3_secret_key === true &&
+      afterKeep.s3_endpoint === 'https://s3b.example.internal',
+    `the stored record after keep is wrong: ${JSON.stringify(afterKeep)}`,
+  )
+  await waitForNoToasts('Object store settings saved')
+  report.checks.secretKeep = { body: keepWrites[0].body, stored: afterKeep }
+
+  stage = 'fixture-probes'
+  const probes = await page.evaluate(async () => {
+    const patch = async body => {
+      const response = await fetch('/api/v1/settings/raw-object-store', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const payload = await response.json().catch(() => null)
+      return { status: response.status, payload }
+    }
+    const base = {
+      backend: 's3',
+      local_dir: '',
+      s3_endpoint: 'https://s3.example.internal',
+      s3_bucket: 'prompt-ferry-raw',
+      s3_region: 'eu-central-1',
+      s3_prefix: 'fixture',
+      s3_allow_http: false,
+      s3_path_style: false,
+      s3_access_key: { mode: 'keep' },
+      s3_secret_key: { mode: 'keep' },
+    }
+    return {
+      bucketMissing: await patch({
+        ...base,
+        s3_bucket: '   ',
+        s3_access_key: { mode: 'keep' },
+        s3_secret_key: { mode: 'keep' },
+      }),
+      emptySecret: await patch({
+        ...base,
+        s3_access_key: { mode: 'replace', value: '   ' },
+      }),
+      normalized: await patch({
+        ...base,
+        s3_bucket: ' probe-bucket ',
+        s3_prefix: '/probe/prefix/',
+        s3_region: '  ',
+        s3_path_style: undefined,
+      }),
+      clearedAccess: await patch({
+        ...base,
+        s3_access_key: { mode: 'clear' },
+      }),
+      clearedSecretToo: await patch({
+        ...base,
+        s3_access_key: { mode: 'clear' },
+        s3_secret_key: { mode: 'clear' },
+      }),
+      replacedAccess: await patch({
+        ...base,
+        s3_bucket: 'prompt-ferry-raw',
+        s3_region: 'eu-central-1',
+        s3_prefix: 'fixture',
+        s3_access_key: { mode: 'replace', value: ' synthetic-probe-access ' },
+        s3_secret_key: { mode: 'replace', value: 'synthetic-probe-secret' },
+      }),
+      keptAccess: await patch({
+        ...base,
+        s3_access_key: { mode: 'keep' },
+        s3_secret_key: { mode: 'keep' },
+      }),
+      disabled: await patch({
+        ...base,
+        backend: 'disabled',
+        s3_bucket: '',
+        s3_access_key: { mode: 'keep' },
+        s3_secret_key: { mode: 'keep' },
+      }),
+      restore: await patch({
+        ...base,
+        backend: 'local',
+        local_dir: '/var/lib/prompt-ferry/raw',
+        s3_prefix: 'fixture',
+      }),
+    }
+  })
+  const bucketMissing = probes.bucketMissing
+  assert(
+    bucketMissing.status === 400 &&
+      bucketMissing.payload?.error?.code === 'bad_request' &&
+      bucketMissing.payload?.error?.message ===
+        's3 bucket is required for s3 backend',
+    `the bucket validation is wrong: ${JSON.stringify(bucketMissing)}`,
+  )
+  const emptySecret = probes.emptySecret
+  assert(
+    emptySecret.status === 400 &&
+      emptySecret.payload?.error?.message === 'secret value cannot be empty',
+    `the empty secret validation is wrong: ${JSON.stringify(emptySecret)}`,
+  )
+  const normalized = probes.normalized
+  assert(
+    normalized.status === 200 &&
+      normalized.payload?.s3_bucket === 'probe-bucket' &&
+      normalized.payload?.s3_prefix === 'probe/prefix' &&
+      normalized.payload?.s3_region === 'auto' &&
+      normalized.payload?.s3_path_style === true,
+    `the server normalization is wrong: ${JSON.stringify(normalized)}`,
+  )
+  assert(
+    probes.clearedAccess.status === 200 &&
+      probes.clearedAccess.payload?.has_s3_access_key === false &&
+      probes.clearedAccess.payload?.has_s3_secret_key === true,
+    `an API clear of one secret affected the other: ${JSON.stringify(probes.clearedAccess)}`,
+  )
+  assert(
+    probes.clearedSecretToo.payload?.has_s3_access_key === false &&
+      probes.clearedSecretToo.payload?.has_s3_secret_key === false,
+    'the API clear did not remove both presence flags',
+  )
+  const replaced = probes.replacedAccess
+  assert(
+    replaced.status === 200 &&
+      replaced.payload?.has_s3_access_key === true &&
+      replaced.payload?.has_s3_secret_key === true,
+    `the API replace did not restore presence: ${JSON.stringify(replaced)}`,
+  )
+  assert(
+    replaced.payload?.s3_access_key !== undefined ||
+      replaced.payload?.has_s3_access_key === true,
+    'the redacted response no longer reports presence',
+  )
+  assert(
+    JSON.stringify(replaced).includes('synthetic-probe') === false,
+    'the read response echoed a stored secret',
+  )
+  assert(
+    probes.keptAccess.status === 200 &&
+      probes.keptAccess.payload?.has_s3_access_key === true &&
+      probes.keptAccess.payload?.has_s3_secret_key === true,
+    'a keep patch did not retain the stored secrets',
+  )
+  assert(
+    probes.disabled.status === 200 &&
+      probes.disabled.payload?.backend === 'disabled' &&
+      probes.disabled.payload?.s3_bucket === '',
+    `a disabled store did not bypass the bucket requirement: ${JSON.stringify(probes.disabled)}`,
+  )
+  assert(
+    probes.restore.status === 200 &&
+      probes.restore.payload?.backend === 'local',
+    'the restore patch failed',
+  )
+  report.checks.fixtureProbes = probes
+  await openStorage()
+
+  stage = 'mutation-failure-draft'
+  await waitForLoadedForm()
+  await injectFault({
+    pathPrefix: STORAGE,
+    method: 'PATCH',
+    status: 503,
+    count: 1,
+  })
+  await setText('settings-storage-local-dir', '/srv/transport-failure')
+  await save()
+  await page.waitForTimeout(900)
+  assert(
+    writesFor('mutation-failure-draft').length === 1,
+    'the failing save did not send one write',
+  )
+  assert(
+    (await page.getByRole('alert').count()) === 1,
+    'the transport failure did not report exactly one error',
+  )
+  assert(
+    (await page
+      .locator('#settings-storage-local-dir')
+      .inputValue()) === '/srv/transport-failure',
+    'the transport failure dropped the draft',
+  )
+  assert(
+    await page.locator('#settings-storage-refresh').isDisabled(),
+    'the scoped refresh stayed enabled after a failed save',
+  )
+  await page.waitForTimeout(1200)
+  assert(
+    writesFor('mutation-failure-draft').length === 1,
+    'the failed save retried itself',
+  )
+  await capture('settings-storage-failure-en-light-1440')
+  await clearFaults()
+  await save()
+  await page.waitForTimeout(900)
+  assert(
+    writesFor('mutation-failure-draft').length === 2,
+    'the Save retry did not resend the draft',
+  )
+  const afterRetry = await storedSettings()
+  assert(
+    afterRetry.local_dir === '/srv/transport-failure',
+    `the retried draft was not stored: ${JSON.stringify(afterRetry)}`,
+  )
+  report.checks.failureDraft = {
+    writes: 2,
+    stored: afterRetry.local_dir,
+  }
+  passed(
+    'mutation-failure-draft',
+    'a 503 reports one error and keeps the draft without retrying itself, and the Save button resends the same draft successfully',
+  )
+  await waitForNoToasts('Object store settings saved')
+
+  stage = 'double-save'
+  await injectFault({
+    pathPrefix: STORAGE,
+    method: 'PATCH',
+    status: 200,
+    delayMs: 900,
+    count: 1,
+  })
+  await setText('settings-storage-local-dir', '/srv/double-save')
+  await page.evaluate(() => {
+    const button = document.getElementById('settings-storage-save')
+    button?.click()
+    button?.click()
+  })
+  await page.waitForTimeout(2000)
+  assert(
+    writesFor('double-save').length === 1,
+    `a double save sent ${writesFor('double-save').length} writes`,
+  )
+  assert(
+    (await toastCount('Object store settings saved')) === 1,
+    'a double save confirmed more than once',
+  )
+  report.checks.doubleSave = { writes: 1 }
+  await clearFaults()
+  await waitForNoToasts('Object store settings saved')
+
+  stage = 'newer-draft'
+  await injectFault({
+    pathPrefix: STORAGE,
+    method: 'PATCH',
+    status: 200,
+    delayMs: 900,
+    count: 1,
+  })
+  await setText('settings-storage-local-dir', '/srv/submitted')
+  await save()
+  await page.waitForTimeout(300)
+  await setText('settings-storage-local-dir', '/srv/newer')
+  await page.waitForTimeout(2200)
+  assert(
+    (await page
+      .locator('#settings-storage-local-dir')
+      .inputValue()) === '/srv/newer',
+    'a draft typed during the save was overwritten',
+  )
+  assert(
+    await page.locator('#settings-storage-refresh').isDisabled(),
+    'the scoped refresh stayed enabled over an unsaved draft',
+  )
+  report.checks.newerDraft = { kept: '/srv/newer' }
+  await clearFaults()
+  await save()
+  await page.waitForTimeout(900)
+  await waitForNoToasts('Object store settings saved')
+
+  stage = 'capability-unavailable'
+  await injectFault({
+    pathPrefix: STORAGE,
+    method: 'GET',
+    status: 501,
+    code: CAPABILITY_CODE,
+    message: 'raw object store configuration is not available on SQLite',
+    count: 1,
+  })
+  await openStorage()
+  await page.waitForTimeout(700)
+  const unavailable = await page.evaluate(() => ({
+    warning: document.body.innerText.includes(
+      'Object store settings are not available in this environment.',
+    ),
+    detail: document.body.innerText.includes(
+      'sqlite_raw_object_store_unavailable: raw object store configuration is not available on SQLite',
+    ),
+    retry: document.getElementById('settings-storage-retry') !== null,
+    form: document.getElementById('settings-storage-local-dir') !== null,
+    saveDisabled: document
+      .getElementById('settings-storage-save')
+      ?.hasAttribute('disabled'),
+  }))
+  assert(unavailable.warning, 'the capability warning is not shown')
+  assert(unavailable.detail, 'the structured capability code is not shown')
+  assert(unavailable.retry, 'the capability warning has no retry')
+  assert(unavailable.form === false, 'the form is shown on an unavailable store')
+  assert(unavailable.saveDisabled === true, 'Save is enabled on an unavailable store')
+  await clearFaults()
+  await page.locator('#settings-storage-retry').click()
+  await page.waitForFunction(
+    () => document.getElementById('settings-storage-local-dir') !== null,
+  )
+  await waitForLoadedForm()
+  assert(
+    readsFor('capability-unavailable').filter(entry => entry.method === 'GET')
+      .length >= 2,
+    'the capability retry did not read again',
+  )
+  report.checks.capabilityUnavailable = {
+    ...unavailable,
+    recovered: true,
+    reads: readsFor('capability-unavailable').length,
+  }
+
+  stage = 'scoped-refresh'
+  const readsBefore = readsFor('scoped-refresh').length
+  await page.locator('#settings-storage-refresh').click()
+  await page.waitForTimeout(900)
+  assert(
+    readsFor('scoped-refresh').length - readsBefore === 1,
+    `the scoped refresh issued ${readsFor('scoped-refresh').length - readsBefore} reads`,
+  )
+  assert(
+    writesFor('scoped-refresh').length === 0,
+    'a refresh saved the settings',
+  )
+  await setText('settings-storage-local-dir', '/srv/dirty')
+  assert(
+    await page.locator('#settings-storage-refresh').isDisabled(),
+    'the refresh stayed enabled over a dirty form',
+  )
+  report.checks.scopedRefresh = { reads: 1, writes: 0 }
+  await openStorage()
+  await waitForLoadedForm()
+
+  stage = 'locale-theme-no-refetch'
+  const readsBeforeToggle = readsFor('locale-theme-no-refetch').length
+  const writesBeforeToggle = writesFor('locale-theme-no-refetch').length
+  await page.getByRole('button', { name: 'Language', exact: true }).click()
+  await page.waitForTimeout(400)
+  await page.getByRole('button', { name: /^(Dark|暗色)$/ }).click()
+  await page.waitForTimeout(600)
+  assert(
+    (await page.evaluate(() => document.documentElement.lang)) === 'zh-CN' &&
+      (await page.evaluate(() =>
+        document.documentElement.classList.contains('dark'),
+      )) === true,
+    'the locale or theme change did not reach the document',
+  )
+  assert(
+    readsFor('locale-theme-no-refetch').length === readsBeforeToggle &&
+      writesFor('locale-theme-no-refetch').length === writesBeforeToggle,
+    'a locale/theme rerender refetched or saved the storage settings',
+  )
+  report.checks.localeThemeNoRefetch = { reads: 0, writes: 0 }
+
+  stage = 'responsive-en'
+  await page.evaluate(() => {
+    window.localStorage.setItem('prompt-ferry:locale', 'en-US')
+    window.localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await openStorage()
+  await waitForLoadedForm()
+  await chooseBackend('S3 compatible')
+  const profile = []
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.waitForTimeout(250)
+    const measured = await page.evaluate(() => {
+      const ids = [
+        'settings-storage-backend',
+        'settings-storage-save',
+        'settings-storage-s3-endpoint',
+        'settings-storage-s3-bucket',
+        'settings-storage-s3-region',
+        'settings-storage-s3-prefix',
+        'settings-storage-s3-allow-http',
+        'settings-storage-s3-path-style',
+        'settings-storage-s3-access-key',
+        'settings-storage-s3-secret-key',
+        'settings-storage-refresh',
+      ]
+      return {
+        controls: ids.map(id => {
+          const rect = document.getElementById(id)?.getBoundingClientRect()
+          return rect
+            ? { id, left: Math.round(rect.left), right: Math.round(rect.right) }
+            : { id, left: -1, right: -1 }
+        }),
+        documentWidth: document.documentElement.scrollWidth,
+        viewport: window.innerWidth,
+      }
+    })
+    assert(
+      measured.documentWidth <= measured.viewport,
+      `the storage tab overflows at ${width}px (${measured.documentWidth} > ${measured.viewport})`,
+    )
+    for (const control of measured.controls) {
+      assert(
+        control.left >= 0 &&
+          control.right <= measured.viewport &&
+          control.right > control.left,
+        `the ${control.id} control is not reachable at ${width}px`,
+      )
+    }
+    profile.push({ width, documentWidth: measured.documentWidth })
+    if (width === 390) await capture('settings-storage-en-light-390')
+  }
+  report.checks.responsive = profile
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  stage = 'locale-zh'
+  await page.evaluate(() => {
+    window.localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    window.localStorage.setItem('prompt-ferry:theme-mode', 'dark')
+  })
+  await openStorage()
+  await waitForLoadedForm()
+  const zh = await page.evaluate(() => ({
+    heading: (
+      document.querySelector(
+        '[data-foundation-route-id="R-SETTINGS-STORAGE"] h1',
+      )?.textContent ?? ''
+    ).trim(),
+    labels: [...document.querySelectorAll('label')].map(node =>
+      (node.textContent ?? '').trim(),
+    ),
+    body: document.body.innerText,
+  }))
+  assert(zh.heading === '对象存储', `the Chinese heading is wrong: ${zh.heading}`)
+  assert(
+    zh.labels.includes('本地目录'),
+    `the Chinese labels are wrong: ${JSON.stringify(zh.labels)}`,
+  )
+  assert(
+    zh.body.includes('原始负载存储') &&
+      zh.body.includes('本地文件直接写入该目录。'),
+    'the Chinese storage copy is incomplete',
+  )
+  await capture('settings-storage-zh-dark-1440')
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.waitForTimeout(300)
+  assert(
+    !(await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    )),
+    'the Chinese dark storage tab overflows at 390px',
+  )
+  await capture('settings-storage-zh-dark-390')
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  collecting = false
+
+  stage = 'admin-denial'
+  await signOut()
+  await signIn('operator')
+  const operatorNav = await page.evaluate(() =>
+    [...document.querySelectorAll('nav a')].map(link =>
+      link.getAttribute('href'),
+    ),
+  )
+  const navHidden = !operatorNav.includes('/settings/storage')
+  assert(navHidden, 'the ordinary-user nav exposes the storage settings route')
+  await page.goto(`${BASE}/settings/storage`)
+  await page.waitForTimeout(700)
+  const redirected = new URL(page.url()).pathname !== '/settings/storage'
+  assert(redirected, 'an ordinary user stayed on the admin storage route')
+  assert(
+    (await page
+      .locator('[data-foundation-route-id="R-SETTINGS-STORAGE"]')
+      .count()) === 0,
+    'an ordinary user rendered the storage settings section',
+  )
+  const forged = await page.evaluate(async () => {
+    const patch = await fetch('/api/v1/settings/raw-object-store', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ backend: 'disabled' }),
+    })
+    const read = await fetch('/api/v1/settings/raw-object-store')
+    return { patch: patch.status, read: read.status }
+  })
+  assert(
+    forged.patch === 403 && forged.read === 403,
+    `the fixture answered a non-admin storage request with ${JSON.stringify(forged)}`,
+  )
+  await page.goto(`${BASE}/settings/general`)
+  await page.waitForSelector('[data-foundation-route-id="R-SETTINGS-GENERAL"]')
+  assert(
+    (await page.locator('[data-settings-card]').count()) === 3,
+    'the ordinary user lost the general settings tab',
+  )
+  const redactionScoped = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/settings/redaction')
+    return response.status
+  })
+  assert(
+    redactionScoped === 200,
+    `the ordinary-user redaction setting returned ${redactionScoped}`,
+  )
+  await signOut()
+  const anonymous = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/settings/raw-object-store')
+    return response.status
+  })
+  assert(anonymous === 401, `an anonymous storage read returned ${anonymous}`)
+  report.checks.adminDenial = {
+    navHidden,
+    redirected,
+    forgedPatch: forged.patch,
+    forgedRead: forged.read,
+    generalIntact: true,
+    redactionIntact: redactionScoped,
+    anonymousRead: anonymous,
+  }
+  passed(
+    'admin-denial',
+    'an ordinary user has no storage link, is redirected away from the route without rendering it, is refused with 403 on forged storage reads and writes, and still reaches the general and redaction settings while an anonymous read is refused with 401',
+  )
+  await signIn('admin')
+
+  stage = 'finish'
+  report.checks.officialPendingRoutes = 0
+  report.checks.unexpectedWindow = 'mounted admin storage tab stages'
+  report.limitations.push(
+    'Evidence is the synthetic fixture and its stored settings; no real directory, bucket, S3 provider, credential validation or production behaviour is claimed.',
+    'The secrets are asserted as presence booleans and mode names only; the 400, 401, 403, 501 and 503 cases run against fixture validation, the role gate, the capability answer and fault injection.',
+  )
+  report.checks.limitations = report.limitations
+  report.finishedAt = new Date().toISOString()
+  return report
+}
