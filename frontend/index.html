@@ -7,12 +7,8 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>prompt-ferry</title>
     <script id="theme-first-paint">
-      // Apply the persisted theme synchronously before the module entry paints,
-      // so browsers that paint before the deferred module bundle (Firefox/LibreWolf)
-      // never flash the default light theme. Mirrors resolveThemeMode and
-      // applyThemeToDocument in src/theme/appTheme.ts, which stay the source of
-      // truth; <html class="dark"> and the :root color-scheme in base.css carry
-      // the dark default if this script is blocked.
+      // Apply the persisted theme before the module entry paints. The React
+      // theme provider uses the same storage key and document state.
       ;(() => {
         let mode = 'dark'
         try {
@@ -30,6 +26,6 @@
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

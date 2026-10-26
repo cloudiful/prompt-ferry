@@ -1,0 +1,853 @@
+/**
+ * Remaining-workflow scenarios for issue #1060 P0 attempt 2.
+ *
+ * Executed by `playwright-cli run-code --filename=e2e/baseline/scenarios.playwright`
+ * after `capture.playwright`. It completes the required baseline workflows that
+ * the first baseline pass left partial: pagination, destructive confirm/cancel,
+ * create/update/delete per domain, section saves and failure drafts, CSV and
+ * archive file interactions, stale-response protection, redaction editing and
+ * preview, usage sorting/filtering/detail override, and relay-host failure
+ * handling. Every write is proven from the fixture request ledger.
+ */
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const shots = 'e2e/baseline/screenshots'
+  const downloads = 'e2e/baseline/downloads'
+
+  const evidence = {
+    startedAt: new Date().toISOString(),
+    captures: [],
+    checks: {},
+    mutations: [],
+  }
+  const consoleErrors = []
+  page.removeAllListeners('dialog')
+  let dialogPolicy = 'accept'
+  const dialogLog = []
+  page.on('console', message => {
+    if (message.type() === 'error') consoleErrors.push(message.text())
+  })
+  page.on('dialog', async dialog => {
+    dialogLog.push(dialog.message())
+    if (dialogPolicy === 'dismiss') await dialog.dismiss()
+    else await dialog.accept()
+  })
+  page.setDefaultTimeout(10000)
+
+  async function fixture(path, method, body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method: method || 'GET',
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    return response.json()
+  }
+  async function setFault(fault) {
+    return fixture('/__fixtures/faults', 'POST', fault)
+  }
+  async function clearFaults() {
+    return fixture('/__fixtures/faults', 'DELETE')
+  }
+  async function requestLog(limit) {
+    const data = await fixture(`/__fixtures/log?limit=${limit || 400}`)
+    return data.requests
+  }
+  async function writesSince(startedAt) {
+    return (await requestLog(400))
+      .filter(entry => new Date(entry.at).getTime() >= startedAt - 50)
+      .filter(entry => entry.method !== 'GET')
+      .filter(entry => !entry.path.startsWith('/__fixtures'))
+      .map(entry => `${entry.method} ${entry.path} -> ${entry.status}`)
+  }
+  async function goto(route, wait) {
+    await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(wait || 1100)
+  }
+  async function applyPrefs(prefs) {
+    await page.evaluate(values => {
+      localStorage.setItem('prompt-ferry:locale', values.locale)
+      localStorage.setItem('prompt-ferry:theme-mode', values.theme)
+    }, prefs)
+  }
+  async function boot(prefs) {
+    await page.context().clearCookies()
+    await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
+    await page.evaluate(() => localStorage.clear())
+    await applyPrefs(prefs)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(400)
+  }
+  async function login(name, password) {
+    await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('textbox', { name: /登录名|login name/i }).fill(name)
+    await page.getByRole('textbox', { name: /密码|password/i }).fill(password)
+    await page.getByRole('button', { name: /^登录$|^log in$|^sign in$/i }).click()
+    await page.waitForTimeout(1300)
+  }
+  async function logout() {
+    await page.getByRole('button', { name: /退出登录|logout/i }).first().click()
+    await page.waitForTimeout(900)
+  }
+  async function capture(name) {
+    await page.waitForTimeout(500)
+    const path = `${shots}/${name}.png`
+    await page.screenshot({ path, fullPage: true })
+    const entry = {
+      name,
+      path,
+      url: page.url().replace(BASE, ''),
+      title: await page.title(),
+      errors: [...consoleErrors],
+      text: (await page.locator('body').innerText()).slice(0, 1200),
+    }
+    evidence.captures.push(entry)
+    consoleErrors.length = 0
+    return entry
+  }
+
+  async function flow(name, fn) {
+    consoleErrors.length = 0
+    const started = Date.now()
+    let error = null
+    try {
+      await fn()
+    } catch (cause) {
+      error = String(cause)
+    }
+    await page.waitForTimeout(500)
+    const writes = await writesSince(started)
+    const result = { name, error, writes, errors: [...consoleErrors] }
+    evidence.mutations.push(result)
+    consoleErrors.length = 0
+    return result
+  }
+
+  function hasWrite(writes, pattern) {
+    return writes.some(entry => pattern.test(entry))
+  }
+
+  async function confirmAction(trigger, accept) {
+    const seenBefore = dialogLog.length
+    dialogPolicy = accept ? 'accept' : 'dismiss'
+    await trigger()
+    await page.waitForTimeout(600)
+    dialogPolicy = 'accept'
+    const dialogSeen = dialogLog.length > seenBefore
+    if (!dialogSeen) {
+      const modal = page.getByRole('dialog').last()
+      if (await modal.isVisible().catch(() => false)) {
+        const button = modal
+          .getByRole('button', {
+            name: accept ? /确认|删除|confirm|delete/i : /取消|cancel/i,
+          })
+          .last()
+        if (await button.count()) await button.click()
+      }
+    }
+    await page.waitForTimeout(700)
+  }
+
+  async function nextPage(pagerIndex) {
+    const pagers = page.getByRole('button', { name: /下一页|next page/i })
+    const count = await pagers.count()
+    const index = pagerIndex === undefined ? 0 : Math.min(pagerIndex, count - 1)
+    const button = pagers.nth(index)
+    if (!(await button.isEnabled().catch(() => false))) return false
+    await button.click()
+    await page.waitForTimeout(1100)
+    return true
+  }
+
+  async function pagination(name, route, pagerIndex, tableIndex) {
+    await goto(route)
+    const table =
+      tableIndex === undefined
+        ? page.locator('table').first()
+        : page.locator('table').nth(tableIndex)
+    const rows = table.locator('tbody tr')
+    const firstRow = await rows.first().innerText().catch(() => '')
+    const before = await rows.count()
+    const moved = await nextPage(pagerIndex)
+    const secondRow = await rows.first().innerText().catch(() => '')
+    const after = await rows.count()
+    await capture(`scenario_pagination_${name}`)
+    evidence.checks.pagination = evidence.checks.pagination || {}
+    evidence.checks.pagination[name] = {
+      moved,
+      before,
+      after,
+      changed: firstRow !== secondRow,
+      advanced: moved && after > 0 && after !== before,
+    }
+  }
+
+  try {
+    const reset = await fixture('/__fixtures/reset', 'POST')
+    if (!reset.reset) throw new Error('fixture reset was refused')
+    const resetSummary = await fixture('/__fixtures/summary')
+    if (resetSummary.aiRecords !== 26 || resetSummary.approvals !== 14) {
+      throw new Error('fixture reset did not restore the seeded state')
+    }
+    await boot({ locale: 'zh-CN', theme: 'dark' })
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await login('admin', 'fixture-password')
+
+    // ----------------------------------------------------------- pagination
+    await pagination('api-keys', '/api-keys')
+    await pagination('available-models', '/available-models')
+    await pagination('users', '/users')
+    await pagination('endpoints-upstreams', '/endpoints/upstreams')
+    await pagination('endpoints-routes', '/endpoints/routes')
+    await pagination('mcp', '/mcp')
+    await pagination('relays', '/relays')
+    await pagination('approvals', '/approvals')
+    await pagination('redaction-rules', '/redaction/rules')
+    await pagination('config-archive', '/settings/config-archive')
+    await pagination('billing-price-rules', '/billing', 99, 99)
+
+    // --------------------------------------------- destructive cancel/delete
+    async function deleteScenario(name, route, options) {
+      const settings = options || {}
+      await flow(name, async () => {
+        await goto(route)
+        const table =
+          settings.tableIndex === undefined
+            ? page.locator('table').first()
+            : page.locator('table').nth(settings.tableIndex)
+        const rows = table.locator('tbody tr')
+        const before = await rows.count()
+        const buttonName = settings.buttonName || /删除|delete/i
+        const row = settings.last ? rows.last() : rows.first()
+        const deleteCount = async () =>
+          (await requestLog(400)).filter(entry => entry.method === 'DELETE').length
+        const deletesBefore = await deleteCount()
+        if (settings.cancelFirst) {
+          await confirmAction(
+            () => row.getByRole('button', { name: buttonName }).first().click(),
+            false,
+          )
+        }
+        const deletesAfterCancel = await deleteCount()
+        await confirmAction(
+          () => row.getByRole('button', { name: buttonName }).first().click(),
+          true,
+        )
+        const deletesAfterConfirm = await deleteCount()
+        const after = await rows.count()
+        evidence.checks.deleteFlows = evidence.checks.deleteFlows || {}
+        evidence.checks.deleteFlows[settings.key || name] = {
+          before,
+          after,
+          cancelIssuedDelete: deletesAfterCancel > deletesBefore,
+          confirmIssuedDelete: deletesAfterConfirm > deletesAfterCancel,
+        }
+        await capture(`scenario_${name}`)
+      })
+    }
+
+    await deleteScenario('api-key-delete-cancel-confirm', '/api-keys', {
+      key: 'apiKey',
+      cancelFirst: true,
+    })
+    await deleteScenario('mcp-delete-cancel-confirm', '/mcp', {
+      key: 'mcp',
+      cancelFirst: true,
+    })
+    await deleteScenario('users-delete', '/users', { key: 'user', last: true })
+    await deleteScenario('endpoint-delete', '/endpoints/upstreams', {
+      key: 'endpoint',
+      last: true,
+    })
+    await deleteScenario('model-route-delete', '/endpoints/routes', {
+      key: 'modelRoute',
+      last: true,
+    })
+    await deleteScenario('relay-delete', '/relays', { key: 'relay', last: true })
+    await flow('billing-price-rule-delete', async () => {
+      await goto('/billing')
+      const deleteCount = async () =>
+        (await requestLog(400)).filter(entry => entry.method === 'DELETE').length
+      const before = await deleteCount()
+      await confirmAction(
+        () => page.getByRole('button', { name: /删除价格版本/ }).last().click(),
+        true,
+      )
+      const after = await deleteCount()
+      evidence.checks.deleteFlows = evidence.checks.deleteFlows || {}
+      evidence.checks.deleteFlows.priceRule = {
+        deleteIssued: after > before,
+      }
+      await capture('scenario_billing_rule_delete')
+    })
+
+    await flow('redaction-delete-cancel-confirm', async () => {
+      await goto('/redaction/rules')
+      const table = page.locator('table').first()
+      const rows = table.locator('tbody tr')
+      const before = await rows.count()
+      const row = rows.first()
+      const deleteCount = async () =>
+        (await requestLog(400)).filter(entry => entry.method === 'DELETE').length
+      await confirmAction(
+        () => row.getByRole('button', { name: /删除/ }).first().click(),
+        false,
+      )
+      await confirmAction(
+        () => row.getByRole('button', { name: /删除/ }).first().click(),
+        true,
+      )
+      await page.getByRole('button', { name: /^保存$|^save$/i }).first().click()
+      await page.waitForTimeout(1000)
+      const writes = await writesSince(Date.now() - 15000)
+      evidence.checks.deleteFlows = evidence.checks.deleteFlows || {}
+      evidence.checks.deleteFlows.redaction = {
+        before,
+        after: await rows.count(),
+        confirmIssuedSave: hasWrite(writes, /PATCH \/api\/v1\/settings\/redaction/),
+        deletes: await deleteCount(),
+      }
+      await capture('scenario_redaction_delete_confirm')
+    })
+
+    // --------------------------------------------------- create and update
+    await flow('user-create-update', async () => {
+      await goto('/users')
+      await page.getByRole('button', { name: '创建用户' }).click()
+      const dialog = page.getByRole('dialog').last()
+      const inputs = dialog.locator('input')
+      await inputs.nth(0).fill('fixture-created-user')
+      await inputs.nth(1).fill('Fixture Created User')
+      await inputs.nth(2).fill('fixture-password')
+      await dialog.getByRole('button', { name: /^创建$|^create$/i }).click()
+      await page.waitForTimeout(1200)
+      const row = page.locator('table tbody tr').first()
+      const display = row.locator('input[placeholder="显示名"]').first()
+      await display.fill('Fixture Created User Renamed')
+      await row.getByRole('button', { name: '保存' }).click()
+      await page.waitForTimeout(1000)
+      await capture('scenario_user_create_update')
+    })
+
+    await flow('endpoint-create', async () => {
+      await goto('/endpoints/upstreams')
+      await page.getByRole('button', { name: /新增上游节点/ }).first().click()
+      const dialog = page.getByRole('dialog').last()
+      await dialog.getByPlaceholder('名称').fill('Fixture Created Upstream')
+      await dialog.getByPlaceholder('基础地址').fill('https://created.example.internal/v1')
+      await dialog.getByRole('button', { name: /保存上游节点/ }).click()
+      await page.waitForTimeout(1300)
+      await capture('scenario_endpoint_create')
+    })
+
+    await flow('model-route-create', async () => {
+      await goto('/endpoints/routes')
+      await page.getByRole('button', { name: /新增模型路由/ }).first().click()
+      const dialog = page.getByRole('dialog').last()
+      await dialog.getByPlaceholder('模型匹配').fill('fixture-created-route*')
+      await dialog.getByRole('button', { name: /新增目标/ }).click()
+      await page.waitForTimeout(400)
+      const combo = dialog.getByRole('combobox').first()
+      await combo.click()
+      await page.waitForTimeout(300)
+      await page.getByRole('option').first().click()
+      await dialog.getByRole('button', { name: /^保存$|^save$/i }).last().click()
+      await page.waitForTimeout(1300)
+      await capture('scenario_model_route_create')
+    })
+
+    await flow('mcp-create', async () => {
+      await goto('/mcp')
+      await page.getByRole('button', { name: /新增 MCP/ }).first().click()
+      const dialog = page.getByRole('dialog').last()
+      await dialog.getByPlaceholder('名称').fill('Fixture Created MCP')
+      await dialog
+        .getByPlaceholder('http://127.0.0.1:3000/mcp')
+        .fill('https://created-mcp.example.internal/mcp')
+      await dialog.getByRole('button', { name: /^保存$|^save$/i }).last().click()
+      await page.waitForTimeout(1200)
+      await capture('scenario_mcp_create')
+    })
+
+    await flow('relay-create-edit-secret', async () => {
+      await goto('/relays')
+      await page.getByRole('button', { name: /新增中继/ }).first().click()
+      let dialog = page.getByRole('dialog').last()
+      await dialog.getByPlaceholder('例如：华东中继 / 公网中继').fill('Fixture Created Relay')
+      await dialog
+        .getByPlaceholder('wss://relay.example.com/ws/worker')
+        .fill('wss://created-relay.example.internal:9443/bridge')
+      await dialog.getByRole('button', { name: /^保存$|^save$/i }).last().click()
+      await page.waitForTimeout(1200)
+      const row = page.locator('table tbody tr').first()
+      await row.getByRole('button', { name: '编辑' }).click()
+      await page.waitForTimeout(500)
+      dialog = page.getByRole('dialog').last()
+      const nameInput = dialog.getByPlaceholder('例如：华东中继 / 公网中继')
+      await nameInput.fill('Fixture Created Relay Renamed')
+      // The edit dialog keeps every stored secret unless its mode is changed;
+      // saving the renamed relay proves the keep path.
+      await dialog.getByRole('button', { name: /保存|save/i }).last().click()
+      await page.waitForTimeout(1200)
+      await capture('scenario_relay_create_edit_secret')
+    })
+
+    await flow('billing-price-rule-create-update', async () => {
+      await goto('/billing')
+      await page.getByRole('button', { name: /新增价格版本/ }).first().click()
+      let dialog = page.getByRole('dialog').last()
+      const inputs = dialog.locator('input')
+      await inputs.nth(1).fill('fixture-created-model')
+      await inputs.nth(2).fill('1.5')
+      await inputs.nth(3).fill('0.5')
+      await inputs.nth(4).fill('0.6')
+      await inputs.nth(5).fill('2.5')
+      await dialog.getByRole('button', { name: /^保存$|^save$/i }).last().click()
+      await page.waitForTimeout(1200)
+      await page.getByRole('button', { name: /编辑价格版本/ }).first().click()
+      await page.waitForTimeout(500)
+      dialog = page.getByRole('dialog').last()
+      const rates = dialog.locator('input')
+      await rates.nth(2).fill('1.75')
+      await dialog.getByRole('button', { name: /^保存$|^save$/i }).last().click()
+      await page.waitForTimeout(1200)
+      await capture('scenario_billing_rule_create_update')
+    })
+
+    // ---------------------------------------------------------- CSV export
+    await flow('billing-csv-download', async () => {
+      await goto('/billing')
+      const details = page
+        .waitForEvent('download', { timeout: 15000 })
+        .catch(() => null)
+      await page.getByRole('button', { name: /导出明细 CSV/ }).click()
+      const detailsFile = await details
+      if (detailsFile) await detailsFile.saveAs(`${downloads}/billing-details.csv`)
+      const monthly = page
+        .waitForEvent('download', { timeout: 15000 })
+        .catch(() => null)
+      await page.getByRole('button', { name: /导出月度 CSV/ }).click()
+      const monthlyFile = await monthly
+      if (monthlyFile) await monthlyFile.saveAs(`${downloads}/billing-monthly.csv`)
+      evidence.checks.csvDownloads = {
+        details: detailsFile ? detailsFile.suggestedFilename() : null,
+        monthly: monthlyFile ? monthlyFile.suggestedFilename() : null,
+      }
+      await capture('scenario_billing_csv')
+    })
+
+    // ------------------------------------------------------------ approvals
+    await flow('approval-reject-resolved-filter', async () => {
+      await goto('/approvals')
+      await page.getByRole('button', { name: /查看详情/ }).first().click()
+      await page.waitForTimeout(500)
+      const dialog = page.getByRole('dialog').last()
+      await dialog.getByRole('button', { name: /^拒绝$|^reject$/i }).click()
+      await page.waitForTimeout(1100)
+      await page.keyboard.press('Escape').catch(() => {})
+      await page.waitForTimeout(500)
+      const filter = page.getByRole('combobox').first()
+      await filter.click()
+      await page.waitForTimeout(300)
+      await page.getByRole('option', { name: /已处理|resolved/i }).first().click()
+      await page.waitForTimeout(1100)
+      evidence.checks.approvals = {
+        resolvedRows: await page.locator('table tbody tr').count(),
+      }
+      await capture('scenario_approval_reject_resolved')
+    })
+
+    // ------------------------------------------------------ settings saves
+    async function saveSetting(name, route, prepare) {
+      await goto(route)
+      const started = Date.now()
+      await prepare()
+      const save = page.getByRole('button', { name: /^保存$|^save$/i }).first()
+      const hadSave = await save.count()
+      if (hadSave) await save.click()
+      await page.waitForTimeout(1100)
+      const writes = await writesSince(started)
+      evidence.checks.settingsSaves = evidence.checks.settingsSaves || {}
+      evidence.checks.settingsSaves[name] = {
+        writes,
+        saved: hasWrite(writes, /(PATCH|PUT) \/api\/v1\/settings\//),
+      }
+      await capture(`scenario_settings_${name}`)
+    }
+
+    await saveSetting('network', '/settings/network', async () => {
+      await page.locator('textarea').first().fill('10.1.0.0/16\n192.168.0.0/16')
+    })
+    await saveSetting('review', '/settings/review', async () => {
+      await page.locator('input[placeholder="gpt-4.1-mini"]').fill('fixture-review-model')
+    })
+    await saveSetting('storage', '/settings/storage', async () => {
+      await page
+        .locator('input[placeholder="/var/lib/prompt-ferry/raw"]')
+        .fill('/var/lib/prompt-ferry/raw-fixture')
+    })
+    await saveSetting('cache-alert', '/settings/cache-alert', async () => {
+      await page.locator('input[type=password]').fill('fixture-dingtalk-secret')
+    })
+    await saveSetting('requests', '/settings/requests', async () => {
+      await page.getByRole('button', { name: '增加' }).first().click()
+    })
+
+    await flow('settings-network-failure-draft', async () => {
+      await goto('/settings/network')
+      await setFault({
+        pathPrefix: '/api/v1/settings/relay-ip-whitelist',
+        method: 'PATCH',
+        status: 500,
+        code: 'fixture_settings_failed',
+        message: 'fixture settings write failed',
+        count: 1,
+      })
+      const textarea = page.locator('textarea').first()
+      await textarea.fill('10.9.0.0/16')
+      await page.getByRole('button', { name: /^保存$|^save$/i }).first().click()
+      await page.waitForTimeout(1200)
+      evidence.checks.settingsSaves.networkFailure = {
+        draft: await textarea.inputValue(),
+        errorVisible: /fixture_settings_failed|failed/i.test(
+          await page.locator('body').innerText(),
+        ),
+      }
+      await capture('scenario_settings_network_failure')
+      await clearFaults()
+    })
+
+    // -------------------------------------------------- usage records flows
+    async function recordsMode() {
+      await goto('/request-records/ai')
+      await page.locator('button[aria-label="记录"]:visible').first().click()
+      await page.waitForTimeout(1300)
+      const firstPage = page
+        .getByRole('button', { name: /第 1 页|page 1/i })
+        .first()
+      if ((await firstPage.count()) && (await firstPage.isEnabled().catch(() => false))) {
+        await firstPage.click()
+        await page.waitForTimeout(1100)
+      }
+    }
+
+    await flow('usage-records-sort-filter-pagination', async () => {
+      await recordsMode()
+      const firstBefore = await page
+        .locator('table tbody tr')
+        .first()
+        .innerText()
+      const tokenHeader = page.locator('table th', { hasText: /Token/i }).first()
+      const sortBefore = (await tokenHeader.getAttribute('aria-sort').catch(() => null)) ?? 'none'
+      if (await tokenHeader.count()) await tokenHeader.click()
+      await page.waitForTimeout(1100)
+      const sortAfter = (await tokenHeader.getAttribute('aria-sort').catch(() => null)) ?? 'none'
+      await page.waitForTimeout(1100)
+      const firstAfterSort = await page
+        .locator('table tbody tr')
+        .first()
+        .innerText()
+      const search = page
+        .locator('input[placeholder*="搜索"]')
+        .first()
+      await search.fill('minimax')
+      await search.press('Enter')
+      await page.waitForTimeout(1100)
+      const filteredRows = await page.locator('table tbody tr').count()
+      await search.fill('')
+      await search.press('Enter')
+      await page.waitForTimeout(1100)
+      const moved = await nextPage()
+      const pageTwoRows = await page.locator('table tbody tr').count()
+      evidence.checks.usageRecords = {
+        sortChanged: firstBefore !== firstAfterSort || sortBefore !== sortAfter,
+        sortBefore,
+        sortAfter,
+        filteredRows,
+        moved,
+        pageTwoRows,
+      }
+      await capture('scenario_usage_records_sort_filter_pagination')
+    })
+
+    await flow('usage-records-stale-search', async () => {
+      await recordsMode()
+      await setFault({
+        pathPrefix: '/api/v1/admin/request-records',
+        method: 'GET',
+        status: 200,
+        delayMs: 1200,
+        count: 1,
+      })
+      const search = page.locator('input[placeholder*="搜索"]').first()
+      await search.fill('zzz-no-match')
+      await search.press('Enter')
+      await page.waitForTimeout(120)
+      await search.fill('minimax')
+      await search.press('Enter')
+      await page.waitForTimeout(1800)
+      const rows = await page.locator('table tbody tr').count()
+      evidence.checks.staleSearch = {
+        rows,
+        discardedSlowResponse: rows > 0,
+        value: await search.inputValue(),
+      }
+      await capture('scenario_usage_stale_search')
+      await clearFaults()
+    })
+
+    await flow('usage-detail-override-and-stale-detail', async () => {
+      await recordsMode()
+      await setFault({
+        pathPrefix: '/api/v1/admin/request-records/',
+        method: 'GET',
+        status: 200,
+        delayMs: 1300,
+        count: 1,
+      })
+      await page.getByRole('button', { name: /查看详情|view details/i }).first().click()
+      await page.waitForTimeout(150)
+      await page.keyboard.press('Escape')
+      await page.getByRole('button', { name: /查看详情|view details/i }).nth(1).click()
+      await page.waitForTimeout(2000)
+      const dialog = page.getByRole('dialog').last()
+      const text = await dialog.innerText()
+      const endpointCombo = dialog.getByRole('combobox').first()
+      await endpointCombo.click()
+      await page.waitForTimeout(300)
+      const option = page.getByRole('option').first()
+      if (await option.count()) await option.click()
+      await page.waitForTimeout(400)
+      const keyCombo = dialog.getByRole('combobox').nth(1)
+      if (await keyCombo.count()) {
+        await keyCombo.click()
+        await page.waitForTimeout(300)
+        const keyOption = page.getByRole('option').first()
+        if (await keyOption.count()) await keyOption.click()
+        await page.waitForTimeout(300)
+      }
+      const saveRoute = dialog.getByRole('button', { name: /保存指定路由|save route/i })
+      const clearRoute = dialog.getByRole('button', { name: /清除指定路由|clear route/i })
+      const resetAffinity = dialog.getByRole('button', {
+        name: /重置会话绑定|reset affinity/i,
+      })
+      const states = {
+        saveEnabled: await saveRoute.isEnabled().catch(() => false),
+        clearEnabled: await clearRoute.isEnabled().catch(() => false),
+        resetEnabled: await resetAffinity.isEnabled().catch(() => false),
+      }
+      if (states.saveEnabled) await saveRoute.click()
+      await page.waitForTimeout(1000)
+      states.clearEnabledAfterSave = await clearRoute.isEnabled().catch(() => false)
+      if (states.clearEnabledAfterSave) await clearRoute.click()
+      await page.waitForTimeout(800)
+      if (states.resetEnabled) await resetAffinity.click()
+      await page.waitForTimeout(800)
+      evidence.checks.detailOverride = states
+      evidence.checks.staleDetail = {
+        showedSecondRecord: /conversation-25/.test(text) && !/conversation-26/.test(text),
+      }
+      await capture('scenario_usage_detail_override')
+      await clearFaults()
+    })
+
+    await flow('usage-clear-cancel-confirm', async () => {
+      await recordsMode()
+      const clearButton = page
+        .getByRole('button', { name: /清除历史|clear history/i })
+        .first()
+      await clearButton.click()
+      await page.waitForTimeout(500)
+      let dialog = page.getByRole('dialog').last()
+      const cancelled = await dialog.isVisible().catch(() => false)
+      if (cancelled) {
+        await dialog.getByRole('button', { name: /取消|cancel/i }).last().click()
+        await page.waitForTimeout(500)
+      }
+      await clearButton.click()
+      await page.waitForTimeout(500)
+      dialog = page.getByRole('dialog').last()
+      if (await dialog.isVisible().catch(() => false)) {
+        await dialog.getByRole('button').last().click()
+        await page.waitForTimeout(1200)
+      }
+      evidence.checks.clearHistory = {
+        dialogOpened: cancelled,
+      }
+      await capture('scenario_usage_clear')
+    })
+
+    // ------------------------------------------------------ redaction flows
+    await flow('redaction-add-edit-save', async () => {
+      await goto('/redaction/rules')
+      await page.getByRole('button', { name: '新增规则' }).click()
+      await page.waitForTimeout(500)
+      const patternInputs = page.locator('input[type=text]')
+      await patternInputs.nth(1).fill('fixture-added-rule')
+      await page.getByRole('button', { name: /^保存$|^save$/i }).first().click()
+      await page.waitForTimeout(1100)
+      const firstRule = page.locator('input[type=password]').first()
+      await firstRule.fill('fixture-edited-rule')
+      await page.getByRole('button', { name: /^保存$|^save$/i }).first().click()
+      await page.waitForTimeout(1100)
+      await capture('scenario_redaction_add_edit')
+    })
+
+    await flow('redaction-preview-and-stale', async () => {
+      await goto('/redaction/preview')
+      const textarea = page.locator('textarea').first()
+      await textarea.fill('contact alpha@example.com and sk_fixture_AAA')
+      await page.getByRole('button', { name: /^预览$|^preview$/i }).last().click()
+      await page.waitForTimeout(1200)
+      const resultText = await page.locator('body').innerText()
+      await setFault({
+        pathPrefix: '/api/v1/settings/redaction/preview',
+        method: 'POST',
+        status: 200,
+        delayMs: 1200,
+        count: 1,
+      })
+      await textarea.fill('sk_fixture_SLOW')
+      await page.getByRole('button', { name: /^预览$|^preview$/i }).last().click()
+      await page.waitForTimeout(120)
+      await textarea.fill('plain fixture text without secrets')
+      await page.getByRole('button', { name: /^预览$|^preview$/i }).last().click()
+      await page.waitForTimeout(1800)
+      const staleText = await page.locator('body').innerText()
+      evidence.checks.redactionPreview = {
+        replacedEmail: /\[EMAIL\]/.test(resultText),
+        replacedSecret: /\[SECRET\]/.test(resultText),
+        staleDiscarded: !/\[SECRET\]/.test(staleText),
+      }
+      await capture('scenario_redaction_preview')
+      await clearFaults()
+    })
+
+    // -------------------------------------------------------- config archive
+    await flow('archive-import-preview-apply-failure', async () => {
+      await goto('/settings/config-archive')
+      await page
+        .locator('input[type=file]')
+        .first()
+        .setInputFiles('e2e/baseline/fixtures/fixture.pfce')
+      await page.waitForTimeout(900)
+      const passphrase = page.locator('input[type=password]').nth(1)
+      const previewButton = page.getByRole('button', { name: /预览变更/ })
+      const disabledBeforePassphrase = !(await previewButton.isEnabled())
+      await setFault({
+        pathPrefix: '/api/v1/admin/config-import/preview',
+        method: 'POST',
+        status: 500,
+        code: 'fixture_import_failed',
+        message: 'fixture import preview failed',
+        count: 1,
+      })
+      await passphrase.fill('fixture-passphrase')
+      await page.waitForTimeout(900)
+      const enabledBeforeFailure = await previewButton.isEnabled()
+      await previewButton.click()
+      await page.waitForTimeout(1200)
+      const failureText = await page.locator('body').innerText()
+      await clearFaults()
+      const passphraseClearedAfterFailure = (await passphrase.inputValue()) === ''
+      await passphrase.fill('fixture-passphrase')
+      await page.waitForTimeout(500)
+      await previewButton.click()
+      await page.waitForTimeout(1200)
+      const previewText = await page.locator('body').innerText()
+      await page.getByRole('button', { name: /应用导入/ }).click()
+      await page.waitForTimeout(1400)
+      evidence.checks.archiveImport = {
+        disabledBeforePassphrase,
+        enabledBeforeFailure,
+        passphraseClearedAfterFailure,
+        fileRetained: /fixture\.pfce/.test(failureText),
+        failureVisible: /fixture_import_failed|failed/i.test(failureText),
+        previewVisible: /target|目标记录|新增|updates|更新/i.test(previewText),
+        passphraseRetained: (await passphrase.inputValue()) === 'fixture-passphrase',
+      }
+      await capture('scenario_archive_import')
+    })
+
+    await flow('archive-export-failure-draft', async () => {
+      await goto('/settings/config-archive')
+      await setFault({
+        pathPrefix: '/api/v1/admin/config-export',
+        method: 'POST',
+        status: 500,
+        code: 'fixture_export_failed',
+        message: 'fixture export failed',
+        count: 1,
+      })
+      const passphrase = page.locator('input[type=password]').first()
+      await passphrase.fill('fixture-export-passphrase')
+      await page.getByRole('button', { name: /导出并下载/ }).click()
+      await page.waitForTimeout(1200)
+      evidence.checks.archiveExportFailure = {
+        passphraseAfterFailure: await passphrase.inputValue(),
+        clearedOnFailure: (await passphrase.inputValue()) === '',
+        errorVisible: /fixture_export_failed|failed/i.test(
+          await page.locator('body').innerText(),
+        ),
+      }
+      await capture('scenario_archive_export_failure')
+      await clearFaults()
+    })
+
+    // ------------------------------------------------------------ relay host
+    await logout()
+    await page.context().clearCookies({ name: 'pf_fixture_relay' })
+    await goto('/relay-host', 900)
+    await page.locator('input[type=password]').first().fill('relay-fixture-token')
+    await page.getByRole('button', { name: /^登录$|^log in$/i }).first().click()
+    await page.waitForTimeout(1400)
+
+    await flow('relay-host-role-failure', async () => {
+      await setFault({
+        pathPrefix: '/api/v1/relay/host/role',
+        method: 'PUT',
+        status: 500,
+        code: 'fixture_role_failed',
+        message: 'fixture role write failed',
+        count: 1,
+      })
+      await page.getByRole('button', { name: /使用该模式|use this mode/i }).first().click()
+      await page.waitForTimeout(1200)
+      evidence.checks.relayHostFailure = {
+        errorVisible: /fixture_role_failed|failed|失败/i.test(
+          await page.locator('body').innerText(),
+        ),
+        roleStillIntegrated: /integrated/.test(await page.locator('body').innerText()),
+      }
+      await capture('scenario_relay_host_role_failure')
+      await clearFaults()
+    })
+
+    await flow('relay-host-settings-failure-draft', async () => {
+      await setFault({
+        pathPrefix: '/api/v1/relay/settings',
+        method: 'PATCH',
+        status: 500,
+        code: 'fixture_relay_settings_failed',
+        message: 'fixture relay settings failed',
+        count: 1,
+      })
+      const bindInput = page.locator('input[type=text]').first()
+      await bindInput.fill('127.0.0.1:9555')
+      await page.getByRole('button', { name: /^保存$|^save$/i }).first().click()
+      await page.waitForTimeout(1200)
+      evidence.checks.relayHostFailure.settingsDraft = await bindInput.inputValue()
+      await capture('scenario_relay_host_settings_failure')
+      await clearFaults()
+    })
+
+    evidence.checks.dialogsSeen = dialogLog.slice(0, 20)
+    evidence.finishedAt = new Date().toISOString()
+    evidence.requestLog = (await requestLog(400)).slice(-100)
+    return JSON.stringify(evidence)
+  } catch (cause) {
+    evidence.failedAt = new Date().toISOString()
+    evidence.failure = String(cause)
+    return JSON.stringify(evidence)
+  }
+}

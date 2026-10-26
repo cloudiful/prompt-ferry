@@ -1,0 +1,76 @@
+{
+  "startedAt": "2026-10-25T13:43:58.155Z",
+  "checks": {
+    "responsiveContainment": [
+      {
+        "width": 1440,
+        "documentWidth": 1440,
+        "contained": true,
+        "endpointVisible": true
+      },
+      {
+        "width": 1024,
+        "documentWidth": 1024,
+        "contained": true,
+        "endpointVisible": true
+      },
+      {
+        "width": 768,
+        "documentWidth": 768,
+        "contained": true,
+        "endpointVisible": true
+      },
+      {
+        "width": 390,
+        "documentWidth": 390,
+        "contained": true,
+        "endpointVisible": true
+      }
+    ],
+    "localeThemeRendering": {
+      "zhDark": {
+        "lang": "zh-CN",
+        "dark": true,
+        "colorScheme": "dark"
+      },
+      "enLight": {
+        "lang": "en-US",
+        "dark": false,
+        "colorScheme": "light",
+        "timeZone": "UTC"
+      }
+    },
+    "quotaStale": {
+      "staleLabelsVisible": true,
+      "staleNumbersRetained": true,
+      "freshLabelsCleared": true
+    },
+    "expectedApiFailures": [
+      "503 GET /api/v1/admin/endpoints",
+      "503 POST /api/v1/admin/endpoints",
+      "503 PATCH /api/v1/admin/endpoints/ep-1002",
+      "500 GET /api/v1/admin/endpoints/ep-minimax-cn/quota-observations",
+      "500 POST /api/v1/admin/endpoints/ep-openai-codex/oauth/refresh",
+      "500 POST /api/v1/admin/endpoints/ep-openai-codex/oauth/device",
+      "500 POST /api/v1/admin/endpoints/ep-openai-codex/oauth/browser",
+      "503 POST /api/v1/admin/endpoints/ep-openai-codex/oauth/browser/complete"
+    ],
+    "apiFailures": [],
+    "syntheticSecretSafety": {
+      "reportRedacted": true,
+      "endpointLedgerRedacted": true,
+      "oauthBodyNotRecorded": true
+    },
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/endpoints-en-light-1024.png",
+    "e2e/foundation/screenshots/endpoints-en-light-768.png",
+    "e2e/foundation/screenshots/endpoints-en-light-390.png",
+    "e2e/foundation/screenshots/endpoints-zh-dark-1440.png",
+    "e2e/foundation/screenshots/endpoints-en-light-1440-final.png",
+    "e2e/foundation/screenshots/endpoints-quota-fresh-en-light-1440.png"
+  ],
+  "finishedAt": "2026-10-25T13:44:00.291Z"
+}

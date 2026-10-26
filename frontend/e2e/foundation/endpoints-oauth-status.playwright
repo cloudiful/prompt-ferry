@@ -1,0 +1,112 @@
+async page => {
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const report = { startedAt: new Date().toISOString(), checks: {}, screenshots: [] }
+  function assert(condition, message) {
+    if (!condition) throw new Error(message)
+  }
+  const consoleErrors = []
+  const pageErrors = []
+  page.setDefaultTimeout(7000)
+  const onConsole = message => {
+    if (message.type() === 'error' && !/(?:status of )?(?:401|500|503)\b/.test(message.text())) consoleErrors.push(message.text())
+  }
+  const onPageError = error => pageErrors.push(error.message)
+  page.on('console', onConsole)
+  page.on('pageerror', onPageError)
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  async function waitForResponse(method, pathname, status) {
+    return page.waitForResponse(response => response.request().method() === method && new URL(response.url()).pathname === pathname && response.status() === status, { timeout: 7000 })
+  }
+
+  async function openEdit(endpointId) {
+    await page.locator(`[data-endpoint-row="${endpointId}"]`).getByRole('button', { name: 'Edit', exact: true }).click()
+    const dialog = page.getByRole('dialog').last()
+    await dialog.waitFor({ state: 'visible' })
+    return dialog
+  }
+
+  let dialog = await openEdit('ep-openai-codex')
+  await dialog.getByText('Logged in', { exact: true }).waitFor({ state: 'visible' })
+  const refreshFailure = await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/endpoints/ep-openai-codex/oauth/refresh',
+    method: 'POST',
+    status: 500,
+    code: 'fixture_oauth_refresh_unavailable',
+    message: 'fixture oauth refresh failure',
+    delayMs: 500,
+  })
+  const failedRefresh = waitForResponse('POST', '/api/v1/admin/endpoints/ep-openai-codex/oauth/refresh', 500)
+  await dialog.getByRole('button', { name: 'Refresh credential', exact: true }).click()
+  const refreshSaveDisabled = await dialog.getByRole('button', { name: 'Save endpoint', exact: true }).isDisabled()
+  const refreshCancelDisabled = await dialog.getByRole('button', { name: 'Cancel', exact: true }).isDisabled()
+  const rowSwitchDisabled = await page.locator('[data-endpoint-row="ep-openai-codex"] [role="switch"]').isDisabled()
+  await failedRefresh
+  const refreshErrorText = await dialog.locator('p.text-destructive').first().innerText()
+  assert(refreshSaveDisabled && refreshCancelDisabled && rowSwitchDisabled, 'OAuth refresh did not share the endpoint write guard')
+  assert(refreshErrorText.length > 0, 'OAuth refresh failure did not remain visible')
+  const successfulRefresh = waitForResponse('POST', '/api/v1/admin/endpoints/ep-openai-codex/oauth/refresh', 200)
+  await dialog.getByRole('button', { name: 'Refresh credential', exact: true }).click()
+  await successfulRefresh
+  await dialog.getByText('Logged in', { exact: true }).waitFor({ state: 'visible' })
+  const refreshStatuses = (await fixture('/__fixtures/log?limit=500')).requests.filter(request => request.path === '/api/v1/admin/endpoints/ep-openai-codex/oauth/refresh').map(request => request.status)
+  assert(JSON.stringify(refreshStatuses) === JSON.stringify([500, 200]), `OAuth refresh retry statuses were ${JSON.stringify(refreshStatuses)}`)
+
+  await dialog.getByRole('button', { name: 'Clear credential', exact: true }).click()
+  await dialog.getByText('Not logged in', { exact: true }).waitFor({ state: 'visible' })
+  await dialog.getByLabel('Upstream plan').click()
+  const subscriptionOption = page.getByRole('option', { name: 'ChatGPT Plus/Pro subscription', exact: true })
+  const subscriptionPlanDisabledWithoutOAuth = await subscriptionOption.isDisabled()
+  assert(subscriptionPlanDisabledWithoutOAuth, 'OpenAI subscription plan remained selectable without OAuth')
+  await page.keyboard.press('Escape')
+  const adminApiKeyFieldAbsent = await dialog.getByLabel('Admin API key').count() === 0
+  assert(adminApiKeyFieldAbsent, 'mapper-only Admin API key appeared as a UI field')
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  const listRefresh = waitForResponse('GET', '/api/v1/admin/endpoints', 200)
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await listRefresh
+  await page.locator('[data-endpoint-row="ep-openai-codex"]').getByRole('button', { name: 'Token plan usage', exact: true }).waitFor({ state: 'detached' })
+  const keylessQuotaActionCount = await page.locator('[data-endpoint-row="ep-openai-codex"]').getByRole('button', { name: 'Token plan usage', exact: true }).count()
+  assert(keylessQuotaActionCount === 0, 'OpenAI without OAuth token remained quota-eligible')
+
+  dialog = await openEdit('ep-openai-codex')
+  await dialog.getByText('Not logged in', { exact: true }).waitFor({ state: 'visible' })
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/endpoints/ep-openai-codex/oauth/device',
+    method: 'POST',
+    status: 500,
+    code: 'fixture_oauth_device_unavailable',
+    message: 'fixture device start failure',
+  })
+  const deviceFailure = waitForResponse('POST', '/api/v1/admin/endpoints/ep-openai-codex/oauth/device', 500)
+  await dialog.getByRole('button', { name: 'Start login', exact: true }).click()
+  await deviceFailure
+  const deviceError = await dialog.locator('p.text-destructive').first().innerText()
+  assert(deviceError.length > 0, 'device flow start failure was not rendered')
+  const deviceStart = waitForResponse('POST', '/api/v1/admin/endpoints/ep-openai-codex/oauth/device', 200)
+  await dialog.getByRole('button', { name: 'Start login', exact: true }).click()
+  await deviceStart
+  await dialog.getByText('FIXTURE-CODE', { exact: true }).waitFor({ state: 'visible' })
+  const pollsBeforeClose = (await fixture('/__fixtures/log?limit=500')).requests.filter(request => request.path.endsWith('/oauth/device/poll')).length
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await page.waitForTimeout(1100)
+  const pollsAfterClose = (await fixture('/__fixtures/log?limit=500')).requests.filter(request => request.path.endsWith('/oauth/device/poll')).length
+  assert(pollsBeforeClose === pollsAfterClose, 'idle device flow continued polling after dialog close')
+  report.checks.oauthStatusAndStartFailures = { refreshStatuses, refreshGuarded: refreshSaveDisabled && refreshCancelDisabled && rowSwitchDisabled, refreshErrorVisible: true, subscriptionPlanDisabledWithoutOAuth, adminApiKeyFieldAbsent, noTokenQuotaAction: keylessQuotaActionCount === 0, deviceStartFailureVisible: true, idlePollCancellation: pollsBeforeClose === pollsAfterClose }
+  report.checks.consoleErrors = consoleErrors
+  report.checks.pageErrors = pageErrors
+  assert(pageErrors.length === 0, `browser page errors: ${JSON.stringify(pageErrors)}`)
+  page.off('console', onConsole)
+  page.off('pageerror', onPageError)
+  report.finishedAt = new Date().toISOString()
+  return report
+}

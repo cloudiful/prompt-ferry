@@ -1,0 +1,94 @@
+async page => {
+  const base = 'http://127.0.0.1:5171'
+  const control = 'http://127.0.0.1:8789'
+  const result = { startedAt: new Date().toISOString(), checks: {}, failures: [], captures: [] }
+  page.setDefaultTimeout(8000)
+  page.removeAllListeners('dialog')
+  page.on('dialog', async d => d.accept())
+  const api = async (path, body) => (await fetch(control + path, { method: body ? 'POST' : 'GET', headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })).json()
+  const log = async () => (await api('/__fixtures/log?limit=500')).requests
+  const since = async t => (await log()).filter(r => Date.parse(r.at) >= t)
+  const visit = async path => { await page.goto(base + path); await page.waitForTimeout(1000) }
+  const run = async (name, fn) => { try { await fn() } catch(error) { result.failures.push({ name, error: String(error) }) } }
+  const shot = async name => {
+    const path = `e2e/baseline/screenshots/advanced4_${name}.png`
+    await page.screenshot({ path, fullPage: true })
+    result.captures.push({ name, path })
+  }
+  const editSubscription = async () => {
+    await visit('/endpoints/upstreams')
+    await page.locator('table tbody tr').filter({ hasText: 'OpenAI ChatGPT Subscription' }).getByRole('button', { name: '编辑', exact: true }).click()
+    await page.waitForTimeout(400)
+    return page.getByRole('dialog').last()
+  }
+  await api('/__fixtures/reset', {})
+  await page.context().clearCookies()
+  await visit('/login')
+  await page.evaluate(() => { localStorage.clear(); localStorage.setItem('prompt-ferry:locale', 'zh-CN') })
+  await page.reload()
+  await page.getByRole('textbox', { name: /登录名/ }).fill('admin')
+  await page.getByRole('textbox', { name: /密码/ }).fill('fixture-password')
+  await page.getByRole('button', { name: '登录', exact: true }).click()
+  await page.waitForTimeout(1100)
+
+  await run('oauth', async () => {
+    const d = await editSubscription()
+    let t = Date.now()
+    await d.getByRole('button', { name: '刷新凭据', exact: true }).click()
+    await page.waitForTimeout(700)
+    const refresh = await since(t)
+    await api('/__fixtures/faults', { pathPrefix: '/api/v1/admin/endpoints/ep-openai-codex/oauth/refresh', method: 'POST', status: 500, count: 1 })
+    t = Date.now()
+    await d.getByRole('button', { name: '刷新凭据', exact: true }).click()
+    await page.waitForTimeout(700)
+    result.checks.oauthFailure = { requests: await since(t), dialogRetained: await d.isVisible() }
+    await d.getByRole('button', { name: '刷新凭据', exact: true }).click()
+    await page.waitForTimeout(700)
+    await d.getByRole('button', { name: '清除凭据', exact: true }).click()
+    await page.waitForTimeout(700)
+    t = Date.now()
+    await d.getByRole('button', { name: '开始登录', exact: true }).click()
+    await page.waitForTimeout(5500)
+    const device = await since(t)
+    const completeText = await d.innerText()
+    await d.getByRole('button', { name: '清除凭据', exact: true }).click()
+    await page.waitForTimeout(700)
+    t = Date.now()
+    await d.getByRole('button', { name: '获取授权链接', exact: true }).click()
+    await page.waitForTimeout(500)
+    await d.locator('#endpoint-oauth-redirect').fill('http://127.0.0.1:1455/auth/callback?code=fixture-only&state=fixture')
+    await d.getByRole('button', { name: '完成登录', exact: true }).click()
+    await page.waitForTimeout(1000)
+    const browser = await since(t)
+    result.checks.oauth = { refresh, device, browser, deviceComplete: completeText.includes('已登录'), browserComplete: (await d.innerText()).includes('已登录') }
+    await shot('oauth_complete')
+  })
+
+  await run('quota', async () => {
+    await visit('/endpoints/upstreams')
+    const row = page.locator('table tbody tr').filter({ hasText: 'MiniMax Platform China Production' })
+    const t = Date.now()
+    await row.getByRole('button', { name: '套餐用量', exact: true }).click()
+    await page.waitForTimeout(1000)
+    const d = page.getByRole('dialog').last()
+    result.checks.quota = { requests: await since(t), text: (await d.innerText()).slice(0, 2500), buttons: await d.getByRole('button').allTextContents() }
+    await shot('quota')
+    const historyStamp = Date.now()
+    await d.getByRole('button', { name: '按键额度历史', exact: true }).click()
+    await page.waitForTimeout(1000)
+    result.checks.quota.history = { requests: await since(historyStamp), text: (await page.getByRole('dialog').last().innerText()).slice(0, 1200) }
+    await shot('quota_history')
+  })
+
+  await run('models-empty', async () => {
+    await page.context().route('**/api/v1/me/models?**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ first: 0, rows: 10, models: [], total: 0 }) }))
+    await visit('/available-models')
+    await page.getByText('没有数据', { exact: true }).waitFor({ state: 'visible' })
+    result.checks.emptyModels = { text: await page.locator('body').innerText(), rowCount: await page.locator('table tbody tr').count() }
+    if (!result.checks.emptyModels.text.includes('没有数据') || result.checks.emptyModels.rowCount !== 1) throw new Error('empty model state did not render')
+    await shot('empty_models')
+    await page.context().unroute('**/api/v1/me/models?**')
+  })
+  result.finishedAt = new Date().toISOString()
+  return JSON.stringify(result)
+}

@@ -1,0 +1,331 @@
+{
+  "runId": "endpoints-routes-1793010932481",
+  "startedAt": "2026-10-26T10:35:32.481Z",
+  "checks": {
+    "adminDenial": {
+      "redirectedToApiKeys": true,
+      "hiddenNavigation": true,
+      "adminApiCalls": 0
+    },
+    "scenarioCoverage": {
+      "admin-denial": true,
+      "route-render": true,
+      "dialog-open": true,
+      "mutation-update": true,
+      "mutation-conflict-guard": true,
+      "mutation-toggle": true,
+      "mutation-create": true,
+      "mutation-delete": true,
+      "long-values": true
+    },
+    "routeAndNavigation": {
+      "routeId": "R-ENDPOINTS-ROUTES",
+      "navigationVisible": true,
+      "first": 0,
+      "rows": 10,
+      "rowCount": 10
+    },
+    "allEndpointResolution": {
+      "query": {
+        "first": "0",
+        "rows": "200"
+      },
+      "offPageTargetId": "ep-fixture-8",
+      "targetSelectable": true
+    },
+    "pagination": {
+      "initialRows": 10,
+      "pageSize20Rows": 12,
+      "independentQueryRows": "20",
+      "pageSizePersistence": true
+    },
+    "catalogBehavior": {
+      "offPageCatalogFetched": true,
+      "endpointId": "ep-fixture-8",
+      "effectiveAutoProtocol": null,
+      "concurrentIdenticalRequests": true,
+      "successfulCacheHit": true
+    },
+    "targetSettingsAndOrdering": {
+      "keyboardOrderMoved": true,
+      "dragOrderRestoredAssociation": true,
+      "targetCount": 5,
+      "duplicateEndpointIdsPreserved": true,
+      "dimensionValid": true,
+      "scheduleDays": [1, 2, 3, 4, 5]
+    },
+    "mutationUpdate": {
+      "status": 200,
+      "orderedTargets": [
+        "ep-fixture-8",
+        "ep-fixture-8",
+        "ep-fixture-10",
+        "ep-fixture-9",
+        "ep-fixture-9"
+      ],
+      "preservedLongModel": true
+    },
+    "targetSettingsRoundtrip": {
+      "pattern": true,
+      "orderedModels": true,
+      "proxyKeep": true,
+      "overnightWeekdays": true,
+      "chatSettings": true,
+      "embeddingDimensions": 1536,
+      "chatHiddenForEmbeddings": true
+    },
+    "proxyClear": true,
+    "embeddingDimensionNullRoundtrip": {
+      "requestStatus": 200,
+      "targetIndex": 2,
+      "inputBeforeSave": "",
+      "payloadValue": null,
+      "reopenedInputValue": ""
+    },
+    "catalogRace": {
+      "requestQueries": [
+        "?native_api=anthropic_messages",
+        "?native_api=responses"
+      ],
+      "requestProtocols": ["anthropic_messages", "responses"],
+      "responseOrder": ["responses", "anthropic_messages"],
+      "oldResponsePendingWhenCurrentRendered": true,
+      "suggestionsAfterCurrentResponse": ["catalog-race-current-model"],
+      "suggestionsAfterOldResponse": ["catalog-race-current-model"],
+      "modelAfterCurrentResponse": "catalog-race-custom-draft",
+      "modelAfterOldResponse": "catalog-race-custom-draft",
+      "currentModelVisibleAfterCurrentResponse": true,
+      "oldModelHiddenAfterCurrentResponse": true,
+      "currentModelVisibleAfterOldResponse": true,
+      "oldModelHiddenAfterOldResponse": true,
+      "draftPreservedBeforeProtocolChange": true,
+      "draftPreservedAfterCurrentResponse": true,
+      "draftPreservedAfterOldResponse": true
+    },
+    "mutationConflictGuard": {
+      "oneFailedWrite": true,
+      "retryStatus": 200,
+      "dismissalDisabled": true,
+      "draftRetained": true
+    },
+    "probeDetails": {
+      "resultCount": 5,
+      "orderedModels": [
+        "long-model",
+        "duplicate-endpoint-model",
+        "embedding-upstream-model",
+        "coalesced-target-four-model",
+        "coalesced-target-five-model"
+      ],
+      "preferredFirst": true,
+      "includesHttpAndMessage": true,
+      "noToast": true
+    },
+    "mutationToggle": {
+      "probeRanDuringToggle": true,
+      "conflictingControlsDisabled": true,
+      "routeListReadsBefore": 6,
+      "routeListReadsAfter": 6
+    },
+    "mutationCreate": {
+      "status": 200,
+      "selectedOffPageEndpoint": "ep-fixture-10",
+      "proxyPayloadSafe": true,
+      "newRuleVisible": true
+    },
+    "mutationDelete": {
+      "cancelledWrites": 0,
+      "successfulDelete": 204,
+      "routeRemoved": true
+    },
+    "longValuesResponsive": {
+      "longPattern": 93,
+      "longModel": 111,
+      "responsive": [
+        {
+          "width": 1440,
+          "noHorizontalOverflow": true,
+          "tableVisible": true,
+          "cardVisible": false
+        },
+        {
+          "width": 1024,
+          "noHorizontalOverflow": true,
+          "tableVisible": true,
+          "cardVisible": false
+        },
+        {
+          "width": 768,
+          "noHorizontalOverflow": true,
+          "tableVisible": true,
+          "cardVisible": false
+        },
+        {
+          "width": 390,
+          "noHorizontalOverflow": true,
+          "tableVisible": false,
+          "cardVisible": true
+        }
+      ],
+      "dialogContainment": [
+        {
+          "width": 768,
+          "withinViewport": true,
+          "saveReachable": true
+        },
+        {
+          "width": 390,
+          "withinViewport": true,
+          "saveReachable": true
+        }
+      ]
+    },
+    "localeThemeRendering": {
+      "chineseActionVisible": true,
+      "darkTheme": true
+    },
+    "apiIsolation": {
+      "unexpectedAdminRequests": [],
+      "quotaCalls": 0,
+      "endpointReadCount": 2,
+      "modelRouteReadCount": 10
+    },
+    "apiLedger": [
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/model-routes",
+        "status": 200,
+        "hasBody": false
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/model-routes",
+        "status": 200,
+        "hasBody": false
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/model-routes/test",
+        "status": 200,
+        "hasBody": true
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/admin/model-routes/rule-fixture-8",
+        "status": 200,
+        "hasBody": true
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/model-routes",
+        "status": 200,
+        "hasBody": false
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/admin/model-routes/rule-fixture-8",
+        "status": 200,
+        "hasBody": true
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/model-routes",
+        "status": 200,
+        "hasBody": false
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/admin/model-routes/rule-fixture-8",
+        "status": 200,
+        "hasBody": true
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/model-routes",
+        "status": 200,
+        "hasBody": false
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/admin/model-routes/rule-fixture-8",
+        "status": 503,
+        "hasBody": true
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/admin/model-routes/rule-fixture-8",
+        "status": 200,
+        "hasBody": true
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/model-routes",
+        "status": 200,
+        "hasBody": false
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/model-routes/test",
+        "status": 200,
+        "hasBody": true
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/admin/model-routes/rule-fixture-8",
+        "status": 200,
+        "hasBody": true
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/model-routes",
+        "status": 200,
+        "hasBody": true
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/model-routes",
+        "status": 200,
+        "hasBody": false
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/admin/model-routes/rule-1026",
+        "status": 200,
+        "hasBody": true
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/model-routes",
+        "status": 200,
+        "hasBody": false
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/admin/model-routes/rule-1026",
+        "status": 204,
+        "hasBody": true
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/model-routes",
+        "status": 200,
+        "hasBody": false
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/model-routes",
+        "status": 200,
+        "hasBody": false
+      }
+    ],
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/endpoints-routes-en-light-1440.png",
+    "e2e/foundation/screenshots/endpoints-routes-en-light-390.png",
+    "e2e/foundation/screenshots/endpoints-routes-dialog-390.png",
+    "e2e/foundation/screenshots/endpoints-routes-zh-dark-1440.png"
+  ],
+  "finishedAt": "2026-10-26T10:35:52.623Z"
+}

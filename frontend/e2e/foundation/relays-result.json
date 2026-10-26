@@ -1,0 +1,600 @@
+{
+  "runId": "relays-1793011043658",
+  "startedAt": "2026-10-26T10:37:23.658Z",
+  "checks": {
+    "adminDenial": {
+      "redirectedToApiKeys": true,
+      "hiddenNavigation": true,
+      "adminRelayCalls": 0
+    },
+    "routeAndNavigation": true,
+    "summaryAndSecretFlags": true,
+    "initialRead": {
+      "first": 0,
+      "rows": 10
+    },
+    "pagination": {
+      "secondPageRead": true,
+      "distinctVisibleRows": true,
+      "pageSizePersisted": true
+    },
+    "listFailureRetainsRowsAndRecovers": true,
+    "dialogOpen": true,
+    "createFailureDraftRetryAndRefreshGuard": true,
+    "backendValidationRetainsDraft": {
+      "normalizedDuplicateUrl": true,
+      "invalidTlsScheme": true,
+      "missingMtlsCertificateAndKey": true,
+      "missingRequiredBridgeKey": true
+    },
+    "syntheticFixtureMaterial": {
+      "requiredMaterialAcceptedByFixture": true,
+      "fixtureValidatesPemCryptography": false,
+      "liveConnectionAttempted": false
+    },
+    "secretPatchSemantics": true,
+    "secretFlagsReopenWithoutEcho": true,
+    "reconnectDisabledAndConflictGuard": {
+      "disabledReconnectNoRequest": true,
+      "sameRowControlsDisabled": true,
+      "unrelatedRowAvailable": true,
+      "lockHeldThroughRefresh": true
+    },
+    "deleteConfirmation": {
+      "cancelNoRequest": true,
+      "confirmedDelete": true,
+      "nativeConfirmCalls": 2
+    },
+    "localeThemeRendering": {
+      "zhDark": {
+        "lang": "zh-CN",
+        "dark": true,
+        "colorScheme": "dark"
+      },
+      "enLight": {
+        "lang": "en-US",
+        "dark": false,
+        "colorScheme": "light"
+      }
+    },
+    "timestampLocaleAndZone": true,
+    "responsiveContainment": [
+      {
+        "locale": "en-US",
+        "theme": "light",
+        "width": 1440,
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "tableContainerWidth": 1136,
+        "tableScrollWidth": 1281,
+        "tableWidth": 1281,
+        "actionsContained": true,
+        "dialogContained": true,
+        "dialogSaveVisible": true,
+        "timestampFormatted": true
+      },
+      {
+        "locale": "en-US",
+        "theme": "light",
+        "width": 1024,
+        "documentWidth": 1024,
+        "viewportWidth": 1024,
+        "tableContainerWidth": 720,
+        "tableScrollWidth": 1281,
+        "tableWidth": 1281,
+        "actionsContained": true,
+        "dialogContained": true,
+        "dialogSaveVisible": true,
+        "timestampFormatted": true
+      },
+      {
+        "locale": "en-US",
+        "theme": "light",
+        "width": 768,
+        "documentWidth": 768,
+        "viewportWidth": 768,
+        "tableContainerWidth": 720,
+        "tableScrollWidth": 1281,
+        "tableWidth": 1281,
+        "actionsContained": true,
+        "dialogContained": true,
+        "dialogSaveVisible": true,
+        "timestampFormatted": true
+      },
+      {
+        "locale": "en-US",
+        "theme": "light",
+        "width": 390,
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "tableContainerWidth": 358,
+        "tableScrollWidth": 1281,
+        "tableWidth": 1281,
+        "actionsContained": true,
+        "dialogContained": true,
+        "dialogSaveVisible": true,
+        "timestampFormatted": true
+      },
+      {
+        "locale": "zh-CN",
+        "theme": "dark",
+        "width": 1440,
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "tableContainerWidth": 1136,
+        "tableScrollWidth": 1136,
+        "tableWidth": 1136,
+        "actionsContained": true,
+        "dialogContained": true,
+        "dialogSaveVisible": true,
+        "timestampFormatted": true
+      },
+      {
+        "locale": "zh-CN",
+        "theme": "dark",
+        "width": 1024,
+        "documentWidth": 1024,
+        "viewportWidth": 1024,
+        "tableContainerWidth": 720,
+        "tableScrollWidth": 1040,
+        "tableWidth": 1040,
+        "actionsContained": true,
+        "dialogContained": true,
+        "dialogSaveVisible": true,
+        "timestampFormatted": true
+      },
+      {
+        "locale": "zh-CN",
+        "theme": "dark",
+        "width": 768,
+        "documentWidth": 768,
+        "viewportWidth": 768,
+        "tableContainerWidth": 720,
+        "tableScrollWidth": 1040,
+        "tableWidth": 1040,
+        "actionsContained": true,
+        "dialogContained": true,
+        "dialogSaveVisible": true,
+        "timestampFormatted": true
+      },
+      {
+        "locale": "zh-CN",
+        "theme": "dark",
+        "width": 390,
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "tableContainerWidth": 358,
+        "tableScrollWidth": 1040,
+        "tableWidth": 1040,
+        "actionsContained": true,
+        "dialogContained": true,
+        "dialogSaveVisible": true,
+        "timestampFormatted": true
+      }
+    ],
+    "noHostRoleOrSecretEcho": {
+      "hostRoleCalls": 0,
+      "routeId": "R-RELAYS",
+      "secretValuesEchoedByApi": false
+    },
+    "secretRequestDigests": [
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays",
+        "name": "Fixture created relay",
+        "relay_url": "ws://relay-created.example.test/bridge",
+        "tls_mode": "off",
+        "bridge_encryption_mode": "off",
+        "secrets": {}
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays",
+        "name": "Fixture created relay",
+        "relay_url": "ws://relay-created.example.test/bridge",
+        "tls_mode": "off",
+        "bridge_encryption_mode": "off",
+        "secrets": {}
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays",
+        "name": "Fixture mTLS relay",
+        "relay_url": "wss://wrong-scheme.example.test/bridge",
+        "tls_mode": "off",
+        "bridge_encryption_mode": "off",
+        "secrets": {}
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays",
+        "name": "Fixture mTLS relay",
+        "relay_url": "wss://relay-frankfurt.example.internal:9443/bridge///",
+        "tls_mode": "server",
+        "bridge_encryption_mode": "off",
+        "secrets": {}
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays",
+        "name": "Fixture mTLS relay",
+        "relay_url": "wss://relay-mtls.example.test/bridge",
+        "tls_mode": "mtls",
+        "bridge_encryption_mode": "off",
+        "secrets": {}
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays",
+        "name": "Fixture mTLS relay",
+        "relay_url": "wss://relay-mtls.example.test/bridge",
+        "tls_mode": "mtls",
+        "bridge_encryption_mode": "required",
+        "secrets": {
+          "relay_ca_pem": {
+            "mode": "replace",
+            "present": true,
+            "digest": "2f32baccd441689e357ba15b076fb33558d40dfed4c9df21e3d995260873d1b1"
+          },
+          "client_cert_pem": {
+            "mode": "replace",
+            "present": true,
+            "digest": "6fc757cb0ed284aafc6380641282492b69f8103bc91f715805adb0cebf190ed0"
+          },
+          "client_key_pem": {
+            "mode": "replace",
+            "present": true,
+            "digest": "520246089c112daea5234174df74a31ffeed377de9422bc4ac563f5b24d0e832"
+          }
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays",
+        "name": "Fixture mTLS relay",
+        "relay_url": "wss://relay-mtls.example.test/bridge",
+        "tls_mode": "mtls",
+        "bridge_encryption_mode": "required",
+        "secrets": {
+          "relay_ca_pem": {
+            "mode": "replace",
+            "present": true,
+            "digest": "2f32baccd441689e357ba15b076fb33558d40dfed4c9df21e3d995260873d1b1"
+          },
+          "client_cert_pem": {
+            "mode": "replace",
+            "present": true,
+            "digest": "6fc757cb0ed284aafc6380641282492b69f8103bc91f715805adb0cebf190ed0"
+          },
+          "client_key_pem": {
+            "mode": "replace",
+            "present": true,
+            "digest": "520246089c112daea5234174df74a31ffeed377de9422bc4ac563f5b24d0e832"
+          },
+          "bridge_encryption_key": {
+            "mode": "replace",
+            "present": true,
+            "digest": "459ef3be2ff59b5d2b70dfd913521d5afae4044aeb5f8d9ab4cfd4fd90b47ffa"
+          }
+        }
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/admin/relays/relay-1002",
+        "name": "Fixture mTLS relay",
+        "relay_url": "wss://relay-mtls.example.test/bridge",
+        "tls_mode": "mtls",
+        "bridge_encryption_mode": "off",
+        "secrets": {
+          "relay_ca_pem": {
+            "mode": "clear",
+            "present": false
+          },
+          "client_cert_pem": {
+            "mode": "replace",
+            "present": true,
+            "digest": "31df4b12ef92778d7ff1a22d7d7ed3a404f702d2d06e36bef693305066de71f2"
+          },
+          "client_key_pem": {
+            "mode": "keep",
+            "present": false
+          },
+          "bridge_encryption_key": {
+            "mode": "clear",
+            "present": false
+          }
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays/relay-frankfurt/reconnect",
+        "secrets": {}
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays/relay-fixture-1/reconnect",
+        "secrets": {}
+      }
+    ],
+    "relayResponseStatuses": [
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "10"
+        },
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "10",
+          "rows": "10"
+        },
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 503
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays",
+        "query": {},
+        "status": 503
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays",
+        "query": {},
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays",
+        "query": {},
+        "status": 400
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays",
+        "query": {},
+        "status": 400
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays",
+        "query": {},
+        "status": 400
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays",
+        "query": {},
+        "status": 400
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays",
+        "query": {},
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/admin/relays/relay-1002",
+        "query": {},
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays/relay-frankfurt/reconnect",
+        "query": {},
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/admin/relays/relay-fixture-1/reconnect",
+        "query": {},
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/admin/relays/relay-1002",
+        "query": {},
+        "status": 204
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/relays",
+        "query": {
+          "first": "0",
+          "rows": "20"
+        },
+        "status": 200
+      }
+    ],
+    "scenarioCoverage": {
+      "route-render": true,
+      "admin-denial": true,
+      "pagination": true,
+      "dialog-open": true,
+      "mutation-create": true,
+      "mutation-reconnect": true,
+      "mutation-delete": true,
+      "mutation-conflict-guard": true
+    },
+    "expectedApiFailures": [
+      "503 GET /api/v1/admin/relays",
+      "503 POST /api/v1/admin/relays",
+      "400 POST /api/v1/admin/relays",
+      "400 POST /api/v1/admin/relays",
+      "400 POST /api/v1/admin/relays",
+      "400 POST /api/v1/admin/relays"
+    ],
+    "apiFailures": [],
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/relays-admin-en-light-1440.png",
+    "e2e/foundation/screenshots/relay-editor-en-light-1440.png",
+    "e2e/foundation/screenshots/relays-admin-zh-dark-1440.png",
+    "e2e/foundation/screenshots/relays-admin-en-light-390.png",
+    "e2e/foundation/screenshots/relay-editor-en-light-390.png",
+    "e2e/foundation/screenshots/relay-editor-zh-dark-1440.png",
+    "e2e/foundation/screenshots/relays-admin-zh-dark-390.png",
+    "e2e/foundation/screenshots/relay-editor-zh-dark-390.png"
+  ],
+  "finishedAt": "2026-10-26T10:37:48.218Z"
+}

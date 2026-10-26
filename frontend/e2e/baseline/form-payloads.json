@@ -1,0 +1,327 @@
+{
+  "checks": {
+    "dimensions": {
+      "invalid": "true",
+      "disabled": true,
+      "invalidRequests": 0,
+      "positive": {
+        "at": "2026-10-23T16:15:58.666Z",
+        "method": "PATCH",
+        "path": "/api/v1/admin/model-routes/rule-embeddings",
+        "query": {},
+        "body": {
+          "enabled": false,
+          "model_pattern": "text-embedding-3-large",
+          "owner_user_id": 2,
+          "scope": "user",
+          "targets": [
+            {
+              "endpoint_id": "ep-openrouter",
+              "enabled": false,
+              "proxy_url_override": "",
+              "active_windows": [
+                {
+                  "start": "00:00",
+                  "end": "24:00",
+                  "days": [1, 2, 3, 4, 5]
+                }
+              ],
+              "dev_system_normalize": false,
+              "thinking_downgrade_enabled": false,
+              "thinking_effort_override": null,
+              "service_tier": null,
+              "compact_mode": "off",
+              "native_api": "embeddings",
+              "embedding_dimensions_override": 1536
+            }
+          ]
+        },
+        "status": 200,
+        "ms": 0
+      },
+      "roundtrip": "1536",
+      "windows": ["00:00", "24:00"],
+      "cleared": {
+        "at": "2026-10-23T16:16:01.018Z",
+        "method": "PATCH",
+        "path": "/api/v1/admin/model-routes/rule-embeddings",
+        "query": {},
+        "body": {
+          "enabled": false,
+          "model_pattern": "text-embedding-3-large",
+          "owner_user_id": 2,
+          "scope": "user",
+          "targets": [
+            {
+              "endpoint_id": "ep-openrouter",
+              "enabled": false,
+              "proxy_url_override": "",
+              "active_windows": [],
+              "dev_system_normalize": false,
+              "thinking_downgrade_enabled": false,
+              "thinking_effort_override": null,
+              "service_tier": null,
+              "compact_mode": "off",
+              "native_api": "embeddings",
+              "embedding_dimensions_override": null
+            }
+          ]
+        },
+        "status": 200,
+        "ms": 0
+      }
+    },
+    "chatControls": {
+      "saved": {
+        "at": "2026-10-23T16:16:04.812Z",
+        "method": "PATCH",
+        "path": "/api/v1/admin/model-routes/rule-embeddings",
+        "query": {},
+        "body": {
+          "enabled": false,
+          "model_pattern": "text-embedding-3-large",
+          "owner_user_id": 2,
+          "scope": "user",
+          "targets": [
+            {
+              "endpoint_id": "ep-openrouter",
+              "enabled": false,
+              "proxy_url_override": "",
+              "dev_system_normalize": true,
+              "thinking_downgrade_enabled": true,
+              "thinking_effort_override": "high",
+              "service_tier": null,
+              "compact_mode": "self_summarize",
+              "native_api": "chat",
+              "embedding_dimensions_override": null
+            }
+          ]
+        },
+        "status": 200,
+        "ms": 0
+      },
+      "text": "编辑模型路由\n目标设置\n· OpenRouter Shared Pool\n端口类型\nChat\n服务等级\n代理覆盖\n直连（无代理）\n生效时间段\n新增时间段\n思考强度覆盖\nhigh\n压缩模式\n自研摘要\n归一 developer→system\n思考适配\n取消\n保存",
+      "combos": ["Chat", "直连（无代理）", "high", "自研摘要"],
+      "requests": [
+        {
+          "at": "2026-10-23T16:16:04.812Z",
+          "method": "PATCH",
+          "path": "/api/v1/admin/model-routes/rule-embeddings",
+          "query": {},
+          "body": {
+            "enabled": false,
+            "model_pattern": "text-embedding-3-large",
+            "owner_user_id": 2,
+            "scope": "user",
+            "targets": [
+              {
+                "endpoint_id": "ep-openrouter",
+                "enabled": false,
+                "proxy_url_override": "",
+                "dev_system_normalize": true,
+                "thinking_downgrade_enabled": true,
+                "thinking_effort_override": "high",
+                "service_tier": null,
+                "compact_mode": "self_summarize",
+                "native_api": "chat",
+                "embedding_dimensions_override": null
+              }
+            ]
+          },
+          "status": 200,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:16:04.817Z",
+          "method": "GET",
+          "path": "/api/v1/admin/model-routes",
+          "query": {
+            "first": "0",
+            "rows": "10"
+          },
+          "status": 200,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:16:05.617Z",
+          "method": "GET",
+          "path": "/__fixtures/log",
+          "query": {
+            "limit": "500"
+          },
+          "status": 200,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:16:05.774Z",
+          "method": "GET",
+          "path": "/api/v1/auth/me",
+          "query": {},
+          "status": 200,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:16:06.083Z",
+          "method": "GET",
+          "path": "/api/v1/admin/endpoints",
+          "query": {
+            "first": "0",
+            "rows": "10"
+          },
+          "status": 200,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:16:06.083Z",
+          "method": "GET",
+          "path": "/api/v1/admin/model-routes",
+          "query": {
+            "first": "0",
+            "rows": "10"
+          },
+          "status": 200,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:16:06.083Z",
+          "method": "GET",
+          "path": "/api/v1/admin/users/options",
+          "query": {},
+          "status": 200,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:16:06.768Z",
+          "method": "GET",
+          "path": "/api/v1/admin/endpoints/ep-openrouter/models",
+          "query": {
+            "native_api": "chat"
+          },
+          "status": 200,
+          "ms": 0
+        }
+      ]
+    },
+    "targets": {
+      "before": [
+        "OpenAI ChatGPT Subscription — Integration Workspace With A Long Name继承继承",
+        "MiniMax Platform China Production已设置已设置"
+      ],
+      "after": [
+        "MiniMax Platform China Production已设置已设置",
+        "OpenAI ChatGPT Subscription — Integration Workspace With A Long Name继承继承"
+      ],
+      "saved": {
+        "at": "2026-10-23T16:16:09.669Z",
+        "method": "PATCH",
+        "path": "/api/v1/admin/model-routes/rule-gpt-codex",
+        "query": {},
+        "body": {
+          "enabled": true,
+          "model_pattern": "gpt-5.1-codex-preview*",
+          "owner_user_id": null,
+          "scope": "admin",
+          "targets": [
+            {
+              "endpoint_id": "ep-minimax-cn",
+              "enabled": false,
+              "dev_system_normalize": false,
+              "thinking_downgrade_enabled": false,
+              "thinking_effort_override": "medium",
+              "service_tier": null,
+              "compact_mode": "self_summarize",
+              "native_api": "chat",
+              "embedding_dimensions_override": null
+            },
+            {
+              "endpoint_id": "ep-openai-codex",
+              "enabled": true,
+              "upstream_model": "gpt-5.1-codex-preview-with-an-extremely-long-upstream-model-identifier",
+              "proxy_url_override": "",
+              "dev_system_normalize": true,
+              "thinking_downgrade_enabled": true,
+              "thinking_effort_override": "high",
+              "service_tier": "priority",
+              "compact_mode": "passthrough",
+              "native_api": "responses",
+              "embedding_dimensions_override": null
+            }
+          ]
+        },
+        "status": 200,
+        "ms": 0
+      },
+      "suggestions": []
+    },
+    "modelSuggestionQueries": [
+      {
+        "at": "2026-10-23T16:15:58.006Z",
+        "method": "GET",
+        "path": "/api/v1/admin/endpoints/ep-openrouter/models",
+        "query": {
+          "native_api": "embeddings"
+        },
+        "status": 200,
+        "ms": 0
+      },
+      {
+        "at": "2026-10-23T16:16:00.611Z",
+        "method": "GET",
+        "path": "/api/v1/admin/endpoints/ep-openrouter/models",
+        "query": {
+          "native_api": "embeddings"
+        },
+        "status": 200,
+        "ms": 0
+      },
+      {
+        "at": "2026-10-23T16:16:03.153Z",
+        "method": "GET",
+        "path": "/api/v1/admin/endpoints/ep-openrouter/models",
+        "query": {
+          "native_api": "embeddings"
+        },
+        "status": 200,
+        "ms": 0
+      },
+      {
+        "at": "2026-10-23T16:16:06.768Z",
+        "method": "GET",
+        "path": "/api/v1/admin/endpoints/ep-openrouter/models",
+        "query": {
+          "native_api": "chat"
+        },
+        "status": 200,
+        "ms": 0
+      },
+      {
+        "at": "2026-10-23T16:16:08.354Z",
+        "method": "GET",
+        "path": "/api/v1/admin/endpoints/ep-openai-codex/models",
+        "query": {
+          "native_api": "responses"
+        },
+        "status": 200,
+        "ms": 0
+      },
+      {
+        "at": "2026-10-23T16:16:08.355Z",
+        "method": "GET",
+        "path": "/api/v1/admin/endpoints/ep-minimax-cn/models",
+        "query": {
+          "native_api": "chat"
+        },
+        "status": 200,
+        "ms": 0
+      }
+    ]
+  },
+  "failures": [],
+  "captures": [
+    {
+      "path": "e2e/baseline/screenshots/form5_chat_controls.png"
+    }
+  ],
+  "startedAt": "2026-10-23T16:15:55.031Z",
+  "finishedAt": "2026-10-23T16:16:10.477Z"
+}

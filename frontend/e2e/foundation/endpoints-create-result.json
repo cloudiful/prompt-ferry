@@ -1,0 +1,82 @@
+{
+  "startedAt": "2026-10-25T13:43:28.005Z",
+  "checks": {
+    "createDialogAndRetry": {
+      "pending": true,
+      "dismissalBlocked": true,
+      "errorVisible": true,
+      "draftRetained": true,
+      "createdId": "ep-1002",
+      "duplicateKeyWarning": true,
+      "invalidProxyBlocked": true
+    },
+    "createPayloads": [
+      {
+        "name": "MiniMax Browser User Upstream With Deliberately Long Operational Name",
+        "provider": "minimax",
+        "provider_region": "global",
+        "scope": "user",
+        "owner_user_id": 2,
+        "base_url_trimmed": true,
+        "key_lb_enabled": false,
+        "mcp_enabled": true,
+        "protocol_mode": "manual",
+        "native_api_override": "chat",
+        "service_tier": "tier-fixture",
+        "api_key_count": 1,
+        "api_key_label": "Primary fixture key",
+        "api_key_present": true,
+        "proxy_present": true,
+        "windows": [
+          {
+            "start": "00:00",
+            "end": "24:00",
+            "days": [1, 2, 3, 4, 5]
+          },
+          {
+            "start": "23:00",
+            "end": "02:00",
+            "days": [6, 7]
+          }
+        ],
+        "admin_api_key_present": false
+      },
+      {
+        "name": "MiniMax Browser User Upstream With Deliberately Long Operational Name",
+        "provider": "minimax",
+        "provider_region": "global",
+        "scope": "user",
+        "owner_user_id": 2,
+        "base_url_trimmed": true,
+        "key_lb_enabled": false,
+        "mcp_enabled": true,
+        "protocol_mode": "manual",
+        "native_api_override": "chat",
+        "service_tier": "tier-fixture",
+        "api_key_count": 1,
+        "api_key_label": "Primary fixture key",
+        "api_key_present": true,
+        "proxy_present": true,
+        "windows": [
+          {
+            "start": "00:00",
+            "end": "24:00",
+            "days": [1, 2, 3, 4, 5]
+          },
+          {
+            "start": "23:00",
+            "end": "02:00",
+            "days": [6, 7]
+          }
+        ],
+        "admin_api_key_present": false
+      }
+    ],
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/endpoints-created-en-light-1440.png"
+  ],
+  "finishedAt": "2026-10-25T13:43:31.448Z"
+}

@@ -1,4 +1,8 @@
-use std::{panic::AssertUnwindSafe, sync::Arc, time::Duration};
+use std::{
+    panic::AssertUnwindSafe,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use chrono::{Duration as ChronoDuration, Utc};
 use futures::{FutureExt, future::BoxFuture};
@@ -124,15 +128,91 @@ async fn reviewer_expired_replica_lease_is_recovered_without_relocking_self() {
     let fetcher = Arc::new(fake_fetcher(quota(Some(20.0))));
     let service = service(&pool, fetcher.clone());
     let provider_endpoint = endpoint(&pool, endpoint_id).await;
+    let started = Instant::now();
     let result = timeout(
         Duration::from_secs(4),
         service.read(&provider_endpoint, true),
     )
     .await;
+    let elapsed = started.elapsed();
+    let fetcher_calls = fetcher.calls.load(std::sync::atomic::Ordering::SeqCst);
+
+    // The state left behind by the timed call, read after it and before the
+    // fixture is removed. A read failure is recorded as its error code only:
+    // it must not replace the failure the test is about, and it must not stop
+    // the owned endpoint from being cleaned up.
+    let refresh_state = db::quota_snapshots::get_refresh_state(&pool, endpoint_id).await;
+    let snapshot = db::quota_snapshots::latest_snapshot(&pool, endpoint_id).await;
+    let sqlx_error_code = |error: &anyhow::Error| -> String {
+        error
+            .downcast_ref::<sqlx::Error>()
+            .and_then(|sqlx_error| sqlx_error.as_database_error())
+            .and_then(|database_error| sqlx::error::DatabaseError::code(database_error))
+            .map(|code| code.to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    };
+    let timestamp = |value: Option<chrono::DateTime<Utc>>| -> String {
+        value
+            .map(|value| value.to_rfc3339())
+            .unwrap_or_else(|| "none".to_string())
+    };
+
+    let mut fields = vec![
+        format!("elapsed_ms={}", elapsed.as_millis()),
+        format!(
+            "result={}",
+            match &result {
+                Ok(Ok(_)) => "ok".to_string(),
+                Ok(Err(error)) => format!("error:{}", error.code()),
+                Err(_) => "timeout".to_string(),
+            }
+        ),
+        format!("fetcher_calls={fetcher_calls}"),
+        format!("endpoint_id={endpoint_id}"),
+    ];
+    match &refresh_state {
+        Ok(Some(state)) => {
+            fields.push("lease_present=true".to_string());
+            fields.push(format!(
+                "lease_expires_at={}",
+                timestamp(state.lease_expires_at)
+            ));
+            fields.push(format!(
+                "last_attempt_at={}",
+                timestamp(state.last_attempt_at)
+            ));
+            fields.push(format!(
+                "last_success_at={}",
+                timestamp(state.last_success_at)
+            ));
+            fields.push(format!(
+                "consecutive_failures={}",
+                state.consecutive_failures
+            ));
+        }
+        Ok(None) => fields.push("lease_present=false".to_string()),
+        Err(error) => {
+            fields.push("lease_present=unknown".to_string());
+            fields.push(format!(
+                "refresh_state_error_code={}",
+                sqlx_error_code(error)
+            ));
+        }
+    }
+    match &snapshot {
+        Ok(snapshot) => fields.push(format!("snapshot_present={}", snapshot.is_some())),
+        Err(error) => {
+            fields.push("snapshot_present=unknown".to_string());
+            fields.push(format!("snapshot_error_code={}", sqlx_error_code(error)));
+        }
+    }
+    let diagnostic = fields.join(",");
+    eprintln!("[quota-lease-diagnostic] {diagnostic}");
+
     cleanup_endpoint(&pool, endpoint_id).await;
     assert!(
         result.is_ok(),
-        "expired replica lease recovery deadlocked on the caller's endpoint mutex"
+        "expired replica lease recovery did not complete within four seconds; {diagnostic}"
     );
     assert!(result.unwrap().is_ok());
     assert_eq!(fetcher.calls.load(std::sync::atomic::Ordering::SeqCst), 1);

@@ -1,5 +1,27 @@
 import type { User } from '../generated/admin-api'
 
+export const USER_KEY_PREFIX = 'user'
+
+export type NewUserForm = {
+  login_name: string
+  password: string
+  display_name: string
+  is_admin: boolean
+}
+
+export function userActionKey(userId: number | null): string {
+  return `${USER_KEY_PREFIX}:${userId == null ? 'create' : String(userId)}`
+}
+
+export function emptyUserForm(): NewUserForm {
+  return {
+    login_name: '',
+    password: '',
+    display_name: '',
+    is_admin: false,
+  }
+}
+
 export type UserListItemView = {
   user: User
   user_id: number

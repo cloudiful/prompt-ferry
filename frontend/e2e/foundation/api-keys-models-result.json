@@ -1,0 +1,97 @@
+{
+  "runId": "api-keys-models-1793010737085",
+  "startedAt": "2026-10-26T10:32:17.085Z",
+  "checks": {
+    "apiKeysRouteAndNavigation": true,
+    "ownerReads": {
+      "self": true,
+      "users": true
+    },
+    "apiKeysResponsive": [
+      {
+        "inputInsideRow": true,
+        "width": 1440,
+        "documentWidth": 1440
+      },
+      {
+        "inputInsideRow": true,
+        "width": 1024,
+        "documentWidth": 1024
+      },
+      {
+        "inputInsideRow": true,
+        "width": 768,
+        "documentWidth": 768
+      },
+      {
+        "inputInsideRow": true,
+        "width": 390,
+        "documentWidth": 390
+      }
+    ],
+    "apiKeysPagination": true,
+    "staleOwnerAndPageResponses": true,
+    "createFailureDraftAndDismissGuard": true,
+    "flatCreateSecretDisplayedAndCopied": true,
+    "createPayloads": ["fixture-created-key", "fixture-created-key"],
+    "createRequestStatuses": [503, 200],
+    "keyRenameAndToggle": true,
+    "deleteConfirmation": true,
+    "adminOwnerReadAndRename": true,
+    "localeThemeRendering": true,
+    "staleModelPageResponse": true,
+    "modelsReadRefreshAndPagination": true,
+    "modelsRenderedEmptyState": {
+      "en": {
+        "tableCount": 1,
+        "tbodyCount": 1,
+        "rowCount": 1,
+        "cellText": "No data",
+        "columnSpan": 2
+      },
+      "zh": {
+        "tableCount": 1,
+        "tbodyCount": 1,
+        "rowCount": 1,
+        "cellText": "没有数据",
+        "columnSpan": 2
+      }
+    },
+    "availableModelsResponsive": [
+      {
+        "width": 1440,
+        "documentWidth": 1440,
+        "tableWidth": 1136
+      },
+      {
+        "width": 1024,
+        "documentWidth": 1024,
+        "tableWidth": 720
+      },
+      {
+        "width": 768,
+        "documentWidth": 768,
+        "tableWidth": 720
+      },
+      {
+        "width": 390,
+        "documentWidth": 390,
+        "tableWidth": 704
+      }
+    ],
+    "locales": ["zh-CN", "en-US"],
+    "themes": ["dark", "light"],
+    "expectedApiFailures": ["503 /api/v1/me/client-keys"],
+    "consoleErrors": [],
+    "pageErrors": [],
+    "apiFailures": []
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/api-keys-zh-dark-1440.png",
+    "e2e/foundation/screenshots/api-key-create-dialog-zh-dark-1440.png",
+    "e2e/foundation/screenshots/available-models-en-light-1440.png",
+    "e2e/foundation/screenshots/available-models-empty-en-light-1440.png",
+    "e2e/foundation/screenshots/available-models-empty-zh-light-1440.png"
+  ],
+  "finishedAt": "2026-10-26T10:32:30.523Z"
+}

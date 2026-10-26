@@ -1,0 +1,165 @@
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const report = {
+    runId: `endpoints-${Date.now()}`,
+    startedAt: new Date().toISOString(),
+    checks: {},
+    screenshots: [],
+  }
+  function assert(condition, message) {
+    if (!condition) throw new Error(message)
+  }
+  const consoleErrors = []
+  const pageErrors = []
+
+  page.setDefaultTimeout(7000)
+  const onConsole = message => {
+    if (message.type() !== 'error') return
+    if (/(?:status of )?(?:401|500|503)\b/.test(message.text())) return
+    consoleErrors.push(message.text())
+  }
+  const onPageError = error => pageErrors.push(error.message)
+  page.on('console', onConsole)
+  page.on('pageerror', onPageError)
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  async function waitForResponse(method, pathname, status) {
+    return page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return response.request().method() === method && url.pathname === pathname && (status === undefined || response.status() === status)
+    }, { timeout: 7000 })
+  }
+
+  async function waitForRouteId(id) {
+    await page.locator(`[data-foundation-route-id="${id}"]`).waitFor({ state: 'visible' })
+  }
+
+  async function signIn(loginName) {
+    await page.getByLabel('Login name').waitFor({ state: 'visible' })
+    await page.getByLabel('Login name').fill(loginName)
+    await page.getByRole('textbox', { name: 'Password' }).fill('fixture-password')
+    await page.getByRole('button', { name: 'Login', exact: true }).click()
+    await page.waitForURL(url => new URL(url).pathname === '/api-keys')
+    await waitForRouteId('R-API-KEYS')
+  }
+
+  async function capture(name) {
+    const file = `${screenshots}/${name}.png`
+    await page.screenshot({ path: file, fullPage: true })
+    report.screenshots.push(file)
+  }
+
+  await page.context().clearCookies()
+  await fixture('/__fixtures/reset', 'POST')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${BASE}/login`)
+  await page.evaluate(() => {
+    localStorage.clear()
+    localStorage.setItem('prompt-ferry:locale', 'en-US')
+    localStorage.setItem('prompt-ferry:theme-mode', 'light')
+    localStorage.setItem('prompt-ferry:display-time-zone', 'UTC')
+  })
+  await page.reload()
+  await signIn('operator')
+  const operatorLogStart = (await fixture('/__fixtures/log?limit=500')).requests.length
+  await page.goto(`${BASE}/endpoints/upstreams`)
+  await page.waitForURL(url => new URL(url).pathname === '/api-keys')
+  await waitForRouteId('R-API-KEYS')
+  const operatorLog = (await fixture('/__fixtures/log?limit=500')).requests.slice(operatorLogStart)
+  const deniedEndpointCalls = operatorLog.filter(request => request.path.startsWith('/api/v1/admin/endpoints')).length
+  assert(deniedEndpointCalls === 0, `non-admin upstream route made ${deniedEndpointCalls} endpoint API calls`)
+  const hiddenUpstreamsLink = await page.locator('a[href="/endpoints/upstreams"]').count() === 0
+  assert(hiddenUpstreamsLink, 'non-admin navigation exposed upstreams')
+  report.checks.adminDenial = { redirectedToApiKeys: new URL(page.url()).pathname === '/api-keys', hiddenNavigation: hiddenUpstreamsLink, adminApiCalls: deniedEndpointCalls }
+
+  await page.context().clearCookies()
+  await fixture('/__fixtures/reset', 'POST')
+  await page.goto(`${BASE}/login`)
+  await page.evaluate(() => {
+    localStorage.clear()
+    localStorage.setItem('prompt-ferry:locale', 'en-US')
+    localStorage.setItem('prompt-ferry:theme-mode', 'light')
+    localStorage.setItem('prompt-ferry:display-time-zone', 'UTC')
+  })
+  await page.reload()
+  await signIn('admin')
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/endpoints',
+    method: 'GET',
+    status: 200,
+    delayMs: 900,
+  })
+  await page.goto(`${BASE}/endpoints/upstreams`)
+  await waitForRouteId('R-ENDPOINTS-UPSTREAMS')
+  const loadingVisible = await page.locator('[aria-live="polite"]:visible').first().isVisible()
+  const navVisible = await page.locator('a[href="/endpoints/upstreams"]').isVisible()
+  assert(loadingVisible && navVisible, 'upstream loading state or admin navigation was missing')
+  await page.locator('[data-endpoint-row="ep-minimax-cn"]').waitFor({ state: 'visible' })
+  const initialRows = await page.locator('[data-endpoint-row]:visible').evaluateAll(rows => rows.map(row => row.getAttribute('data-endpoint-row')))
+  assert(initialRows.length === 10 && new Set(initialRows).size === 10, `initial endpoint page was not ten distinct rows: ${JSON.stringify(initialRows)}`)
+  const observedRequests = (await fixture('/__fixtures/log?limit=500')).requests
+  const initialRequests = observedRequests.filter(request => request.path === '/api/v1/admin/endpoints' && request.method === 'GET')
+  const adminUserOptionsRead = observedRequests.some(request => request.path === '/api/v1/admin/users/options' && request.method === 'GET' && request.status === 200)
+  assert(initialRequests.some(request => request.query.first === '0' && request.query.rows === '10'), 'first page query did not use first=0 and rows=10')
+  assert(adminUserOptionsRead, 'admin endpoint owner options read was not observed')
+  report.checks.adminUserOptionsRead = adminUserOptionsRead
+  report.checks.routeAndNavigation = { routeId: 'R-ENDPOINTS-UPSTREAMS', navVisible, initialRowCount: initialRows.length, firstPageQuery: { first: 0, rows: 10 } }
+  report.checks.loadingState = loadingVisible
+  await capture('endpoints-en-light-1440')
+
+  await page.getByRole('button', { name: 'Next page', exact: true }).click()
+  await page.locator('[data-endpoint-row="ep-fixture-10"]').waitFor({ state: 'visible' })
+  const secondRows = await page.locator('[data-endpoint-row]:visible').evaluateAll(rows => rows.map(row => row.getAttribute('data-endpoint-row')))
+  assert(secondRows.length === 3 && new Set(secondRows).size === 3, `last page did not contain three distinct rows: ${JSON.stringify(secondRows)}`)
+  const pageTwoRequest = (await fixture('/__fixtures/log?limit=500')).requests.findLast(request => request.path === '/api/v1/admin/endpoints' && request.method === 'GET' && request.query.first === '10')
+  assert(pageTwoRequest?.query.rows === '10', 'second page query was not first=10 rows=10')
+  report.checks.pagination = { initialRows: initialRows.length, secondPageRows: secondRows.length, secondPageIds: secondRows, query: pageTwoRequest?.query }
+  await page.getByRole('button', { name: 'Previous page', exact: true }).click()
+  await page.locator('[data-endpoint-row="ep-minimax-cn"]').waitFor({ state: 'visible' })
+  await page.getByLabel('Rows per page').click()
+  await page.getByRole('option', { name: '20', exact: true }).click()
+  await page.locator('[data-endpoint-row="ep-fixture-10"]').waitFor({ state: 'visible' })
+  const pageSizeStored = await page.evaluate(() => localStorage.getItem('prompt-ferry:table-page-size:endpoints'))
+  assert(pageSizeStored === '20', `endpoint page size did not persist: ${pageSizeStored}`)
+  report.checks.pageSizePersistence = pageSizeStored === '20'
+
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await page.waitForTimeout(250)
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/endpoints',
+    method: 'GET',
+    status: 503,
+    code: 'fixture_endpoint_list_unavailable',
+    message: 'fixture endpoint list failure',
+  })
+  const listFailure = waitForResponse('GET', '/api/v1/admin/endpoints', 503)
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await listFailure
+  const listAlert = page.getByRole('alert').last()
+  await listAlert.waitFor({ state: 'visible' })
+  const listErrorText = await listAlert.innerText()
+  assert(listErrorText.length > 0, 'endpoint list failure did not render an error')
+  const listRetry = waitForResponse('GET', '/api/v1/admin/endpoints', 200)
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await listRetry
+  await page.locator('[data-endpoint-row="ep-minimax-cn"]').waitFor({ state: 'visible' })
+  report.checks.errorState = { visible: true, retainedRows: (await page.locator('[data-endpoint-row]:visible').count()) > 0, retried: true, messagePresent: listErrorText.includes('fixture endpoint list failure') || listErrorText.includes('fixture_endpoint_list_unavailable') }
+  report.checks.consoleErrors = consoleErrors
+  report.checks.pageErrors = pageErrors
+  assert(pageErrors.length === 0, `browser page errors: ${JSON.stringify(pageErrors)}`)
+  page.off('console', onConsole)
+  page.off('pageerror', onPageError)
+  report.finishedAt = new Date().toISOString()
+  return report
+}

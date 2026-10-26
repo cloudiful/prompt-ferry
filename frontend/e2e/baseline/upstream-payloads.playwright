@@ -1,0 +1,39 @@
+async page => {
+ const base='http://127.0.0.1:5171'
+ const r={startedAt:new Date().toISOString(),checks:{},failures:[]}
+ page.setDefaultTimeout(8000)
+ const api=async(path,body)=>(await fetch('http://127.0.0.1:8789'+path,{method:body?'POST':'GET',headers:{'content-type':'application/json'},body:body?JSON.stringify(body):undefined})).json()
+ const since=async t=>(await api('/__fixtures/log?limit=500')).requests.filter(x=>Date.parse(x.at)>=t)
+ const edit=async()=>{await page.goto(base+'/endpoints/upstreams');await page.waitForTimeout(800);await page.locator('table tbody tr').filter({hasText:'OpenAI ChatGPT Subscription'}).getByRole('button',{name:'编辑',exact:true}).click();return page.getByRole('dialog').last()}
+ const choose=async(combo,label)=>{await combo.click();await page.getByRole('option',{name:label,exact:true}).click();await page.waitForTimeout(200)}
+ const save=async d=>{const t=Date.now();await d.getByRole('button',{name:'保存上游节点',exact:true}).click();await page.waitForTimeout(700);return(await since(t)).find(x=>x.method==='PATCH'&&x.path.endsWith('/ep-openai-codex'))}
+ await api('/__fixtures/reset',{})
+ await page.context().clearCookies();await page.goto(base+'/login');await page.evaluate(()=>{localStorage.clear();localStorage.setItem('prompt-ferry:locale','zh-CN')});await page.reload();await page.getByRole('textbox',{name:/登录名/}).fill('admin');await page.getByRole('textbox',{name:/密码/}).fill('fixture-password');await page.getByRole('button',{name:'登录',exact:true}).click();await page.waitForTimeout(900)
+ try {
+  let d=await edit()
+  r.checks.subscription={keyInputs:await d.getByPlaceholder('API 密钥',{exact:true}).count(),saved:await save(d)}
+  d=await edit()
+  await d.locator('#endpoint-plan').click()
+  const labels=await page.getByRole('option').allTextContents()
+  r.checks.planOptions=labels
+  await page.getByRole('option',{name:/Platform|平台/}).first().click()
+  await page.waitForTimeout(300)
+  await d.getByRole('button',{name:'新增 API key',exact:true}).click()
+  await d.getByPlaceholder('key 1').fill('fixture-platform-row')
+  await d.getByPlaceholder('API 密钥',{exact:true}).fill('fixture-not-a-credential')
+  r.checks.platform={keyEditorVisible:await d.getByRole('button',{name:'新增 API key',exact:true}).isVisible(),saved:await save(d)}
+  d=await edit()
+  await choose(d.getByRole('combobox').nth(2),'Embeddings')
+  const protocol=await save(d)
+  d=await edit()
+  const roundtrip=await d.getByRole('combobox').nth(2).textContent()
+  await choose(d.getByRole('combobox').nth(1),'通用')
+  const baseInput=d.getByPlaceholder('基础地址')
+  if(await baseInput.count())await baseInput.fill('https://fixture-upstream.invalid/v1')
+  const key=d.getByPlaceholder('API 密钥',{exact:true})
+  if(await key.count())await key.first().fill('fixture-not-a-credential')
+  r.checks.transition={protocol,roundtrip,providerReset:await save(d)}
+ }catch(e){r.failures.push({scenario:'upstream',error:String(e)})}
+ r.finishedAt=new Date().toISOString()
+ return JSON.stringify(r)
+}

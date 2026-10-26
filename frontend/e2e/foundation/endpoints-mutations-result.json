@@ -1,0 +1,19 @@
+{
+  "startedAt": "2026-10-25T13:43:35.793Z",
+  "checks": {
+    "keyRowsBehavior": {
+      "replacementSent": true,
+      "replacementReopenedSaved": true,
+      "removedSavedRow": true
+    },
+    "proxyClearAndScheduleEmpty": {
+      "proxyEmptySent": true,
+      "emptyScheduleSent": true,
+      "settingsReopened": true
+    },
+    "consoleErrors": [],
+    "pageErrors": []
+  },
+  "screenshots": [],
+  "finishedAt": "2026-10-25T13:43:37.339Z"
+}

@@ -1,0 +1,1023 @@
+{
+  "runId": "settings-cache-alert-1793011070786",
+  "startedAt": "2026-10-26T10:37:50.786Z",
+  "finishedAt": "2026-10-26T10:38:42.328Z",
+  "checks": {
+    "routeRender": {
+      "routeId": "R-SETTINGS-CACHE-ALERT",
+      "routeTab": "cache-alert",
+      "controls": {
+        "missing": [],
+        "enabled": "checked",
+        "window": "30",
+        "minTurns": "8",
+        "threshold": "0.85",
+        "cooldown": "15",
+        "webhook": "https://oapi.dingtalk.com/robot/send?access_token=fixture",
+        "secretType": "password",
+        "secretValue": "",
+        "windowBounds": {
+          "min": "5",
+          "max": "1440"
+        },
+        "thresholdBounds": {
+          "min": "0",
+          "max": "1",
+          "step": "0.05"
+        },
+        "presence": "true",
+        "mode": "keep",
+        "hint": true,
+        "bodyLeak": false,
+        "secretControls": 0,
+        "saveDisabled": false,
+        "refreshDisabled": false
+      }
+    },
+    "noAutosave": {
+      "writes": 0
+    },
+    "secretBadges": {
+      "before": {
+        "presence": "true",
+        "mode": "keep"
+      },
+      "typed": {
+        "presence": "true",
+        "mode": "replace"
+      },
+      "blank": {
+        "presence": "true",
+        "mode": "keep"
+      }
+    },
+    "mutationUpdate": {
+      "writes": 1,
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 10,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      },
+      "stored": {
+        "status": 200,
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 10,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_blank": true,
+        "has_dingtalk_secret": true
+      }
+    },
+    "secretReplace": {
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 10,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": true
+      },
+      "afterReplace": {
+        "secretValue": "",
+        "presence": "true",
+        "mode": "keep",
+        "bodyLeak": false,
+        "titleLeak": false,
+        "storageLeak": false
+      },
+      "stored": {
+        "status": 200,
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 10,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_blank": true,
+        "has_dingtalk_secret": true
+      }
+    },
+    "secretKeep": {
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 12,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      },
+      "stored": {
+        "status": 200,
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 12,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_blank": true,
+        "has_dingtalk_secret": true
+      }
+    },
+    "fixtureValidation": {
+      "windowLow": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "window_minutes must be between 5 and 1440"
+          }
+        }
+      },
+      "windowHigh": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "window_minutes must be between 5 and 1440"
+          }
+        }
+      },
+      "minTurnsLow": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "min_turns must be between 2 and 100"
+          }
+        }
+      },
+      "minTurnsHigh": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "min_turns must be between 2 and 100"
+          }
+        }
+      },
+      "thresholdLow": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "threshold must be between 0 and 1"
+          }
+        }
+      },
+      "thresholdHigh": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "threshold must be between 0 and 1"
+          }
+        }
+      },
+      "cooldownLow": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "cooldown_minutes must be between 5 and 1440"
+          }
+        }
+      },
+      "cooldownHigh": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "cooldown_minutes must be between 5 and 1440"
+          }
+        }
+      },
+      "thresholdZero": {
+        "status": 200,
+        "payload": {
+          "enabled": true,
+          "window_minutes": 45,
+          "min_turns": 12,
+          "threshold": 0,
+          "cooldown_minutes": 30,
+          "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+          "dingtalk_secret": "",
+          "has_dingtalk_secret": true
+        }
+      },
+      "thresholdOne": {
+        "status": 200,
+        "payload": {
+          "enabled": true,
+          "window_minutes": 45,
+          "min_turns": 12,
+          "threshold": 1,
+          "cooldown_minutes": 30,
+          "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+          "dingtalk_secret": "",
+          "has_dingtalk_secret": true
+        }
+      },
+      "partialDefaults": {
+        "status": 200,
+        "payload": {
+          "enabled": false,
+          "window_minutes": 30,
+          "min_turns": 5,
+          "threshold": 0.2,
+          "cooldown_minutes": 60,
+          "dingtalk_webhook_url": "",
+          "dingtalk_secret": "",
+          "has_dingtalk_secret": true
+        }
+      },
+      "replaceSecret": {
+        "status": 200,
+        "payload": {
+          "enabled": true,
+          "window_minutes": 45,
+          "min_turns": 12,
+          "threshold": 0.35,
+          "cooldown_minutes": 30,
+          "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+          "dingtalk_secret": "",
+          "has_dingtalk_secret": true
+        }
+      },
+      "blankKeepsSecret": {
+        "status": 200,
+        "payload": {
+          "enabled": true,
+          "window_minutes": 45,
+          "min_turns": 12,
+          "threshold": 0.35,
+          "cooldown_minutes": 30,
+          "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+          "dingtalk_secret": "",
+          "has_dingtalk_secret": true
+        }
+      },
+      "restore": {
+        "status": 200,
+        "payload": {
+          "enabled": true,
+          "window_minutes": 45,
+          "min_turns": 12,
+          "threshold": 0.35,
+          "cooldown_minutes": 30,
+          "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+          "dingtalk_secret": "",
+          "has_dingtalk_secret": true
+        }
+      }
+    },
+    "capabilityUnavailable": {
+      "warning": true,
+      "detail": true,
+      "retry": true,
+      "form": false,
+      "saveDisabled": true,
+      "pageRefreshDisabled": true,
+      "recovered": true,
+      "reads": 2
+    },
+    "doubleSave": {
+      "writes": 1
+    },
+    "newerDraft": {
+      "kept": "0.2"
+    },
+    "failureDraft": {
+      "writes": 2,
+      "stored": 15
+    },
+    "scopedRefresh": {
+      "reads": 1,
+      "writes": 0
+    },
+    "localeThemeNoRefetch": {
+      "reads": 0,
+      "writes": 0
+    },
+    "responsive": [
+      {
+        "width": 1440,
+        "documentWidth": 1440
+      },
+      {
+        "width": 1024,
+        "documentWidth": 1024
+      },
+      {
+        "width": 768,
+        "documentWidth": 768
+      },
+      {
+        "width": 390,
+        "documentWidth": 390
+      }
+    ],
+    "adminDenial": {
+      "navHidden": true,
+      "redirected": true,
+      "forgedPut": 403,
+      "forgedRead": 403,
+      "generalIntact": true,
+      "redactionIntact": 200,
+      "anonymousRead": 401
+    },
+    "officialPendingRoutes": 0,
+    "unexpectedWindow": "mounted admin cache alert tab stages",
+    "limitations": [
+      "Evidence is the synthetic fixture and its stored policy; no alert detection, DingTalk delivery, threshold evaluation or production behaviour is claimed.",
+      "The secret is asserted as presence booleans only. The fixture has no path that empties a stored secret, so a false presence badge is covered by the component test rather than the browser run; the 400, 401, 403, 501 and 503 cases run against fixture validation, the role gate, the capability answer and fault injection."
+    ]
+  },
+  "scenarios": {
+    "R-SETTINGS-CACHE-ALERT": {
+      "route-render": {
+        "passed": true,
+        "evidence": "the admin cache alert route renders one card with the enabled switch, the four bounded numbers and the float threshold, the webhook, a password-only empty secret with the server presence badge and the local keep badge, and the PostgreSQL hint, from exactly one read and no write"
+      },
+      "admin-denial": {
+        "passed": true,
+        "evidence": "an ordinary user has no cache alert link, is redirected away from the route without rendering it, is refused with 403 on forged reads and writes, and still reaches the general and redaction settings while an anonymous read is refused with 401"
+      },
+      "mutation-update": {
+        "passed": true,
+        "evidence": "one manual save sends the whole policy with the float threshold exact and the empty secret keeping the stored one, and the stored record matches"
+      },
+      "mutation-failure-draft": {
+        "passed": true,
+        "evidence": "a 503 reports one error and keeps the draft without retrying itself, and the Save button resends the same draft successfully"
+      }
+    }
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/settings-cache-alert-en-light-1440.png",
+    "e2e/foundation/screenshots/settings-cache-alert-failure-en-light-1440.png",
+    "e2e/foundation/screenshots/settings-cache-alert-en-light-390.png",
+    "e2e/foundation/screenshots/settings-cache-alert-zh-dark-1440.png",
+    "e2e/foundation/screenshots/settings-cache-alert-zh-dark-390.png"
+  ],
+  "apiFailures": [],
+  "expectedApiFailures": [
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "400 PUT /api/v1/settings/cache-alert",
+    "400 PUT /api/v1/settings/cache-alert",
+    "400 PUT /api/v1/settings/cache-alert",
+    "400 PUT /api/v1/settings/cache-alert",
+    "400 PUT /api/v1/settings/cache-alert",
+    "400 PUT /api/v1/settings/cache-alert",
+    "400 PUT /api/v1/settings/cache-alert",
+    "400 PUT /api/v1/settings/cache-alert",
+    "501 GET /api/v1/settings/cache-alert",
+    "503 PUT /api/v1/settings/cache-alert",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "403 PUT /api/v1/settings/cache-alert",
+    "403 GET /api/v1/settings/cache-alert",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/settings/cache-alert",
+    "401 GET /api/v1/auth/me"
+  ],
+  "unexpectedRequests": [],
+  "settingsRequests": [
+    {
+      "stage": "route-render",
+      "method": "GET",
+      "path": "/api/v1/settings/cache-alert",
+      "body": null
+    },
+    {
+      "stage": "mutation-update",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 10,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "mutation-update",
+      "method": "GET",
+      "path": "/api/v1/settings/cache-alert",
+      "body": null
+    },
+    {
+      "stage": "secret-replace",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 10,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": true
+      }
+    },
+    {
+      "stage": "secret-replace",
+      "method": "GET",
+      "path": "/api/v1/settings/cache-alert",
+      "body": null
+    },
+    {
+      "stage": "secret-keep",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 12,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "secret-keep",
+      "method": "GET",
+      "path": "/api/v1/settings/cache-alert",
+      "body": null
+    },
+    {
+      "stage": "fixture-validation",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 4,
+        "min_turns": 12,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "fixture-validation",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 1441,
+        "min_turns": 12,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "fixture-validation",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 1,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "fixture-validation",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 101,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "fixture-validation",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 12,
+        "threshold": -0.01,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "fixture-validation",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 12,
+        "threshold": 1.01,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "fixture-validation",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 12,
+        "threshold": 0.35,
+        "cooldown_minutes": 4,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "fixture-validation",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 12,
+        "threshold": 0.35,
+        "cooldown_minutes": 1441,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "fixture-validation",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 12,
+        "threshold": 0,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "fixture-validation",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 12,
+        "threshold": 1,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "fixture-validation",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": ["enabled"],
+        "enabled": false,
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "fixture-validation",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 12,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": true
+      }
+    },
+    {
+      "stage": "fixture-validation",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 12,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": true
+      }
+    },
+    {
+      "stage": "fixture-validation",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 45,
+        "min_turns": 12,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "fixture-validation",
+      "method": "GET",
+      "path": "/api/v1/settings/cache-alert",
+      "body": null
+    },
+    {
+      "stage": "capability-unavailable",
+      "method": "GET",
+      "path": "/api/v1/settings/cache-alert",
+      "body": null
+    },
+    {
+      "stage": "capability-unavailable",
+      "method": "GET",
+      "path": "/api/v1/settings/cache-alert",
+      "body": null
+    },
+    {
+      "stage": "double-save",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 60,
+        "min_turns": 12,
+        "threshold": 0.35,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "newer-draft",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 60,
+        "min_turns": 12,
+        "threshold": 0.1,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "newer-draft",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 60,
+        "min_turns": 12,
+        "threshold": 0.2,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 60,
+        "min_turns": 15,
+        "threshold": 0.2,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": [
+          "cooldown_minutes",
+          "dingtalk_secret",
+          "dingtalk_webhook_url",
+          "enabled",
+          "min_turns",
+          "threshold",
+          "window_minutes"
+        ],
+        "enabled": true,
+        "window_minutes": 60,
+        "min_turns": 15,
+        "threshold": 0.2,
+        "cooldown_minutes": 30,
+        "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "GET",
+      "path": "/api/v1/settings/cache-alert",
+      "body": null
+    },
+    {
+      "stage": "scoped-refresh",
+      "method": "GET",
+      "path": "/api/v1/settings/cache-alert",
+      "body": null
+    },
+    {
+      "stage": "scoped-refresh",
+      "method": "GET",
+      "path": "/api/v1/settings/cache-alert",
+      "body": null
+    },
+    {
+      "stage": "responsive-en",
+      "method": "GET",
+      "path": "/api/v1/settings/cache-alert",
+      "body": null
+    },
+    {
+      "stage": "locale-zh",
+      "method": "GET",
+      "path": "/api/v1/settings/cache-alert",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "PUT",
+      "path": "/api/v1/settings/cache-alert",
+      "body": {
+        "keys": ["enabled"],
+        "enabled": false,
+        "dingtalk_secret_present": false
+      }
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/cache-alert",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/redaction",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/cache-alert",
+      "body": null
+    }
+  ],
+  "consoleErrorCount": 0,
+  "pageErrorCount": 0,
+  "limitations": [
+    "Evidence is the synthetic fixture and its stored policy; no alert detection, DingTalk delivery, threshold evaluation or production behaviour is claimed.",
+    "The secret is asserted as presence booleans only. The fixture has no path that empties a stored secret, so a false presence badge is covered by the component test rather than the browser run; the 400, 401, 403, 501 and 503 cases run against fixture validation, the role gate, the capability answer and fault injection."
+  ]
+}

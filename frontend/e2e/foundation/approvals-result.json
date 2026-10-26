@@ -1,0 +1,633 @@
+{
+  "runId": "approvals-1793010752955",
+  "startedAt": "2026-10-26T10:32:32.955Z",
+  "checks": {
+    "routeRender": {
+      "routeId": true,
+      "noPlaceholder": true,
+      "pendingDefault": true,
+      "singleRead": true,
+      "rowCount": 10,
+      "remainingWait": true
+    },
+    "pagination": {
+      "secondPageRead": true,
+      "secondPageRows": 1,
+      "pageSizeOptions": ["10", "25", "50"],
+      "pageSizeRead": true,
+      "range": true,
+      "mobilePagerOnlyWhenOverflowing": true
+    },
+    "filter": {
+      "resolvedRead": true,
+      "resolvedRows": 4,
+      "resolvedHasNoAnswers": true,
+      "resolvedRemainingDash": true,
+      "pendingResetsFirst": true
+    },
+    "responsive": [
+      {
+        "locale": "en-US",
+        "theme": "light",
+        "width": 1440,
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "desktopVisible": true,
+        "mobileVisible": false,
+        "desktopPagerVisible": true,
+        "mobilePagerVisible": false,
+        "mobileCardVisible": false,
+        "mobileCardHasAnswer": true,
+        "lang": "en-US",
+        "storedLocale": "en-US",
+        "storedTheme": "light"
+      },
+      {
+        "locale": "en-US",
+        "theme": "light",
+        "width": 1024,
+        "documentWidth": 1024,
+        "viewportWidth": 1024,
+        "desktopVisible": true,
+        "mobileVisible": false,
+        "desktopPagerVisible": true,
+        "mobilePagerVisible": false,
+        "mobileCardVisible": false,
+        "mobileCardHasAnswer": true,
+        "lang": "en-US",
+        "storedLocale": "en-US",
+        "storedTheme": "light"
+      },
+      {
+        "locale": "en-US",
+        "theme": "light",
+        "width": 768,
+        "documentWidth": 768,
+        "viewportWidth": 768,
+        "desktopVisible": true,
+        "mobileVisible": false,
+        "desktopPagerVisible": true,
+        "mobilePagerVisible": false,
+        "mobileCardVisible": false,
+        "mobileCardHasAnswer": true,
+        "lang": "en-US",
+        "storedLocale": "en-US",
+        "storedTheme": "light"
+      },
+      {
+        "locale": "en-US",
+        "theme": "light",
+        "width": 390,
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "desktopVisible": false,
+        "mobileVisible": true,
+        "desktopPagerVisible": false,
+        "mobilePagerVisible": true,
+        "mobileCardVisible": true,
+        "mobileCardHasAnswer": true,
+        "lang": "en-US",
+        "storedLocale": "en-US",
+        "storedTheme": "light"
+      },
+      {
+        "locale": "zh-CN",
+        "theme": "dark",
+        "width": 1440,
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "desktopVisible": true,
+        "mobileVisible": false,
+        "desktopPagerVisible": true,
+        "mobilePagerVisible": false,
+        "mobileCardVisible": false,
+        "mobileCardHasAnswer": true,
+        "lang": "zh-CN",
+        "storedLocale": "zh-CN",
+        "storedTheme": "dark"
+      },
+      {
+        "locale": "zh-CN",
+        "theme": "dark",
+        "width": 1024,
+        "documentWidth": 1024,
+        "viewportWidth": 1024,
+        "desktopVisible": true,
+        "mobileVisible": false,
+        "desktopPagerVisible": true,
+        "mobilePagerVisible": false,
+        "mobileCardVisible": false,
+        "mobileCardHasAnswer": true,
+        "lang": "zh-CN",
+        "storedLocale": "zh-CN",
+        "storedTheme": "dark"
+      },
+      {
+        "locale": "zh-CN",
+        "theme": "dark",
+        "width": 768,
+        "documentWidth": 768,
+        "viewportWidth": 768,
+        "desktopVisible": true,
+        "mobileVisible": false,
+        "desktopPagerVisible": true,
+        "mobilePagerVisible": false,
+        "mobileCardVisible": false,
+        "mobileCardHasAnswer": true,
+        "lang": "zh-CN",
+        "storedLocale": "zh-CN",
+        "storedTheme": "dark"
+      },
+      {
+        "locale": "zh-CN",
+        "theme": "dark",
+        "width": 390,
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "desktopVisible": false,
+        "mobileVisible": true,
+        "desktopPagerVisible": false,
+        "mobilePagerVisible": true,
+        "mobileCardVisible": true,
+        "mobileCardHasAnswer": true,
+        "lang": "zh-CN",
+        "storedLocale": "zh-CN",
+        "storedTheme": "dark"
+      }
+    ],
+    "dialogOpen": {
+      "detailRead": true,
+      "showsUserKeyModel": true,
+      "showsCategories": true,
+      "showsPreview": true,
+      "showsPayload": true,
+      "hidesForbiddenFields": true,
+      "hidesEmptyPayload": true
+    },
+    "lastPageCorrection": {
+      "emptyPageRead": true,
+      "correctedRead": true,
+      "correctedRows": 10
+    },
+    "mutationApprove": {
+      "singleWrite": true,
+      "noBody": true,
+      "listRefreshed": true,
+      "detailReloaded": true,
+      "toast": true,
+      "leftPendingList": true
+    },
+    "mutationReject": {
+      "singleWrite": true,
+      "toast": true,
+      "leftPendingList": true,
+      "movedToResolved": true
+    },
+    "conflictGuard": {
+      "singleWrite": true,
+      "ownRowDisabled": true,
+      "otherRowEnabled": true
+    },
+    "modalGuard": {
+      "cancelDisabled": true,
+      "dismissalBlocked": true
+    },
+    "errorState": {
+      "listFailureClearsRows": true,
+      "listRetryRecovers": true,
+      "detailFailureKeepsDialogClosed": true,
+      "conflictRejected": true,
+      "conflictNoRefresh": true,
+      "writeFailureNoRefresh": true
+    },
+    "latestWins": {
+      "listKeepsNewest": true,
+      "detailKeepsNewest": true
+    },
+    "timerCleanup": {
+      "tickerRan": true,
+      "clearedOnLeave": true
+    },
+    "adminDenial": {
+      "redirected": true,
+      "noApprovalReads": true,
+      "forged403": true
+    },
+    "anonymousScope": {
+      "list401": true
+    }
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/approvals-en-light-1440.png",
+    "e2e/foundation/screenshots/approvals-responsive-en-light-1440.png",
+    "e2e/foundation/screenshots/approvals-zh-dark-390.png",
+    "e2e/foundation/screenshots/approvals-detail-en-light-1440.png"
+  ],
+  "expectedApiFailures": [
+    "503 GET /api/v1/admin/approvals",
+    "404 GET /api/v1/admin/approvals/:id",
+    "409 POST /api/v1/admin/approvals/:id/approve",
+    "503 POST /api/v1/admin/approvals/:id/approve",
+    "403 GET /api/v1/admin/approvals",
+    "401 GET /api/v1/admin/approvals"
+  ],
+  "apiFailures": [],
+  "consoleErrorCount": 0,
+  "pageErrorCount": 0,
+  "approvalRequests": [
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "10",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "0",
+      "rows": "25",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "resolved",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals/:id",
+      "rawPath": "/api/v1/admin/approvals/approval-1",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals/:id",
+      "rawPath": "/api/v1/admin/approvals/approval-fixture-2",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "10",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/approvals/:id/approve",
+      "rawPath": "/api/v1/admin/approvals/approval-fixture-10/approve",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "10",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals/:id",
+      "rawPath": "/api/v1/admin/approvals/approval-1",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/approvals/:id/approve",
+      "rawPath": "/api/v1/admin/approvals/approval-1/approve",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals/:id",
+      "rawPath": "/api/v1/admin/approvals/approval-1",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/approvals/:id/reject",
+      "rawPath": "/api/v1/admin/approvals/approval-fixture-2/reject",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "resolved",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/approvals/:id/approve",
+      "rawPath": "/api/v1/admin/approvals/approval-fixture-3/approve",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals/:id",
+      "rawPath": "/api/v1/admin/approvals/approval-fixture-4",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/approvals/:id/approve",
+      "rawPath": "/api/v1/admin/approvals/approval-fixture-4/approve",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals/:id",
+      "rawPath": "/api/v1/admin/approvals/approval-fixture-4",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals/:id",
+      "rawPath": "/api/v1/admin/approvals/approval-fixture-5",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/approvals/:id/approve",
+      "rawPath": "/api/v1/admin/approvals/approval-fixture-6/approve",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/approvals/:id/approve",
+      "rawPath": "/api/v1/admin/approvals/approval-fixture-6/approve",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/approvals/:id/approve",
+      "rawPath": "/api/v1/admin/approvals/approval-fixture-7/approve",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "resolved",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals/:id",
+      "rawPath": "/api/v1/admin/approvals/approval-fixture-8",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals/:id",
+      "rawPath": "/api/v1/admin/approvals/approval-fixture-9",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": null,
+      "first": null,
+      "rows": null,
+      "body": null
+    }
+  ],
+  "decisionWrites": [
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/approvals/approval-fixture-10/approve",
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/approvals/approval-1/approve",
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/approvals/approval-fixture-2/reject",
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/approvals/approval-fixture-3/approve",
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/approvals/approval-fixture-4/approve",
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/approvals/approval-fixture-6/approve",
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/approvals/approval-fixture-6/approve",
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/approvals/approval-fixture-7/approve",
+      "body": null
+    }
+  ],
+  "finishedAt": "2026-10-26T10:33:10.421Z"
+}

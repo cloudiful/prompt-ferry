@@ -1,0 +1,1147 @@
+{
+  "runId": "settings-review-1793011197262",
+  "startedAt": "2026-10-26T10:39:57.262Z",
+  "finishedAt": "2026-10-26T10:40:58.751Z",
+  "checks": {
+    "routeRender": {
+      "routeId": "R-SETTINGS-REVIEW",
+      "routeTab": "review",
+      "controls": {
+        "missing": [],
+        "groups": [
+          {
+            "label": "Execution",
+            "open": true
+          },
+          {
+            "label": "Custom review policy",
+            "open": false
+          },
+          {
+            "label": "Webhook",
+            "open": false
+          }
+        ],
+        "apiKeyType": "password",
+        "bearerType": "password",
+        "enabled": "checked",
+        "failurePolicy": "Block on failure",
+        "timeout": "8000",
+        "ttl": "120",
+        "baseUrl": "https://review.example.internal",
+        "model": "review-model",
+        "headers": "X-Fixture-Header: enabled",
+        "hintVisible": true,
+        "apiKeyPresent": false,
+        "bearerPresent": false
+      }
+    },
+    "noAutosave": {
+      "writes": 0
+    },
+    "mutationUpdate": {
+      "writes": 1,
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {
+          "X-One": "1",
+          "X-Url": "https://a.example/x:y"
+        },
+        "enabled": true,
+        "failure_policy": "fail_open",
+        "review_base_url": "https://review2.example.internal",
+        "review_model": "review-model-2",
+        "review_timeout_ms": 4500,
+        "pending_ttl_seconds": 60,
+        "custom_policy_text": "Updated fixture policy",
+        "webhook_enabled": true,
+        "webhook_url": "https://review.example.internal/webhook"
+      },
+      "stored": {
+        "status": 200,
+        "enabled": true,
+        "review_base_url": "https://review2.example.internal",
+        "review_model": "review-model-2",
+        "review_timeout_ms": 4500,
+        "failure_policy": "fail_open",
+        "pending_ttl_seconds": 60,
+        "custom_policy_text": "Updated fixture policy",
+        "review_api_key_present": false,
+        "webhook": {
+          "enabled": true,
+          "url": "https://review.example.internal/webhook",
+          "bearer_token_present": false,
+          "extra_headers": {
+            "X-One": "1",
+            "X-Url": "https://a.example/x:y"
+          }
+        }
+      }
+    },
+    "secretLifecycle": {
+      "set": true,
+      "loadedSecrets": {
+        "apiKeyPresent": true,
+        "bearerPresent": true,
+        "bodyLeak": false,
+        "titleLeak": false,
+        "storageLeak": false
+      },
+      "untouchedPresent": true,
+      "clearedPresent": false,
+      "afterClear": {
+        "status": 200,
+        "enabled": true,
+        "review_base_url": "https://review2.example.internal",
+        "review_model": "review-model-3",
+        "review_timeout_ms": 4500,
+        "failure_policy": "fail_open",
+        "pending_ttl_seconds": 60,
+        "custom_policy_text": "Updated fixture policy",
+        "review_api_key_present": false,
+        "webhook": {
+          "enabled": true,
+          "url": "https://review.example.internal/webhook",
+          "bearer_token_present": true,
+          "extra_headers": {
+            "X-One": "1",
+            "X-Url": "https://a.example/x:y"
+          }
+        }
+      }
+    },
+    "localHeaderError": {
+      "writes": 0
+    },
+    "serverValidation": {
+      "writes": 2,
+      "alerts": [
+        "Header format must be Name: value",
+        "bad_request: review_base_url must not include /v1"
+      ],
+      "corrected": "https://review3.example.internal"
+    },
+    "serverValidationCases": {
+      "currentBaseUrl": "https://review3.example.internal",
+      "emptyBaseUrl": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "review_base_url is required when LLM review is enabled"
+          }
+        }
+      },
+      "v1Suffix": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "review_base_url must not include /v1"
+          }
+        }
+      },
+      "emptyModel": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "review_model is required when LLM review is enabled"
+          }
+        }
+      },
+      "lowTimeout": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "review_timeout_ms must be at least 100"
+          }
+        }
+      },
+      "zeroTtl": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "pending_ttl_seconds must be at least 1"
+          }
+        }
+      },
+      "webhookNoUrl": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "webhook.url is required when webhook is enabled"
+          }
+        }
+      },
+      "emptyHeaderName": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "webhook.extra_headers must not contain empty header names"
+          }
+        }
+      },
+      "multiLineHeader": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "webhook.extra_headers values must be single-line"
+          }
+        }
+      },
+      "disabledInvalid": {
+        "status": 200,
+        "payload": {
+          "enabled": false,
+          "review_base_url": "",
+          "review_api_key": "",
+          "review_model": "",
+          "review_timeout_ms": 1,
+          "failure_policy": "fail_closed",
+          "pending_ttl_seconds": 0,
+          "custom_policy_text": "",
+          "webhook": {
+            "enabled": true,
+            "url": "",
+            "bearer_token": "",
+            "extra_headers": {}
+          }
+        }
+      },
+      "restore": {
+        "status": 200,
+        "payload": {
+          "enabled": true,
+          "review_base_url": "https://review.example.internal",
+          "review_api_key": "",
+          "review_model": "review-model",
+          "review_timeout_ms": 3000,
+          "failure_policy": "fail_closed",
+          "pending_ttl_seconds": 300,
+          "custom_policy_text": "",
+          "webhook": {
+            "enabled": false,
+            "url": "",
+            "bearer_token": "",
+            "extra_headers": {}
+          }
+        }
+      }
+    },
+    "doubleSave": {
+      "writes": 1
+    },
+    "newerDraft": {
+      "kept": "newer policy"
+    },
+    "failureDraft": {
+      "writes": 2,
+      "stored": "transport-failure policy"
+    },
+    "scopedRefresh": {
+      "reads": 1,
+      "writes": 0
+    },
+    "localeThemeNoRefetch": {
+      "reads": 0,
+      "writes": 0
+    },
+    "responsive": [
+      {
+        "width": 1440,
+        "documentWidth": 1440
+      },
+      {
+        "width": 1024,
+        "documentWidth": 1024
+      },
+      {
+        "width": 768,
+        "documentWidth": 768
+      },
+      {
+        "width": 390,
+        "documentWidth": 390
+      }
+    ],
+    "collapsible": {
+      "states": [true, false, false],
+      "afterOpen": true,
+      "afterSecond": true,
+      "first": true,
+      "afterClose": false
+    },
+    "adminDenial": {
+      "navHidden": true,
+      "redirected": true,
+      "forgedPatch": 403,
+      "forgedRead": 403,
+      "generalIntact": true,
+      "redactionIntact": 200,
+      "anonymousRead": 401
+    },
+    "officialPendingRoutes": 0,
+    "unexpectedWindow": "mounted admin review tab stages",
+    "limitations": [
+      "Evidence is the synthetic fixture and its stored settings; no PostgreSQL review execution, provider call, webhook delivery or production behaviour is claimed.",
+      "The secrets are asserted as booleans and presence flags only; the 400, 401, 403 and 503 cases run against fixture validation, the role gate and fault injection."
+    ]
+  },
+  "scenarios": {
+    "R-SETTINGS-REVIEW": {
+      "route-render": {
+        "passed": true,
+        "evidence": "the admin review route renders one card with all twelve controls, three native disclosure groups, password-only secrets and the PostgreSQL hint, from exactly one read and no write"
+      },
+      "admin-denial": {
+        "passed": true,
+        "evidence": "an ordinary user has no review link, is redirected away from the route without rendering it, is refused with 403 on forged review reads and writes, and still reaches the general and redaction settings while an anonymous read is refused with 401"
+      },
+      "mutation-update": {
+        "passed": true,
+        "evidence": "one manual save sends the whole object including the assembled webhook, the failure policy changes to fail_open, header values keep their colons, and the stored record matches"
+      },
+      "mutation-failure-draft": {
+        "passed": true,
+        "evidence": "a 503 reports one error and keeps the draft without retrying itself, and the Save button resends the same draft successfully"
+      }
+    }
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/settings-review-en-light-1440.png",
+    "e2e/foundation/screenshots/settings-review-failure-en-light-1440.png",
+    "e2e/foundation/screenshots/settings-review-en-light-390.png",
+    "e2e/foundation/screenshots/settings-review-zh-dark-1440.png",
+    "e2e/foundation/screenshots/settings-review-zh-dark-390.png"
+  ],
+  "apiFailures": [],
+  "expectedApiFailures": [
+    "401 GET /api/v1/auth/me",
+    "400 PATCH /api/v1/settings/llm-review",
+    "400 PATCH /api/v1/settings/llm-review",
+    "400 PATCH /api/v1/settings/llm-review",
+    "400 PATCH /api/v1/settings/llm-review",
+    "400 PATCH /api/v1/settings/llm-review",
+    "400 PATCH /api/v1/settings/llm-review",
+    "400 PATCH /api/v1/settings/llm-review",
+    "400 PATCH /api/v1/settings/llm-review",
+    "400 PATCH /api/v1/settings/llm-review",
+    "503 PATCH /api/v1/settings/llm-review",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "403 PATCH /api/v1/settings/llm-review",
+    "403 GET /api/v1/settings/llm-review",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/settings/llm-review",
+    "401 GET /api/v1/auth/me"
+  ],
+  "unexpectedRequests": [],
+  "settingsRequests": [
+    {
+      "stage": "route-render",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "mutation-update",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {
+          "X-One": "1",
+          "X-Url": "https://a.example/x:y"
+        },
+        "enabled": true,
+        "failure_policy": "fail_open",
+        "review_base_url": "https://review2.example.internal",
+        "review_model": "review-model-2",
+        "review_timeout_ms": 4500,
+        "pending_ttl_seconds": 60,
+        "custom_policy_text": "Updated fixture policy",
+        "webhook_enabled": true,
+        "webhook_url": "https://review.example.internal/webhook"
+      }
+    },
+    {
+      "stage": "mutation-update",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "secret-keep-and-clear",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "secret-keep-and-clear",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": true,
+        "webhook_bearer_token_present": true,
+        "extra_headers": {
+          "X-One": "1",
+          "X-Url": "https://a.example/x:y"
+        },
+        "enabled": true,
+        "failure_policy": "fail_open",
+        "review_base_url": "https://review2.example.internal",
+        "review_model": "review-model-2",
+        "review_timeout_ms": 4500,
+        "pending_ttl_seconds": 60,
+        "custom_policy_text": "Updated fixture policy",
+        "webhook_enabled": true,
+        "webhook_url": "https://review.example.internal/webhook"
+      }
+    },
+    {
+      "stage": "secret-keep-and-clear",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "secret-keep-and-clear",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "secret-keep-and-clear",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": true,
+        "webhook_bearer_token_present": true,
+        "extra_headers": {
+          "X-One": "1",
+          "X-Url": "https://a.example/x:y"
+        },
+        "enabled": true,
+        "failure_policy": "fail_open",
+        "review_base_url": "https://review2.example.internal",
+        "review_model": "review-model-3",
+        "review_timeout_ms": 4500,
+        "pending_ttl_seconds": 60,
+        "custom_policy_text": "Updated fixture policy",
+        "webhook_enabled": true,
+        "webhook_url": "https://review.example.internal/webhook"
+      }
+    },
+    {
+      "stage": "secret-keep-and-clear",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "secret-keep-and-clear",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "secret-keep-and-clear",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": true,
+        "extra_headers": {
+          "X-One": "1",
+          "X-Url": "https://a.example/x:y"
+        },
+        "enabled": true,
+        "failure_policy": "fail_open",
+        "review_base_url": "https://review2.example.internal",
+        "review_model": "review-model-3",
+        "review_timeout_ms": 4500,
+        "pending_ttl_seconds": 60,
+        "custom_policy_text": "Updated fixture policy",
+        "webhook_enabled": true,
+        "webhook_url": "https://review.example.internal/webhook"
+      }
+    },
+    {
+      "stage": "secret-keep-and-clear",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "validation-server-400",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": true,
+        "extra_headers": {
+          "X-Clean": "1"
+        },
+        "enabled": true,
+        "failure_policy": "fail_open",
+        "review_base_url": "https://review3.example.internal/v1",
+        "review_model": "review-model-3",
+        "review_timeout_ms": 4500,
+        "pending_ttl_seconds": 60,
+        "custom_policy_text": "Updated fixture policy",
+        "webhook_enabled": true,
+        "webhook_url": "https://review.example.internal/webhook"
+      }
+    },
+    {
+      "stage": "validation-server-400",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": true,
+        "extra_headers": {
+          "X-Clean": "1"
+        },
+        "enabled": true,
+        "failure_policy": "fail_open",
+        "review_base_url": "https://review3.example.internal",
+        "review_model": "review-model-3",
+        "review_timeout_ms": 4500,
+        "pending_ttl_seconds": 60,
+        "custom_policy_text": "Updated fixture policy",
+        "webhook_enabled": true,
+        "webhook_url": "https://review.example.internal/webhook"
+      }
+    },
+    {
+      "stage": "validation-server-400",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "disabled-validation-bypass",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "disabled-validation-bypass",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {},
+        "enabled": true,
+        "failure_policy": "fail_closed",
+        "review_base_url": "  ",
+        "review_model": "review-model",
+        "review_timeout_ms": 3000,
+        "pending_ttl_seconds": 300,
+        "custom_policy_text": "",
+        "webhook_enabled": false,
+        "webhook_url": ""
+      }
+    },
+    {
+      "stage": "disabled-validation-bypass",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {},
+        "enabled": true,
+        "failure_policy": "fail_closed",
+        "review_base_url": "https://a.example/v1/",
+        "review_model": "review-model",
+        "review_timeout_ms": 3000,
+        "pending_ttl_seconds": 300,
+        "custom_policy_text": "",
+        "webhook_enabled": false,
+        "webhook_url": ""
+      }
+    },
+    {
+      "stage": "disabled-validation-bypass",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {},
+        "enabled": true,
+        "failure_policy": "fail_closed",
+        "review_base_url": "https://review.example.internal",
+        "review_model": "",
+        "review_timeout_ms": 3000,
+        "pending_ttl_seconds": 300,
+        "custom_policy_text": "",
+        "webhook_enabled": false,
+        "webhook_url": ""
+      }
+    },
+    {
+      "stage": "disabled-validation-bypass",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {},
+        "enabled": true,
+        "failure_policy": "fail_closed",
+        "review_base_url": "https://review.example.internal",
+        "review_model": "review-model",
+        "review_timeout_ms": 99,
+        "pending_ttl_seconds": 300,
+        "custom_policy_text": "",
+        "webhook_enabled": false,
+        "webhook_url": ""
+      }
+    },
+    {
+      "stage": "disabled-validation-bypass",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {},
+        "enabled": true,
+        "failure_policy": "fail_closed",
+        "review_base_url": "https://review.example.internal",
+        "review_model": "review-model",
+        "review_timeout_ms": 3000,
+        "pending_ttl_seconds": 0,
+        "custom_policy_text": "",
+        "webhook_enabled": false,
+        "webhook_url": ""
+      }
+    },
+    {
+      "stage": "disabled-validation-bypass",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {},
+        "enabled": true,
+        "failure_policy": "fail_closed",
+        "review_base_url": "https://review.example.internal",
+        "review_model": "review-model",
+        "review_timeout_ms": 3000,
+        "pending_ttl_seconds": 300,
+        "custom_policy_text": "",
+        "webhook_enabled": true,
+        "webhook_url": "   "
+      }
+    },
+    {
+      "stage": "disabled-validation-bypass",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {
+          "  ": "value"
+        },
+        "enabled": true,
+        "failure_policy": "fail_closed",
+        "review_base_url": "https://review.example.internal",
+        "review_model": "review-model",
+        "review_timeout_ms": 3000,
+        "pending_ttl_seconds": 300,
+        "custom_policy_text": "",
+        "webhook_enabled": false,
+        "webhook_url": ""
+      }
+    },
+    {
+      "stage": "disabled-validation-bypass",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {
+          "X-Bad": "line1\nline2"
+        },
+        "enabled": true,
+        "failure_policy": "fail_closed",
+        "review_base_url": "https://review.example.internal",
+        "review_model": "review-model",
+        "review_timeout_ms": 3000,
+        "pending_ttl_seconds": 300,
+        "custom_policy_text": "",
+        "webhook_enabled": false,
+        "webhook_url": ""
+      }
+    },
+    {
+      "stage": "disabled-validation-bypass",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {},
+        "enabled": false,
+        "failure_policy": "fail_closed",
+        "review_base_url": "",
+        "review_model": "",
+        "review_timeout_ms": 1,
+        "pending_ttl_seconds": 0,
+        "custom_policy_text": "",
+        "webhook_enabled": true,
+        "webhook_url": ""
+      }
+    },
+    {
+      "stage": "disabled-validation-bypass",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {},
+        "enabled": true,
+        "failure_policy": "fail_closed",
+        "review_base_url": "https://review.example.internal",
+        "review_model": "review-model",
+        "review_timeout_ms": 3000,
+        "pending_ttl_seconds": 300,
+        "custom_policy_text": "",
+        "webhook_enabled": false,
+        "webhook_url": ""
+      }
+    },
+    {
+      "stage": "disabled-validation-bypass",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "double-save",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {},
+        "enabled": true,
+        "failure_policy": "fail_closed",
+        "review_base_url": "https://review.example.internal",
+        "review_model": "review-model-4",
+        "review_timeout_ms": 3000,
+        "pending_ttl_seconds": 300,
+        "custom_policy_text": "",
+        "webhook_enabled": false,
+        "webhook_url": ""
+      }
+    },
+    {
+      "stage": "newer-draft",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {},
+        "enabled": true,
+        "failure_policy": "fail_closed",
+        "review_base_url": "https://review.example.internal",
+        "review_model": "review-model-4",
+        "review_timeout_ms": 3000,
+        "pending_ttl_seconds": 300,
+        "custom_policy_text": "submitted policy",
+        "webhook_enabled": false,
+        "webhook_url": ""
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {},
+        "enabled": true,
+        "failure_policy": "fail_closed",
+        "review_base_url": "https://review.example.internal",
+        "review_model": "review-model-4",
+        "review_timeout_ms": 3000,
+        "pending_ttl_seconds": 300,
+        "custom_policy_text": "transport-failure policy",
+        "webhook_enabled": false,
+        "webhook_url": ""
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": [
+          "custom_policy_text",
+          "enabled",
+          "failure_policy",
+          "pending_ttl_seconds",
+          "review_api_key",
+          "review_base_url",
+          "review_model",
+          "review_timeout_ms",
+          "webhook"
+        ],
+        "webhookKeys": ["bearer_token", "enabled", "extra_headers", "url"],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {},
+        "enabled": true,
+        "failure_policy": "fail_closed",
+        "review_base_url": "https://review.example.internal",
+        "review_model": "review-model-4",
+        "review_timeout_ms": 3000,
+        "pending_ttl_seconds": 300,
+        "custom_policy_text": "transport-failure policy",
+        "webhook_enabled": false,
+        "webhook_url": ""
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "scoped-refresh",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "responsive-en",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "collapsible-groups",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "locale-zh",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "PATCH",
+      "path": "/api/v1/settings/llm-review",
+      "body": {
+        "keys": ["enabled"],
+        "webhookKeys": [],
+        "review_api_key_present": false,
+        "webhook_bearer_token_present": false,
+        "extra_headers": {},
+        "enabled": false
+      }
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/redaction",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/redaction/custom-strings",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/redaction",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    }
+  ],
+  "consoleErrorCount": 0,
+  "pageErrorCount": 0,
+  "limitations": [
+    "Evidence is the synthetic fixture and its stored settings; no PostgreSQL review execution, provider call, webhook delivery or production behaviour is claimed.",
+    "The secrets are asserted as booleans and presence flags only; the 400, 401, 403 and 503 cases run against fixture validation, the role gate and fault injection."
+  ]
+}

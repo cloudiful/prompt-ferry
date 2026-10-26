@@ -94,3 +94,38 @@ export function createMcpWorkspaceView(
     ),
   }
 }
+
+export function canDisableMcpBearerToken(
+  tokens: readonly { enabled: boolean; token: string }[],
+  index: number,
+): boolean {
+  const token = tokens[index]
+  if (!token || !token.enabled || token.token.trim() === '') return true
+  return tokens.some(
+    (candidate, candidateIndex) =>
+      candidateIndex !== index &&
+      candidate.enabled &&
+      candidate.token.trim() !== '',
+  )
+}
+
+export function canRemoveMcpBearerToken(
+  tokens: readonly { enabled: boolean; token: string }[],
+  index: number,
+): boolean {
+  const token = tokens[index]
+  if (!token || token.token.trim() === '') return true
+  const hasOtherNonEmptyToken = tokens.some(
+    (candidate, candidateIndex) =>
+      candidateIndex !== index && candidate.token.trim() !== '',
+  )
+  return (
+    !hasOtherNonEmptyToken ||
+    tokens.some(
+      (candidate, candidateIndex) =>
+        candidateIndex !== index &&
+        candidate.enabled &&
+        candidate.token.trim() !== '',
+    )
+  )
+}

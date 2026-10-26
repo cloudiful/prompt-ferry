@@ -1,0 +1,1083 @@
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const startedAt = new Date().toISOString()
+  const report = {
+    runId: `redaction-rules-${Date.now()}`,
+    startedAt,
+    checks: {},
+    screenshots: [],
+    expectedApiFailures: [],
+    apiFailures: [],
+    consoleErrorCount: 0,
+    pageErrorCount: 0,
+    redactionApiRequestCount: 0,
+    userOptionsRequestCount: 0,
+  }
+  const redactionRequests = []
+  const redactionResponses = []
+  const patchBodies = []
+  let stage = 'startup'
+
+  page.setDefaultTimeout(12000)
+  await page.addInitScript(() => {
+    window.__redactionNativeConfirm = false
+    window.confirm = () => {
+      window.__redactionNativeConfirm = true
+      return false
+    }
+  })
+  page.on('pageerror', () => report.pageErrorCount++)
+  page.on('console', (message) => {
+    if (message.type() !== 'error') return
+    if (/(?:status of )?(?:400|401|403|404|503)\b/.test(message.text())) return
+    report.consoleErrorCount++
+  })
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (!url.pathname.startsWith('/api/')) return
+    if (
+      request.method() === 'GET' &&
+      url.pathname === '/api/v1/admin/users/options'
+    ) {
+      report.userOptionsRequestCount++
+    }
+    if (
+      url.pathname === '/api/v1/settings/redaction' ||
+      url.pathname.startsWith('/api/v1/settings/redaction/')
+    ) {
+      const item = {
+        method: request.method(),
+        path: url.pathname,
+        scope: url.searchParams.get('scope'),
+        userId: url.searchParams.get('user_id'),
+        first: url.searchParams.get('first'),
+        rows: url.searchParams.get('rows'),
+        searchFixture10: url.searchParams.get('search') === 'fixture-secret-10',
+      }
+      redactionRequests.push(item)
+      report.redactionApiRequestCount++
+      if (
+        request.method() === 'PATCH' &&
+        url.pathname === '/api/v1/settings/redaction'
+      ) {
+        try {
+          patchBodies.push(request.postDataJSON())
+        } catch {}
+      }
+    }
+  })
+  page.on('response', (response) => {
+    const url = new URL(response.url())
+    if (
+      url.pathname === '/api/v1/settings/redaction' ||
+      url.pathname.startsWith('/api/v1/settings/redaction/')
+    ) {
+      const responseInfo = {
+        method: response.request().method(),
+        path: url.pathname,
+        status: response.status(),
+        scope: url.searchParams.get('scope'),
+        userId: url.searchParams.get('user_id'),
+      }
+      redactionResponses.push(responseInfo)
+    }
+    if (!url.pathname.startsWith('/api/') || response.status() < 400) return
+    const method = response.request().method()
+    if (response.status() === 401 && url.pathname === '/api/v1/auth/me') return
+    if (
+      [401, 403].includes(response.status()) &&
+      method === 'GET' &&
+      url.pathname === '/api/v1/admin/request-records'
+    ) {
+      report.expectedApiFailures.push(
+        `${response.status()} GET /api/v1/admin/request-records`,
+      )
+      return
+    }
+    if (
+      response.status() === 404 &&
+      method === 'GET' &&
+      url.pathname === '/api/v1/settings/redaction/unknown'
+    ) {
+      report.expectedApiFailures.push(
+        '404 GET /api/v1/settings/redaction/unknown',
+      )
+      return
+    }
+    if (
+      response.status() === 503 &&
+      method === 'PATCH' &&
+      url.pathname === '/api/v1/settings/redaction'
+    ) {
+      report.expectedApiFailures.push('503 PATCH /api/v1/settings/redaction')
+      return
+    }
+    if (
+      [401, 403].includes(response.status()) &&
+      (url.pathname === '/api/v1/settings/redaction' ||
+        url.pathname === '/api/v1/settings/redaction/custom-strings')
+    ) {
+      report.expectedApiFailures.push(
+        `${response.status()} ${method} ${url.pathname}`,
+      )
+      return
+    }
+    report.apiFailures.push(`${response.status()} ${method} ${url.pathname}`)
+  })
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(`${stage}: ${message}`)
+  }
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok)
+      throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  function waitForResponse(method, path, status = 200) {
+    return page
+      .waitForResponse((response) => {
+        const url = new URL(response.url())
+        return (
+          response.request().method() === method &&
+          url.pathname === path &&
+          response.status() === status
+        )
+      })
+      .catch((cause) => {
+        throw new Error(
+          `${stage}: timed out waiting for ${status} ${method} ${path}; requests=${JSON.stringify(redactionRequests.slice(-8))}; ${cause.message}`,
+        )
+      })
+  }
+
+  function waitForRedactionRequest(method, options = {}) {
+    return page
+      .waitForResponse((response) => {
+        const url = new URL(response.url())
+        const request = response.request()
+        return (
+          request.method() === method &&
+          url.pathname ===
+            (options.path ?? '/api/v1/settings/redaction/custom-strings') &&
+          (options.status === undefined ||
+            response.status() === options.status) &&
+          (options.first === undefined ||
+            url.searchParams.get('first') === String(options.first)) &&
+          (options.rows === undefined ||
+            url.searchParams.get('rows') === String(options.rows)) &&
+          (options.searchFixture10 === undefined ||
+            (url.searchParams.get('search') === 'fixture-secret-10') ===
+              options.searchFixture10) &&
+          (options.scope === undefined ||
+            url.searchParams.get('scope') === options.scope) &&
+          (options.userId === undefined ||
+            url.searchParams.get('user_id') === String(options.userId))
+        )
+      })
+      .catch((cause) => {
+        throw new Error(
+          `${stage}: timed out waiting for a Redaction Rules query; requests=${JSON.stringify(redactionRequests.slice(-8))}; responses=${JSON.stringify(redactionResponses.slice(-8))}; ${cause.message}`,
+        )
+      })
+  }
+
+  async function signIn(loginName) {
+    await page.getByLabel('Login name').waitFor({ state: 'visible' })
+    await page.getByLabel('Login name').fill(loginName)
+    await page
+      .getByRole('textbox', { name: 'Password' })
+      .fill('fixture-password')
+    await page.getByRole('button', { name: 'Login' }).click()
+    await page.waitForURL((url) => new URL(url).pathname === '/api-keys')
+  }
+
+  async function waitForRules() {
+    await page
+      .locator('[data-foundation-route-id="R-REDACTION-RULES"]')
+      .waitFor({ state: 'visible' })
+    await page
+      .locator('[data-foundation-route-id="R-REDACTION-RULES"] > header > h1')
+      .waitFor({ state: 'visible' })
+    await page
+      .getByRole('searchbox', { name: 'Pattern' })
+      .waitFor({ state: 'visible' })
+      .catch((cause) => {
+        throw new Error(
+          `${stage}: rules panel did not become ready; responses=${JSON.stringify(redactionResponses.slice(-8))}; ${cause.message}`,
+        )
+      })
+  }
+
+  async function chooseOption(triggerName, optionName) {
+    await page.getByRole('combobox', { name: triggerName }).click()
+    await page.getByRole('option', { name: optionName }).click()
+  }
+
+  async function setRuleOption(arrayIndex, label, value) {
+    const row = page.locator(`[data-redaction-array-index="${arrayIndex}"]`)
+    await row
+      .getByRole('combobox', { name: `${label} ${arrayIndex + 1}` })
+      .click()
+    await page.getByRole('option', { name: value, exact: true }).click()
+  }
+
+  function patternInput(arrayIndex) {
+    return page.locator(
+      `[data-redaction-array-index="${arrayIndex}"] input[name="redaction-custom-pattern"]`,
+    )
+  }
+
+  function requestCount(method, path) {
+    return redactionRequests.filter(
+      (item) => item.method === method && item.path === path,
+    ).length
+  }
+
+  async function capture(name) {
+    const path = `${screenshots}/${name}.png`
+    await page.screenshot({ path, fullPage: true })
+    report.screenshots.push(path)
+  }
+
+  await page.context().clearCookies()
+  await fixture('/__fixtures/reset', 'POST')
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto(`${BASE}/login`)
+  await page.evaluate(() => {
+    localStorage.clear()
+    localStorage.setItem('prompt-ferry:locale', 'en-US')
+    localStorage.setItem('prompt-ferry:theme-mode', 'light')
+    localStorage.setItem(
+      'prompt-ferry:table-page-size:redaction-custom-strings',
+      '10',
+    )
+    localStorage.setItem('prompt-ferry:display-time-zone', 'UTC')
+  })
+  await page.reload()
+  await signIn('admin')
+
+  stage = 'route-render-and-initial-load'
+  const initialSettingsRead = waitForResponse(
+    'GET',
+    '/api/v1/settings/redaction',
+    200,
+  )
+  const initialStringsPage = waitForRedactionRequest('GET', {
+    first: 0,
+    rows: 10,
+  })
+  await page.goto(`${BASE}/redaction/rules`)
+  await waitForRules()
+  await initialSettingsRead
+  await initialStringsPage
+  assert(
+    redactionRequests.some(
+      (item) =>
+        item.method === 'GET' &&
+        item.path === '/api/v1/settings/redaction' &&
+        item.scope === 'global' &&
+        item.userId === null,
+    ),
+    'admin did not start in global scope',
+  )
+  assert(
+    report.userOptionsRequestCount > 0,
+    'admin user options were not loaded',
+  )
+  assert(
+    (await page.locator('[data-slot="checkbox"]').count()) >= 10,
+    'built-in and enabled controls are missing',
+  )
+  assert(
+    (await page
+      .locator('input[name="redaction-custom-pattern"][type="password"]')
+      .count()) === 10,
+    'initial custom patterns are not masked',
+  )
+  report.checks.routeAndInitialReads = true
+  report.checks.initialPage = redactionRequests.some(
+    (item) =>
+      item.path.endsWith('/custom-strings') &&
+      item.first === '0' &&
+      item.rows === '10',
+  )
+
+  stage = 'search-and-pagination'
+  let responseWait = waitForRedactionRequest('GET', { searchFixture10: true })
+  await page
+    .getByRole('searchbox', { name: 'Pattern' })
+    .fill('fixture-secret-10')
+  await responseWait
+  const filteredIndexes = await page
+    .locator('tr[data-redaction-array-index]')
+    .evaluateAll((rows) =>
+      rows.map((row) => row.getAttribute('data-redaction-array-index')),
+    )
+  assert(
+    filteredIndexes.length === 1,
+    'server search did not return one matching row',
+  )
+  assert(
+    redactionRequests.some((item) => item.searchFixture10),
+    'server search query was not transmitted',
+  )
+  report.checks.validationSearchPayload = {
+    serverSearch: true,
+    exactPageQuery: true,
+    distinctRows: true,
+  }
+
+  responseWait = waitForRedactionRequest('GET', {
+    first: 0,
+    rows: 10,
+    searchFixture10: false,
+  })
+  await page.getByRole('searchbox', { name: 'Pattern' }).fill('')
+  await responseWait
+  const pageOne = await page
+    .locator('tr[data-redaction-array-index]')
+    .evaluateAll((rows) =>
+      rows.map((row) => row.getAttribute('data-redaction-array-index')),
+    )
+  responseWait = waitForRedactionRequest('GET', { first: 10, rows: 10 })
+  await page.getByRole('button', { name: 'Next page' }).click()
+  await responseWait
+  const pageTwo = await page
+    .locator('tr[data-redaction-array-index]')
+    .evaluateAll((rows) =>
+      rows.map((row) => row.getAttribute('data-redaction-array-index')),
+    )
+  assert(
+    pageOne.length === 10 &&
+      pageTwo.length === 2 &&
+      !pageOne.some((index) => pageTwo.includes(index)),
+    'server pages were not distinct',
+  )
+  report.checks.pagination = { secondPageRead: true, distinctVisibleRows: true }
+
+  stage = 'out-of-range-page-correction'
+  const requestStart = redactionRequests.length
+  const injectedStatus = await page.evaluate(async () => {
+    const current = await fetch('/api/v1/settings/redaction?scope=global').then(
+      (response) => response.json(),
+    )
+    current.config.custom_strings = current.config.custom_strings.slice(0, 4)
+    const response = await fetch('/api/v1/settings/redaction?scope=global', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(current.config),
+    })
+    return response.status
+  })
+  assert(
+    injectedStatus === 200,
+    'fixture could not reduce server-side rules for page correction',
+  )
+  responseWait = waitForRedactionRequest('GET', { first: 0, rows: 10 })
+  const refreshSettings = waitForResponse(
+    'GET',
+    '/api/v1/settings/redaction',
+    200,
+  )
+  await page.getByRole('button', { name: 'Refresh' }).click()
+  await refreshSettings
+  await responseWait
+  const correctedRequests = redactionRequests
+    .slice(requestStart)
+    .filter((item) => item.path.endsWith('/custom-strings'))
+    .map((item) => item.first)
+  assert(
+    correctedRequests.includes('10') && correctedRequests.at(-1) === '0',
+    'empty out-of-range page was not retried at the last valid offset',
+  )
+  assert(
+    (await page.locator('tr[data-redaction-array-index]').count()) === 4,
+    'corrected page did not show the remaining server rows',
+  )
+  report.checks.pagination.emptyOutOfRangeCorrected = true
+  patchBodies.length = 0
+
+  await page.getByRole('checkbox', { name: 'Secret' }).click()
+  assert(
+    (await page
+      .getByRole('checkbox', { name: 'Secret' })
+      .getAttribute('aria-checked')) === 'false',
+    'built-in rule toggle did not update',
+  )
+  assert(
+    (await page.getByText('Unsaved', { exact: true }).count()) === 0,
+    'built-in change marked custom strings dirty',
+  )
+  report.checks.builtinToggleCustomDirty = true
+
+  for (const rows of [20, 50, 10]) {
+    responseWait = waitForRedactionRequest('GET', { first: 0, rows })
+    await chooseOption('Rows per page', String(rows))
+    await responseWait
+    const stored = await page.evaluate(() =>
+      localStorage.getItem(
+        'prompt-ferry:table-page-size:redaction-custom-strings',
+      ),
+    )
+    assert(stored === String(rows), 'page size did not persist')
+  }
+  report.checks.pageSizePersistence = true
+
+  responseWait = waitForRedactionRequest('GET', { first: 0, rows: 50 })
+  await chooseOption('Rows per page', '50')
+  await responseWait
+  const beforeDirtySearch = requestCount(
+    'GET',
+    '/api/v1/settings/redaction/custom-strings',
+  )
+
+  stage = 'local-draft-search-and-normalization'
+  await page.getByRole('button', { name: 'Add rule' }).click()
+  const firstNewIndex = await page
+    .locator('tr[data-redaction-array-index]')
+    .evaluateAll((rows) =>
+      Math.max(
+        ...rows.map((row) =>
+          Number(row.getAttribute('data-redaction-array-index')),
+        ),
+      ),
+    )
+  assert(
+    (await patternInput(firstNewIndex).getAttribute('type')) === 'text',
+    'new rule did not default to visible editing',
+  )
+  assert(
+    (await page
+      .getByRole('combobox', { name: `Match type ${firstNewIndex + 1}` })
+      .innerText()) === 'Contains',
+    'new rule did not default to contains matching',
+  )
+  assert(
+    (await page
+      .getByRole('combobox', { name: `Scope ${firstNewIndex + 1}` })
+      .innerText()) === 'Text',
+    'new rule did not default to text scope',
+  )
+  await patternInput(firstNewIndex).fill('  redaction-e2e-normalized  ')
+  await page.getByRole('button', { name: 'Add rule' }).click()
+  await patternInput(firstNewIndex + 1).fill('redaction-e2e-normalized')
+  await page.getByRole('button', { name: 'Add rule' }).click()
+  await patternInput(firstNewIndex + 2).fill('redaction-e2e-normalized')
+  await setRuleOption(firstNewIndex + 2, 'Match type', 'Exact')
+  await setRuleOption(firstNewIndex + 2, 'Scope', 'Line')
+  await page.getByRole('button', { name: 'Add rule' }).click()
+  assert(
+    (await page
+      .getByText('An identical rule already exists and will be merged on save.')
+      .count()) >= 1,
+    'duplicate warning did not render',
+  )
+  assert(
+    (await page
+      .getByText(
+        'A rule with the same pattern but different match type or scope exists.',
+      )
+      .count()) >= 1,
+    'conflict warning did not render',
+  )
+  await page
+    .getByRole('searchbox', { name: 'Pattern' })
+    .fill('redaction-e2e-normalized')
+  assert(
+    requestCount('GET', '/api/v1/settings/redaction/custom-strings') ===
+      beforeDirtySearch,
+    'dirty search made a server request',
+  )
+  await page.getByRole('searchbox', { name: 'Pattern' }).fill('')
+  report.checks.dirtyLocalSearch = true
+  report.checks.warningPriority = true
+
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/settings/redaction',
+    method: 'PATCH',
+    status: 503,
+    code: 'fixture_save_failure',
+    message: 'fixture save failure',
+  })
+  const patchCountBeforeFailure = requestCount(
+    'PATCH',
+    '/api/v1/settings/redaction',
+  )
+  responseWait = waitForResponse('PATCH', '/api/v1/settings/redaction', 503)
+  await page.getByRole('button', { name: 'Save' }).click()
+  await responseWait
+  const failedBody = patchBodies[patchBodies.length - 1]
+  const normalizedDuplicates = failedBody.custom_strings.filter(
+    (rule) => rule.pattern === 'redaction-e2e-normalized',
+  )
+  const normalizedSignatures = new Set(
+    failedBody.custom_strings.map(
+      (rule) => `${rule.pattern}::${rule.match_type}::${rule.scope}`,
+    ),
+  )
+  const normalization = {
+    trimmed: failedBody.custom_strings.some(
+      (rule) => rule.pattern === 'redaction-e2e-normalized',
+    ),
+    emptyDropped: failedBody.custom_strings.every(
+      (rule) => rule.pattern.trim().length > 0,
+    ),
+    exactSignatureDeduped:
+      normalizedDuplicates.length === 2 &&
+      normalizedSignatures.size === failedBody.custom_strings.length,
+    conflictRetained:
+      normalizedDuplicates.some(
+        (rule) => rule.match_type === 'contains' && rule.scope === 'text',
+      ) &&
+      normalizedDuplicates.some(
+        (rule) => rule.match_type === 'exact' && rule.scope === 'line',
+      ),
+  }
+  assert(
+    Object.values(normalization).every(Boolean),
+    'submitted payload did not normalize exact signatures while preserving conflicts',
+  )
+  assert(
+    failedBody.enabled === true && failedBody.rules.secret === false,
+    'built-in and enabled state was not included in the save payload',
+  )
+  assert(
+    await page.getByText('Unsaved', { exact: true }).isVisible(),
+    'failed save cleared the custom dirty state',
+  )
+  assert(
+    (await patternInput(firstNewIndex).inputValue()) ===
+      'redaction-e2e-normalized',
+    'failed save did not keep the normalized draft',
+  )
+  assert(
+    requestCount('PATCH', '/api/v1/settings/redaction') ===
+      patchCountBeforeFailure + 1,
+    'failed save did not issue one PATCH',
+  )
+  report.checks.normalization = normalization
+  report.checks.builtinAndEnabledPayload = true
+  report.checks.failedSaveRetainsDraft = true
+
+  let savedPageRead
+  responseWait = waitForResponse('PATCH', '/api/v1/settings/redaction', 200)
+  savedPageRead = waitForRedactionRequest('GET', { first: 0, rows: 50 })
+  await page.getByRole('button', { name: 'Save' }).click()
+  await responseWait
+  await savedPageRead
+  assert(
+    (await page.getByText('Unsaved', { exact: true }).count()) === 0,
+    'successful retry did not clear the dirty badge',
+  )
+  assert(
+    await page.getByText('Saved', { exact: true }).isVisible(),
+    'successful retry did not notify success',
+  )
+  report.checks.retrySuccess = true
+
+  stage = 'save-guard-and-newer-draft'
+  await page.getByRole('button', { name: 'Add rule' }).click()
+  const inFlightIndex = await page
+    .locator('tr[data-redaction-array-index]')
+    .evaluateAll((rows) =>
+      Math.max(
+        ...rows.map((row) =>
+          Number(row.getAttribute('data-redaction-array-index')),
+        ),
+      ),
+    )
+  await patternInput(inFlightIndex).fill('redaction-e2e-in-flight')
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/settings/redaction',
+    method: 'PATCH',
+    status: 200,
+    delayMs: 700,
+  })
+  const patchCountBeforeInFlight = requestCount(
+    'PATCH',
+    '/api/v1/settings/redaction',
+  )
+  const requestWait = page.waitForRequest(
+    (request) =>
+      request.method() === 'PATCH' &&
+      new URL(request.url()).pathname === '/api/v1/settings/redaction',
+  )
+  responseWait = waitForResponse('PATCH', '/api/v1/settings/redaction', 200)
+  const inFlightPageRead = waitForRedactionRequest('GET', {
+    first: 0,
+    rows: 50,
+  })
+  await page.getByRole('button', { name: 'Save' }).click()
+  await requestWait
+  const saveDisabledInFlight = await page
+    .getByRole('button', { name: 'Save' })
+    .isDisabled()
+  await patternInput(inFlightIndex).fill('redaction-e2e-newer-draft')
+  const inFlightBody = patchBodies[patchBodies.length - 1]
+  await responseWait
+  await inFlightPageRead
+  assert(
+    saveDisabledInFlight,
+    'save control remained enabled while the shared guard was held',
+  )
+  assert(
+    requestCount('PATCH', '/api/v1/settings/redaction') ===
+      patchCountBeforeInFlight + 1,
+    'held save admitted a duplicate PATCH',
+  )
+  assert(
+    (await patternInput(inFlightIndex).inputValue()) ===
+      'redaction-e2e-newer-draft',
+    'successful response clobbered a newer edit',
+  )
+  assert(
+    await page.getByText('Unsaved', { exact: true }).isVisible(),
+    'newer custom edit lost its dirty state',
+  )
+  report.checks.saveGuardAndNewerEdit = {
+    onePatch: true,
+    saveDisabledInFlight,
+    newerEditPreserved: true,
+    requestSnapshotWasOlder: !inFlightBody.custom_strings.some(
+      (rule) => rule.pattern === 'redaction-e2e-newer-draft',
+    ),
+  }
+
+  stage = 'delete-confirm-and-reveal-shift'
+  const deleteIndex = inFlightIndex - 1
+  const deleteCountBefore = requestCount('PATCH', '/api/v1/settings/redaction')
+  await page.getByRole('button', { name: `Delete ${deleteIndex + 1}` }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.waitFor({ state: 'visible' })
+  assert(
+    await dialog.getByRole('button', { name: 'Cancel' }).isVisible(),
+    'delete dialog cancel action is not reachable',
+  )
+  assert(
+    await dialog.getByRole('button', { name: 'Delete' }).isVisible(),
+    'delete dialog confirm action is not reachable',
+  )
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  assert((await dialog.count()) === 0, 'cancel did not close the delete dialog')
+  await page.getByRole('button', { name: `Delete ${deleteIndex + 1}` }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click()
+  assert(
+    requestCount('PATCH', '/api/v1/settings/redaction') === deleteCountBefore,
+    'local delete issued a PATCH before save',
+  )
+  assert(
+    (await patternInput(inFlightIndex - 1).getAttribute('type')) === 'text',
+    'revealed rule did not retain reveal state after index shift',
+  )
+  report.checks.deleteConfirmation = {
+    cancelNoWrite: true,
+    confirmedLocalDelete: true,
+    revealIndexShift: true,
+    nativeConfirmUsed: false,
+  }
+
+  stage = 'invalid-regex-and-corrected-patch'
+  const invalidIndex =
+    (await page
+      .locator('tr[data-redaction-array-index]')
+      .evaluateAll((rows) =>
+        Math.max(
+          ...rows.map((row) =>
+            Number(row.getAttribute('data-redaction-array-index')),
+          ),
+        ),
+      )) + 1
+  await page.getByRole('button', { name: 'Add rule' }).click()
+  await patternInput(invalidIndex).fill('[')
+  await setRuleOption(invalidIndex, 'Match type', 'Regex')
+  const patchCountBeforeInvalid = requestCount(
+    'PATCH',
+    '/api/v1/settings/redaction',
+  )
+  await page.getByRole('button', { name: 'Save' }).click()
+  assert(
+    (await patternInput(invalidIndex).getAttribute('aria-invalid')) === 'true',
+    'invalid regex input is not marked aria-invalid',
+  )
+  assert(
+    await page.locator('#redaction-save-validation-error').isVisible(),
+    'invalid regex did not show a local error',
+  )
+  assert(
+    requestCount('PATCH', '/api/v1/settings/redaction') ===
+      patchCountBeforeInvalid,
+    'invalid regex issued a PATCH',
+  )
+  await patternInput(invalidIndex).fill('^safe+$')
+  assert(
+    (await patternInput(invalidIndex).getAttribute('aria-invalid')) === null,
+    'corrected regex remained invalid',
+  )
+  responseWait = waitForResponse('PATCH', '/api/v1/settings/redaction', 200)
+  savedPageRead = waitForRedactionRequest('GET', { first: 0, rows: 50 })
+  await page.getByRole('button', { name: 'Save' }).click()
+  await responseWait
+  await savedPageRead
+  assert(
+    (await page.getByText('Unsaved', { exact: true }).count()) === 0,
+    'corrected regex payload did not save',
+  )
+  report.checks.invalidRegex = { localErrorNoPatch: true, correctedPatch: true }
+
+  stage = 'identity-and-scoped-configs'
+  const reopenedSettingsRead = waitForResponse(
+    'GET',
+    '/api/v1/settings/redaction',
+    200,
+  )
+  const reopenedPageRead = waitForRedactionRequest('GET', {
+    first: 0,
+    rows: 50,
+  })
+  await page.reload()
+  await waitForRules()
+  await reopenedSettingsRead
+  await reopenedPageRead
+  assert(
+    (await page
+      .locator('input[name="redaction-custom-pattern"][type="password"]')
+      .count()) > 0,
+    'browser reopen did not mask rule patterns',
+  )
+  const scopeWait = waitForResponse('GET', '/api/v1/settings/redaction', 200)
+  const scopePageWait = waitForRedactionRequest('GET', {
+    path: '/api/v1/settings/redaction/custom-strings',
+    scope: 'user',
+    userId: 1,
+  })
+  await chooseOption('Rule scope', 'User private rules')
+  await scopeWait
+  await scopePageWait
+  const userRead = waitForRedactionRequest('GET', {
+    path: '/api/v1/settings/redaction',
+    scope: 'user',
+    userId: 2,
+  })
+  const userPageRead = waitForRedactionRequest('GET', {
+    path: '/api/v1/settings/redaction/custom-strings',
+    scope: 'user',
+    userId: 2,
+  })
+  await chooseOption('Target user', 'Fixture Operator · operator')
+  await userRead
+  await userPageRead
+  const operatorRead = waitForRedactionRequest('GET', {
+    path: '/api/v1/settings/redaction',
+    scope: 'user',
+    userId: 3,
+  })
+  const operatorPageRead = waitForRedactionRequest('GET', {
+    path: '/api/v1/settings/redaction/custom-strings',
+    scope: 'user',
+    userId: 3,
+  })
+  await chooseOption(
+    'Target user',
+    'integration-operator-eu-west-with-a-long-login-name',
+  )
+  await operatorRead
+  await operatorPageRead
+  const privatePattern = await page
+    .locator('input[name="redaction-custom-pattern"]')
+    .first()
+    .inputValue()
+  const userSecretBefore = await page
+    .getByRole('checkbox', { name: 'Secret' })
+    .getAttribute('aria-checked')
+  await page.getByRole('checkbox', { name: 'Secret' }).click()
+  responseWait = waitForResponse('PATCH', '/api/v1/settings/redaction', 200)
+  savedPageRead = waitForRedactionRequest('GET', { first: 0, rows: 50 })
+  await page.getByRole('button', { name: 'Save' }).click()
+  await responseWait
+  await savedPageRead
+  const globalRead = waitForRedactionRequest('GET', {
+    path: '/api/v1/settings/redaction',
+    scope: 'global',
+  })
+  await chooseOption('Rule scope', 'Public rules')
+  await globalRead
+  const globalSecretAfterUserSave = await page
+    .getByRole('checkbox', { name: 'Secret' })
+    .getAttribute('aria-checked')
+  assert(
+    privatePattern === 'private-fixture-3',
+    'admin target did not load its user-specific rule draft',
+  )
+  assert(
+    userSecretBefore === 'true' && globalSecretAfterUserSave === 'false',
+    'admin user save changed global rule state',
+  )
+  report.checks.adminScopeIsolation = {
+    userTargetRead: true,
+    userScopedPatch: redactionRequests.some(
+      (item) =>
+        item.method === 'PATCH' && item.scope === 'user' && item.userId === '3',
+    ),
+    globalUnchanged: true,
+  }
+
+  stage = 'responsive-locale-theme'
+  const responsive = []
+  async function checkWidths(locale, theme) {
+    for (const width of [1440, 1024, 768, 390]) {
+      await page.setViewportSize({ width, height: 1000 })
+      const result = await page.evaluate(() => {
+        const table = document.querySelector('[data-slot="table-container"]')
+        const scroll = table ? table.scrollWidth > table.clientWidth : false
+        if (table) table.scrollLeft = table.scrollWidth
+        const lastAction = table?.querySelector(
+          'tbody tr:last-child td:last-child button',
+        )
+        const tableBox = table?.getBoundingClientRect()
+        const actionBox = lastAction?.getBoundingClientRect()
+        const actionsReachable = Boolean(
+          tableBox &&
+          actionBox &&
+          actionBox.left >= tableBox.left &&
+          actionBox.right <= tableBox.right,
+        )
+        if (table) table.scrollLeft = 0
+        return {
+          documentWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth,
+          tableScrolls: scroll,
+          actionsReachable,
+          hasRows: Boolean(table?.querySelector('tbody tr')),
+        }
+      })
+      assert(result.documentWidth <= width, `document overflow at ${width}px`)
+      assert(
+        result.hasRows && result.actionsReachable,
+        `rule actions were unreachable at ${width}px`,
+      )
+      if (width === 390)
+        assert(
+          result.tableScrolls,
+          'mobile rules table did not contain horizontal overflow',
+        )
+      responsive.push({ locale, theme, width, ...result })
+    }
+  }
+
+  await checkWidths('en-US', 'light')
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await capture('redaction-rules-en-light-1440')
+  await page.getByRole('button', { name: 'Language' }).click()
+  await page.getByRole('button', { name: '语言' }).waitFor({ state: 'visible' })
+  await page.getByRole('button', { name: '暗色' }).click()
+  await checkWidths('zh-CN', 'dark')
+  await capture('redaction-rules-zh-dark-390')
+  const responsiveDeleteIndex = await page
+    .locator('tr[data-redaction-array-index]')
+    .evaluateAll((rows) =>
+      Number(rows[0]?.getAttribute('data-redaction-array-index')),
+    )
+  await page
+    .locator(`[data-redaction-array-index="${responsiveDeleteIndex}"] button`)
+    .last()
+    .click()
+  const responsiveDialog = page.getByRole('dialog')
+  await responsiveDialog.waitFor({ state: 'visible' })
+  const dialogLayout = await responsiveDialog.evaluate((element) => {
+    const box = element.getBoundingClientRect()
+    return {
+      fitsViewport: box.left >= 0 && box.right <= window.innerWidth,
+      cancelVisible: Boolean(element.querySelector('button')),
+      actionCount: element.querySelectorAll('button').length,
+    }
+  })
+  assert(
+    dialogLayout.fitsViewport && dialogLayout.actionCount >= 2,
+    'mobile delete dialog did not contain its actions',
+  )
+  report.checks.responsiveContainment = responsive
+  report.checks.deleteDialogResponsive = dialogLayout
+  await responsiveDialog.getByRole('button', { name: '取消' }).click()
+  await page.getByRole('button', { name: '语言' }).click()
+  await page.getByRole('button', { name: 'Light' }).click()
+
+  stage = 'non-admin-and-anonymous-authorization'
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const adminOptionsCount = report.userOptionsRequestCount
+  await page.getByRole('button', { name: 'Logout' }).click()
+  await page.waitForURL((url) => new URL(url).pathname === '/login')
+  const anonymousStatuses = await page.evaluate(async () => {
+    const redaction = await fetch(
+      '/api/v1/settings/redaction?scope=user&user_id=2',
+    ).then((response) => response.status)
+    const records = await fetch(
+      '/api/v1/admin/request-records?category=ai',
+    ).then((response) => response.status)
+    return { redaction, records }
+  })
+  assert(
+    anonymousStatuses.redaction === 401 && anonymousStatuses.records === 401,
+    'anonymous redaction or request-record request was not rejected',
+  )
+  await signIn('operator')
+  const operatorIdentity = await page.evaluate(async () =>
+    fetch('/api/v1/auth/me').then((response) => response.json()),
+  )
+  assert(
+    operatorIdentity.user_id === 2 && operatorIdentity.is_admin === false,
+    'operator login did not establish the expected worker identity',
+  )
+  const operatorSettingsRead = waitForRedactionRequest('GET', {
+    path: '/api/v1/settings/redaction',
+    scope: 'user',
+    userId: 2,
+  })
+  await page.goto(`${BASE}/redaction/rules`)
+  await page
+    .locator('[data-foundation-route-id="R-REDACTION-RULES"]')
+    .waitFor({ state: 'visible' })
+  const operatorSettingsResponse = await operatorSettingsRead
+  if (operatorSettingsResponse.status() !== 200) {
+    throw new Error(
+      `operator scope read failed: ${operatorSettingsResponse.status()} ${await operatorSettingsResponse.text()}`,
+    )
+  }
+  await waitForRules()
+  await page
+    .getByRole('checkbox', { name: 'Secret' })
+    .waitFor({ state: 'visible' })
+  assert(
+    (await page.getByRole('combobox', { name: 'Rule scope' }).count()) === 0,
+    'non-admin received an admin scope selector',
+  )
+  assert(
+    (await page.getByRole('combobox', { name: 'Target user' }).count()) === 0,
+    'non-admin received target user options',
+  )
+  assert(
+    (await page
+      .getByRole('checkbox', { name: 'Secret' })
+      .getAttribute('aria-checked')) === 'false',
+    'non-admin did not load their own private configuration',
+  )
+  const selfWrite = waitForRedactionRequest('PATCH', {
+    path: '/api/v1/settings/redaction',
+    scope: 'user',
+    userId: 2,
+    status: 200,
+  })
+  const selfListReload = waitForRedactionRequest('GET', {
+    path: '/api/v1/settings/redaction/custom-strings',
+    scope: 'user',
+    userId: 2,
+    first: 0,
+    rows: 50,
+  })
+  await page.getByRole('checkbox', { name: 'Email' }).click()
+  await page.getByRole('button', { name: 'Save' }).click()
+  await selfWrite
+  await selfListReload
+
+  const recordScope = await page.evaluate(async () => {
+    const read = async (suffix) => {
+      const response = await fetch(
+        `/api/v1/admin/request-records?category=ai${suffix}`,
+      )
+      if (!response.ok) return { records: [], status: response.status, total: 0 }
+      const page = await response.json()
+      return {
+        records: Array.isArray(page.records) ? page.records : [],
+        status: response.status,
+        total: typeof page.total === 'number' ? page.total : 0,
+      }
+    }
+    return { forged: await read('&user=admin'), own: await read('') }
+  })
+  const forbiddenStatuses = await page.evaluate(async () => {
+    const global = await fetch('/api/v1/settings/redaction?scope=global').then(
+      (response) => response.status,
+    )
+    const foreign = await fetch(
+      '/api/v1/settings/redaction?scope=user&user_id=1',
+    ).then((response) => response.status)
+    const unknown = await fetch('/api/v1/settings/redaction/unknown').then(
+      (response) => response.status,
+    )
+    return { global, foreign, unknown }
+  })
+  assert(
+    forbiddenStatuses.global === 403 &&
+      forbiddenStatuses.foreign === 403 &&
+      forbiddenStatuses.unknown === 404,
+    'non-admin global or foreign redaction access changed, or unknown redaction path was accepted',
+  )
+  // A request-record read is authenticated and self-scoped, not admin-only:
+  // the ordinary user reads their own rows and a forged user filter cannot
+  // widen that scope.
+  const ownRecordUsers = [
+    ...new Set(recordScope.own.records.map((record) => record.user_id)),
+  ]
+  assert(
+    recordScope.own.status === 200 &&
+      recordScope.own.records.length > 0 &&
+      ownRecordUsers.length === 1 &&
+      ownRecordUsers[0] === operatorIdentity.user_id,
+    `the ordinary user did not read their own request records (${JSON.stringify(recordScope.own.status)} / ${JSON.stringify(ownRecordUsers)})`,
+  )
+  assert(
+    recordScope.forged.status === 200 &&
+      recordScope.forged.records.every(
+        (record) => record.user_id === operatorIdentity.user_id,
+      ) &&
+      recordScope.forged.total <= recordScope.own.total,
+    'a forged user filter widened the ordinary user request-record scope',
+  )
+  assert(
+    report.userOptionsRequestCount === adminOptionsCount,
+    'non-admin requested admin user options',
+  )
+  report.checks.roleAuthorization = {
+    adminScopeTargetOptions: true,
+    nonAdminSelfOnly: true,
+    selfScopedPatch: redactionRequests.some(
+      (item) =>
+        item.method === 'PATCH' &&
+        item.path === '/api/v1/settings/redaction' &&
+        item.scope === 'user' &&
+        item.userId === '2',
+    ),
+    optionsNotRequested: true,
+    anonymous401: anonymousStatuses.redaction === 401,
+    anonymousRequestRecords401: anonymousStatuses.records === 401,
+    globalAndForeign403:
+      forbiddenStatuses.global === 403 && forbiddenStatuses.foreign === 403,
+    unrelatedRequestRecordsStatus: recordScope.own.status,
+    requestRecordsSelfScoped: true,
+    requestRecordsForgedUserNoWiden: true,
+    unknownRedaction404: forbiddenStatuses.unknown === 404,
+  }
+
+  const nativeConfirmCalled = await page.evaluate(
+    () => window.__redactionNativeConfirm === true,
+  )
+  report.checks.deleteConfirmation.nativeConfirmUsed = nativeConfirmCalled
+  report.checks.expectedApiFailures = report.expectedApiFailures.length > 0
+  report.finishedAt = new Date().toISOString()
+  assert(!nativeConfirmCalled, 'rule deletion invoked a native confirm dialog')
+  assert(
+    report.apiFailures.length === 0,
+    `unexpected API failures: ${report.apiFailures.join(', ')}`,
+  )
+  assert(report.consoleErrorCount === 0, 'console errors were reported')
+  assert(report.pageErrorCount === 0, 'page errors were reported')
+  return report
+}

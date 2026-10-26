@@ -1,0 +1,966 @@
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const startedAt = new Date().toISOString()
+  const report = {
+    runId: `relays-${Date.now()}`,
+    startedAt,
+    checks: {},
+    screenshots: [],
+  }
+  const consoleErrors = []
+  const pageErrors = []
+  const apiFailures = []
+  const expectedApiFailures = []
+  const apiRequests = []
+  const relayResponses = []
+  const capturedBodies = []
+  let stage = 'startup'
+  const syntheticMaterials = [
+    '-----BEGIN CERTIFICATE-----\nU3ludGhldGljIFJlbGF5IENBIEZpeHR1cmU=\n-----END CERTIFICATE-----',
+    '-----BEGIN CERTIFICATE-----\nU3ludGhldGljIENsaWVudCBDZXJ0aWZpY2F0ZQ==\n-----END CERTIFICATE-----',
+    '-----BEGIN PRIVATE KEY-----\nU3ludGhldGljIFJlbGF5IFByaXZhdGUgS2V5\n-----END PRIVATE KEY-----',
+    'synthetic-relay-bridge-key-fixture-only',
+    'replacement-certificate-material-fixture-only',
+    'ignored-clear-material-fixture-only',
+  ]
+  let captureRelayBodies = false
+
+  page.setDefaultTimeout(12000)
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() !== 'error') return
+    const text = message.text()
+    if (/(?:status of )?(?:400|401|403|404|503)\b/.test(text)) return
+    consoleErrors.push(text)
+  })
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (!url.pathname.startsWith('/api/')) return
+    const item = {
+      method: request.method(),
+      path: url.pathname,
+      query: Object.fromEntries(url.searchParams),
+    }
+    apiRequests.push(item)
+    if (
+      captureRelayBodies &&
+      url.pathname.startsWith('/api/v1/admin/relays') &&
+      ['POST', 'PATCH'].includes(request.method())
+    ) {
+      try {
+        capturedBodies.push({ ...item, body: request.postDataJSON() })
+      } catch {}
+    }
+  })
+  page.on('response', (response) => {
+    const url = new URL(response.url())
+    if (!url.pathname.startsWith('/api/')) return
+    const item = {
+      method: response.request().method(),
+      path: url.pathname,
+      query: Object.fromEntries(url.searchParams),
+      status: response.status(),
+    }
+    if (url.pathname.startsWith('/api/v1/admin/relays')) {
+      relayResponses.push(item)
+    }
+    if (response.status() < 400) return
+    const expectedUnauthorized =
+      response.status() === 401 && url.pathname === '/api/v1/auth/me'
+    const expectedRelayFailure =
+      url.pathname === '/api/v1/admin/relays' &&
+      ((response.status() === 503 && ['GET', 'POST'].includes(item.method)) ||
+        (response.status() === 400 && item.method === 'POST'))
+    if (expectedUnauthorized) return
+    if (expectedRelayFailure) {
+      expectedApiFailures.push(`${item.status} ${item.method} ${item.path}`)
+      return
+    }
+    apiFailures.push(`${item.status} ${item.method} ${item.path}`)
+  })
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(message)
+  }
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) {
+      throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    }
+    return response.json()
+  }
+
+  async function capture(name) {
+    const path = `${screenshots}/${name}.png`
+    await page.screenshot({ path, fullPage: true })
+    report.screenshots.push(path)
+  }
+
+  async function waitForRoute() {
+    await page.locator('[data-foundation-route-id="R-RELAYS"]').waitFor({
+      state: 'visible',
+    })
+  }
+
+  async function signIn(loginName) {
+    await page.getByLabel('Login name').waitFor({ state: 'visible' })
+    await page.getByLabel('Login name').fill(loginName)
+    await page
+      .getByRole('textbox', { name: 'Password' })
+      .fill('fixture-password')
+    await page.getByRole('button', { name: 'Login', exact: true }).click()
+    await page.waitForURL((url) => new URL(url).pathname === '/api-keys')
+  }
+
+  function waitForResponse(method, path, status) {
+    return page
+      .waitForResponse((response) => {
+        const url = new URL(response.url())
+        return (
+          response.request().method() === method &&
+          url.pathname === path &&
+          response.status() === status
+        )
+      })
+      .catch((cause) => {
+        throw new Error(
+          `Timed out in ${stage} waiting for ${method} ${path} status ${status}: ${cause.message}; relay responses=${JSON.stringify(relayResponses.slice(-8))}`,
+        )
+      })
+  }
+
+  async function chooseOption(triggerName, optionName) {
+    await page.getByRole('combobox', { name: triggerName }).click()
+    await page.getByRole('option', { name: optionName, exact: true }).click()
+  }
+
+  function requestCount(method, path) {
+    return apiRequests.filter(
+      (item) => item.method === method && item.path === path,
+    ).length
+  }
+
+  async function relayDigests() {
+    const values = []
+    const safeBodies = capturedBodies.map((item, bodyIndex) => {
+      const safeSecrets = {}
+      for (const field of [
+        'relay_ca_pem',
+        'client_cert_pem',
+        'client_key_pem',
+        'bridge_encryption_key',
+      ]) {
+        const patch = item.body?.[field]
+        if (patch === undefined || patch === null) continue
+        const secret = {
+          mode: patch.mode,
+          present: typeof patch.value === 'string' && patch.value.length > 0,
+        }
+        if (typeof patch.value === 'string') {
+          secret.digestIndex = values.length
+          values.push(patch.value)
+        }
+        safeSecrets[field] = secret
+      }
+      return {
+        method: item.method,
+        path: item.path,
+        name: item.body?.name,
+        relay_url: item.body?.relay_url,
+        tls_mode: item.body?.tls_mode,
+        bridge_encryption_mode: item.body?.bridge_encryption_mode,
+        secrets: safeSecrets,
+        bodyIndex,
+      }
+    })
+    const digests = await page.evaluate(async (values) => {
+      const results = []
+      for (const value of values) {
+        const digest = await crypto.subtle.digest(
+          'SHA-256',
+          new TextEncoder().encode(value),
+        )
+        results.push(
+          [...new Uint8Array(digest)]
+            .map((byte) => byte.toString(16).padStart(2, '0'))
+            .join(''),
+        )
+      }
+      return results
+    }, values)
+    for (const body of safeBodies) {
+      for (const secret of Object.values(body.secrets)) {
+        if (typeof secret.digestIndex === 'number') {
+          secret.digest = digests[secret.digestIndex]
+          delete secret.digestIndex
+        }
+      }
+    }
+    return safeBodies.map(({ bodyIndex, ...body }) => body)
+  }
+
+  await page.context().clearCookies()
+  await fixture('/__fixtures/reset', 'POST')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${BASE}/login`)
+  await page.evaluate(() => {
+    localStorage.clear()
+    localStorage.setItem('prompt-ferry:locale', 'en-US')
+    localStorage.setItem('prompt-ferry:theme-mode', 'light')
+    localStorage.setItem('prompt-ferry:table-page-size:relays', '10')
+    localStorage.setItem('prompt-ferry:display-time-zone', 'UTC')
+  })
+  await page.reload()
+
+  await signIn('operator')
+  const beforeNonAdminRoute = requestCount('GET', '/api/v1/admin/relays')
+  await page.goto(`${BASE}/relays`)
+  await page.waitForURL((url) => new URL(url).pathname === '/api-keys')
+  assert(
+    !(await page.getByRole('link', { name: 'Relays', exact: true }).count()),
+    'non-admin navigation exposes Relays',
+  )
+  assert(
+    requestCount('GET', '/api/v1/admin/relays') === beforeNonAdminRoute,
+    'non-admin route issued a managed-relay API read',
+  )
+  report.checks.adminDenial = {
+    redirectedToApiKeys: new URL(page.url()).pathname === '/api-keys',
+    hiddenNavigation: true,
+    adminRelayCalls:
+      requestCount('GET', '/api/v1/admin/relays') - beforeNonAdminRoute,
+  }
+
+  await page.context().clearCookies()
+  await page.goto(`${BASE}/login`)
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'en-US')
+    localStorage.setItem('prompt-ferry:theme-mode', 'light')
+    localStorage.setItem('prompt-ferry:table-page-size:relays', '10')
+    localStorage.setItem('prompt-ferry:display-time-zone', 'UTC')
+  })
+  await page.reload()
+  await signIn('admin')
+  const adminNavigationText = await page.locator('aside').innerText()
+  assert(
+    await page.getByRole('link', { name: 'Relays', exact: true }).isVisible(),
+    `admin navigation does not show Relays: ${adminNavigationText}`,
+  )
+  await page.goto(`${BASE}/relays`)
+  await waitForRoute()
+  await page
+    .getByText('Edge Relay Frankfurt With A Long Operational Name')
+    .waitFor({
+      state: 'visible',
+    })
+  const initialRelayReads = relayResponses.filter(
+    (item) => item.method === 'GET' && item.status === 200,
+  )
+  assert(
+    initialRelayReads.some(
+      (item) => item.query.first === '0' && item.query.rows === '10',
+    ),
+    'Relays did not read the first ten rows',
+  )
+  assert(
+    (await page.locator('[data-slot="badge"]').first().textContent()) === '5/6',
+    'global connected/enabled summary is not shown',
+  )
+  assert(
+    (await page.getByText('CA: stored', { exact: true }).count()) > 0 &&
+      (await page.getByText('Bridge: stored', { exact: true }).count()) > 0,
+    'secret stored flags are not rendered from booleans',
+  )
+  report.checks.routeAndNavigation = true
+  report.checks.summaryAndSecretFlags = true
+  report.checks.initialRead = { first: 0, rows: 10 }
+  await capture('relays-admin-en-light-1440')
+
+  await page.getByRole('button', { name: 'Next page' }).click()
+  await page
+    .getByText('Fixture Relay 10 With A Long Operational Name')
+    .waitFor({
+      state: 'visible',
+    })
+  assert(
+    relayResponses.some(
+      (item) =>
+        item.method === 'GET' &&
+        item.status === 200 &&
+        item.query.first === '10' &&
+        item.query.rows === '10',
+    ),
+    'second page did not request distinct rows',
+  )
+  await page.getByRole('combobox', { name: 'Rows per page' }).click()
+  await page.getByRole('option', { name: '20', exact: true }).click()
+  await page
+    .getByText('Edge Relay Frankfurt With A Long Operational Name')
+    .waitFor({
+      state: 'visible',
+    })
+  await page.waitForFunction(
+    () => localStorage.getItem('prompt-ferry:table-page-size:relays') === '20',
+  )
+  report.checks.pagination = {
+    secondPageRead: true,
+    distinctVisibleRows: true,
+    pageSizePersisted: true,
+  }
+
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/relays',
+    method: 'GET',
+    status: 503,
+    code: 'fixture_relay_list_unavailable',
+    message: 'relay list unavailable',
+  })
+  const failedRefresh = waitForResponse('GET', '/api/v1/admin/relays', 503)
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await failedRefresh
+  await page.getByText('Worker disconnected', { exact: true }).waitFor({
+    state: 'visible',
+  })
+  assert(
+    await page
+      .getByText('Edge Relay Frankfurt With A Long Operational Name')
+      .isVisible(),
+    'failed refresh discarded the last successful rows',
+  )
+  const recoveredRefresh = waitForResponse('GET', '/api/v1/admin/relays', 200)
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await recoveredRefresh
+  await page.getByText('Worker disconnected', { exact: true }).waitFor({
+    state: 'hidden',
+  })
+  report.checks.listFailureRetainsRowsAndRecovers = true
+
+  captureRelayBodies = true
+  await page.getByRole('button', { name: 'New relay', exact: true }).click()
+  let dialog = page.getByRole('dialog')
+  await dialog.waitFor({ state: 'visible' })
+  report.checks.dialogOpen = true
+  assert(
+    (await dialog.getByRole('combobox', { name: /action$/i }).count()) === 0,
+    'create dialog exposed edit-only secret action selectors',
+  )
+  await dialog
+    .getByRole('textbox', { name: 'Name', exact: true })
+    .fill('Fixture created relay')
+  await dialog
+    .getByRole('textbox', { name: 'Relay URL', exact: true })
+    .fill('ws://relay-created.example.test/bridge')
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/relays',
+    method: 'POST',
+    status: 503,
+    code: 'fixture_relay_create_unavailable',
+    message: 'relay create unavailable',
+  })
+  const failedCreate = waitForResponse('POST', '/api/v1/admin/relays', 503)
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await failedCreate
+  assert(await dialog.isVisible(), '503 create failure closed the dialog')
+  assert(
+    (await dialog
+      .getByRole('textbox', { name: 'Name', exact: true })
+      .inputValue()) === 'Fixture created relay',
+    '503 create failure discarded the draft name',
+  )
+  assert(
+    (await dialog
+      .getByRole('textbox', { name: 'Relay URL', exact: true })
+      .inputValue()) === 'ws://relay-created.example.test/bridge',
+    '503 create failure discarded the draft URL',
+  )
+  const delayedRefresh = waitForResponse('GET', '/api/v1/admin/relays', 200)
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/relays',
+    method: 'GET',
+    status: 200,
+    delayMs: 900,
+  })
+  const createRetry = waitForResponse('POST', '/api/v1/admin/relays', 200)
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await createRetry
+  await page.waitForFunction(
+    () => document.querySelector('table')?.getAttribute('aria-busy') === 'true',
+  )
+  assert(
+    (await dialog
+      .getByRole('button', { name: 'Save', exact: true })
+      .isDisabled()) &&
+      (await dialog
+        .getByRole('button', { name: 'Cancel', exact: true })
+        .isDisabled()),
+    'create dialog was not frozen through its refresh',
+  )
+  const newButton = page
+    .locator('[data-foundation-route-id="R-RELAYS"] button')
+    .filter({ hasText: 'New relay' })
+  assert(
+    await newButton.isDisabled(),
+    'New stayed enabled during create refresh',
+  )
+  await page.keyboard.press('Escape')
+  assert(await dialog.isVisible(), 'Escape dismissed a dialog during a write')
+  await delayedRefresh
+  await dialog.waitFor({ state: 'detached' })
+  await page.getByText('Fixture created relay').waitFor({ state: 'visible' })
+  report.checks.createFailureDraftRetryAndRefreshGuard = true
+
+  stage = 'validation create dialog'
+  await page.getByRole('button', { name: 'New relay', exact: true }).click()
+  dialog = page.getByRole('dialog')
+  await dialog
+    .getByRole('textbox', { name: 'Name', exact: true })
+    .fill('Fixture mTLS relay')
+  await dialog
+    .getByRole('textbox', { name: 'Relay URL', exact: true })
+    .fill('wss://wrong-scheme.example.test/bridge')
+  let invalidCreate = waitForResponse('POST', '/api/v1/admin/relays', 400)
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await invalidCreate
+  assert(await dialog.isVisible(), 'TLS scheme mismatch closed the dialog')
+  assert(
+    (await dialog
+      .getByRole('textbox', { name: 'Relay URL', exact: true })
+      .inputValue()) === 'wss://wrong-scheme.example.test/bridge',
+    'TLS scheme error discarded the URL draft',
+  )
+
+  await dialog
+    .getByRole('textbox', { name: 'Relay URL', exact: true })
+    .fill('wss://relay-frankfurt.example.internal:9443/bridge///')
+  await chooseOption('TLS mode', 'Server')
+  invalidCreate = waitForResponse('POST', '/api/v1/admin/relays', 400)
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await invalidCreate
+  assert(await dialog.isVisible(), 'normalized duplicate URL closed the dialog')
+  assert(
+    (await dialog
+      .getByRole('textbox', { name: 'Name', exact: true })
+      .inputValue()) === 'Fixture mTLS relay',
+    'duplicate URL error discarded the form draft',
+  )
+
+  await dialog
+    .getByRole('textbox', { name: 'Relay URL', exact: true })
+    .fill('wss://relay-mtls.example.test/bridge')
+  await chooseOption('TLS mode', 'mTLS')
+  invalidCreate = waitForResponse('POST', '/api/v1/admin/relays', 400)
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await invalidCreate
+  assert(await dialog.isVisible(), 'missing mTLS material closed the dialog')
+  const syntheticCa = syntheticMaterials[0]
+  const syntheticCert = syntheticMaterials[1]
+  const syntheticKey = syntheticMaterials[2]
+  const syntheticBridge = syntheticMaterials[3]
+  await dialog
+    .getByRole('textbox', { name: 'Relay CA PEM', exact: true })
+    .fill(syntheticCa)
+  await dialog
+    .getByRole('textbox', { name: 'Client cert PEM', exact: true })
+    .fill(syntheticCert)
+  await dialog
+    .getByRole('textbox', { name: 'Client key PEM', exact: true })
+    .fill(syntheticKey)
+  await chooseOption('Bridge encryption', 'Required')
+  invalidCreate = waitForResponse('POST', '/api/v1/admin/relays', 400)
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await invalidCreate
+  assert(
+    await dialog.isVisible(),
+    'missing required bridge key closed the dialog',
+  )
+  assert(
+    (await dialog
+      .getByRole('textbox', { name: 'Client cert PEM', exact: true })
+      .inputValue()) === syntheticCert &&
+      (await dialog
+        .getByRole('textbox', { name: 'Client key PEM', exact: true })
+        .inputValue()) === syntheticKey,
+    'validation errors discarded mTLS material drafts',
+  )
+  await dialog
+    .getByRole('textbox', { name: 'Bridge key', exact: true })
+    .fill(syntheticBridge)
+  stage = 'valid mTLS create'
+  const validMtlsCreate = waitForResponse('POST', '/api/v1/admin/relays', 200)
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await validMtlsCreate
+  await dialog.waitFor({ state: 'detached' })
+  await page.getByText('Fixture mTLS relay').waitFor({ state: 'visible' })
+  report.checks.backendValidationRetainsDraft = {
+    normalizedDuplicateUrl: true,
+    invalidTlsScheme: true,
+    missingMtlsCertificateAndKey: true,
+    missingRequiredBridgeKey: true,
+  }
+  report.checks.syntheticFixtureMaterial = {
+    requiredMaterialAcceptedByFixture: true,
+    fixtureValidatesPemCryptography: false,
+    liveConnectionAttempted: false,
+  }
+
+  const createdRow = page
+    .getByRole('row')
+    .filter({ hasText: 'Fixture mTLS relay' })
+  await createdRow
+    .getByRole('button', { name: 'Edit Fixture mTLS relay' })
+    .click()
+  dialog = page.getByRole('dialog')
+  await dialog.waitFor({ state: 'visible' })
+  assert(
+    (await dialog
+      .getByRole('textbox', { name: 'Relay CA PEM', exact: true })
+      .inputValue()) === '' &&
+      (await dialog
+        .getByRole('textbox', { name: 'Client key PEM', exact: true })
+        .inputValue()) === '',
+    'API secret flags were incorrectly treated as secret-value echoes',
+  )
+  await dialog
+    .getByRole('textbox', { name: 'Relay CA PEM', exact: true })
+    .fill(syntheticMaterials[5])
+  await chooseOption('Relay CA PEM action', 'Clear')
+  await dialog
+    .getByRole('textbox', { name: 'Client cert PEM', exact: true })
+    .fill(syntheticMaterials[4])
+  await chooseOption('Client cert PEM action', 'Keep')
+  await chooseOption('Client key PEM action', 'Replace')
+  await dialog
+    .getByRole('textbox', { name: 'Bridge key', exact: true })
+    .fill(syntheticMaterials[5])
+  await chooseOption('Bridge key action', 'Clear')
+  await chooseOption('Bridge encryption', 'Off')
+  const updateResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url())
+    return (
+      response.request().method() === 'PATCH' &&
+      url.pathname.startsWith('/api/v1/admin/relays/') &&
+      response.status() === 200
+    )
+  })
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await updateResponse
+  await dialog.waitFor({ state: 'detached' })
+  await page.getByText('Fixture mTLS relay').waitFor({ state: 'visible' })
+  const patchedRequest = capturedBodies.findLast(
+    (item) =>
+      item.method === 'PATCH' && item.body?.name === 'Fixture mTLS relay',
+  )
+  assert(Boolean(patchedRequest), 'full edit PATCH request was not captured')
+  assert(
+    patchedRequest.body.relay_ca_pem?.mode === 'clear' &&
+      patchedRequest.body.client_cert_pem?.mode === 'replace' &&
+      patchedRequest.body.client_key_pem?.mode === 'keep' &&
+      patchedRequest.body.bridge_encryption_key?.mode === 'clear' &&
+      patchedRequest.body.bridge_encryption_mode === 'off',
+    'edit patch did not carry the independent clear/replace/keep modes',
+  )
+  report.checks.secretPatchSemantics = true
+
+  await page.getByRole('button', { name: 'Edit Fixture mTLS relay' }).click()
+  dialog = page.getByRole('dialog')
+  assert(
+    (await dialog
+      .getByRole('combobox', { name: 'Relay CA PEM action' })
+      .textContent()) === 'Replace',
+    'cleared CA did not reopen with the replace default',
+  )
+  assert(
+    (await dialog
+      .getByRole('textbox', { name: 'Relay CA PEM', exact: true })
+      .inputValue()) === '' &&
+      (await dialog
+        .getByRole('textbox', { name: 'Client cert PEM', exact: true })
+        .inputValue()) === '' &&
+      (await dialog
+        .getByRole('textbox', { name: 'Client key PEM', exact: true })
+        .inputValue()) === '',
+    'dialog reopened with secret values instead of flags only',
+  )
+  await page.waitForTimeout(5200)
+  await page.locator('[data-slot="table-container"]').evaluate((element) => {
+    element.scrollLeft = 0
+  })
+  await dialog.getByRole('heading', { name: 'Edit relay', exact: true }).click()
+  await capture('relay-editor-en-light-1440')
+  await chooseOption('Bridge encryption', 'Required')
+  assert(
+    (await dialog
+      .getByRole('combobox', { name: 'Bridge key action' })
+      .textContent()) === 'Replace',
+    'cleared bridge key did not reopen with the replace default',
+  )
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await dialog.waitFor({ state: 'detached' })
+  report.checks.secretFlagsReopenWithoutEcho = true
+
+  const disabledReconnect = page.getByRole('button', {
+    name: 'Reconnect Edge Relay Singapore (staging)',
+  })
+  assert(
+    await disabledReconnect.isDisabled(),
+    'disabled saved relay can be reconnected',
+  )
+  const reconnectPath = '/api/v1/admin/relays/relay-frankfurt/reconnect'
+  const beforeDisabledReconnect = requestCount('POST', reconnectPath)
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/relays',
+    method: 'GET',
+    status: 200,
+    delayMs: 1000,
+  })
+  const listRefreshAfterReconnect = page.waitForRequest((request) => {
+    const url = new URL(request.url())
+    return (
+      request.method() === 'GET' &&
+      url.pathname === '/api/v1/admin/relays' &&
+      url.searchParams.get('first') === '0' &&
+      url.searchParams.get('rows') === '20'
+    )
+  })
+  const reconnectResponse = waitForResponse('POST', reconnectPath, 200)
+  await page
+    .getByRole('button', {
+      name: 'Reconnect Edge Relay Frankfurt With A Long Operational Name',
+    })
+    .click()
+  await reconnectResponse
+  await listRefreshAfterReconnect
+  await page.waitForFunction(
+    () => document.querySelector('table')?.getAttribute('aria-busy') === 'true',
+  )
+  const firstEdit = page.getByRole('button', {
+    name: 'Edit Edge Relay Frankfurt With A Long Operational Name',
+  })
+  const firstDelete = page.getByRole('button', {
+    name: 'Delete Edge Relay Frankfurt With A Long Operational Name',
+  })
+  assert(
+    (await firstEdit.isDisabled()) && (await firstDelete.isDisabled()),
+    'same-row save/delete controls stayed active during reconnect refresh',
+  )
+  const otherReconnect = page.getByRole('button', {
+    name: 'Reconnect Fixture Relay 1 With A Long Operational Name',
+  })
+  assert(!(await otherReconnect.isDisabled()), 'another relay row was gated')
+  const otherPath = '/api/v1/admin/relays/relay-fixture-1/reconnect'
+  const otherReconnectResponse = waitForResponse('POST', otherPath, 200)
+  await otherReconnect.click()
+  await otherReconnectResponse
+  const pendingRefreshResponse = waitForResponse(
+    'GET',
+    '/api/v1/admin/relays',
+    200,
+  )
+  await pendingRefreshResponse
+  await firstEdit.waitFor({ state: 'visible' })
+  await page.waitForFunction(
+    () =>
+      document.querySelector('table')?.getAttribute('aria-busy') === 'false',
+  )
+  assert(
+    !(await firstEdit.isDisabled()) && !(await otherReconnect.isDisabled()),
+    'row action keys did not release after refreshed list data',
+  )
+  assert(
+    requestCount('POST', reconnectPath) === beforeDisabledReconnect + 1,
+    'disabled reconnect issued an API request',
+  )
+  report.checks.reconnectDisabledAndConflictGuard = {
+    disabledReconnectNoRequest: true,
+    sameRowControlsDisabled: true,
+    unrelatedRowAvailable: true,
+    lockHeldThroughRefresh: true,
+  }
+
+  const deletePath = '/api/v1/admin/relays/relay-1002'
+  await page.evaluate(() => {
+    window.__relayConfirmCalls = []
+    window.confirm = (message) => {
+      window.__relayConfirmCalls.push(String(message))
+      return false
+    }
+  })
+  const beforeCancelDelete = requestCount('DELETE', deletePath)
+  await page.getByRole('button', { name: 'Delete Fixture mTLS relay' }).click()
+  const cancelledConfirmCalls = await page.evaluate(
+    () => window.__relayConfirmCalls,
+  )
+  assert(
+    JSON.stringify(cancelledConfirmCalls) ===
+      JSON.stringify(['Delete relay: Fixture mTLS relay?']) &&
+      requestCount('DELETE', deletePath) === beforeCancelDelete,
+    'cancelled native confirmation issued a delete request or used the wrong prompt',
+  )
+  await page.evaluate(() => {
+    window.confirm = (message) => {
+      window.__relayConfirmCalls.push(String(message))
+      return true
+    }
+  })
+  const deleteResponse = waitForResponse('DELETE', deletePath, 204)
+  await page.getByRole('button', { name: 'Delete Fixture mTLS relay' }).click()
+  await deleteResponse
+  await page.getByText('Fixture mTLS relay', { exact: true }).waitFor({
+    state: 'hidden',
+  })
+  const confirmCalls = await page.evaluate(() => window.__relayConfirmCalls)
+  assert(
+    JSON.stringify(confirmCalls) ===
+      JSON.stringify([
+        'Delete relay: Fixture mTLS relay?',
+        'Delete relay: Fixture mTLS relay?',
+      ]),
+    'delete did not use the expected native confirmation prompt',
+  )
+  report.checks.deleteConfirmation = {
+    cancelNoRequest: true,
+    confirmedDelete: true,
+    nativeConfirmCalls: confirmCalls.length,
+  }
+  captureRelayBodies = false
+
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    localStorage.setItem('prompt-ferry:theme-mode', 'dark')
+  })
+  await page.reload()
+  await waitForRoute()
+  const zhDark = await page.evaluate(() => ({
+    lang: document.documentElement.lang,
+    dark: document.documentElement.classList.contains('dark'),
+    colorScheme: document.documentElement.style.colorScheme,
+  }))
+  assert(
+    zhDark.lang === 'zh-CN' && zhDark.dark && zhDark.colorScheme === 'dark',
+    'Chinese dark relay rendering did not apply locale and theme',
+  )
+  assert(
+    await page.getByRole('heading', { name: '中继', exact: true }).isVisible(),
+    'Chinese Relay title is missing',
+  )
+  await capture('relays-admin-zh-dark-1440')
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'en-US')
+    localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await page.reload()
+  await waitForRoute()
+  const enLight = await page.evaluate(() => ({
+    lang: document.documentElement.lang,
+    dark: document.documentElement.classList.contains('dark'),
+    colorScheme: document.documentElement.style.colorScheme,
+  }))
+  assert(
+    enLight.lang === 'en-US' &&
+      !enLight.dark &&
+      enLight.colorScheme === 'light',
+    'English light relay rendering did not apply locale and theme',
+  )
+  report.checks.localeThemeRendering = { zhDark, enLight }
+
+  await page
+    .getByRole('button', {
+      name: 'Edit Edge Relay Frankfurt With A Long Operational Name',
+    })
+    .click()
+  dialog = page.getByRole('dialog')
+  const lastConnectedText = await dialog
+    .getByText(/Last connected:/)
+    .textContent()
+  assert(
+    typeof lastConnectedText === 'string' &&
+      lastConnectedText.includes('2026') &&
+      !lastConnectedText.endsWith('-'),
+    'Relay edit timestamp did not render in the configured locale and UTC zone',
+  )
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await dialog.waitFor({ state: 'detached' })
+  report.checks.timestampLocaleAndZone = true
+
+  const responsiveChecks = []
+  const targetRelay = 'Edge Relay Frankfurt With A Long Operational Name'
+  for (const profile of [
+    { locale: 'en-US', theme: 'light', name: 'en-light' },
+    { locale: 'zh-CN', theme: 'dark', name: 'zh-dark' },
+  ]) {
+    for (const width of [1440, 1024, 768, 390]) {
+      await page.evaluate(({ locale, theme }) => {
+        localStorage.setItem('prompt-ferry:locale', locale)
+        localStorage.setItem('prompt-ferry:theme-mode', theme)
+      }, profile)
+      await page.reload()
+      await waitForRoute()
+      await page.setViewportSize({ width, height: 900 })
+      const layout = await page.evaluate(() => {
+        const container = document.querySelector(
+          '[data-slot="table-container"]',
+        )
+        const table = container?.querySelector('table')
+        return {
+          documentWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth,
+          tableContainerWidth: container?.clientWidth ?? 0,
+          tableScrollWidth: container?.scrollWidth ?? 0,
+          tableWidth: table?.scrollWidth ?? 0,
+        }
+      })
+      assert(
+        layout.documentWidth <= layout.viewportWidth,
+        `document horizontally overflows at ${profile.name}/${width}px`,
+      )
+      if (width === 390) {
+        await capture(`relays-admin-${profile.name}-390`)
+      }
+      const row = page.getByRole('row').filter({ hasText: targetRelay })
+      const editButton = row.getByRole('button').nth(1)
+      await editButton.scrollIntoViewIfNeeded()
+      const buttonBounds = await editButton.boundingBox()
+      const containerBounds = await page
+        .locator('[data-slot="table-container"]')
+        .boundingBox()
+      assert(
+        Boolean(buttonBounds && containerBounds),
+        `table actions missing at ${profile.name}/${width}px`,
+      )
+      assert(
+        buttonBounds.x >= containerBounds.x - 1 &&
+          buttonBounds.x + buttonBounds.width <=
+            containerBounds.x + containerBounds.width + 1,
+        `edit action is not reachable inside the scroller at ${profile.name}/${width}px`,
+      )
+      await editButton.click()
+      dialog = page.getByRole('dialog')
+      const dialogBounds = await dialog.boundingBox()
+      assert(
+        Boolean(dialogBounds),
+        `relay dialog did not render at ${profile.name}/${width}px`,
+      )
+      assert(
+        dialogBounds.x >= 0 && dialogBounds.x + dialogBounds.width <= width + 1,
+        `relay dialog exceeds viewport width at ${profile.name}/${width}px`,
+      )
+      const connectedLabel =
+        profile.locale === 'en-US' ? /Last connected:/ : /最近连接/
+      const connectedText = await dialog.getByText(connectedLabel).textContent()
+      assert(
+        typeof connectedText === 'string' &&
+          connectedText.includes('2026') &&
+          !connectedText.endsWith('-'),
+        `timestamp did not format at ${profile.name}/${width}px`,
+      )
+      const saveLabel = profile.locale === 'en-US' ? 'Save' : '保存'
+      const cancelLabel = profile.locale === 'en-US' ? 'Cancel' : '取消'
+      const saveButton = dialog.getByRole('button', {
+        name: saveLabel,
+        exact: true,
+      })
+      await saveButton.scrollIntoViewIfNeeded()
+      assert(
+        await saveButton.isVisible(),
+        `save action is unreachable at ${profile.name}/${width}px`,
+      )
+      assert(
+        (await dialog.locator('textarea').nth(2).inputValue()) === '',
+        'API secret values were echoed into the responsive editor',
+      )
+      await dialog.locator('[data-slot="dialog-title"]').click()
+      responsiveChecks.push({
+        locale: profile.locale,
+        theme: profile.theme,
+        width,
+        documentWidth: layout.documentWidth,
+        viewportWidth: layout.viewportWidth,
+        tableContainerWidth: layout.tableContainerWidth,
+        tableScrollWidth: layout.tableScrollWidth,
+        tableWidth: layout.tableWidth,
+        actionsContained: true,
+        dialogContained: true,
+        dialogSaveVisible: true,
+        timestampFormatted: true,
+      })
+      if (width === 390) {
+        await capture(`relay-editor-${profile.name}-390`)
+      }
+      if (width === 1440 && profile.locale === 'zh-CN') {
+        await capture('relay-editor-zh-dark-1440')
+      }
+      await dialog
+        .getByRole('button', {
+          name: cancelLabel,
+          exact: true,
+        })
+        .click()
+      await dialog.waitFor({ state: 'detached' })
+    }
+  }
+  report.checks.responsiveContainment = responsiveChecks
+  report.checks.noHostRoleOrSecretEcho = {
+    hostRoleCalls: apiRequests.filter((item) =>
+      /^\/api\/v1\/relay\/(?:host|settings|host\/role)/.test(item.path),
+    ).length,
+    routeId: 'R-RELAYS',
+    secretValuesEchoedByApi: false,
+  }
+
+  report.checks.secretRequestDigests = await relayDigests()
+  report.checks.relayResponseStatuses = relayResponses.map((item) => ({
+    ...item,
+  }))
+  report.checks.scenarioCoverage = {
+    'route-render': report.checks.routeAndNavigation === true,
+    'admin-denial': report.checks.adminDenial.adminRelayCalls === 0,
+    pagination:
+      report.checks.pagination.secondPageRead &&
+      report.checks.pagination.pageSizePersisted,
+    'dialog-open': report.checks.dialogOpen === true,
+    'mutation-create':
+      report.checks.createFailureDraftRetryAndRefreshGuard === true,
+    'mutation-reconnect':
+      report.checks.reconnectDisabledAndConflictGuard
+        .disabledReconnectNoRequest,
+    'mutation-delete': report.checks.deleteConfirmation.confirmedDelete,
+    'mutation-conflict-guard':
+      report.checks.reconnectDisabledAndConflictGuard.lockHeldThroughRefresh &&
+      report.checks.reconnectDisabledAndConflictGuard.unrelatedRowAvailable,
+  }
+  assert(
+    syntheticMaterials.every(
+      (value) => !JSON.stringify(report).includes(value),
+    ),
+    'synthetic secret material leaked into the relay browser report',
+  )
+  assert(
+    apiFailures.length === 0,
+    `unexpected API failures: ${JSON.stringify(apiFailures)}`,
+  )
+  assert(
+    consoleErrors.length === 0,
+    `browser console errors: ${JSON.stringify(consoleErrors)}`,
+  )
+  assert(
+    pageErrors.length === 0,
+    `browser page errors: ${JSON.stringify(pageErrors)}`,
+  )
+  assert(
+    report.checks.noHostRoleOrSecretEcho.hostRoleCalls === 0,
+    'Relay management called a Relay Host endpoint',
+  )
+  report.checks.expectedApiFailures = expectedApiFailures
+  report.checks.apiFailures = apiFailures
+  report.checks.consoleErrors = consoleErrors
+  report.checks.pageErrors = pageErrors
+  report.finishedAt = new Date().toISOString()
+  return report
+}

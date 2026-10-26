@@ -1,0 +1,655 @@
+{
+  "runId": "config-archive-1793010856017",
+  "startedAt": "2026-10-26T10:34:16.017Z",
+  "finishedAt": "2026-10-26T10:34:49.106Z",
+  "checks": {
+    "routeRender": {
+      "routeId": "R-SETTINGS-CONFIG-ARCHIVE",
+      "routeTab": "config-archive",
+      "controls": {
+        "missing": [],
+        "exportType": "password",
+        "importType": "password",
+        "fileAccept": ".pfce,application/octet-stream",
+        "exportDisabled": true,
+        "previewDisabled": true,
+        "applyDisabled": true,
+        "auditRows": 10,
+        "auditColumns": 9,
+        "auditTitle": true,
+        "importTitle": true,
+        "bodyLeak": false
+      }
+    },
+    "pagination": {
+      "rowsAfterSize": 12,
+      "storedPageSize": "20",
+      "pageOneFirst": "10",
+      "pageTwoFirst": "1",
+      "pageTwoRows": 2
+    },
+    "exportBytes": {
+      "length": 525,
+      "magic": "PROMPT_FERRY_SYNTHETIC_ARCHIVE",
+      "headerFingerprint": "1bbf547ca492d1d75cf656a301c4af4a5ea0669433a6a1959f99e914604989f6",
+      "headerBackend": "postgresql",
+      "headerFormatVersion": "1"
+    },
+    "fileExport": {
+      "suggested": "prompt-ferry-config.pfce",
+      "savedPath": "e2e/foundation/config-archive-download.pfce",
+      "bytes": {
+        "length": 525,
+        "magic": "PROMPT_FERRY_SYNTHETIC_ARCHIVE",
+        "headerFingerprint": "af98b03ed9843b5edf784834eaee02d12ba62d062af0c3ee2af2a34958cffd62",
+        "headerBackend": "postgresql",
+        "headerFormatVersion": "1"
+      },
+      "auditFirstRow": "19"
+    },
+    "fileImport": {
+      "domains": ["endpoints", "model_routes", "mcp_servers"],
+      "warnings": "endpoints: 1 record(s) carry an unrecoverable secret\nmcp_servers: 1 record(s) carry an unrecoverable secret",
+      "body": {
+        "keys": ["archive_base64", "passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": true,
+        "archive_base64_chars": 700
+      },
+      "auditUnchanged": true
+    },
+    "destructiveConfirm": {
+      "dialogBody": "Confirm replace import\n\nThe import atomically replaces the restorable configuration domains and cannot be undone.\n\nCancel\nConfirm import\nClose",
+      "applied": "Configuration imported\n\nBackend\npostgresql\nFormat version\n1\nFingerprint\naf98b03ed9843b5e\nName\tRecords\tUnrecoverable secrets\nendpoints\t13\t1\nmodel_routes\t12\t0\nmcp_servers\t12\t1",
+      "domains": ["endpoints", "model_routes", "mcp_servers"],
+      "body": {
+        "keys": ["archive_base64", "passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": true,
+        "archive_base64_chars": 700
+      },
+      "latestAuditRow": "Import\tadmin\tpostgresql\t525\taf98b03ed9843b5e\t37\tSuccess\t\n-\n\t10/23/2026, 8:00:03 PM"
+    },
+    "capabilities": {
+      "audit": true,
+      "export": true,
+      "import": true,
+      "recovered": true
+    },
+    "failureDraft": {
+      "wrongPassphrase": {
+        "error": "archive_decrypt_failed: configuration archive could not be decrypted",
+        "passphrasePresent": false,
+        "file": true,
+        "preview": false
+      },
+      "corrupt": "archive_invalid_header: not a prompt-ferry configuration archive",
+      "version": "archive_unsupported_version: unsupported configuration archive version 9 (supported 1)",
+      "backend": "archive_backend_mismatch: configuration archive was written by the sqlite backend but the target is postgresql",
+      "failed": {
+        "dialog": true,
+        "error": "fixture_injected_error: fixture injected failure",
+        "passphrasePresent": true,
+        "preview": true
+      },
+      "writes": 2,
+      "doubleExport": 1
+    },
+    "responsive": [
+      {
+        "width": 1440,
+        "documentWidth": 1440,
+        "headers": 9
+      },
+      {
+        "width": 1024,
+        "documentWidth": 1024,
+        "headers": 9
+      },
+      {
+        "width": 768,
+        "documentWidth": 768,
+        "headers": 9
+      },
+      {
+        "width": 390,
+        "documentWidth": 390,
+        "headers": 9
+      }
+    ],
+    "adminDenial": {
+      "navHidden": true,
+      "redirected": true,
+      "forged": {
+        "audit": 403,
+        "export": 403,
+        "preview": 403,
+        "apply": 403
+      },
+      "generalIntact": true,
+      "redactionIntact": 200,
+      "anonymousRead": 401
+    },
+    "officialPendingRoutes": 0,
+    "unexpectedWindow": "mounted admin archive tab stages",
+    "limitations": [
+      "Evidence is the synthetic fixture archive format: no production .pfce, Argon2id/ChaCha20-Poly1305 archive, real configuration replacement or production behaviour is claimed.",
+      "The passphrase and the archive body are recorded as presence flags and lengths only. The audit empty-tail page correction and the 32 KB base64 chunking are asserted by the unit suite rather than here, because the synthetic audit trail only grows within a run and a wrong-window read cannot be produced through the UI."
+    ]
+  },
+  "scenarios": {
+    "R-SETTINGS-CONFIG-ARCHIVE": {
+      "route-render": {
+        "passed": true,
+        "evidence": "the admin archive route renders the export card, the import wizard and the nine-column audit table from exactly one audit read and zero writes, with password-only passphrases"
+      },
+      "admin-denial": {
+        "passed": true,
+        "evidence": "an ordinary user has no archive link, is redirected away from the route without rendering it, is refused with 403 on all four archive routes, and still reaches the general and redaction settings while an anonymous read is refused with 401"
+      },
+      "pagination": {
+        "passed": true,
+        "evidence": "the audit pager reads a distinct second page, persists the page size under the config-archive-audit scope and offers the standard sizes"
+      },
+      "file-export": {
+        "passed": true,
+        "evidence": "one export sends only the passphrase, saves the real browser download under the fixed name despite a server-chosen Content-Disposition, and reports the response backend, format, fingerprint and exact length while the audit trail refreshes inside the claim"
+      },
+      "file-import": {
+        "passed": true,
+        "evidence": "the downloaded synthetic archive imports back: the same file can be chosen twice, the preview reports every per-domain count and warning and records no audit row"
+      },
+      "destructive-confirm": {
+        "passed": true,
+        "evidence": "opening the warning sends nothing, cancel writes nothing and clears the flow, and the confirmed apply replaces the archive, reports every restored domain, clears the transient secrets and adds the audit row"
+      },
+      "mutation-failure-draft": {
+        "passed": true,
+        "evidence": "a wrong passphrase, a corrupt header, an unsupported version and a foreign backend each answer the codec's own code while the file survives, a 503 keeps the confirmed wizard and resends the same body, a double export sends one request, and the three capability codes stay distinct and recover on retry"
+      }
+    }
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/config-archive-en-light-1440.png",
+    "e2e/foundation/screenshots/config-archive-export-en-light-1440.png",
+    "e2e/foundation/screenshots/config-archive-preview-en-light-1440.png",
+    "e2e/foundation/screenshots/config-archive-confirm-en-light-1440.png",
+    "e2e/foundation/screenshots/config-archive-applied-en-light-1440.png",
+    "e2e/foundation/screenshots/config-archive-failure-en-light-1440.png",
+    "e2e/foundation/screenshots/config-archive-en-light-390.png",
+    "e2e/foundation/screenshots/config-archive-zh-dark-1440.png",
+    "e2e/foundation/screenshots/config-archive-zh-dark-390.png"
+  ],
+  "apiFailures": [],
+  "expectedApiFailures": [
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "400 POST /api/v1/admin/config-import/preview",
+    "500 POST /api/v1/admin/config-import/preview",
+    "422 POST /api/v1/admin/config-import/preview",
+    "422 POST /api/v1/admin/config-import/preview",
+    "503 POST /api/v1/admin/config-import",
+    "501 GET /api/v1/admin/config-audit",
+    "501 POST /api/v1/admin/config-export",
+    "501 POST /api/v1/admin/config-import/preview",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "403 GET /api/v1/admin/config-audit",
+    "403 POST /api/v1/admin/config-export",
+    "403 POST /api/v1/admin/config-import/preview",
+    "403 POST /api/v1/admin/config-import",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/admin/config-audit",
+    "401 GET /api/v1/auth/me"
+  ],
+  "unexpectedRequests": [],
+  "archiveRequests": [
+    {
+      "stage": "route-render",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "pagination",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "20"
+      },
+      "body": null
+    },
+    {
+      "stage": "pagination",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "pagination",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "10",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "file-export",
+      "method": "POST",
+      "path": "/api/v1/admin/config-export",
+      "query": {},
+      "body": {
+        "keys": ["passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": false,
+        "archive_base64_chars": 0
+      }
+    },
+    {
+      "stage": "file-export",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "10",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "file-import",
+      "method": "POST",
+      "path": "/api/v1/admin/config-import/preview",
+      "query": {},
+      "body": {
+        "keys": ["archive_base64", "passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": true,
+        "archive_base64_chars": 700
+      }
+    },
+    {
+      "stage": "destructive-confirm",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "destructive-confirm",
+      "method": "POST",
+      "path": "/api/v1/admin/config-import/preview",
+      "query": {},
+      "body": {
+        "keys": ["archive_base64", "passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": true,
+        "archive_base64_chars": 700
+      }
+    },
+    {
+      "stage": "destructive-confirm",
+      "method": "POST",
+      "path": "/api/v1/admin/config-import",
+      "query": {},
+      "body": {
+        "keys": ["archive_base64", "passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": true,
+        "archive_base64_chars": 700
+      }
+    },
+    {
+      "stage": "destructive-confirm",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "POST",
+      "path": "/api/v1/admin/config-import/preview",
+      "query": {},
+      "body": {
+        "keys": ["archive_base64", "passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 26,
+        "archive_base64_present": true,
+        "archive_base64_chars": 700
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "POST",
+      "path": "/api/v1/admin/config-import/preview",
+      "query": {},
+      "body": {
+        "keys": ["archive_base64", "passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": true,
+        "archive_base64_chars": 36
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "POST",
+      "path": "/api/v1/admin/config-import/preview",
+      "query": {},
+      "body": {
+        "keys": ["archive_base64", "passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": true,
+        "archive_base64_chars": 176
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "POST",
+      "path": "/api/v1/admin/config-import/preview",
+      "query": {},
+      "body": {
+        "keys": ["archive_base64", "passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": true,
+        "archive_base64_chars": 172
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "POST",
+      "path": "/api/v1/admin/config-import/preview",
+      "query": {},
+      "body": {
+        "keys": ["archive_base64", "passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": true,
+        "archive_base64_chars": 700
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "POST",
+      "path": "/api/v1/admin/config-import",
+      "query": {},
+      "body": {
+        "keys": ["archive_base64", "passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": true,
+        "archive_base64_chars": 700
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "POST",
+      "path": "/api/v1/admin/config-import",
+      "query": {},
+      "body": {
+        "keys": ["archive_base64", "passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": true,
+        "archive_base64_chars": 700
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "POST",
+      "path": "/api/v1/admin/config-export",
+      "query": {},
+      "body": {
+        "keys": ["passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": false,
+        "archive_base64_chars": 0
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "POST",
+      "path": "/api/v1/admin/config-export",
+      "query": {},
+      "body": {
+        "keys": ["passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": false,
+        "archive_base64_chars": 0
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "POST",
+      "path": "/api/v1/admin/config-export",
+      "query": {},
+      "body": {
+        "keys": ["passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": false,
+        "archive_base64_chars": 0
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "POST",
+      "path": "/api/v1/admin/config-import/preview",
+      "query": {},
+      "body": {
+        "keys": ["archive_base64", "passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": true,
+        "archive_base64_chars": 700
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "POST",
+      "path": "/api/v1/admin/config-import/preview",
+      "query": {},
+      "body": {
+        "keys": ["archive_base64", "passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 36,
+        "archive_base64_present": true,
+        "archive_base64_chars": 700
+      }
+    },
+    {
+      "stage": "responsive-and-locale",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "responsive-and-locale",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "responsive-and-locale",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "responsive-and-locale",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "responsive-and-locale",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "10"
+      },
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "POST",
+      "path": "/api/v1/admin/config-export",
+      "query": {},
+      "body": {
+        "keys": ["passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 27,
+        "archive_base64_present": false,
+        "archive_base64_chars": 0
+      }
+    },
+    {
+      "stage": "admin-denial",
+      "method": "POST",
+      "path": "/api/v1/admin/config-import/preview",
+      "query": {},
+      "body": {
+        "keys": ["archive_base64", "passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 27,
+        "archive_base64_present": false,
+        "archive_base64_chars": 0
+      }
+    },
+    {
+      "stage": "admin-denial",
+      "method": "POST",
+      "path": "/api/v1/admin/config-import",
+      "query": {},
+      "body": {
+        "keys": ["archive_base64", "passphrase"],
+        "passphrase_present": true,
+        "passphrase_chars": 27,
+        "archive_base64_present": false,
+        "archive_base64_chars": 0
+      }
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/admin/config-audit",
+      "query": {
+        "first": "0",
+        "rows": "10"
+      },
+      "body": null
+    }
+  ],
+  "consoleErrorCount": 0,
+  "pageErrorCount": 0,
+  "limitations": [
+    "Evidence is the synthetic fixture archive format: no production .pfce, Argon2id/ChaCha20-Poly1305 archive, real configuration replacement or production behaviour is claimed.",
+    "The passphrase and the archive body are recorded as presence flags and lengths only. The audit empty-tail page correction and the 32 KB base64 chunking are asserted by the unit suite rather than here, because the synthetic audit trail only grows within a run and a wrong-window read cannot be produced through the UI."
+  ]
+}

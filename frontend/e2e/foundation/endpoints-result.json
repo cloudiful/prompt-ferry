@@ -1,0 +1,410 @@
+{
+  "status": "complete",
+  "runId": "endpoints-1793010891626",
+  "startedAt": "2026-10-26T10:34:51.626Z",
+  "finishedAt": "2026-10-26T10:35:29.755Z",
+  "callbacks": [
+    "endpoints",
+    "endpoints-create",
+    "endpoints-update",
+    "endpoints-mutations",
+    "endpoints-delete",
+    "endpoints-quota",
+    "endpoints-oauth-status",
+    "endpoints-oauth-device",
+    "endpoints-oauth-browser",
+    "endpoints-finish"
+  ],
+  "checks": {
+    "adminDenial": {
+      "redirectedToApiKeys": true,
+      "hiddenNavigation": true,
+      "adminApiCalls": 0
+    },
+    "adminUserOptionsRead": true,
+    "routeAndNavigation": {
+      "routeId": "R-ENDPOINTS-UPSTREAMS",
+      "navVisible": true,
+      "initialRowCount": 10,
+      "firstPageQuery": {
+        "first": 0,
+        "rows": 10
+      }
+    },
+    "loadingState": true,
+    "pagination": {
+      "initialRows": 10,
+      "secondPageRows": 3,
+      "secondPageIds": ["ep-fixture-8", "ep-fixture-9", "ep-fixture-10"],
+      "query": {
+        "first": "10",
+        "rows": "10"
+      }
+    },
+    "pageSizePersistence": true,
+    "errorState": {
+      "visible": true,
+      "retainedRows": true,
+      "retried": true,
+      "messagePresent": true
+    },
+    "consoleErrors": [],
+    "pageErrors": [],
+    "createDialogAndRetry": {
+      "pending": true,
+      "dismissalBlocked": true,
+      "errorVisible": true,
+      "draftRetained": true,
+      "createdId": "ep-1002",
+      "duplicateKeyWarning": true,
+      "invalidProxyBlocked": true
+    },
+    "createPayloads": [
+      {
+        "name": "MiniMax Browser User Upstream With Deliberately Long Operational Name",
+        "provider": "minimax",
+        "provider_region": "global",
+        "scope": "user",
+        "owner_user_id": 2,
+        "base_url_trimmed": true,
+        "key_lb_enabled": false,
+        "mcp_enabled": true,
+        "protocol_mode": "manual",
+        "native_api_override": "chat",
+        "service_tier": "tier-fixture",
+        "api_key_count": 1,
+        "api_key_label": "Primary fixture key",
+        "api_key_present": true,
+        "proxy_present": true,
+        "windows": [
+          {
+            "start": "00:00",
+            "end": "24:00",
+            "days": [1, 2, 3, 4, 5]
+          },
+          {
+            "start": "23:00",
+            "end": "02:00",
+            "days": [6, 7]
+          }
+        ],
+        "admin_api_key_present": false
+      },
+      {
+        "name": "MiniMax Browser User Upstream With Deliberately Long Operational Name",
+        "provider": "minimax",
+        "provider_region": "global",
+        "scope": "user",
+        "owner_user_id": 2,
+        "base_url_trimmed": true,
+        "key_lb_enabled": false,
+        "mcp_enabled": true,
+        "protocol_mode": "manual",
+        "native_api_override": "chat",
+        "service_tier": "tier-fixture",
+        "api_key_count": 1,
+        "api_key_label": "Primary fixture key",
+        "api_key_present": true,
+        "proxy_present": true,
+        "windows": [
+          {
+            "start": "00:00",
+            "end": "24:00",
+            "days": [1, 2, 3, 4, 5]
+          },
+          {
+            "start": "23:00",
+            "end": "02:00",
+            "days": [6, 7]
+          }
+        ],
+        "admin_api_key_present": false
+      }
+    ],
+    "updateFailureDraftRetry": {
+      "saveDisabled": true,
+      "cancelDisabled": true,
+      "rowToggleDisabled": true,
+      "independentProbeEnabled": true,
+      "otherEndpointAvailable": true,
+      "errorVisible": true,
+      "draftRetained": true,
+      "retryStatus": 200,
+      "payload": {
+        "name": "Fixture Upstream Browser Created Updated",
+        "provider": "minimax",
+        "provider_region": "global",
+        "scope": "user",
+        "owner_user_id": 2,
+        "key_lb_enabled": false,
+        "mcp_enabled": true,
+        "protocol_mode": "manual",
+        "native_api_override": "chat",
+        "service_tier": "tier-fixture",
+        "proxy_present": false,
+        "proxy_empty": false,
+        "windows_present": false,
+        "admin_api_key_present": false,
+        "api_keys": [
+          {
+            "key_id": "key-1001",
+            "key_label": "Primary fixture key",
+            "enabled": true,
+            "api_key_present": false
+          }
+        ]
+      }
+    },
+    "keyRowsBehavior": {
+      "replacementSent": true,
+      "replacementReopenedSaved": true,
+      "removedSavedRow": true
+    },
+    "proxyClearAndScheduleEmpty": {
+      "proxyEmptySent": true,
+      "emptyScheduleSent": true,
+      "settingsReopened": true
+    },
+    "toggleAndIndependentProbe": {
+      "toggledOff": true,
+      "probePath": "/api/v1/admin/endpoints/ep-1002/test",
+      "probeResultRendered": true,
+      "accessibleName": "HTTP 200 / 312ms / fixture upstream accepted the probe",
+      "restored": true
+    },
+    "deleteCancelAndSuccess": {
+      "cancelledWrites": 0,
+      "successfulDelete": true
+    },
+    "fixtureQuotaStatusScope": {
+      "quotaStatusScope": "text_inference",
+      "fiveHourWindowKind": "five_hour"
+    },
+    "genericQuotaIneligible": {
+      "actionCount": 0,
+      "apiCalls": 0
+    },
+    "tableMobileQuotaPills": {
+      "identical": true,
+      "actionVisible": true,
+      "overflow": false,
+      "tableBadgeLabels": ["Available"],
+      "cardBadgeLabels": ["Available"],
+      "tablePillCount": 1,
+      "cardPillCount": 1,
+      "rendered": true
+    },
+    "oauthNegativeCancelQuotaListRetry": {
+      "quotaErrorVisible": true,
+      "quotaRetry": true,
+      "query": {
+        "limit": "50"
+      },
+      "loadedObservation": true,
+      "listPreservedOnChartRoundtrip": true,
+      "noCursorProvidedByFixture": true
+    },
+    "keyQuotaHistory": {
+      "initialTrend": {
+        "range": "24h"
+      },
+      "ranges": ["24h", "7d", "30d"],
+      "filteredKey": "key-minimax-1",
+      "allKeysOmitKeyId": true,
+      "actualCanvas": true,
+      "lazyImportObserved": true,
+      "observationQuery": {
+        "limit": "50"
+      },
+      "observationText": "Oct 23, 2026, 12:00 PM\nprimary\nUnknown source\nminimax-m2\nResets in 5h 0m\nRemaining 62.0%\n38.00 / 100.00"
+    },
+    "oauthQuota": {
+      "currentCacheRequestCount": 7,
+      "warmOpenNoRequest": true,
+      "provider": "minimax",
+      "unknownNotZero": true,
+      "knownWindowText": "5-hour window\nExpired\n—\n38.00 / 100.00"
+    },
+    "subscriptionQuotaHistory": {
+      "query": {
+        "limit": "50"
+      },
+      "observationId": "snapshot-1",
+      "sourceRendered": true,
+      "cursor": null,
+      "noLoadMore": true
+    },
+    "oauthStatusAndStartFailures": {
+      "refreshStatuses": [500, 200],
+      "refreshGuarded": true,
+      "refreshErrorVisible": true,
+      "subscriptionPlanDisabledWithoutOAuth": true,
+      "adminApiKeyFieldAbsent": true,
+      "noTokenQuotaAction": true,
+      "deviceStartFailureVisible": true,
+      "idlePollCancellation": true
+    },
+    "deviceOAuthCompletion": {
+      "pollStatuses": [200, 200],
+      "pendingThenComplete": true,
+      "clearRestoredKeylessState": true,
+      "noVerificationNavigation": true
+    },
+    "browserOAuth": {
+      "startFailureVisible": true,
+      "completionStatuses": [503, 200],
+      "redirectMasked": true,
+      "redirectDraftRetained": true,
+      "dismissDisabledWhilePending": true,
+      "noExternalNavigation": true
+    },
+    "oauthGenerationGuards": {
+      "providerChangeBrowserVerified": true,
+      "providerDuringStatus": true,
+      "oauthSectionRemoved": true,
+      "endpointSwitchRetained": true
+    },
+    "responsiveContainment": [
+      {
+        "width": 1440,
+        "documentWidth": 1440,
+        "contained": true,
+        "endpointVisible": true
+      },
+      {
+        "width": 1024,
+        "documentWidth": 1024,
+        "contained": true,
+        "endpointVisible": true
+      },
+      {
+        "width": 768,
+        "documentWidth": 768,
+        "contained": true,
+        "endpointVisible": true
+      },
+      {
+        "width": 390,
+        "documentWidth": 390,
+        "contained": true,
+        "endpointVisible": true
+      }
+    ],
+    "localeThemeRendering": {
+      "zhDark": {
+        "lang": "zh-CN",
+        "dark": true,
+        "colorScheme": "dark"
+      },
+      "enLight": {
+        "lang": "en-US",
+        "dark": false,
+        "colorScheme": "light",
+        "timeZone": "UTC"
+      }
+    },
+    "quotaStale": {
+      "staleLabelsVisible": true,
+      "staleNumbersRetained": true,
+      "freshLabelsCleared": true
+    },
+    "expectedApiFailures": [
+      "503 GET /api/v1/admin/endpoints",
+      "503 POST /api/v1/admin/endpoints",
+      "503 PATCH /api/v1/admin/endpoints/ep-1002",
+      "500 GET /api/v1/admin/endpoints/ep-minimax-cn/quota-observations",
+      "500 POST /api/v1/admin/endpoints/ep-openai-codex/oauth/refresh",
+      "500 POST /api/v1/admin/endpoints/ep-openai-codex/oauth/device",
+      "500 POST /api/v1/admin/endpoints/ep-openai-codex/oauth/browser",
+      "503 POST /api/v1/admin/endpoints/ep-openai-codex/oauth/browser/complete"
+    ],
+    "apiFailures": [],
+    "syntheticSecretSafety": {
+      "reportRedacted": true,
+      "endpointLedgerRedacted": true,
+      "oauthBodyNotRecorded": true
+    },
+    "scenarioCoverage": {
+      "route-render": true,
+      "admin-denial": true,
+      "pagination": true,
+      "dialog-open": true,
+      "mutation-create": true,
+      "mutation-toggle": true,
+      "mutation-update": true,
+      "mutation-delete": true,
+      "mutation-conflict-guard": true,
+      "mutation-failure-draft": true,
+      "long-values": true,
+      "loading-state": true,
+      "error-state": true
+    }
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/endpoints-en-light-1440.png",
+    "e2e/foundation/screenshots/endpoints-created-en-light-1440.png",
+    "e2e/foundation/screenshots/endpoints-quota-current-en-light-1440.png",
+    "e2e/foundation/screenshots/endpoints-en-light-390-mobile.png",
+    "e2e/foundation/screenshots/endpoints-quota-chart-en-light-1440.png",
+    "e2e/foundation/screenshots/endpoints-quota-history-en-light-1440.png",
+    "e2e/foundation/screenshots/endpoints-subscription-history-en-light-1440.png",
+    "e2e/foundation/screenshots/endpoints-en-light-1024.png",
+    "e2e/foundation/screenshots/endpoints-en-light-768.png",
+    "e2e/foundation/screenshots/endpoints-en-light-390.png",
+    "e2e/foundation/screenshots/endpoints-zh-dark-1440.png",
+    "e2e/foundation/screenshots/endpoints-en-light-1440-final.png",
+    "e2e/foundation/screenshots/endpoints-quota-fresh-en-light-1440.png"
+  ],
+  "segments": [
+    {
+      "name": "endpoints",
+      "startedAt": "2026-10-26T10:34:51.626Z",
+      "finishedAt": "2026-10-26T10:34:56.399Z"
+    },
+    {
+      "name": "endpoints-create",
+      "startedAt": "2026-10-26T10:34:57.338Z",
+      "finishedAt": "2026-10-26T10:35:00.876Z"
+    },
+    {
+      "name": "endpoints-update",
+      "startedAt": "2026-10-26T10:35:02.358Z",
+      "finishedAt": "2026-10-26T10:35:03.716Z"
+    },
+    {
+      "name": "endpoints-mutations",
+      "startedAt": "2026-10-26T10:35:05.150Z",
+      "finishedAt": "2026-10-26T10:35:06.770Z"
+    },
+    {
+      "name": "endpoints-delete",
+      "startedAt": "2026-10-26T10:35:08.209Z",
+      "finishedAt": "2026-10-26T10:35:08.760Z"
+    },
+    {
+      "name": "endpoints-quota",
+      "startedAt": "2026-10-26T10:35:10.190Z",
+      "finishedAt": "2026-10-26T10:35:13.496Z"
+    },
+    {
+      "name": "endpoints-oauth-status",
+      "startedAt": "2026-10-26T10:35:14.430Z",
+      "finishedAt": "2026-10-26T10:35:17.338Z"
+    },
+    {
+      "name": "endpoints-oauth-device",
+      "startedAt": "2026-10-26T10:35:18.792Z",
+      "finishedAt": "2026-10-26T10:35:21.520Z"
+    },
+    {
+      "name": "endpoints-oauth-browser",
+      "startedAt": "2026-10-26T10:35:22.955Z",
+      "finishedAt": "2026-10-26T10:35:26.106Z"
+    },
+    {
+      "name": "endpoints-finish",
+      "startedAt": "2026-10-26T10:35:27.554Z",
+      "finishedAt": "2026-10-26T10:35:29.755Z"
+    }
+  ]
+}

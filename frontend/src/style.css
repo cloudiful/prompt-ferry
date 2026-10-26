@@ -1,4 +1,90 @@
 @import 'tailwindcss';
-@import '@nuxt/ui';
-@import './styles/base.css';
-@import './styles/usage.css';
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  color-scheme: light;
+  --radius: 0.625rem;
+  --background: #f5f7f8;
+  --foreground: #18221c;
+  --card: #ffffff;
+  --card-foreground: #18221c;
+  --popover: #ffffff;
+  --popover-foreground: #18221c;
+  --primary: #0284c7;
+  --primary-foreground: #ffffff;
+  --secondary: #e7ece9;
+  --secondary-foreground: #27362d;
+  --muted: #e9eeeb;
+  --muted-foreground: #5d6b62;
+  --accent: #e3ece7;
+  --accent-foreground: #20352a;
+  --destructive: #c83232;
+  --border: #d5ded8;
+  --input: #d5ded8;
+  --ring: #0284c7;
+}
+
+.dark {
+  color-scheme: dark;
+  --background: #040604;
+  --foreground: #e7f0e9;
+  --card: #0b100c;
+  --card-foreground: #e7f0e9;
+  --popover: #0b100c;
+  --popover-foreground: #e7f0e9;
+  --primary: #38bdf8;
+  --primary-foreground: #07131a;
+  --secondary: #1b261f;
+  --secondary-foreground: #dce8df;
+  --muted: #17201a;
+  --muted-foreground: #9aa99f;
+  --accent: #1b2b21;
+  --accent-foreground: #dce8df;
+  --destructive: #7f1d1d;
+  --border: #26352a;
+  --input: #26352a;
+  --ring: #38bdf8;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    margin: 0;
+    min-width: 20rem;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: ui-sans-serif, system-ui, sans-serif;
+  }
+
+  button,
+  input {
+    font: inherit;
+  }
+}

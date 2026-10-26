@@ -1,0 +1,562 @@
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const consoleErrors = []
+  const pageErrors = []
+  const apiFailures = []
+  const expectedApiFailures = []
+  const createPayloads = []
+  const updatePayloads = []
+  const resetPayloads = []
+  const report = {
+    runId: `users-${Date.now()}`,
+    startedAt: new Date().toISOString(),
+    checks: {},
+    screenshots: [],
+  }
+  let captureCreates = false
+  let captureUpdates = false
+  let captureResets = false
+
+  page.setDefaultTimeout(12000)
+  page.on('console', message => {
+    if (message.type() !== 'error') return
+    if (
+      message.text().includes('status of 401 (Unauthorized)') ||
+      message.text().includes('status of 503 (Service Unavailable)')
+    ) {
+      return
+    }
+    consoleErrors.push(message.text())
+  })
+  page.on('pageerror', error => pageErrors.push(error.message))
+  page.on('response', response => {
+    const url = new URL(response.url())
+    if (!url.pathname.startsWith('/api/') || response.status() < 400) return
+    const expectedUnauthorized =
+      response.status() === 401 &&
+      (url.pathname === '/api/v1/auth/me' ||
+        url.pathname === '/api/v1/auth/login')
+    if (expectedUnauthorized) return
+    if (
+      response.status() === 503 &&
+      ((response.request().method() === 'POST' &&
+        url.pathname === '/api/v1/admin/users') ||
+        (response.request().method() === 'POST' &&
+          url.pathname === '/api/v1/admin/users/2/reset-password'))
+    ) {
+      expectedApiFailures.push(
+        `${response.status()} ${response.request().method()} ${url.pathname}`,
+      )
+      return
+    }
+    apiFailures.push(
+      `${response.status()} ${response.request().method()} ${url.pathname}`,
+    )
+  })
+  page.on('request', request => {
+    const url = new URL(request.url())
+    if (
+      captureCreates &&
+      request.method() === 'POST' &&
+      url.pathname === '/api/v1/admin/users'
+    ) {
+      const body = request.postDataJSON()
+      createPayloads.push({
+        login_name: body.login_name,
+        display_name: body.display_name,
+        is_admin: body.is_admin,
+        passwordIsRaw: body.password === ' fixture-password ',
+      })
+    }
+    if (
+      captureUpdates &&
+      request.method() === 'PATCH' &&
+      /^\/api\/v1\/admin\/users\/\d+$/.test(url.pathname)
+    ) {
+      updatePayloads.push({
+        user_id: Number(url.pathname.split('/').at(-1)),
+        ...request.postDataJSON(),
+      })
+    }
+    if (
+      captureResets &&
+      request.method() === 'POST' &&
+      url.pathname === '/api/v1/admin/users/2/reset-password'
+    ) {
+      const body = request.postDataJSON()
+      resetPayloads.push({ passwordIsRaw: body.password === ' fixture-reset-password ' })
+    }
+  })
+  function assert(condition, message) {
+    if (!condition) throw new Error(message)
+  }
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok)
+      throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  async function capture(name) {
+    const file = `${screenshots}/${name}.png`
+    await page.screenshot({ path: file, fullPage: true })
+    report.screenshots.push(file)
+  }
+
+  async function waitForRouteId(id) {
+    await page.locator(`[data-foundation-route-id="${id}"]`).waitFor({
+      state: 'visible',
+    })
+  }
+
+  async function signIn(loginName) {
+    await page.getByLabel('Login name').waitFor({ state: 'visible' })
+    await page.getByLabel('Login name').fill(loginName)
+    await page.getByRole('textbox', { name: 'Password' }).fill('fixture-password')
+    await page.getByRole('button', { name: 'Login', exact: true }).click()
+    await page.waitForURL(url => new URL(url).pathname === '/api-keys')
+    await waitForRouteId('R-API-KEYS')
+  }
+
+  async function visibleUserIds() {
+    return page.locator('[data-user-row]:visible').evaluateAll(rows =>
+      rows.map(row => row.getAttribute('data-user-row')),
+    )
+  }
+
+  await page.context().clearCookies()
+  await fixture('/__fixtures/reset', 'POST')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${BASE}/login`)
+  await page.locator('#login-name').waitFor({ state: 'visible' })
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'en-US')
+    localStorage.setItem('prompt-ferry:theme-mode', 'light')
+    localStorage.setItem('prompt-ferry:table-page-size:users', '10')
+  })
+  await page.reload()
+  await signIn('admin')
+  assert(
+    await page.getByRole('link', { name: 'Users', exact: true }).isVisible(),
+    'admin navigation does not show Users',
+  )
+  const requestsBeforeUsers = await fixture('/__fixtures/log?limit=500')
+  await page.goto(`${BASE}/users`)
+  await waitForRouteId('R-USERS')
+  assert(
+    (await page.locator('[data-foundation-placeholder="R-USERS"]').count()) === 0,
+    'Users route is still a placeholder',
+  )
+  await page.locator('[data-user-row="1"]:visible').waitFor({ state: 'visible' })
+  const initialUserReads = await fixture('/__fixtures/log?limit=500')
+  const usersRouteRequests = initialUserReads.requests.slice(
+    requestsBeforeUsers.requests.length,
+  )
+  assert(
+    usersRouteRequests.some(
+      request =>
+        request.method === 'GET' &&
+        request.path === '/api/v1/admin/users' &&
+        request.query.first === '0' &&
+        request.query.rows === '10',
+    ),
+    'admin Users list did not request the first ten rows',
+  )
+  assert(
+    !usersRouteRequests.some(
+      request => request.path === '/api/v1/admin/users/options',
+    ),
+    'Users page issued the unused user-options request',
+  )
+  report.checks.routeAndNavigation = true
+  report.checks.listReadWithoutOptions = true
+
+  await capture('users-admin-en-light-1440')
+
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/users',
+    method: 'POST',
+    status: 503,
+    code: 'fixture_user_create_failed',
+    message: 'user create failed',
+  })
+  captureCreates = true
+  await page.getByRole('button', { name: 'Create user' }).click()
+  const createDialog = page.getByRole('dialog')
+  await createDialog.waitFor({ state: 'visible' })
+  await createDialog.getByRole('textbox', { name: 'Login name' }).fill(' fixture-created-user ')
+  await createDialog.getByRole('textbox', { name: 'Display name' }).fill(' Fixture Created ')
+  await createDialog.getByLabel('Initial password').fill(' fixture-password ')
+  await createDialog.getByRole('checkbox', { name: 'Admin' }).check()
+  await createDialog.getByRole('button', { name: 'Create', exact: true }).click()
+  await page.getByRole('alert').waitFor({ state: 'visible' })
+  assert(await createDialog.isVisible(), 'failed create closed its dialog')
+  assert(
+    (await createDialog.getByRole('textbox', { name: 'Login name' }).inputValue()) ===
+      ' fixture-created-user ',
+    'failed create did not retain the raw login draft',
+  )
+  assert(
+    (await createDialog.getByRole('textbox', { name: 'Display name' }).inputValue()) ===
+      ' Fixture Created ',
+    'failed create did not retain its display-name draft',
+  )
+  const createPassword = createDialog.getByLabel('Initial password')
+  assert(
+    (await createPassword.getAttribute('type')) === 'password' &&
+      (await createPassword.inputValue()) === ' fixture-password ',
+    'failed create did not retain its masked password draft',
+  )
+  await createDialog.getByRole('button', { name: 'Create', exact: true }).click()
+  await createDialog.waitFor({ state: 'detached' })
+  captureCreates = false
+  assert(
+    JSON.stringify(createPayloads) ===
+      JSON.stringify([
+        {
+          login_name: ' fixture-created-user ',
+          display_name: ' Fixture Created ',
+          is_admin: true,
+          passwordIsRaw: true,
+        },
+        {
+          login_name: ' fixture-created-user ',
+          display_name: ' Fixture Created ',
+          is_admin: true,
+          passwordIsRaw: true,
+        },
+      ]),
+    'create requests did not preserve all raw generated-contract fields',
+  )
+  report.checks.createDialogFailureDraftAndRetry = true
+  report.checks.dialogOpen = true
+
+  captureUpdates = true
+  const operatorRow = page.locator('[data-user-row="2"]:visible')
+  await operatorRow.getByRole('textbox', { name: 'Display name' }).fill('Operator Updated')
+  await operatorRow.getByRole('checkbox', { name: 'Toggle admin for operator' }).check()
+  await operatorRow.getByRole('checkbox', { name: 'Toggle active for operator' }).uncheck()
+  await operatorRow.getByRole('button', { name: 'Save' }).click()
+  await page.getByRole('status').filter({ hasText: 'User saved' }).waitFor({ state: 'visible' })
+  captureUpdates = false
+  assert(
+    JSON.stringify(updatePayloads) ===
+      JSON.stringify([
+        {
+          user_id: 2,
+          display_name: 'Operator Updated',
+          is_admin: true,
+          is_active: false,
+        },
+      ]),
+    'save did not send the captured full-row UserUpdate payload',
+  )
+  report.checks.updateFullRow = true
+
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/users/2/reset-password',
+    method: 'POST',
+    status: 503,
+    code: 'fixture_password_reset_failed',
+    message: 'password reset failed',
+  })
+  captureResets = true
+  await operatorRow.getByRole('button', { name: 'Reset password' }).click()
+  const resetDialog = page.getByRole('dialog')
+  await resetDialog.waitFor({ state: 'visible' })
+  assert(await resetDialog.getByText('operator').isVisible(), 'reset target login is missing')
+  const resetInput = resetDialog.getByRole('textbox', { name: 'New password' })
+  await resetInput.fill(' fixture-reset-password ')
+  await resetDialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await page.getByRole('alert').filter({ hasText: 'password reset failed' }).waitFor({ state: 'visible' })
+  assert(await resetDialog.isVisible(), 'failed reset closed its dialog')
+  assert(
+    (await resetInput.getAttribute('type')) === 'password' &&
+      (await resetInput.inputValue()) === ' fixture-reset-password ',
+    'failed reset did not retain its masked password draft',
+  )
+  assert(
+    (await page.getByText(' fixture-reset-password ', { exact: true }).count()) === 0,
+    'reset password appeared in rendered text',
+  )
+  await resetDialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await resetDialog.waitFor({ state: 'detached' })
+  captureResets = false
+  assert(
+    JSON.stringify(resetPayloads) === JSON.stringify([{ passwordIsRaw: true }, { passwordIsRaw: true }]),
+    'reset password requests did not preserve the captured password body',
+  )
+  report.checks.resetFailureDraftRetryAndPasswordMasking = true
+
+  const deletesBeforeCancel = await fixture('/__fixtures/log?limit=500')
+  const previousDeleteCount = deletesBeforeCancel.requests.filter(
+    request => request.method === 'DELETE' && request.path === '/api/v1/admin/users/3',
+  ).length
+  await page.evaluate(() => {
+    window.__usersDeleteConfirmMessages = []
+    window.confirm = message => {
+      window.__usersDeleteConfirmMessages.push(message)
+      return false
+    }
+  })
+  await page.locator('[data-user-row="3"]:visible').getByRole('button', { name: 'Delete' }).click()
+  const cancelMessages = await page.evaluate(() => window.__usersDeleteConfirmMessages)
+  assert(
+    typeof cancelMessages.at(-1) === 'string' &&
+      cancelMessages.at(-1).includes('integration-operator-eu-west') &&
+      cancelMessages.at(-1).endsWith('?'),
+    `delete confirmation did not name the selected account: ${JSON.stringify(cancelMessages)}`,
+  )
+  const deletesAfterCancel = await fixture('/__fixtures/log?limit=500')
+  assert(
+    deletesAfterCancel.requests.filter(
+      request => request.method === 'DELETE' && request.path === '/api/v1/admin/users/3',
+    ).length === previousDeleteCount,
+    'cancelled delete issued a request',
+  )
+  report.checks.deleteCancelNoWrite = true
+
+  const longUserId = '3'
+  await page.getByRole('button', { name: 'Refresh' }).click()
+  await page.locator('[data-user-row="1"]:visible').waitFor({ state: 'visible' })
+  const firstPageIds = (await visibleUserIds()).map(String)
+  assert(firstPageIds.length === 10, 'first users page did not contain ten rows')
+
+  const responsiveUsers = []
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    const row = page.locator(`[data-user-row="${longUserId}"]:visible`)
+    await row.waitFor({ state: 'visible' })
+    const geometry = await row.evaluate(element => {
+      const bounds = element.getBoundingClientRect()
+      const login = element.querySelector('[data-user-login]')
+      const input = element.querySelector('input')
+      const actions = element.querySelector('[data-user-actions]')
+      const loginBounds = login.getBoundingClientRect()
+      const inputBounds = input.getBoundingClientRect()
+      const actionBounds = actions.getBoundingClientRect()
+      return {
+        loginInside: loginBounds.left >= bounds.left && loginBounds.right <= bounds.right,
+        inputInside: inputBounds.left >= bounds.left && inputBounds.right <= bounds.right,
+        actionsInside: actionBounds.left >= bounds.left && actionBounds.right <= bounds.right,
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth,
+      }
+    })
+    assert(
+      geometry.loginInside &&
+        geometry.inputInside &&
+        geometry.actionsInside &&
+        geometry.documentWidth <= geometry.viewportWidth,
+      `long user row overflowed or overlapped at ${width}px`,
+    )
+    if (width === 390) {
+      for (const name of ['Reset password', 'Save', 'Delete']) {
+        assert(await row.getByRole('button', { name }).isVisible(), `mobile ${name} action is missing`)
+      }
+    }
+    responsiveUsers.push({ width, ...geometry })
+  }
+  report.checks.longValuesResponsive = responsiveUsers
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.getByRole('button', { name: 'Next page' }).click()
+  await page.getByRole('button', { name: 'Page 2 (current)' }).waitFor({ state: 'visible' })
+  const secondPageIds = (await visibleUserIds()).map(String)
+  assert(
+    secondPageIds.length === 4 &&
+      secondPageIds.every(userId => !firstPageIds.includes(userId)),
+    'second page did not render distinct user rows',
+  )
+  const createdUserId = await page.locator('[data-user-row]:visible').evaluateAll(rows => {
+    const row = rows.find(element => element.innerText.includes('fixture-created-user'))
+    return row?.getAttribute('data-user-row') ?? null
+  })
+  assert(typeof createdUserId === 'string', 'created user was missing from the last page')
+  const pageTwoLog = await fixture('/__fixtures/log?limit=500')
+  assert(
+    pageTwoLog.requests.some(
+      request =>
+        request.method === 'GET' &&
+        request.path === '/api/v1/admin/users' &&
+        request.query.first === '10' &&
+        request.query.rows === '10',
+    ),
+    'next page did not request first=10 and rows=10',
+  )
+  report.checks.paginationDistinctRowsAndQuery = true
+
+  await page.getByRole('combobox', { name: 'Rows per page' }).click()
+  await page.getByRole('option', { name: '20', exact: true }).click()
+  await page.waitForFunction(
+    () => localStorage.getItem('prompt-ferry:table-page-size:users') === '20',
+  )
+  await page.locator(`[data-user-row="${longUserId}"]:visible`).waitFor({ state: 'visible' })
+  assert((await visibleUserIds()).length === 14, 'twenty-row page did not show all users')
+  await page.reload()
+  await waitForRouteId('R-USERS')
+  await page.locator(`[data-user-row="${longUserId}"]:visible`).waitFor({ state: 'visible' })
+  assert(
+    (await page.evaluate(() => localStorage.getItem('prompt-ferry:table-page-size:users'))) === '20',
+    'users page size was not preserved after reload',
+  )
+  const sizeTwentyLog = await fixture('/__fixtures/log?limit=500')
+  assert(
+    sizeTwentyLog.requests.some(
+      request =>
+        request.method === 'GET' &&
+        request.path === '/api/v1/admin/users' &&
+        request.query.first === '0' &&
+        request.query.rows === '20',
+    ),
+    'restored page size did not request twenty rows',
+  )
+  report.checks.pageSizePersistence = true
+  await page.getByRole('combobox', { name: 'Rows per page' }).click()
+  await page.getByRole('option', { name: '10', exact: true }).click()
+  await page.locator('[data-user-row="1"]:visible').waitFor({ state: 'visible' })
+  await page.getByRole('button', { name: 'Next page' }).click()
+  await page.getByRole('button', { name: 'Page 2 (current)' }).waitFor({ state: 'visible' })
+  const lastPageIds = (await visibleUserIds()).map(String)
+  assert(
+    lastPageIds.length === 4 && lastPageIds.includes(createdUserId),
+    'last page no longer contains the created user and fixture rows',
+  )
+  await page.evaluate(() => {
+    window.confirm = () => true
+  })
+  for (const userId of lastPageIds.filter(id => id !== createdUserId)) {
+    const row = page.locator(`[data-user-row="${userId}"]:visible`)
+    await row.getByRole('button', { name: 'Delete' }).click()
+    await row.waitFor({ state: 'detached' })
+  }
+  assert(
+    JSON.stringify((await visibleUserIds()).map(String)) ===
+      JSON.stringify([createdUserId]),
+    'fixture rows were not removed from the last page before the final delete',
+  )
+  const lastPageRow = page.locator(`[data-user-row="${createdUserId}"]:visible`)
+  await lastPageRow.getByRole('button', { name: 'Delete' }).click()
+  await page.getByRole('button', { name: 'Page 1 (current)' }).waitFor({ state: 'visible' })
+  await page.locator('[data-user-row="1"]:visible').waitFor({ state: 'visible' })
+  assert(
+    (await page.locator(`[data-user-row="${createdUserId}"]`).count()) === 0,
+    'deleted last-page user remained rendered',
+  )
+  const correctedPageLog = await fixture('/__fixtures/log?limit=500')
+  assert(
+    correctedPageLog.requests.some(
+      request =>
+        request.method === 'GET' &&
+        request.path === '/api/v1/admin/users' &&
+        request.query.first === '10' &&
+        request.query.rows === '10',
+    ) &&
+      correctedPageLog.requests.some(
+        request =>
+          request.method === 'GET' &&
+          request.path === '/api/v1/admin/users' &&
+          request.query.first === '0' &&
+          request.query.rows === '10',
+      ) &&
+      correctedPageLog.requests.some(
+        request =>
+          request.method === 'DELETE' &&
+          request.path === `/api/v1/admin/users/${createdUserId}` &&
+          request.status === 204,
+      ),
+    'deleting the final row did not issue DELETE and reload the last valid page',
+  )
+  report.checks.deletePageCorrection = true
+  report.checks.scenarioCoverage = {
+    'route-render': true,
+    'admin-denial': true,
+    pagination: true,
+    'dialog-open': true,
+    'mutation-create': true,
+    'mutation-update': true,
+    'mutation-delete': true,
+    'mutation-failure-draft': true,
+    'long-values': true,
+  }
+
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    localStorage.setItem('prompt-ferry:theme-mode', 'dark')
+  })
+  await page.reload()
+  await waitForRouteId('R-USERS')
+  await page.locator('[data-user-row="1"]:visible').waitFor({ state: 'visible' })
+  const zhDark = await page.evaluate(() => ({
+    dark: document.documentElement.classList.contains('dark'),
+    lang: document.documentElement.lang,
+    colorScheme: document.documentElement.style.colorScheme,
+  }))
+  assert(
+    zhDark.lang === 'zh-CN' && zhDark.dark && zhDark.colorScheme === 'dark',
+    'Users did not render with the persisted Chinese dark preferences',
+  )
+  assert(
+    await page.getByRole('button', { name: '创建用户' }).isVisible(),
+    'localized create action did not render',
+  )
+  await capture('users-admin-zh-dark-1440')
+
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'en-US')
+    localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await page.reload()
+  await waitForRouteId('R-USERS')
+  await page.locator('[data-user-row="1"]:visible').waitFor({ state: 'visible' })
+  const enLight = await page.evaluate(() => ({
+    dark: document.documentElement.classList.contains('dark'),
+    lang: document.documentElement.lang,
+    colorScheme: document.documentElement.style.colorScheme,
+  }))
+  assert(
+    enLight.lang === 'en-US' && !enLight.dark && enLight.colorScheme === 'light',
+    'Users did not render with the persisted English light preferences',
+  )
+  await capture('users-admin-en-light-1440-final')
+  report.checks.localeThemeRendering = { zhDark, enLight }
+
+  await page.context().clearCookies()
+  await fixture('/__fixtures/reset', 'POST')
+  await page.goto(`${BASE}/login`)
+  await page.getByLabel('Login name').waitFor({ state: 'visible' })
+  await signIn('operator')
+  await page.goto(`${BASE}/users`)
+  await page.waitForURL(url => new URL(url).pathname === '/api-keys')
+  await waitForRouteId('R-API-KEYS')
+  assert(
+    (await page.getByRole('link', { name: 'Users', exact: true }).count()) === 0,
+    'non-admin navigation exposed Users',
+  )
+  const operatorLog = await fixture('/__fixtures/log?limit=500')
+  const adminUserRequests = operatorLog.requests.filter(request =>
+    request.path.startsWith('/api/v1/admin/users'),
+  )
+  assert(adminUserRequests.length === 0, 'non-admin route attempted an admin users API call')
+  report.checks.adminDenial = {
+    redirectedToApiKeys: true,
+    hiddenNavigation: true,
+    adminApiCalls: adminUserRequests.length,
+  }
+  report.checks.createPayloads = createPayloads
+  report.checks.updatePayloads = updatePayloads
+  report.checks.resetPayloads = resetPayloads
+  report.checks.expectedApiFailures = expectedApiFailures
+  report.checks.apiFailures = apiFailures
+  report.checks.consoleErrors = consoleErrors
+  report.checks.pageErrors = pageErrors
+  report.finishedAt = new Date().toISOString()
+  return report
+}

@@ -1,0 +1,171 @@
+{
+  "runId": "redaction-rules-1793011023313",
+  "startedAt": "2026-10-26T10:37:03.313Z",
+  "checks": {
+    "routeAndInitialReads": true,
+    "initialPage": true,
+    "validationSearchPayload": {
+      "serverSearch": true,
+      "exactPageQuery": true,
+      "distinctRows": true
+    },
+    "pagination": {
+      "secondPageRead": true,
+      "distinctVisibleRows": true,
+      "emptyOutOfRangeCorrected": true
+    },
+    "builtinToggleCustomDirty": true,
+    "pageSizePersistence": true,
+    "dirtyLocalSearch": true,
+    "warningPriority": true,
+    "normalization": {
+      "trimmed": true,
+      "emptyDropped": true,
+      "exactSignatureDeduped": true,
+      "conflictRetained": true
+    },
+    "builtinAndEnabledPayload": true,
+    "failedSaveRetainsDraft": true,
+    "retrySuccess": true,
+    "saveGuardAndNewerEdit": {
+      "onePatch": true,
+      "saveDisabledInFlight": true,
+      "newerEditPreserved": true,
+      "requestSnapshotWasOlder": true
+    },
+    "deleteConfirmation": {
+      "cancelNoWrite": true,
+      "confirmedLocalDelete": true,
+      "revealIndexShift": true,
+      "nativeConfirmUsed": false
+    },
+    "invalidRegex": {
+      "localErrorNoPatch": true,
+      "correctedPatch": true
+    },
+    "adminScopeIsolation": {
+      "userTargetRead": true,
+      "userScopedPatch": true,
+      "globalUnchanged": true
+    },
+    "responsiveContainment": [
+      {
+        "locale": "en-US",
+        "theme": "light",
+        "width": 1440,
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "tableScrolls": true,
+        "actionsReachable": true,
+        "hasRows": true
+      },
+      {
+        "locale": "en-US",
+        "theme": "light",
+        "width": 1024,
+        "documentWidth": 1024,
+        "viewportWidth": 1024,
+        "tableScrolls": true,
+        "actionsReachable": true,
+        "hasRows": true
+      },
+      {
+        "locale": "en-US",
+        "theme": "light",
+        "width": 768,
+        "documentWidth": 768,
+        "viewportWidth": 768,
+        "tableScrolls": true,
+        "actionsReachable": true,
+        "hasRows": true
+      },
+      {
+        "locale": "en-US",
+        "theme": "light",
+        "width": 390,
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "tableScrolls": true,
+        "actionsReachable": true,
+        "hasRows": true
+      },
+      {
+        "locale": "zh-CN",
+        "theme": "dark",
+        "width": 1440,
+        "documentWidth": 1440,
+        "viewportWidth": 1440,
+        "tableScrolls": true,
+        "actionsReachable": true,
+        "hasRows": true
+      },
+      {
+        "locale": "zh-CN",
+        "theme": "dark",
+        "width": 1024,
+        "documentWidth": 1024,
+        "viewportWidth": 1024,
+        "tableScrolls": true,
+        "actionsReachable": true,
+        "hasRows": true
+      },
+      {
+        "locale": "zh-CN",
+        "theme": "dark",
+        "width": 768,
+        "documentWidth": 768,
+        "viewportWidth": 768,
+        "tableScrolls": true,
+        "actionsReachable": true,
+        "hasRows": true
+      },
+      {
+        "locale": "zh-CN",
+        "theme": "dark",
+        "width": 390,
+        "documentWidth": 390,
+        "viewportWidth": 390,
+        "tableScrolls": true,
+        "actionsReachable": true,
+        "hasRows": true
+      }
+    ],
+    "deleteDialogResponsive": {
+      "fitsViewport": true,
+      "cancelVisible": true,
+      "actionCount": 3
+    },
+    "roleAuthorization": {
+      "adminScopeTargetOptions": true,
+      "nonAdminSelfOnly": true,
+      "selfScopedPatch": true,
+      "optionsNotRequested": true,
+      "anonymous401": true,
+      "anonymousRequestRecords401": true,
+      "globalAndForeign403": true,
+      "unrelatedRequestRecordsStatus": 200,
+      "requestRecordsSelfScoped": true,
+      "requestRecordsForgedUserNoWiden": true,
+      "unknownRedaction404": true
+    },
+    "expectedApiFailures": true
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/redaction-rules-en-light-1440.png",
+    "e2e/foundation/screenshots/redaction-rules-zh-dark-390.png"
+  ],
+  "expectedApiFailures": [
+    "503 PATCH /api/v1/settings/redaction",
+    "401 GET /api/v1/settings/redaction",
+    "401 GET /api/v1/admin/request-records",
+    "403 GET /api/v1/settings/redaction",
+    "403 GET /api/v1/settings/redaction",
+    "404 GET /api/v1/settings/redaction/unknown"
+  ],
+  "apiFailures": [],
+  "consoleErrorCount": 0,
+  "pageErrorCount": 0,
+  "redactionApiRequestCount": 41,
+  "userOptionsRequestCount": 2,
+  "finishedAt": "2026-10-26T10:37:21.276Z"
+}

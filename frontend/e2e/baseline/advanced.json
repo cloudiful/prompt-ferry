@@ -1,0 +1,136 @@
+{
+  "startedAt": "2026-10-23T16:02:48.974Z",
+  "checks": {
+    "oauthFailure": {
+      "requests": [
+        {
+          "at": "2026-10-23T16:02:54.653Z",
+          "method": "POST",
+          "path": "/api/v1/admin/endpoints/ep-openai-codex/oauth/refresh",
+          "query": {},
+          "status": 500,
+          "ms": 1
+        }
+      ],
+      "dialogRetained": true
+    },
+    "oauth": {
+      "refresh": [
+        {
+          "at": "2026-10-23T16:02:53.884Z",
+          "method": "POST",
+          "path": "/api/v1/admin/endpoints/ep-openai-codex/oauth/refresh",
+          "query": {},
+          "status": 200,
+          "ms": 0
+        }
+      ],
+      "device": [
+        {
+          "at": "2026-10-23T16:02:56.932Z",
+          "method": "POST",
+          "path": "/api/v1/admin/endpoints/ep-openai-codex/oauth/device",
+          "query": {},
+          "status": 200,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:02:57.968Z",
+          "method": "POST",
+          "path": "/api/v1/admin/endpoints/ep-openai-codex/oauth/device/poll",
+          "query": {},
+          "status": 200,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:02:58.972Z",
+          "method": "POST",
+          "path": "/api/v1/admin/endpoints/ep-openai-codex/oauth/device/poll",
+          "query": {},
+          "status": 200,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:02:58.976Z",
+          "method": "GET",
+          "path": "/api/v1/admin/endpoints/ep-openai-codex/oauth",
+          "query": {},
+          "status": 200,
+          "ms": 0
+        }
+      ],
+      "browser": [
+        {
+          "at": "2026-10-23T16:03:03.251Z",
+          "method": "POST",
+          "path": "/api/v1/admin/endpoints/ep-openai-codex/oauth/browser",
+          "query": {},
+          "status": 200,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:03:03.855Z",
+          "method": "POST",
+          "path": "/api/v1/admin/endpoints/ep-openai-codex/oauth/browser/complete",
+          "query": {},
+          "status": 200,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:03:03.862Z",
+          "method": "GET",
+          "path": "/api/v1/admin/endpoints/ep-openai-codex/oauth",
+          "query": {},
+          "status": 200,
+          "ms": 0
+        }
+      ],
+      "deviceComplete": true,
+      "browserComplete": true
+    },
+    "quota": {
+      "requests": [],
+      "text": "套餐用量 / MiniMax Platform China Production\nprimary\n可用\n最低剩余 62.0% · 2 个窗口\nminimax-m2\n观测时间：2026年10月23日 20:00\n5 小时窗口\n还有 56 分钟重置\n剩余 62.0%\n38.00 / 100.00\n周窗口\n-\n—\n按键额度历史",
+      "buttons": ["", "primary可用最低剩余 62.0% · 2 个窗口", "按键额度历史"],
+      "history": {
+        "requests": [
+          {
+            "at": "2026-10-23T16:03:07.466Z",
+            "method": "GET",
+            "path": "/api/v1/admin/endpoints/ep-minimax-cn/quota-observations/trend",
+            "query": {
+              "range": "24h"
+            },
+            "status": 200,
+            "ms": 0
+          }
+        ],
+        "text": "套餐用量 / MiniMax Platform China Production\nprimary\n可用\n最低剩余 62.0% · 2 个窗口\nminimax-m2\n观测时间：2026年10月23日 20:00\n5 小时窗口\n还有 56 分钟重置\n剩余 62.0%\n38.00 / 100.00\n周窗口\n-\n—\n按键额度历史\n趋势图\n列表\n全部按键\n最近 24 小时\n剩余额度\n5 小时窗口"
+      }
+    },
+    "emptyModels": {
+      "text": "API 密钥\n可用模型\n用户\n上游节点\nMCP\n中继\n本机服务\n脱敏\n请求记录\n账单\n审批队列\n设置\nadmin\n退出登录\n刷新\n编号\t名称\n\n没有数据\n10\n1",
+      "rowCount": 1
+    }
+  },
+  "failures": [],
+  "captures": [
+    {
+      "name": "oauth_complete",
+      "path": "e2e/baseline/screenshots/advanced4_oauth_complete.png"
+    },
+    {
+      "name": "quota",
+      "path": "e2e/baseline/screenshots/advanced4_quota.png"
+    },
+    {
+      "name": "quota_history",
+      "path": "e2e/baseline/screenshots/advanced4_quota_history.png"
+    },
+    {
+      "name": "empty_models",
+      "path": "e2e/baseline/screenshots/advanced4_empty_models.png"
+    }
+  ],
+  "finishedAt": "2026-10-23T16:03:10.382Z"
+}

@@ -126,6 +126,11 @@ cd frontend
 bun run openapi-ts
 ```
 
+The frontend command installs its exact-pinned generator and TypeScript 6.0.3
+under `frontend/tools/codegen/` with the same seven-day release-age gate, then
+runs code generation with Node. The application typecheck remains on TypeScript
+7.0.2; the codegen compiler is not part of the app graph or bundle.
+
 Commit generated changes to `openapi/admin-api.yaml` and
 `frontend/src/generated/admin-api/**` together with the source change. Do not
 hand-edit generated files or add handwritten admin API DTOs. The document covers

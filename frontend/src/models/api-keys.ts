@@ -1,5 +1,16 @@
 import type { ClientKey, User } from '../generated/admin-api'
 
+export const SELF_USER_ID = 0
+export const CLIENT_KEY_PREFIX = 'clientkey'
+
+export function clientKeyActionKey(keyId: string): string {
+  return `${CLIENT_KEY_PREFIX}:${keyId}`
+}
+
+export function clientKeyCreateKey(userId: number): string {
+  return `${CLIENT_KEY_PREFIX}:create:${userId}`
+}
+
 export type ApiKeyItemView = {
   key: ClientKey
   key_id: string

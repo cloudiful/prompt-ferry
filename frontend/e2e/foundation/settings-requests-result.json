@@ -1,0 +1,516 @@
+{
+  "runId": "settings-requests-1793011168930",
+  "startedAt": "2026-10-26T10:39:28.930Z",
+  "finishedAt": "2026-10-26T10:39:54.773Z",
+  "checks": {
+    "routeRender": {
+      "routeId": "R-SETTINGS-REQUESTS",
+      "routeTab": "requests",
+      "cardCount": 3,
+      "loaded": {
+        "rawDays": "7",
+        "approvalDays": "30",
+        "flushWindow": "40",
+        "maxChars": "32768",
+        "maxBytes": "65536",
+        "mode": "Normalized + raw JSON",
+        "whitelist": "unchecked",
+        "batching": "checked",
+        "lineBreak": "checked",
+        "sentenceEnd": "checked"
+      },
+      "readPaths": [
+        "/api/v1/settings/request-content-logging",
+        "/api/v1/settings/usage-retention",
+        "/api/v1/settings/stream-delta-batching",
+        "/api/v1/settings/model-route-whitelist"
+      ]
+    },
+    "loadedOutOfRangePreserved": true,
+    "mutationUpdate": {
+      "loggingBody": {
+        "mode": "off",
+        "raw_retention_days": 7
+      },
+      "rawBody": {
+        "mode": "off",
+        "raw_retention_days": 10
+      },
+      "retentionBody": {
+        "approval_retention_days": 45,
+        "content_retention_days": 30,
+        "metadata_retention_days": 90,
+        "raw_backend": "local",
+        "raw_retention_days": 10,
+        "replay_enabled": true
+      },
+      "whitelistBody": {
+        "enabled": true
+      },
+      "batchingBody": {
+        "enabled": true,
+        "flush_window_ms": 500,
+        "max_buffer_chars": 4096,
+        "max_buffer_bytes": 8192,
+        "flush_on_line_break": true,
+        "flush_on_sentence_end": false
+      },
+      "storedRetention": {
+        "approval_retention_days": 45,
+        "content_retention_days": 30,
+        "metadata_retention_days": 90,
+        "raw_backend": "local",
+        "raw_retention_days": 10,
+        "replay_enabled": true
+      },
+      "storedLogging": {
+        "mode": "off",
+        "raw_retention_days": 10
+      },
+      "writes": 5
+    },
+    "reload": {
+      "raw": "10",
+      "approval": "45",
+      "whitelist": "checked",
+      "flush": "500",
+      "chars": "4096",
+      "bytes": "8192",
+      "sentenceEnd": "unchecked",
+      "mode": "Off",
+      "reads": 4,
+      "writes": 0
+    },
+    "conflictGuard": {
+      "claimantSpinners": 1,
+      "bothDisabled": true,
+      "heldWritesBeforeRelease": 0,
+      "independentKeyWrites": 1,
+      "loggingWrites": 1,
+      "retentionWrites": 1,
+      "retentionBody": {
+        "approval_retention_days": 50,
+        "content_retention_days": 30,
+        "metadata_retention_days": 90,
+        "raw_backend": "local",
+        "raw_retention_days": 10,
+        "replay_enabled": true
+      }
+    },
+    "failureDraft": {
+      "failedWrites": 1,
+      "draftKept": "640",
+      "failureAlerts": 1,
+      "retryWrites": 2,
+      "retryBody": {
+        "enabled": true,
+        "flush_window_ms": 640,
+        "max_buffer_chars": 4096,
+        "max_buffer_bytes": 8192,
+        "flush_on_line_break": true,
+        "flush_on_sentence_end": false
+      }
+    },
+    "newerDraft": {
+      "writes": 2,
+      "final": "720"
+    },
+    "scopedRefresh": {
+      "reads": 4,
+      "refreshWrites": 0,
+      "draftWrites": 1,
+      "disabledWhileDirty": true,
+      "enabledAfterSave": true
+    },
+    "staleRead": {
+      "keptDraft": "55",
+      "storedApproval": 55
+    },
+    "responsive": [
+      {
+        "width": 1440,
+        "documentWidth": 1440,
+        "controls": 10
+      },
+      {
+        "width": 1024,
+        "documentWidth": 1024,
+        "controls": 10
+      },
+      {
+        "width": 768,
+        "documentWidth": 768,
+        "controls": 10
+      },
+      {
+        "width": 390,
+        "documentWidth": 390,
+        "controls": 10
+      }
+    ],
+    "localeThemeNoRefetch": {
+      "reads": 0,
+      "writes": 0,
+      "keptValue": "12"
+    },
+    "adminDenial": {
+      "navHidden": true,
+      "redirected": true,
+      "forgedPatch": 403,
+      "forgedRead": 403,
+      "generalIntact": true,
+      "redactionIntact": 200,
+      "anonymousRead": 401
+    },
+    "settingsReadPaths": [
+      "/api/v1/settings/request-content-logging",
+      "/api/v1/settings/usage-retention",
+      "/api/v1/settings/stream-delta-batching",
+      "/api/v1/settings/model-route-whitelist"
+    ],
+    "officialPendingRoutes": 0,
+    "unexpectedWindow": "mounted admin requests tab stages",
+    "limitations": [
+      "Evidence is the synthetic fixture and its stored settings records; no live provider, database or production behaviour is claimed.",
+      "The 503, delay and forged-role cases run against the fixture fault injection and role gate, not a remote service."
+    ]
+  },
+  "scenarios": {
+    "R-SETTINGS-REQUESTS": {
+      "route-render": {
+        "passed": true,
+        "evidence": "the admin requests route renders three cards with every control, exactly four reads and no write on mount"
+      },
+      "admin-denial": {
+        "passed": true,
+        "evidence": "an ordinary user has no requests link, is redirected away from the route without rendering it, is refused with 403 on forged settings reads and writes, and still reaches the general and redaction settings while an anonymous read is refused with 401"
+      },
+      "mutation-update": {
+        "passed": true,
+        "evidence": "every exposed control autosaved exactly once with its real body, the burst coalesced into one write, and the stored record kept the fields this tab does not expose"
+      },
+      "mutation-conflict-guard": {
+        "passed": true,
+        "evidence": "both retention forms disabled under one shared key with only the claimant spinning, the independent key stayed usable, and the held draft was submitted once on release with the shared raw days kept in step"
+      },
+      "mutation-failure-draft": {
+        "passed": true,
+        "evidence": "a 503 kept the draft, notified once, offered a retry only for that section, and the retry sent the same draft again"
+      }
+    }
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/settings-requests-en-light-1440.png",
+    "e2e/foundation/screenshots/settings-requests-retention-guard-en-light-1440.png",
+    "e2e/foundation/screenshots/settings-requests-failure-draft-en-light-1440.png",
+    "e2e/foundation/screenshots/settings-requests-en-light-390.png",
+    "e2e/foundation/screenshots/settings-requests-zh-dark-1440.png",
+    "e2e/foundation/screenshots/settings-requests-zh-dark-390.png"
+  ],
+  "apiFailures": [],
+  "expectedApiFailures": [
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "503 PATCH /api/v1/settings/stream-delta-batching",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "403 PATCH /api/v1/settings/usage-retention",
+    "403 GET /api/v1/settings/request-content-logging",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/settings/usage-retention",
+    "401 GET /api/v1/auth/me"
+  ],
+  "unexpectedRequests": [],
+  "settingsRequests": [
+    {
+      "stage": "route-render",
+      "method": "GET",
+      "path": "/api/v1/settings/request-content-logging",
+      "body": null
+    },
+    {
+      "stage": "route-render",
+      "method": "GET",
+      "path": "/api/v1/settings/usage-retention",
+      "body": null
+    },
+    {
+      "stage": "route-render",
+      "method": "GET",
+      "path": "/api/v1/settings/stream-delta-batching",
+      "body": null
+    },
+    {
+      "stage": "route-render",
+      "method": "GET",
+      "path": "/api/v1/settings/model-route-whitelist",
+      "body": null
+    },
+    {
+      "stage": "mutation-update",
+      "method": "PATCH",
+      "path": "/api/v1/settings/request-content-logging",
+      "body": "{\"mode\":\"off\",\"raw_retention_days\":7}"
+    },
+    {
+      "stage": "mutation-update",
+      "method": "PATCH",
+      "path": "/api/v1/settings/request-content-logging",
+      "body": "{\"mode\":\"off\",\"raw_retention_days\":10}"
+    },
+    {
+      "stage": "mutation-update",
+      "method": "PATCH",
+      "path": "/api/v1/settings/usage-retention",
+      "body": "{\"approval_retention_days\":45,\"content_retention_days\":30,\"metadata_retention_days\":90,\"raw_backend\":\"local\",\"raw_retention_days\":10,\"replay_enabled\":true}"
+    },
+    {
+      "stage": "mutation-update",
+      "method": "PATCH",
+      "path": "/api/v1/settings/model-route-whitelist",
+      "body": "{\"enabled\":true}"
+    },
+    {
+      "stage": "mutation-update",
+      "method": "PATCH",
+      "path": "/api/v1/settings/stream-delta-batching",
+      "body": "{\"enabled\":true,\"flush_window_ms\":500,\"max_buffer_chars\":4096,\"max_buffer_bytes\":8192,\"flush_on_line_break\":true,\"flush_on_sentence_end\":false}"
+    },
+    {
+      "stage": "mutation-update",
+      "method": "GET",
+      "path": "/api/v1/settings/usage-retention",
+      "body": null
+    },
+    {
+      "stage": "mutation-update",
+      "method": "GET",
+      "path": "/api/v1/settings/request-content-logging",
+      "body": null
+    },
+    {
+      "stage": "mutation-update-reload",
+      "method": "GET",
+      "path": "/api/v1/settings/request-content-logging",
+      "body": null
+    },
+    {
+      "stage": "mutation-update-reload",
+      "method": "GET",
+      "path": "/api/v1/settings/usage-retention",
+      "body": null
+    },
+    {
+      "stage": "mutation-update-reload",
+      "method": "GET",
+      "path": "/api/v1/settings/stream-delta-batching",
+      "body": null
+    },
+    {
+      "stage": "mutation-update-reload",
+      "method": "GET",
+      "path": "/api/v1/settings/model-route-whitelist",
+      "body": null
+    },
+    {
+      "stage": "mutation-conflict-guard",
+      "method": "PATCH",
+      "path": "/api/v1/settings/request-content-logging",
+      "body": "{\"mode\":\"normalized_only\",\"raw_retention_days\":10}"
+    },
+    {
+      "stage": "mutation-conflict-guard",
+      "method": "PATCH",
+      "path": "/api/v1/settings/model-route-whitelist",
+      "body": "{\"enabled\":false}"
+    },
+    {
+      "stage": "mutation-conflict-guard",
+      "method": "PATCH",
+      "path": "/api/v1/settings/usage-retention",
+      "body": "{\"approval_retention_days\":50,\"content_retention_days\":30,\"metadata_retention_days\":90,\"raw_backend\":\"local\",\"raw_retention_days\":10,\"replay_enabled\":true}"
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "PATCH",
+      "path": "/api/v1/settings/stream-delta-batching",
+      "body": "{\"enabled\":true,\"flush_window_ms\":640,\"max_buffer_chars\":4096,\"max_buffer_bytes\":8192,\"flush_on_line_break\":true,\"flush_on_sentence_end\":false}"
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "PATCH",
+      "path": "/api/v1/settings/stream-delta-batching",
+      "body": "{\"enabled\":true,\"flush_window_ms\":640,\"max_buffer_chars\":4096,\"max_buffer_bytes\":8192,\"flush_on_line_break\":true,\"flush_on_sentence_end\":false}"
+    },
+    {
+      "stage": "newer-draft",
+      "method": "PATCH",
+      "path": "/api/v1/settings/stream-delta-batching",
+      "body": "{\"enabled\":true,\"flush_window_ms\":700,\"max_buffer_chars\":4096,\"max_buffer_bytes\":8192,\"flush_on_line_break\":true,\"flush_on_sentence_end\":false}"
+    },
+    {
+      "stage": "newer-draft",
+      "method": "PATCH",
+      "path": "/api/v1/settings/stream-delta-batching",
+      "body": "{\"enabled\":true,\"flush_window_ms\":720,\"max_buffer_chars\":4096,\"max_buffer_bytes\":8192,\"flush_on_line_break\":true,\"flush_on_sentence_end\":false}"
+    },
+    {
+      "stage": "scoped-refresh",
+      "method": "GET",
+      "path": "/api/v1/settings/request-content-logging",
+      "body": null
+    },
+    {
+      "stage": "scoped-refresh",
+      "method": "GET",
+      "path": "/api/v1/settings/usage-retention",
+      "body": null
+    },
+    {
+      "stage": "scoped-refresh",
+      "method": "GET",
+      "path": "/api/v1/settings/stream-delta-batching",
+      "body": null
+    },
+    {
+      "stage": "scoped-refresh",
+      "method": "GET",
+      "path": "/api/v1/settings/model-route-whitelist",
+      "body": null
+    },
+    {
+      "stage": "scoped-refresh",
+      "method": "PATCH",
+      "path": "/api/v1/settings/request-content-logging",
+      "body": "{\"mode\":\"normalized_only\",\"raw_retention_days\":12}"
+    },
+    {
+      "stage": "stale-read",
+      "method": "GET",
+      "path": "/api/v1/settings/request-content-logging",
+      "body": null
+    },
+    {
+      "stage": "stale-read",
+      "method": "GET",
+      "path": "/api/v1/settings/usage-retention",
+      "body": null
+    },
+    {
+      "stage": "stale-read",
+      "method": "GET",
+      "path": "/api/v1/settings/stream-delta-batching",
+      "body": null
+    },
+    {
+      "stage": "stale-read",
+      "method": "GET",
+      "path": "/api/v1/settings/model-route-whitelist",
+      "body": null
+    },
+    {
+      "stage": "stale-read",
+      "method": "PATCH",
+      "path": "/api/v1/settings/usage-retention",
+      "body": "{\"approval_retention_days\":55,\"content_retention_days\":30,\"metadata_retention_days\":90,\"raw_backend\":\"local\",\"raw_retention_days\":12,\"replay_enabled\":true}"
+    },
+    {
+      "stage": "stale-read",
+      "method": "GET",
+      "path": "/api/v1/settings/usage-retention",
+      "body": null
+    },
+    {
+      "stage": "responsive-en",
+      "method": "GET",
+      "path": "/api/v1/settings/request-content-logging",
+      "body": null
+    },
+    {
+      "stage": "responsive-en",
+      "method": "GET",
+      "path": "/api/v1/settings/usage-retention",
+      "body": null
+    },
+    {
+      "stage": "responsive-en",
+      "method": "GET",
+      "path": "/api/v1/settings/stream-delta-batching",
+      "body": null
+    },
+    {
+      "stage": "responsive-en",
+      "method": "GET",
+      "path": "/api/v1/settings/model-route-whitelist",
+      "body": null
+    },
+    {
+      "stage": "locale-zh",
+      "method": "GET",
+      "path": "/api/v1/settings/request-content-logging",
+      "body": null
+    },
+    {
+      "stage": "locale-zh",
+      "method": "GET",
+      "path": "/api/v1/settings/usage-retention",
+      "body": null
+    },
+    {
+      "stage": "locale-zh",
+      "method": "GET",
+      "path": "/api/v1/settings/stream-delta-batching",
+      "body": null
+    },
+    {
+      "stage": "locale-zh",
+      "method": "GET",
+      "path": "/api/v1/settings/model-route-whitelist",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "PATCH",
+      "path": "/api/v1/settings/usage-retention",
+      "body": "{\"approval_retention_days\":99}"
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/request-content-logging",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/redaction",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/redaction/custom-strings",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/redaction",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/usage-retention",
+      "body": null
+    }
+  ],
+  "consoleErrorCount": 0,
+  "pageErrorCount": 0,
+  "limitations": [
+    "Evidence is the synthetic fixture and its stored settings records; no live provider, database or production behaviour is claimed.",
+    "The 503, delay and forged-role cases run against the fixture fault injection and role gate, not a remote service."
+  ]
+}

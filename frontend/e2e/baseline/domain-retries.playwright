@@ -1,0 +1,38 @@
+async page => {
+  const control=async(path,body)=>(await fetch('http://127.0.0.1:8789'+path,{method:body===undefined?'GET':'POST',headers:{'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)})).json()
+  const r={startedAt:new Date().toISOString(),failures:[],checks:{}}
+  await control('/__fixtures/reset',{})
+  await page.context().clearCookies()
+  await page.goto('http://127.0.0.1:5171/login')
+  await page.evaluate(()=>{localStorage.clear();localStorage.setItem('prompt-ferry:locale','zh-CN')})
+  await page.reload()
+  await page.getByRole('textbox',{name:/登录名/}).fill('admin')
+  await page.getByRole('textbox',{name:/密码/}).fill('fixture-password')
+  await page.getByRole('button',{name:'登录',exact:true}).click()
+  await page.waitForTimeout(900)
+  for(const cfg of [
+    {id:'R-USERS',route:'/users',open:'创建用户',path:'/api/v1/admin/users',submit:'创建',fill:async d=>{await d.locator('input').nth(0).fill('retry-user');await d.locator('input').nth(1).fill('Retry User');await d.locator('input').nth(2).fill('fixture-password')},draft:async d=>(await d.locator('input').nth(0).inputValue())==='retry-user'},
+    {id:'R-MCP',route:'/mcp',open:'新增 MCP',path:'/api/v1/admin/mcp-servers',submit:'保存',fill:async d=>{await d.getByPlaceholder('名称').fill('Retry MCP');await d.getByPlaceholder('http://127.0.0.1:3000/mcp').fill('https://retry.example.internal/mcp')},draft:async d=>(await d.getByPlaceholder('名称').inputValue())==='Retry MCP'},
+    {id:'R-RELAYS',route:'/relays',open:'新增中继',path:'/api/v1/admin/relays',submit:'保存',fill:async d=>{await d.getByPlaceholder('例如：华东中继 / 公网中继').fill('Retry Relay');await d.getByPlaceholder('wss://relay.example.com/ws/worker').fill('wss://retry.example.internal/bridge')},draft:async d=>(await d.getByPlaceholder('例如：华东中继 / 公网中继').inputValue())==='Retry Relay'}
+  ]){
+    try{
+      await page.goto('http://127.0.0.1:5171'+cfg.route)
+      await page.waitForTimeout(700)
+      await page.getByRole('button',{name:cfg.open}).first().click()
+      const d=page.getByRole('dialog').last()
+      await cfg.fill(d)
+      await control('/__fixtures/faults',{pathPrefix:cfg.path,method:'POST',status:503,count:1,message:'Retry fixture failure'})
+      await d.getByRole('button',{name:cfg.submit,exact:true}).last().click()
+      await page.waitForTimeout(700)
+      if(!await d.isVisible()||!await cfg.draft(d))throw Error('failure lost dialog/draft')
+      await d.getByRole('button',{name:cfg.submit,exact:true}).last().click()
+      await page.waitForTimeout(900)
+      const writes=(await control('/__fixtures/log?limit=300')).requests.filter(x=>x.method==='POST'&&x.path===cfg.path)
+      if(writes.length!==2||writes[0].status!==503||writes[1].status<200||writes[1].status>=300)throw Error('missing failed write and successful retry')
+      if(await d.isVisible())throw Error('success did not close dialog')
+      r.checks[cfg.id]={draftRetained:true,closedOnlyOnSuccess:true,writes}
+    }catch(e){r.failures.push(cfg.id+': '+String(e));await page.keyboard.press('Escape')}
+  }
+  r.finishedAt=new Date().toISOString()
+  return JSON.stringify(r)
+}

@@ -1,0 +1,1032 @@
+{
+  "runId": "settings-storage-1793011261332",
+  "startedAt": "2026-10-26T10:41:01.332Z",
+  "finishedAt": "2026-10-26T10:41:54.181Z",
+  "checks": {
+    "routeRender": {
+      "routeId": "R-SETTINGS-STORAGE",
+      "routeTab": "storage",
+      "controls": {
+        "backend": "Local file",
+        "localDir": "/var/lib/prompt-ferry/raw",
+        "saveDisabled": false,
+        "refreshDisabled": false,
+        "localHint": true,
+        "cardTitle": "Raw payload store",
+        "s3Fields": false,
+        "unavailable": false
+      }
+    },
+    "backendBranches": {
+      "s3": {
+        "missing": [],
+        "endpoint": "https://s3.example.internal",
+        "bucket": "prompt-ferry-raw",
+        "region": "eu-central-1",
+        "prefix": "fixture/",
+        "allowHttp": "unchecked",
+        "pathStyle": "unchecked",
+        "accessType": "password",
+        "secretType": "password",
+        "accessValue": "",
+        "secretValue": "",
+        "present": ["true", "true"],
+        "hint": true,
+        "localDir": false
+      },
+      "disabled": {
+        "hint": true,
+        "bucket": false,
+        "localDir": false
+      }
+    },
+    "noAutosave": {
+      "writes": 0
+    },
+    "mutationUpdate": {
+      "writes": 1,
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "local",
+        "local_dir": "/srv/fixture-raw",
+        "s3_allow_http": false,
+        "s3_bucket": "prompt-ferry-raw",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture/",
+        "s3_region": "eu-central-1",
+        "access_mode": "keep",
+        "access_value_present": false,
+        "secret_mode": "keep",
+        "secret_value_present": false
+      },
+      "stored": {
+        "status": 200,
+        "backend": "local",
+        "local_dir": "/srv/fixture-raw",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_bucket": "prompt-ferry-raw",
+        "s3_region": "eu-central-1",
+        "s3_prefix": "fixture",
+        "s3_allow_http": false,
+        "s3_path_style": false,
+        "has_s3_access_key": true,
+        "has_s3_secret_key": true
+      }
+    },
+    "secretReplace": {
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "s3",
+        "local_dir": "/srv/fixture-raw",
+        "s3_allow_http": false,
+        "s3_bucket": "fixture-s3-bucket",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "replace",
+        "access_value_present": true,
+        "secret_mode": "replace",
+        "secret_value_present": true
+      },
+      "secretVisibility": {
+        "accessValue": "",
+        "secretValue": "",
+        "present": ["true", "true"],
+        "bodyLeak": false,
+        "titleLeak": false,
+        "storageLeak": false,
+        "clearControl": false
+      }
+    },
+    "secretKeep": {
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "s3",
+        "local_dir": "/srv/fixture-raw",
+        "s3_allow_http": false,
+        "s3_bucket": "fixture-s3-bucket",
+        "s3_endpoint": "https://s3b.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "keep",
+        "access_value_present": false,
+        "secret_mode": "keep",
+        "secret_value_present": false
+      },
+      "stored": {
+        "status": 200,
+        "backend": "s3",
+        "local_dir": "/srv/fixture-raw",
+        "s3_endpoint": "https://s3b.example.internal",
+        "s3_bucket": "fixture-s3-bucket",
+        "s3_region": "eu-central-1",
+        "s3_prefix": "fixture",
+        "s3_allow_http": false,
+        "s3_path_style": false,
+        "has_s3_access_key": true,
+        "has_s3_secret_key": true
+      }
+    },
+    "fixtureProbes": {
+      "bucketMissing": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "s3 bucket is required for s3 backend"
+          }
+        }
+      },
+      "emptySecret": {
+        "status": 400,
+        "payload": {
+          "error": {
+            "code": "bad_request",
+            "message": "secret value cannot be empty"
+          }
+        }
+      },
+      "normalized": {
+        "status": 200,
+        "payload": {
+          "backend": "s3",
+          "local_dir": "",
+          "s3_allow_http": false,
+          "s3_bucket": "probe-bucket",
+          "s3_endpoint": "https://s3.example.internal",
+          "s3_path_style": true,
+          "s3_prefix": "probe/prefix",
+          "s3_region": "auto",
+          "has_s3_access_key": true,
+          "has_s3_secret_key": true
+        }
+      },
+      "clearedAccess": {
+        "status": 200,
+        "payload": {
+          "backend": "s3",
+          "local_dir": "",
+          "s3_allow_http": false,
+          "s3_bucket": "prompt-ferry-raw",
+          "s3_endpoint": "https://s3.example.internal",
+          "s3_path_style": false,
+          "s3_prefix": "fixture",
+          "s3_region": "eu-central-1",
+          "has_s3_access_key": false,
+          "has_s3_secret_key": true
+        }
+      },
+      "clearedSecretToo": {
+        "status": 200,
+        "payload": {
+          "backend": "s3",
+          "local_dir": "",
+          "s3_allow_http": false,
+          "s3_bucket": "prompt-ferry-raw",
+          "s3_endpoint": "https://s3.example.internal",
+          "s3_path_style": false,
+          "s3_prefix": "fixture",
+          "s3_region": "eu-central-1",
+          "has_s3_access_key": false,
+          "has_s3_secret_key": false
+        }
+      },
+      "replacedAccess": {
+        "status": 200,
+        "payload": {
+          "backend": "s3",
+          "local_dir": "",
+          "s3_allow_http": false,
+          "s3_bucket": "prompt-ferry-raw",
+          "s3_endpoint": "https://s3.example.internal",
+          "s3_path_style": false,
+          "s3_prefix": "fixture",
+          "s3_region": "eu-central-1",
+          "has_s3_access_key": true,
+          "has_s3_secret_key": true
+        }
+      },
+      "keptAccess": {
+        "status": 200,
+        "payload": {
+          "backend": "s3",
+          "local_dir": "",
+          "s3_allow_http": false,
+          "s3_bucket": "prompt-ferry-raw",
+          "s3_endpoint": "https://s3.example.internal",
+          "s3_path_style": false,
+          "s3_prefix": "fixture",
+          "s3_region": "eu-central-1",
+          "has_s3_access_key": true,
+          "has_s3_secret_key": true
+        }
+      },
+      "disabled": {
+        "status": 200,
+        "payload": {
+          "backend": "disabled",
+          "local_dir": "",
+          "s3_allow_http": false,
+          "s3_bucket": "",
+          "s3_endpoint": "https://s3.example.internal",
+          "s3_path_style": false,
+          "s3_prefix": "fixture",
+          "s3_region": "eu-central-1",
+          "has_s3_access_key": true,
+          "has_s3_secret_key": true
+        }
+      },
+      "restore": {
+        "status": 200,
+        "payload": {
+          "backend": "local",
+          "local_dir": "/var/lib/prompt-ferry/raw",
+          "s3_allow_http": false,
+          "s3_bucket": "prompt-ferry-raw",
+          "s3_endpoint": "https://s3.example.internal",
+          "s3_path_style": false,
+          "s3_prefix": "fixture",
+          "s3_region": "eu-central-1",
+          "has_s3_access_key": true,
+          "has_s3_secret_key": true
+        }
+      }
+    },
+    "failureDraft": {
+      "writes": 2,
+      "stored": "/srv/transport-failure"
+    },
+    "doubleSave": {
+      "writes": 1
+    },
+    "newerDraft": {
+      "kept": "/srv/newer"
+    },
+    "capabilityUnavailable": {
+      "warning": true,
+      "detail": true,
+      "retry": true,
+      "form": false,
+      "saveDisabled": true,
+      "recovered": true,
+      "reads": 2
+    },
+    "scopedRefresh": {
+      "reads": 1,
+      "writes": 0
+    },
+    "localeThemeNoRefetch": {
+      "reads": 0,
+      "writes": 0
+    },
+    "responsive": [
+      {
+        "width": 1440,
+        "documentWidth": 1440
+      },
+      {
+        "width": 1024,
+        "documentWidth": 1024
+      },
+      {
+        "width": 768,
+        "documentWidth": 768
+      },
+      {
+        "width": 390,
+        "documentWidth": 390
+      }
+    ],
+    "adminDenial": {
+      "navHidden": true,
+      "redirected": true,
+      "forgedPatch": 403,
+      "forgedRead": 403,
+      "generalIntact": true,
+      "redactionIntact": 200,
+      "anonymousRead": 401
+    },
+    "officialPendingRoutes": 0,
+    "unexpectedWindow": "mounted admin storage tab stages",
+    "limitations": [
+      "Evidence is the synthetic fixture and its stored settings; no real directory, bucket, S3 provider, credential validation or production behaviour is claimed.",
+      "The secrets are asserted as presence booleans and mode names only; the 400, 401, 403, 501 and 503 cases run against fixture validation, the role gate, the capability answer and fault injection."
+    ]
+  },
+  "scenarios": {
+    "R-SETTINGS-STORAGE": {
+      "route-render": {
+        "passed": true,
+        "evidence": "the admin storage route renders one card with the Local file backend, the stored directory, the hint and an enabled Save from exactly one read and no write"
+      },
+      "admin-denial": {
+        "passed": true,
+        "evidence": "an ordinary user has no storage link, is redirected away from the route without rendering it, is refused with 403 on forged storage reads and writes, and still reaches the general and redaction settings while an anonymous read is refused with 401"
+      },
+      "mutation-update": {
+        "passed": true,
+        "evidence": "one manual save sends the whole object with the server prefix normalization, keeps both stored secrets, and the stored record matches"
+      },
+      "mutation-failure-draft": {
+        "passed": true,
+        "evidence": "a 503 reports one error and keeps the draft without retrying itself, and the Save button resends the same draft successfully"
+      }
+    }
+  },
+  "screenshots": [
+    "e2e/foundation/screenshots/settings-storage-en-light-1440.png",
+    "e2e/foundation/screenshots/settings-storage-failure-en-light-1440.png",
+    "e2e/foundation/screenshots/settings-storage-en-light-390.png",
+    "e2e/foundation/screenshots/settings-storage-zh-dark-1440.png",
+    "e2e/foundation/screenshots/settings-storage-zh-dark-390.png"
+  ],
+  "apiFailures": [],
+  "expectedApiFailures": [
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "400 PATCH /api/v1/settings/raw-object-store",
+    "400 PATCH /api/v1/settings/raw-object-store",
+    "503 PATCH /api/v1/settings/raw-object-store",
+    "501 GET /api/v1/settings/raw-object-store",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "403 PATCH /api/v1/settings/raw-object-store",
+    "403 GET /api/v1/settings/raw-object-store",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/auth/me",
+    "401 GET /api/v1/settings/raw-object-store",
+    "401 GET /api/v1/auth/me"
+  ],
+  "unexpectedRequests": [],
+  "settingsRequests": [
+    {
+      "stage": "route-render",
+      "method": "GET",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": null
+    },
+    {
+      "stage": "mutation-update",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "local",
+        "local_dir": "/srv/fixture-raw",
+        "s3_allow_http": false,
+        "s3_bucket": "prompt-ferry-raw",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture/",
+        "s3_region": "eu-central-1",
+        "access_mode": "keep",
+        "access_value_present": false,
+        "secret_mode": "keep",
+        "secret_value_present": false
+      }
+    },
+    {
+      "stage": "mutation-update",
+      "method": "GET",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": null
+    },
+    {
+      "stage": "secret-replace",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "s3",
+        "local_dir": "/srv/fixture-raw",
+        "s3_allow_http": false,
+        "s3_bucket": "fixture-s3-bucket",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "replace",
+        "access_value_present": true,
+        "secret_mode": "replace",
+        "secret_value_present": true
+      }
+    },
+    {
+      "stage": "secret-replace",
+      "method": "GET",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": null
+    },
+    {
+      "stage": "secret-keep",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "s3",
+        "local_dir": "/srv/fixture-raw",
+        "s3_allow_http": false,
+        "s3_bucket": "fixture-s3-bucket",
+        "s3_endpoint": "https://s3b.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "keep",
+        "access_value_present": false,
+        "secret_mode": "keep",
+        "secret_value_present": false
+      }
+    },
+    {
+      "stage": "secret-keep",
+      "method": "GET",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": null
+    },
+    {
+      "stage": "fixture-probes",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "s3",
+        "local_dir": "",
+        "s3_allow_http": false,
+        "s3_bucket": "   ",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "keep",
+        "access_value_present": false,
+        "secret_mode": "keep",
+        "secret_value_present": false
+      }
+    },
+    {
+      "stage": "fixture-probes",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "s3",
+        "local_dir": "",
+        "s3_allow_http": false,
+        "s3_bucket": "prompt-ferry-raw",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "replace",
+        "access_value_present": true,
+        "secret_mode": "keep",
+        "secret_value_present": false
+      }
+    },
+    {
+      "stage": "fixture-probes",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "s3",
+        "local_dir": "",
+        "s3_allow_http": false,
+        "s3_bucket": " probe-bucket ",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_prefix": "/probe/prefix/",
+        "s3_region": "  ",
+        "access_mode": "keep",
+        "access_value_present": false,
+        "secret_mode": "keep",
+        "secret_value_present": false
+      }
+    },
+    {
+      "stage": "fixture-probes",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "s3",
+        "local_dir": "",
+        "s3_allow_http": false,
+        "s3_bucket": "prompt-ferry-raw",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "clear",
+        "access_value_present": false,
+        "secret_mode": "keep",
+        "secret_value_present": false
+      }
+    },
+    {
+      "stage": "fixture-probes",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "s3",
+        "local_dir": "",
+        "s3_allow_http": false,
+        "s3_bucket": "prompt-ferry-raw",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "clear",
+        "access_value_present": false,
+        "secret_mode": "clear",
+        "secret_value_present": false
+      }
+    },
+    {
+      "stage": "fixture-probes",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "s3",
+        "local_dir": "",
+        "s3_allow_http": false,
+        "s3_bucket": "prompt-ferry-raw",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "replace",
+        "access_value_present": true,
+        "secret_mode": "replace",
+        "secret_value_present": true
+      }
+    },
+    {
+      "stage": "fixture-probes",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "s3",
+        "local_dir": "",
+        "s3_allow_http": false,
+        "s3_bucket": "prompt-ferry-raw",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "keep",
+        "access_value_present": false,
+        "secret_mode": "keep",
+        "secret_value_present": false
+      }
+    },
+    {
+      "stage": "fixture-probes",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "disabled",
+        "local_dir": "",
+        "s3_allow_http": false,
+        "s3_bucket": "",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "keep",
+        "access_value_present": false,
+        "secret_mode": "keep",
+        "secret_value_present": false
+      }
+    },
+    {
+      "stage": "fixture-probes",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "local",
+        "local_dir": "/var/lib/prompt-ferry/raw",
+        "s3_allow_http": false,
+        "s3_bucket": "prompt-ferry-raw",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "keep",
+        "access_value_present": false,
+        "secret_mode": "keep",
+        "secret_value_present": false
+      }
+    },
+    {
+      "stage": "fixture-probes",
+      "method": "GET",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": null
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "local",
+        "local_dir": "/srv/transport-failure",
+        "s3_allow_http": false,
+        "s3_bucket": "prompt-ferry-raw",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "keep",
+        "access_value_present": false,
+        "secret_mode": "keep",
+        "secret_value_present": false
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "local",
+        "local_dir": "/srv/transport-failure",
+        "s3_allow_http": false,
+        "s3_bucket": "prompt-ferry-raw",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "keep",
+        "access_value_present": false,
+        "secret_mode": "keep",
+        "secret_value_present": false
+      }
+    },
+    {
+      "stage": "mutation-failure-draft",
+      "method": "GET",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": null
+    },
+    {
+      "stage": "double-save",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "local",
+        "local_dir": "/srv/double-save",
+        "s3_allow_http": false,
+        "s3_bucket": "prompt-ferry-raw",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "keep",
+        "access_value_present": false,
+        "secret_mode": "keep",
+        "secret_value_present": false
+      }
+    },
+    {
+      "stage": "newer-draft",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "local",
+        "local_dir": "/srv/submitted",
+        "s3_allow_http": false,
+        "s3_bucket": "prompt-ferry-raw",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "keep",
+        "access_value_present": false,
+        "secret_mode": "keep",
+        "secret_value_present": false
+      }
+    },
+    {
+      "stage": "newer-draft",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": [
+          "backend",
+          "local_dir",
+          "s3_access_key",
+          "s3_allow_http",
+          "s3_bucket",
+          "s3_endpoint",
+          "s3_path_style",
+          "s3_prefix",
+          "s3_region",
+          "s3_secret_key"
+        ],
+        "backend": "local",
+        "local_dir": "/srv/newer",
+        "s3_allow_http": false,
+        "s3_bucket": "prompt-ferry-raw",
+        "s3_endpoint": "https://s3.example.internal",
+        "s3_path_style": false,
+        "s3_prefix": "fixture",
+        "s3_region": "eu-central-1",
+        "access_mode": "keep",
+        "access_value_present": false,
+        "secret_mode": "keep",
+        "secret_value_present": false
+      }
+    },
+    {
+      "stage": "capability-unavailable",
+      "method": "GET",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": null
+    },
+    {
+      "stage": "capability-unavailable",
+      "method": "GET",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": null
+    },
+    {
+      "stage": "scoped-refresh",
+      "method": "GET",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": null
+    },
+    {
+      "stage": "scoped-refresh",
+      "method": "GET",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": null
+    },
+    {
+      "stage": "responsive-en",
+      "method": "GET",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": null
+    },
+    {
+      "stage": "locale-zh",
+      "method": "GET",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "PATCH",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": {
+        "keys": ["backend"],
+        "backend": "disabled",
+        "access_value_present": false,
+        "secret_value_present": false
+      }
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/redaction",
+      "body": null
+    },
+    {
+      "stage": "admin-denial",
+      "method": "GET",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": null
+    }
+  ],
+  "consoleErrorCount": 0,
+  "pageErrorCount": 0,
+  "limitations": [
+    "Evidence is the synthetic fixture and its stored settings; no real directory, bucket, S3 provider, credential validation or production behaviour is claimed.",
+    "The secrets are asserted as presence booleans and mode names only; the 400, 401, 403, 501 and 503 cases run against fixture validation, the role gate, the capability answer and fault injection."
+  ]
+}

@@ -1,0 +1,168 @@
+async (page) => {
+  const result = {
+    startedAt: new Date().toISOString(),
+    failures: [],
+    checks: {},
+  }
+  const cases = [
+    {
+      id: 'R-API-KEYS',
+      route: '/api-keys',
+      text: 'integration-key-with-a-long-label',
+    },
+    {
+      id: 'R-USERS',
+      route: '/users',
+      text: 'integration-operator-eu-west-with-a-long-login-name',
+    },
+    {
+      id: 'R-ENDPOINTS-UPSTREAMS',
+      route: '/endpoints/upstreams',
+      text: 'OpenAI ChatGPT Subscription — Integration Workspace With A Long Name',
+    },
+    {
+      id: 'R-ENDPOINTS-ROUTES',
+      route: '/endpoints/routes',
+      text: 'gpt-5.1-codex-preview-with-an-extremely-long-upstream-model-identifier',
+    },
+    {
+      id: 'R-MCP',
+      route: '/mcp',
+      text: 'Context7 Documentation With A Long Server Name',
+    },
+    {
+      id: 'R-USAGE-AI',
+      route: '/request-records/ai',
+      text: 'extremely-long-upstream-model-identifier',
+    },
+    {
+      id: 'R-BILLING',
+      route: '/billing',
+      text: 'OpenAI ChatGPT Subscription — Integration Workspace With A Long Name',
+    },
+  ]
+  try {
+    const reset = async () => {
+      await fetch('http://127.0.0.1:8789/__fixtures/reset', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      })
+      await page.context().clearCookies()
+      await page.goto('http://127.0.0.1:5171/login')
+      await page.evaluate(() => {
+        localStorage.clear()
+        localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+      })
+      await page.reload()
+      await page.getByRole('textbox', { name: /登录名/ }).fill('admin')
+      await page.getByRole('textbox', { name: /密码/ }).fill('fixture-password')
+      await page.getByRole('button', { name: '登录', exact: true }).click()
+      await page.waitForTimeout(650)
+    }
+    await reset()
+    await page.setViewportSize({ width: 1440, height: 900 })
+    for (const item of cases) {
+      await page.goto(`http://127.0.0.1:5171${item.route}`, {
+        waitUntil: 'domcontentloaded',
+      })
+      await page.waitForTimeout(650)
+      if (item.id === 'R-API-KEYS') {
+        await page
+          .getByRole('combobox', { name: '每页条数', exact: true })
+          .click()
+        await page
+          .getByRole('option', { name: '50', exact: true })
+          .click()
+          .catch(() => {})
+        await page.waitForTimeout(300)
+      }
+      if (item.id === 'R-USAGE-AI') {
+        await page.getByRole('button', { name: '记录', exact: true }).click()
+        await page.waitForTimeout(300)
+        const search = page.getByPlaceholder(
+          '搜索请求 / request id / session id / client key',
+        )
+        await search.fill(item.text)
+        await search.press('Enter')
+        await page.waitForTimeout(400)
+      }
+      const cell = page
+        .locator('table tbody td')
+        .filter({ hasText: item.text })
+        .first()
+      const cellCount = await cell.count()
+      const bodyText = await page.locator('body').innerText()
+      let cellInfo = cellCount
+        ? await cell.evaluate((element) => {
+            const cell = element.getBoundingClientRect()
+            const table = element.closest('table')?.getBoundingClientRect()
+            return {
+              text: (element.innerText || element.textContent || '').trim(),
+              cell: { left: cell.left, right: cell.right, width: cell.width },
+              table: table ? { left: table.left, right: table.right } : null,
+              withinTable: Boolean(
+                table &&
+                cell.left >= table.left - 1 &&
+                cell.right <= table.right + 1,
+              ),
+              scrollWidth: element.scrollWidth,
+              clientWidth: element.clientWidth,
+            }
+          })
+        : null
+      let inputInfo = null
+      if (item.id === 'R-API-KEYS') {
+        inputInfo = await page
+          .locator('input[aria-label="名称"]')
+          .evaluateAll((elements, expected) => {
+            const input = elements.find(
+              (element) =>
+                String(element.value).includes(expected) &&
+                element.checkVisibility(),
+            )
+            if (!input) return null
+            const rect = input.getBoundingClientRect()
+            return {
+              text: input.value,
+              accessibleName: input.getAttribute('aria-label'),
+              visible: input.checkVisibility(),
+              withinViewport:
+                rect.width > 0 &&
+                rect.left >= 0 &&
+                rect.right <= window.innerWidth,
+              rect: { left: rect.left, right: rect.right, width: rect.width },
+            }
+          }, item.text)
+      }
+      const longTextVisible =
+        bodyText.includes(item.text) ||
+        Boolean(inputInfo?.visible && inputInfo.text.includes(item.text))
+      const contained =
+        item.id === 'R-API-KEYS'
+          ? Boolean(
+              inputInfo?.withinViewport && inputInfo.accessibleName === '名称',
+            )
+          : Boolean(cellInfo?.withinTable)
+      result.checks[item.id] = {
+        route: page.url().replace('http://127.0.0.1:5171', ''),
+        expectedLongTextVisible: longTextVisible,
+        textLength: item.text.length,
+        cellInfo: cellInfo ?? inputInfo,
+        passed:
+          longTextVisible &&
+          contained &&
+          (cellInfo?.text ?? inputInfo?.text ?? '').includes(item.text),
+      }
+      if (!result.checks[item.id].passed)
+        result.failures.push({
+          id: item.id,
+          error: 'long value was not visibly contained in a table cell',
+        })
+    }
+  } catch (error) {
+    result.failures.push({ id: 'long-values', error: String(error) })
+  }
+  result.finishedAt = new Date().toISOString()
+  return JSON.stringify(result)
+}

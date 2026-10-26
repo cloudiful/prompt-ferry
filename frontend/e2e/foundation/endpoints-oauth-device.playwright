@@ -1,0 +1,65 @@
+async page => {
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const report = { startedAt: new Date().toISOString(), checks: {}, screenshots: [] }
+  function assert(condition, message) {
+    if (!condition) throw new Error(message)
+  }
+  const consoleErrors = []
+  const pageErrors = []
+  const externalRequests = []
+  page.setDefaultTimeout(7000)
+  const onConsole = message => {
+    if (message.type() === 'error' && !/(?:status of )?(?:401|500|503)\b/.test(message.text())) consoleErrors.push(message.text())
+  }
+  const onPageError = error => pageErrors.push(error.message)
+  const onRequest = request => {
+    const url = new URL(request.url())
+    if (url.pathname.includes('/__fixtures/never-open') || url.port === '1455') externalRequests.push(url.origin + url.pathname)
+  }
+  page.on('console', onConsole)
+  page.on('pageerror', onPageError)
+  page.on('request', onRequest)
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  async function waitForResponse(method, pathname, status) {
+    return page.waitForResponse(response => response.request().method() === method && new URL(response.url()).pathname === pathname && response.status() === status, { timeout: 7000 })
+  }
+
+  const dialog = page.getByRole('dialog').last()
+  await page.locator('[data-endpoint-row="ep-openai-codex"]').getByRole('button', { name: 'Edit', exact: true }).click()
+  await dialog.waitFor({ state: 'visible' })
+  await dialog.getByText('Not logged in', { exact: true }).waitFor({ state: 'visible' })
+  const deviceStart = waitForResponse('POST', '/api/v1/admin/endpoints/ep-openai-codex/oauth/device', 200)
+  await dialog.getByRole('button', { name: 'Start login', exact: true }).click()
+  await deviceStart
+  await dialog.getByText('FIXTURE-CODE', { exact: true }).waitFor({ state: 'visible' })
+  const firstPoll = waitForResponse('POST', '/api/v1/admin/endpoints/ep-openai-codex/oauth/device/poll', 200)
+  await firstPoll
+  const completingPoll = waitForResponse('POST', '/api/v1/admin/endpoints/ep-openai-codex/oauth/device/poll', 200)
+  await completingPoll
+  await dialog.getByText('Logged in', { exact: true }).waitFor({ state: 'visible', timeout: 7000 })
+  const pollStatuses = (await fixture('/__fixtures/log?limit=500')).requests.filter(request => request.path.endsWith('/oauth/device/poll')).map(request => request.status)
+  assert(pollStatuses.length >= 2 && pollStatuses.every(status => status === 200), 'synthetic device flow did not advance pending then complete')
+  await dialog.getByRole('button', { name: 'Clear credential', exact: true }).click()
+  await dialog.getByText('Not logged in', { exact: true }).waitFor({ state: 'visible' })
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  assert(externalRequests.length === 0, `device flow navigated to external verification: ${JSON.stringify(externalRequests)}`)
+  report.checks.deviceOAuthCompletion = { pollStatuses, pendingThenComplete: true, clearRestoredKeylessState: true, noVerificationNavigation: true }
+  report.checks.consoleErrors = consoleErrors
+  report.checks.pageErrors = pageErrors
+  assert(pageErrors.length === 0, `browser page errors: ${JSON.stringify(pageErrors)}`)
+  page.off('console', onConsole)
+  page.off('pageerror', onPageError)
+  page.off('request', onRequest)
+  report.finishedAt = new Date().toISOString()
+  return report
+}

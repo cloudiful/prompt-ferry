@@ -1,0 +1,462 @@
+async page => {
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const report = {
+    startedAt: new Date().toISOString(),
+    checks: {},
+    screenshots: [],
+  }
+  function assert(condition, message) {
+    if (!condition) throw new Error(message)
+  }
+  const consoleErrors = []
+  const pageErrors = []
+  const chartResourceRequests = []
+  page.setDefaultTimeout(7000)
+  const onConsole = (message) => {
+    if (
+      message.type() === 'error' &&
+      !/(?:status of )?(?:401|500|503)\b/.test(message.text())
+    )
+      consoleErrors.push(message.text())
+  }
+  const onPageError = (error) => pageErrors.push(error.message)
+  page.on('console', onConsole)
+  page.on('pageerror', onPageError)
+  const onRequest = (request) => {
+    const url = request.url()
+    if (/UsageChart|echarts/i.test(url)) chartResourceRequests.push(url)
+  }
+  page.on('request', onRequest)
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok)
+      throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  async function waitForResponse(
+    method,
+    pathname,
+    status,
+    predicate = () => true,
+  ) {
+    return page.waitForResponse(
+      (response) => {
+        const url = new URL(response.url())
+        return (
+          response.request().method() === method &&
+          url.pathname === pathname &&
+          (status === undefined || response.status() === status) &&
+          predicate(url)
+        )
+      },
+      { timeout: 7000 },
+    )
+  }
+
+  async function openQuota(endpointId) {
+    const row = page.locator(`[data-endpoint-row="${endpointId}"]`)
+    await row
+      .getByRole('button', { name: 'Token plan usage', exact: true })
+      .click()
+    const dialog = page.getByRole('dialog').last()
+    await dialog
+      .locator(`[data-quota-dialog="${endpointId}"]`)
+      .waitFor({ state: 'visible' })
+    return dialog
+  }
+
+  async function capture(name) {
+    const file = `${screenshots}/${name}.png`
+    await page.screenshot({ path: file, fullPage: true })
+    report.screenshots.push(file)
+  }
+
+  await page.waitForURL(
+    (url) => new URL(url).pathname === '/endpoints/upstreams',
+  )
+  const warmQuotaResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'GET' &&
+      new URL(response.url()).pathname ===
+        '/api/v1/admin/endpoints/ep-minimax-cn/token-plan-usage',
+    { timeout: 7000 },
+  )
+  await page.reload()
+  await page
+    .locator('[data-foundation-route-id="R-ENDPOINTS-UPSTREAMS"]')
+    .waitFor({ state: 'visible' })
+  await page
+    .locator('[data-endpoint-row="ep-minimax-cn"]')
+    .waitFor({ state: 'visible' })
+  const quotaResponse = await warmQuotaResponse
+  const quotaUsage = await quotaResponse.json()
+  const minimaxKey = quotaUsage.keys.find(
+    (key) => key.key_id === 'key-minimax-1',
+  )
+  const quotaStatusScope = minimaxKey?.quota_status?.scope
+  const fiveHourWindowKind = minimaxKey?.quota_windows?.find(
+    (window) => window.kind === 'five_hour',
+  )?.kind
+  assert(
+    quotaStatusScope === 'text_inference',
+    `fixture quota status scope must be text_inference: ${quotaStatusScope}`,
+  )
+  assert(
+    fiveHourWindowKind === 'five_hour',
+    `canonical window kind changed: ${fiveHourWindowKind}`,
+  )
+  report.checks.fixtureQuotaStatusScope = {
+    quotaStatusScope,
+    fiveHourWindowKind,
+  }
+  await page.waitForTimeout(150)
+  const genericRow = page.locator('[data-endpoint-row="ep-fixture-1"]')
+  assert(
+    (await genericRow
+      .getByRole('button', { name: 'Token plan usage', exact: true })
+      .count()) === 0,
+    'generic endpoint exposed quota action',
+  )
+  const genericQuotaCalls = (
+    await fixture('/__fixtures/log?limit=500')
+  ).requests.filter(
+    (request) =>
+      request.path.startsWith('/api/v1/admin/endpoints/ep-fixture-') &&
+      request.path.includes('token-plan-usage'),
+  )
+  assert(
+    genericQuotaCalls.length === 0,
+    'generic endpoint triggered quota requests',
+  )
+  report.checks.genericQuotaIneligible = {
+    actionCount: 0,
+    apiCalls: genericQuotaCalls.length,
+  }
+
+  const minimaxQuotaPath =
+    '/api/v1/admin/endpoints/ep-minimax-cn/token-plan-usage'
+  const minimaxQuotaCallsBefore = (
+    await fixture('/__fixtures/log?limit=500')
+  ).requests.filter(
+    (request) => request.method === 'GET' && request.path === minimaxQuotaPath,
+  ).length
+  let dialog = await openQuota('ep-minimax-cn')
+  const quotaProvider = await dialog
+    .locator('[data-quota-dialog="ep-minimax-cn"]')
+    .getAttribute('data-quota-provider')
+  await dialog
+    .locator('[data-quota-key="key-minimax-1"]')
+    .waitFor({ state: 'visible' })
+  await page.waitForTimeout(150)
+  const minimaxQuotaCallsAfter = (
+    await fixture('/__fixtures/log?limit=500')
+  ).requests.filter(
+    (request) => request.method === 'GET' && request.path === minimaxQuotaPath,
+  ).length
+  assert(
+    minimaxQuotaCallsBefore >= 1 &&
+      minimaxQuotaCallsAfter === minimaxQuotaCallsBefore,
+    'warm page/dialog cache issued another current-usage request',
+  )
+  const unknownQuotaText = await dialog
+    .locator('[data-quota-row="minimax:weekly"]')
+    .innerText()
+  const knownWindowText = await dialog
+    .locator('[data-quota-row="minimax:primary"]')
+    .innerText()
+    .catch(() => '')
+  const knownWindowFallback =
+    knownWindowText ||
+    (await dialog.locator('[data-quota-row]').first().innerText())
+  assert(
+    unknownQuotaText.includes('—') && !/\b0(?:\.0)?%/.test(unknownQuotaText),
+    'unknown quota was displayed as a real zero',
+  )
+  assert(
+    knownWindowFallback.includes('38.00 / 100.00') &&
+      knownWindowFallback.includes('Expired'),
+    `known quota quantity/status missing: ${knownWindowFallback}`,
+  )
+  await capture('endpoints-quota-current-en-light-1440')
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  const mobileCard = page.locator('[data-endpoint-card="ep-minimax-cn"]')
+  await mobileCard.waitFor({ state: 'visible' })
+  const mobileQuotaAction = await mobileCard
+    .getByRole('button', { name: 'Token plan usage', exact: true })
+    .isVisible()
+  const mobileOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  )
+  const tableBadgeLabels = await page
+    .locator(
+      '[data-endpoint-row="ep-minimax-cn"] [data-quota-badges="table"] [data-slot="badge"]',
+    )
+    .allTextContents()
+  const cardBadgeLabels = await mobileCard
+    .locator('[data-quota-badges="card"] [data-slot="badge"]')
+    .allTextContents()
+  const tablePillCount = tableBadgeLabels.length
+  const cardPillCount = cardBadgeLabels.length
+  const identicalPillLabels =
+    tablePillCount > 0 &&
+    JSON.stringify(tableBadgeLabels) === JSON.stringify(cardBadgeLabels)
+  assert(
+    mobileQuotaAction && !mobileOverflow,
+    'mobile quota action or layout containment failed',
+  )
+  assert(
+    identicalPillLabels,
+    `table/mobile quota pills differ: ${JSON.stringify({ tableBadgeLabels, cardBadgeLabels })}`,
+  )
+  report.checks.tableMobileQuotaPills = {
+    identical: identicalPillLabels,
+    actionVisible: mobileQuotaAction,
+    overflow: mobileOverflow,
+    tableBadgeLabels,
+    cardBadgeLabels,
+    tablePillCount,
+    cardPillCount,
+    rendered: tablePillCount > 0 && cardPillCount > 0,
+  }
+  await capture('endpoints-en-light-390-mobile')
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  dialog = await openQuota('ep-minimax-cn')
+  const keyHistory = dialog
+    .locator('summary')
+    .filter({ hasText: 'Per-key quota history' })
+  const chartRequestsBeforeExpand = chartResourceRequests.length
+  const trend24Response = waitForResponse(
+    'GET',
+    '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations/trend',
+    200,
+    (url) => url.searchParams.get('range') === '24h',
+  )
+  await keyHistory.click()
+  await trend24Response
+  const allKeyTrend = (
+    await fixture('/__fixtures/log?limit=500')
+  ).requests.findLast(
+    (request) =>
+      request.path ===
+      '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations/trend',
+  )
+  assert(
+    allKeyTrend?.query.range === '24h' &&
+      !Object.hasOwn(allKeyTrend.query, 'key_id'),
+    'initial key trend was not all-key 24h',
+  )
+  const chartElement = dialog.locator('[data-usage-chart]')
+  await chartElement.waitFor({ state: 'visible' })
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('[data-usage-chart] canvas')),
+    null,
+    { timeout: 7000 },
+  )
+  const chartStats = await chartElement.evaluate((element) => ({
+    width: element.clientWidth,
+    height: element.clientHeight,
+    canvasCount: element.querySelectorAll('canvas').length,
+  }))
+  assert(
+    chartStats.width > 0 && chartStats.height > 0 && chartStats.canvasCount > 0,
+    `lazy ECharts chart did not render at nonzero size: ${JSON.stringify(chartStats)}`,
+  )
+  assert(
+    chartRequestsBeforeExpand === 0 && chartResourceRequests.length > 0,
+    `ECharts lazy boundary was not observed: before=${chartRequestsBeforeExpand} after=${chartResourceRequests.length}`,
+  )
+  const rangeSelect = dialog.getByLabel('Range')
+  await rangeSelect.click()
+  const range7Response = waitForResponse(
+    'GET',
+    '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations/trend',
+    200,
+    (url) => url.searchParams.get('range') === '7d',
+  )
+  await page.getByRole('option', { name: 'Last 7 days', exact: true }).click()
+  await range7Response
+  await rangeSelect.click()
+  const range30Response = waitForResponse(
+    'GET',
+    '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations/trend',
+    200,
+    (url) => url.searchParams.get('range') === '30d',
+  )
+  await page.getByRole('option', { name: 'Last 30 days', exact: true }).click()
+  await range30Response
+  const keySelect = dialog.getByLabel('Key')
+  await keySelect.click()
+  const keyFilterResponse = waitForResponse(
+    'GET',
+    '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations/trend',
+    200,
+    (url) => url.searchParams.get('key_id') === 'key-minimax-1',
+  )
+  await page.getByRole('option', { name: 'primary', exact: true }).click()
+  await keyFilterResponse
+  await keySelect.click()
+  const allKeysResponse = waitForResponse(
+    'GET',
+    '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations/trend',
+    200,
+    (url) =>
+      url.searchParams.get('range') === '30d' &&
+      !url.searchParams.has('key_id'),
+  )
+  await page.getByRole('option', { name: 'All keys', exact: true }).click()
+  await allKeysResponse
+  await capture('endpoints-quota-chart-en-light-1440')
+
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations',
+    method: 'GET',
+    status: 500,
+    code: 'fixture_quota_history_unavailable',
+    message: 'fixture quota history failure',
+  })
+  await dialog.getByRole('button', { name: 'List', exact: true }).click()
+  await dialog
+    .getByText('Quota history could not be loaded.', { exact: false })
+    .waitFor({ state: 'visible' })
+  const quotaListErrorVisible = true
+  const retryResponse = waitForResponse(
+    'GET',
+    '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations',
+    200,
+  )
+  await dialog.getByRole('button', { name: 'Retry', exact: true }).click()
+  await retryResponse
+  await dialog
+    .locator('[data-quota-observation-id="observation-1"]')
+    .waitFor({ state: 'visible' })
+  const observationRequests = (
+    await fixture('/__fixtures/log?limit=500')
+  ).requests.filter(
+    (request) =>
+      request.path ===
+        '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations' &&
+      request.method === 'GET',
+  )
+  const observationQuery = observationRequests.at(-1)?.query
+  assert(
+    observationQuery?.limit === '50' &&
+      !Object.hasOwn(observationQuery, 'key_id'),
+    'all-key history query did not use limit=50 without key_id',
+  )
+  const loadedObservations = observationRequests.length
+  await dialog.getByRole('button', { name: 'Chart', exact: true }).click()
+  await dialog.getByRole('button', { name: 'List', exact: true }).click()
+  assert(
+    (await fixture('/__fixtures/log?limit=500')).requests.filter(
+      (request) =>
+        request.path ===
+          '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations' &&
+        request.method === 'GET',
+    ).length === loadedObservations,
+    'chart/list roundtrip reloaded the retained list',
+  )
+  const observationText = await dialog
+    .locator('[data-quota-observation-id="observation-1"]')
+    .innerText()
+  assert(
+    observationText.includes('primary'),
+    'key history omitted the observed key label',
+  )
+  report.checks.oauthNegativeCancelQuotaListRetry = {
+    quotaErrorVisible: quotaListErrorVisible,
+    quotaRetry: true,
+    query: observationQuery,
+    loadedObservation: true,
+    listPreservedOnChartRoundtrip: true,
+    noCursorProvidedByFixture: true,
+  }
+  report.checks.keyQuotaHistory = {
+    initialTrend: allKeyTrend?.query,
+    ranges: ['24h', '7d', '30d'],
+    filteredKey: 'key-minimax-1',
+    allKeysOmitKeyId: true,
+    actualCanvas: true,
+    lazyImportObserved:
+      chartRequestsBeforeExpand === 0 && chartResourceRequests.length > 0,
+    observationQuery,
+    observationText,
+  }
+  report.checks.oauthQuota = {
+    currentCacheRequestCount: minimaxQuotaCallsAfter,
+    warmOpenNoRequest: true,
+    provider: quotaProvider,
+    unknownNotZero: true,
+    knownWindowText: knownWindowFallback,
+  }
+  await capture('endpoints-quota-history-en-light-1440')
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+
+  dialog = await openQuota('ep-openai-codex')
+  const subscriptionHistoryResponse = waitForResponse(
+    'GET',
+    '/api/v1/admin/endpoints/ep-openai-codex/quota-history',
+    200,
+  )
+  await dialog
+    .locator('summary')
+    .filter({ hasText: /^Quota history$/ })
+    .click()
+  await subscriptionHistoryResponse
+  await dialog
+    .locator('[data-quota-snapshot-id="snapshot-1"]')
+    .waitFor({ state: 'visible' })
+  const subscriptionQuery = (
+    await fixture('/__fixtures/log?limit=500')
+  ).requests.findLast(
+    (request) =>
+      request.path === '/api/v1/admin/endpoints/ep-openai-codex/quota-history',
+  )?.query
+  assert(
+    subscriptionQuery?.limit === '50',
+    'subscription history did not request limit=50',
+  )
+  assert(
+    (await dialog
+      .getByRole('button', { name: 'Load more', exact: true })
+      .count()) === 0,
+    'history showed load-more without a fixture cursor',
+  )
+  const subscriptionText = await dialog
+    .locator('[data-quota-snapshot-id="snapshot-1"]')
+    .innerText()
+  assert(
+    subscriptionText.includes('Unknown source'),
+    'subscription history omitted source label',
+  )
+  report.checks.subscriptionQuotaHistory = {
+    query: subscriptionQuery,
+    observationId: 'snapshot-1',
+    sourceRendered: true,
+    cursor: null,
+    noLoadMore: true,
+  }
+  await capture('endpoints-subscription-history-en-light-1440')
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+
+  report.checks.consoleErrors = consoleErrors
+  report.checks.pageErrors = pageErrors
+  assert(
+    pageErrors.length === 0,
+    `browser page errors: ${JSON.stringify(pageErrors)}`,
+  )
+  page.off('console', onConsole)
+  page.off('pageerror', onPageError)
+  page.off('request', onRequest)
+  report.finishedAt = new Date().toISOString()
+  return report
+}

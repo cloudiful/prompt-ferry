@@ -1,0 +1,73 @@
+{
+  "startedAt": "2026-10-23T16:45:06.035Z",
+  "finishedAt": "2026-10-23T16:45:16.974Z",
+  "failures": [],
+  "checks": {
+    "R-USERS": {
+      "draftRetained": true,
+      "closedOnlyOnSuccess": true,
+      "writes": [
+        {
+          "at": "2026-10-23T16:45:08.854Z",
+          "method": "POST",
+          "path": "/api/v1/admin/users",
+          "query": {},
+          "status": 503,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:45:09.637Z",
+          "method": "POST",
+          "path": "/api/v1/admin/users",
+          "query": {},
+          "status": 200,
+          "ms": 0
+        }
+      ]
+    },
+    "R-MCP": {
+      "draftRetained": true,
+      "closedOnlyOnSuccess": true,
+      "writes": [
+        {
+          "at": "2026-10-23T16:45:12.173Z",
+          "method": "POST",
+          "path": "/api/v1/admin/mcp-servers",
+          "query": {},
+          "status": 503,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:45:12.998Z",
+          "method": "POST",
+          "path": "/api/v1/admin/mcp-servers",
+          "query": {},
+          "status": 200,
+          "ms": 0
+        }
+      ]
+    },
+    "R-RELAYS": {
+      "draftRetained": true,
+      "closedOnlyOnSuccess": true,
+      "writes": [
+        {
+          "at": "2026-10-23T16:45:15.220Z",
+          "method": "POST",
+          "path": "/api/v1/admin/relays",
+          "query": {},
+          "status": 503,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:45:16.036Z",
+          "method": "POST",
+          "path": "/api/v1/admin/relays",
+          "query": {},
+          "status": 200,
+          "ms": 0
+        }
+      ]
+    }
+  }
+}

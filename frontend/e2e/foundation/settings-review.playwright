@@ -1,0 +1,1073 @@
+async page => {
+  const BASE = 'http://127.0.0.1:5171'
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const screenshots = 'e2e/foundation/screenshots'
+  const LLM_REVIEW = '/api/v1/settings/llm-review'
+
+  const startedAt = new Date().toISOString()
+  const report = {
+    runId: `settings-review-${Date.now()}`,
+    startedAt,
+    finishedAt: null,
+    checks: {},
+    scenarios: {
+      'R-SETTINGS-REVIEW': {
+        'route-render': null,
+        'admin-denial': null,
+        'mutation-update': null,
+        'mutation-failure-draft': null,
+      },
+    },
+    screenshots: [],
+    apiFailures: [],
+    expectedApiFailures: [],
+    unexpectedRequests: [],
+    settingsRequests: [],
+    consoleErrorCount: 0,
+    pageErrorCount: 0,
+    limitations: [],
+  }
+  let stage = 'startup'
+  let collecting = false
+
+  page.setDefaultTimeout(15000)
+  page.on('pageerror', () => report.pageErrorCount++)
+  page.on('console', message => {
+    if (message.type() !== 'error') return
+    if (/\b(400|401|403|503)\b/.test(message.text())) return
+    report.consoleErrorCount++
+  })
+  page.on('request', request => {
+    const url = new URL(request.url())
+    if (url.pathname.startsWith('/api/v1/settings/')) {
+      // The ledger keeps the request shape and booleans for the two secrets; the
+      // values themselves are never recorded.
+      const body = request.postData()
+      let shape = null
+      if (body) {
+        try {
+          const parsed = JSON.parse(body)
+          shape = {
+            keys: Object.keys(parsed).sort(),
+            webhookKeys: Object.keys(parsed.webhook ?? {}).sort(),
+            review_api_key_present: Boolean(parsed.review_api_key),
+            webhook_bearer_token_present: Boolean(
+              parsed.webhook?.bearer_token,
+            ),
+            extra_headers: parsed.webhook?.extra_headers ?? {},
+            enabled: parsed.enabled,
+            failure_policy: parsed.failure_policy,
+            review_base_url: parsed.review_base_url,
+            review_model: parsed.review_model,
+            review_timeout_ms: parsed.review_timeout_ms,
+            pending_ttl_seconds: parsed.pending_ttl_seconds,
+            custom_policy_text: parsed.custom_policy_text,
+            webhook_enabled: parsed.webhook?.enabled,
+            webhook_url: parsed.webhook?.url,
+          }
+        } catch {
+          shape = { unparsable: true }
+        }
+      }
+      report.settingsRequests.push({
+        stage,
+        method: request.method(),
+        path: url.pathname,
+        body: shape,
+      })
+      return
+    }
+    if (!url.pathname.startsWith('/api/')) return
+    if (!collecting) return
+    if (
+      url.pathname.startsWith('/api/v1/auth/') ||
+      url.pathname.startsWith('/api/v1/relay/auth/') ||
+      url.pathname.startsWith('/api/v1/me/') ||
+      url.pathname === '/api/v1/bridge/status'
+    ) {
+      return
+    }
+    report.unexpectedRequests.push(`${request.method()} ${url.pathname}`)
+  })
+  page.on('response', response => {
+    const url = new URL(response.url())
+    if (!url.pathname.startsWith('/api/')) return
+    if (response.status() < 400) return
+    if (response.status() === 401 && url.pathname === '/api/v1/auth/me') {
+      report.expectedApiFailures.push('401 GET /api/v1/auth/me')
+      return
+    }
+    const entry = `${response.status()} ${response.request().method()} ${url.pathname}`
+    if (
+      url.pathname === LLM_REVIEW &&
+      (response.status() === 400 ||
+        response.status() === 403 ||
+        response.status() === 401 ||
+        response.status() === 503)
+    ) {
+      report.expectedApiFailures.push(entry)
+      return
+    }
+    report.apiFailures.push(entry)
+  })
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(`${stage}: ${message}`)
+  }
+
+  async function capture(name) {
+    const path = `${screenshots}/${name}.png`
+    await page.screenshot({ path, fullPage: true })
+    report.screenshots.push(path)
+  }
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) {
+      throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    }
+    return response.json()
+  }
+
+  async function clearFaults() {
+    await fixture('/__fixtures/faults', 'DELETE')
+  }
+
+  async function injectFault(fault) {
+    await clearFaults()
+    await fixture('/__fixtures/faults', 'POST', fault)
+  }
+
+  function requestsFor(requestStage) {
+    return report.settingsRequests.filter(entry => entry.stage === requestStage)
+  }
+
+  function readsFor(requestStage) {
+    return requestsFor(requestStage).filter(entry => entry.method === 'GET')
+  }
+
+  function writesFor(requestStage) {
+    return requestsFor(requestStage).filter(entry => entry.method === 'PATCH')
+  }
+
+  async function signIn(loginName) {
+    await page.goto(`${BASE}/login`)
+    const loginNameField = page.getByLabel(/^(Login name|登录名)$/)
+    await loginNameField.waitFor({ state: 'visible' })
+    await loginNameField.fill(loginName)
+    await page
+      .getByRole('textbox', { name: /^(Password|密码)$/ })
+      .fill('fixture-password')
+    await page.getByRole('button', { name: /^(Login|登录)$/ }).click()
+    await page.waitForURL(url => new URL(url).pathname === '/api-keys')
+  }
+
+  async function signOut() {
+    await page.getByRole('button', { name: /Logout|退出登录/ }).click()
+    await page.waitForURL(url => new URL(url).pathname === '/login')
+  }
+
+  async function openReview() {
+    await page.goto(`${BASE}/settings/review`)
+    await page.waitForSelector('[data-foundation-route-id="R-SETTINGS-REVIEW"]')
+    await page.waitForFunction(() => {
+      const save = document.getElementById('settings-llm-review-save')
+      return save !== null && !save.hasAttribute('disabled')
+    })
+    await page.waitForTimeout(150)
+  }
+
+  async function storedSettings() {
+    return page.evaluate(async () => {
+      const response = await fetch('/api/v1/settings/llm-review')
+      const body = await response.json()
+      return {
+        status: response.status,
+        enabled: body.enabled,
+        review_base_url: body.review_base_url,
+        review_model: body.review_model,
+        review_timeout_ms: body.review_timeout_ms,
+        failure_policy: body.failure_policy,
+        pending_ttl_seconds: body.pending_ttl_seconds,
+        custom_policy_text: body.custom_policy_text,
+        review_api_key_present: Boolean(body.review_api_key),
+        webhook: {
+          enabled: body.webhook?.enabled,
+          url: body.webhook?.url,
+          bearer_token_present: Boolean(body.webhook?.bearer_token),
+          extra_headers: body.webhook?.extra_headers ?? {},
+        },
+      }
+    })
+  }
+
+  function toastCount(text) {
+    return page.getByText(text, { exact: true }).count()
+  }
+
+  async function waitForNoToasts(text) {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if ((await toastCount(text)) === 0) return
+      await page.waitForTimeout(250)
+    }
+    throw new Error('a notification never cleared')
+  }
+
+  /** Open the disclosure whose summary carries this label, if collapsed. */
+  async function openGroup(label) {
+    await page.evaluate(name => {
+      const group = [...document.querySelectorAll('details')].find(node =>
+        (node.querySelector('summary')?.textContent ?? '').includes(name),
+      )
+      if (group && !group.hasAttribute('open')) {
+        group.querySelector('summary')?.click()
+      }
+    }, label)
+    await page.waitForTimeout(150)
+  }
+
+  async function setNumber(id, value) {
+    await page.locator(`#${id}`).fill(String(value))
+  }
+
+  async function setText(id, value) {
+    await page.locator(`#${id}`).fill(value)
+  }
+
+  async function save() {
+    await page.locator('#settings-llm-review-save').click()
+  }
+
+  function passed(scenario, evidence) {
+    report.scenarios['R-SETTINGS-REVIEW'][scenario] = {
+      passed: true,
+      evidence,
+    }
+  }
+
+  stage = 'admin-sign-in'
+  await page.goto(`${BASE}/login`)
+  await page.evaluate(() => {
+    window.localStorage.setItem('prompt-ferry:locale', 'en-US')
+    window.localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await signIn('admin')
+  await clearFaults()
+  await page.waitForTimeout(600)
+  collecting = true
+
+  stage = 'route-render'
+  await openReview()
+  const routeId = await page
+    .locator('[data-foundation-route-id]')
+    .getAttribute('data-foundation-route-id')
+  const routeTab = await page
+    .locator('[data-foundation-route-id]')
+    .getAttribute('data-settings-tab')
+  assert(
+    routeId === 'R-SETTINGS-REVIEW' && routeTab === 'review',
+    `the review route identity is wrong: ${routeId}/${routeTab}`,
+  )
+  assert(
+    (await page
+      .locator('[data-foundation-route-id="R-SETTINGS-REVIEW"] h1')
+      .innerText()) === 'Review',
+    'the review heading is not localized',
+  )
+
+  const controls = await page.evaluate(() => {
+    const ids = [
+      'settings-llm-review-enabled',
+      'settings-llm-review-base-url',
+      'settings-llm-review-model',
+      'settings-llm-review-api-key',
+      'settings-llm-review-failure-policy',
+      'settings-llm-review-timeout-ms',
+      'settings-llm-review-pending-ttl-seconds',
+      'settings-llm-review-custom-policy',
+      'settings-llm-review-webhook-enabled',
+      'settings-llm-review-webhook-url',
+      'settings-llm-review-webhook-bearer-token',
+      'settings-llm-review-extra-headers',
+    ]
+    return {
+      missing: ids.filter(id => document.getElementById(id) === null),
+      groups: [...document.querySelectorAll('details')].map(node => ({
+        label: (node.querySelector('summary')?.textContent ?? '').trim(),
+        open: node.hasAttribute('open'),
+      })),
+      apiKeyType: document
+        .getElementById('settings-llm-review-api-key')
+        ?.getAttribute('type'),
+      bearerType: document
+        .getElementById('settings-llm-review-webhook-bearer-token')
+        ?.getAttribute('type'),
+      enabled: document
+        .getElementById('settings-llm-review-enabled')
+        ?.getAttribute('data-state'),
+      failurePolicy: (
+        document.getElementById('settings-llm-review-failure-policy')
+          ?.textContent ?? ''
+      ).trim(),
+      timeout: document.getElementById('settings-llm-review-timeout-ms')?.value,
+      ttl: document.getElementById('settings-llm-review-pending-ttl-seconds')
+        ?.value,
+      baseUrl: document.getElementById('settings-llm-review-base-url')?.value,
+      model: document.getElementById('settings-llm-review-model')?.value,
+      headers: document.getElementById('settings-llm-review-extra-headers')
+        ?.value,
+      hintVisible: document.body.innerText.includes(
+        'PostgreSQL storage mode only.',
+      ),
+      apiKeyPresent: Boolean(
+        document.getElementById('settings-llm-review-api-key')?.value,
+      ),
+      bearerPresent: Boolean(
+        document.getElementById('settings-llm-review-webhook-bearer-token')
+          ?.value,
+      ),
+    }
+  })
+  assert(controls.missing.length === 0, `missing controls: ${controls.missing}`)
+  assert(
+    controls.groups.length === 3 &&
+      controls.groups.every(group => group.label.length > 0),
+    `the three collapsible groups are missing: ${JSON.stringify(controls.groups)}`,
+  )
+  assert(
+    controls.apiKeyType === 'password' && controls.bearerType === 'password',
+    'the two secrets are not password inputs',
+  )
+  assert(controls.enabled === 'checked', 'the loaded enabled switch is wrong')
+  assert(
+    controls.failurePolicy.includes('Block on failure'),
+    `the failure policy default is not fail_closed: ${controls.failurePolicy}`,
+  )
+  assert(
+    controls.timeout === '8000' && controls.ttl === '120',
+    `the loaded numbers are wrong: ${controls.timeout}/${controls.ttl}`,
+  )
+  assert(
+    controls.baseUrl === 'https://review.example.internal' &&
+      controls.model === 'review-model',
+    `the loaded base URL or model is wrong: ${JSON.stringify(controls)}`,
+  )
+  assert(
+    controls.headers === 'X-Fixture-Header: enabled',
+    `the loaded extra headers are wrong: ${controls.headers}`,
+  )
+  assert(controls.hintVisible, 'the PostgreSQL storage-mode hint is not visible')
+  assert(
+    readsFor('route-render').length === 1 &&
+      readsFor('route-render')[0].path === LLM_REVIEW,
+    `the mount read ${JSON.stringify(readsFor('route-render'))}`,
+  )
+  assert(
+    writesFor('route-render').length === 0,
+    'mounting the review tab saved the settings',
+  )
+  await capture('settings-review-en-light-1440')
+  report.checks.routeRender = { routeId, routeTab, controls }
+  passed(
+    'route-render',
+    'the admin review route renders one card with all twelve controls, three native disclosure groups, password-only secrets and the PostgreSQL hint, from exactly one read and no write',
+  )
+
+  stage = 'no-autosave'
+  await setText('settings-llm-review-model', 'typed-model')
+  await page.waitForTimeout(900)
+  assert(
+    writesFor('no-autosave').length === 0,
+    'editing a field autosaved the review settings',
+  )
+  report.checks.noAutosave = { writes: 0 }
+
+  stage = 'mutation-update'
+  await setText('settings-llm-review-base-url', 'https://review2.example.internal')
+  await setText('settings-llm-review-model', 'review-model-2')
+  await setNumber('settings-llm-review-timeout-ms', 4500)
+  await setNumber('settings-llm-review-pending-ttl-seconds', 60)
+  await openGroup('Custom review policy')
+  await openGroup('Webhook')
+  await setText('settings-llm-review-custom-policy', 'Updated fixture policy')
+  await page.locator('#settings-llm-review-failure-policy').click()
+  await page.getByRole('option', { name: 'Allow on failure', exact: true }).click()
+  await setText(
+    'settings-llm-review-extra-headers',
+    'X-One: 1\nX-Url: https://a.example/x:y',
+  )
+  await save()
+  await page.waitForTimeout(900)
+  const updateWrites = writesFor('mutation-update')
+  assert(updateWrites.length === 1, `the save sent ${updateWrites.length} writes`)
+  const updateBody = updateWrites[0].body
+  assert(
+    JSON.stringify(updateBody.keys) ===
+      JSON.stringify([
+        'custom_policy_text',
+        'enabled',
+        'failure_policy',
+        'pending_ttl_seconds',
+        'review_api_key',
+        'review_base_url',
+        'review_model',
+        'review_timeout_ms',
+        'webhook',
+      ]),
+    `the save body does not carry every field: ${JSON.stringify(updateBody.keys)}`,
+  )
+  assert(
+    JSON.stringify(updateBody.webhookKeys) ===
+      JSON.stringify(['bearer_token', 'enabled', 'extra_headers', 'url']),
+    `the webhook body is not complete: ${JSON.stringify(updateBody.webhookKeys)}`,
+  )
+  assert(
+    updateBody.review_base_url === 'https://review2.example.internal' &&
+      updateBody.review_model === 'review-model-2' &&
+      updateBody.review_timeout_ms === 4500 &&
+      updateBody.pending_ttl_seconds === 60 &&
+      updateBody.failure_policy === 'fail_open' &&
+      updateBody.custom_policy_text === 'Updated fixture policy' &&
+      updateBody.enabled === true &&
+      updateBody.webhook_enabled === true &&
+      updateBody.webhook_url === 'https://review.example.internal/webhook',
+    `the saved values are wrong: ${JSON.stringify(updateBody)}`,
+  )
+  assert(
+    JSON.stringify(updateBody.extra_headers) ===
+      JSON.stringify({ 'X-One': '1', 'X-Url': 'https://a.example/x:y' }),
+    `the header roundtrip lost its first-colon values: ${JSON.stringify(updateBody.extra_headers)}`,
+  )
+  assert(
+    updateBody.review_api_key_present === false ||
+      updateBody.review_api_key_present === true,
+    'the API key presence flag is malformed',
+  )
+  const savedStored = await storedSettings()
+  assert(
+    savedStored.review_base_url === 'https://review2.example.internal' &&
+      savedStored.review_model === 'review-model-2' &&
+      savedStored.review_timeout_ms === 4500 &&
+      savedStored.pending_ttl_seconds === 60 &&
+      savedStored.failure_policy === 'fail_open' &&
+      savedStored.custom_policy_text === 'Updated fixture policy' &&
+      JSON.stringify(savedStored.webhook.extra_headers) ===
+        JSON.stringify({ 'X-One': '1', 'X-Url': 'https://a.example/x:y' }),
+    `the stored review settings are wrong: ${JSON.stringify(savedStored)}`,
+  )
+  await waitForNoToasts('LLM review settings saved')
+  report.checks.mutationUpdate = {
+    writes: updateWrites.length,
+    body: updateBody,
+    stored: savedStored,
+  }
+  passed(
+    'mutation-update',
+    'one manual save sends the whole object including the assembled webhook, the failure policy changes to fail_open, header values keep their colons, and the stored record matches',
+  )
+
+  stage = 'secret-keep-and-clear'
+  await openReview()
+  await openGroup('Execution')
+  await openGroup('Webhook')
+  await setText('settings-llm-review-api-key', 'synthetic-browser-key')
+  await setText(
+    'settings-llm-review-webhook-bearer-token',
+    'synthetic-browser-token',
+  )
+  await save()
+  await page.waitForTimeout(900)
+  const secretWrite = writesFor('secret-keep-and-clear')
+  assert(secretWrite.length === 1, 'the secret set did not send one write')
+  assert(
+    secretWrite[0].body.review_api_key_present === true &&
+      secretWrite[0].body.webhook_bearer_token_present === true,
+    'the secret set did not carry both secrets',
+  )
+  const afterSet = await storedSettings()
+  assert(
+    afterSet.review_api_key_present === true &&
+      afterSet.webhook.bearer_token_present === true,
+    'the fixture did not store the secrets',
+  )
+  await waitForNoToasts('LLM review settings saved')
+
+  await openReview()
+  const loadedSecrets = await page.evaluate(() => ({
+    apiKeyPresent: Boolean(
+      document.getElementById('settings-llm-review-api-key')?.value,
+    ),
+    bearerPresent: Boolean(
+      document.getElementById('settings-llm-review-webhook-bearer-token')
+        ?.value,
+    ),
+    bodyLeak: document.body.innerText.includes('synthetic-browser-key'),
+    titleLeak: [...document.querySelectorAll('[title]')].some(node =>
+      (node.getAttribute('title') ?? '').includes('synthetic-browser'),
+    ),
+    storageLeak: Object.keys(window.localStorage).some(key =>
+      String(window.localStorage.getItem(key)).includes('synthetic-browser'),
+    ),
+  }))
+  assert(
+    loadedSecrets.apiKeyPresent &&
+      loadedSecrets.bearerPresent &&
+      !loadedSecrets.bodyLeak &&
+      !loadedSecrets.titleLeak &&
+      !loadedSecrets.storageLeak,
+    `the secret visibility contract is broken: ${JSON.stringify(loadedSecrets)}`,
+  )
+  await setText('settings-llm-review-model', 'review-model-3')
+  await save()
+  await page.waitForTimeout(900)
+  const untouchedWrite = writesFor('secret-keep-and-clear')[1]
+  assert(
+    untouchedWrite?.body.review_api_key_present === true &&
+      untouchedWrite?.body.webhook_bearer_token_present === true,
+    'an untouched save did not send the stored secrets back',
+  )
+  const afterUntouched = await storedSettings()
+  assert(
+    afterUntouched.review_api_key_present === true &&
+      afterUntouched.webhook.bearer_token_present === true,
+    'an untouched save cleared a stored secret',
+  )
+  await waitForNoToasts('LLM review settings saved')
+
+  await openReview()
+  await setText('settings-llm-review-api-key', '')
+  await save()
+  await page.waitForTimeout(900)
+  const clearedWrite = writesFor('secret-keep-and-clear')[2]
+  assert(
+    clearedWrite?.body.review_api_key_present === false,
+    'the cleared API key was not sent as empty',
+  )
+  const afterClear = await storedSettings()
+  assert(
+    afterClear.review_api_key_present === false &&
+      afterClear.webhook.bearer_token_present === true,
+    'clearing one secret affected the other',
+  )
+  report.checks.secretLifecycle = {
+    set: secretWrite[0].body.review_api_key_present,
+    loadedSecrets,
+    untouchedPresent: untouchedWrite.body.review_api_key_present,
+    clearedPresent: clearedWrite.body.review_api_key_present,
+    afterClear,
+  }
+  await waitForNoToasts('LLM review settings saved')
+
+  stage = 'validation-local-headers'
+  await openGroup('Webhook')
+  const beforeLocalError = writesFor('validation-local-headers').length
+  await setText('settings-llm-review-extra-headers', 'missing-colon')
+  assert(
+    (await page.getByText('Header format must be Name: value').count()) >= 1,
+    'the malformed header line is not reported in the form',
+  )
+  await save()
+  await page.waitForTimeout(900)
+  assert(
+    writesFor('validation-local-headers').length === beforeLocalError,
+    'a malformed header line still sent a request',
+  )
+  await waitForNoToasts('LLM review settings saved')
+  report.checks.localHeaderError = { writes: 0 }
+  await setText('settings-llm-review-extra-headers', 'X-Clean: 1')
+
+  stage = 'validation-server-400'
+  await setText('settings-llm-review-base-url', 'https://review3.example.internal/v1')
+  await save()
+  await page.waitForTimeout(900)
+  const serverErrorWrites = writesFor('validation-server-400')
+  assert(serverErrorWrites.length === 1, 'the invalid base URL did not send one write')
+  const serverAlerts = await page.getByRole('alert').allInnerTexts()
+  assert(
+    serverAlerts.some(text => text.includes('review_base_url must not include /v1')),
+    `the server validation message is not shown: ${JSON.stringify(serverAlerts)}`,
+  )
+  assert(
+    (await page
+      .locator('#settings-llm-review-base-url')
+      .inputValue()) === 'https://review3.example.internal/v1',
+    'the invalid draft was dropped',
+  )
+  assert(
+    (await toastCount('LLM review settings saved')) === 0,
+    'the invalid save reported a success',
+  )
+  await setText('settings-llm-review-base-url', 'https://review3.example.internal')
+  await save()
+  await page.waitForTimeout(900)
+  assert(
+    writesFor('validation-server-400').length === 2,
+    'the corrected draft did not retry through Save',
+  )
+  const afterCorrected = await storedSettings()
+  assert(
+    afterCorrected.review_base_url === 'https://review3.example.internal',
+    'the corrected base URL was not stored',
+  )
+  report.checks.serverValidation = {
+    writes: writesFor('validation-server-400').length,
+    alerts: serverAlerts,
+    corrected: afterCorrected.review_base_url,
+  }
+  await waitForNoToasts('LLM review settings saved')
+
+  stage = 'disabled-validation-bypass'
+  const probes = await page.evaluate(async () => {
+    const read = await (await fetch('/api/v1/settings/llm-review')).json()
+    const patch = async body => {
+      const response = await fetch('/api/v1/settings/llm-review', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const payload = await response.json().catch(() => null)
+      return { status: response.status, payload }
+    }
+    const base = {
+      custom_policy_text: '',
+      enabled: true,
+      failure_policy: 'fail_closed',
+      pending_ttl_seconds: 300,
+      review_api_key: '',
+      review_base_url: 'https://review.example.internal',
+      review_model: 'review-model',
+      review_timeout_ms: 3000,
+      webhook: {
+        bearer_token: '',
+        enabled: false,
+        extra_headers: {},
+        url: '',
+      },
+    }
+    const results = {
+      currentBaseUrl: read.review_base_url,
+      emptyBaseUrl: await patch({ ...base, review_base_url: '  ' }),
+      v1Suffix: await patch({ ...base, review_base_url: 'https://a.example/v1/' }),
+      emptyModel: await patch({ ...base, review_model: '' }),
+      lowTimeout: await patch({ ...base, review_timeout_ms: 99 }),
+      zeroTtl: await patch({ ...base, pending_ttl_seconds: 0 }),
+      webhookNoUrl: await patch({
+        ...base,
+        webhook: { ...base.webhook, enabled: true, url: '   ' },
+      }),
+      emptyHeaderName: await patch({
+        ...base,
+        webhook: {
+          ...base.webhook,
+          extra_headers: { '  ': 'value' },
+        },
+      }),
+      multiLineHeader: await patch({
+        ...base,
+        webhook: {
+          ...base.webhook,
+          extra_headers: { 'X-Bad': 'line1\nline2' },
+        },
+      }),
+      disabledInvalid: await patch({
+        ...base,
+        enabled: false,
+        review_base_url: '',
+        review_model: '',
+        review_timeout_ms: 1,
+        pending_ttl_seconds: 0,
+        webhook: { ...base.webhook, enabled: true, url: '' },
+      }),
+      restore: await patch({ ...base, review_model: 'review-model' }),
+    }
+    return results
+  })
+  for (const [name, expected] of [
+    ['emptyBaseUrl', 'review_base_url is required when LLM review is enabled'],
+    ['v1Suffix', 'review_base_url must not include /v1'],
+    ['emptyModel', 'review_model is required when LLM review is enabled'],
+    ['lowTimeout', 'review_timeout_ms must be at least 100'],
+    ['zeroTtl', 'pending_ttl_seconds must be at least 1'],
+    ['webhookNoUrl', 'webhook.url is required when webhook is enabled'],
+    [
+      'emptyHeaderName',
+      'webhook.extra_headers must not contain empty header names',
+    ],
+    ['multiLineHeader', 'webhook.extra_headers values must be single-line'],
+  ]) {
+    const result = probes[name]
+    assert(
+      result.status === 400 &&
+        result.payload?.error?.code === 'bad_request' &&
+        result.payload?.error?.message === expected,
+      `the ${name} validation case is wrong: ${JSON.stringify(result)}`,
+    )
+  }
+  assert(
+    probes.disabledInvalid.status === 200,
+    `a disabled review did not accept invalid values: ${JSON.stringify(probes.disabledInvalid)}`,
+  )
+  assert(
+    probes.restore.status === 200 &&
+      probes.restore.payload?.review_model === 'review-model',
+    'the restore patch failed',
+  )
+  report.checks.serverValidationCases = probes
+  await openReview()
+
+  stage = 'double-save'
+  await injectFault({
+    pathPrefix: LLM_REVIEW,
+    method: 'PATCH',
+    status: 200,
+    delayMs: 900,
+    count: 1,
+  })
+  await setText('settings-llm-review-model', 'review-model-4')
+  await page.evaluate(() => {
+    const button = document.getElementById('settings-llm-review-save')
+    button?.click()
+    button?.click()
+  })
+  await page.waitForTimeout(2000)
+  assert(
+    writesFor('double-save').length === 1,
+    `a double save sent ${writesFor('double-save').length} writes`,
+  )
+  assert(
+    (await toastCount('LLM review settings saved')) === 1,
+    'a double save confirmed more than once',
+  )
+  report.checks.doubleSave = { writes: 1 }
+  await clearFaults()
+  await waitForNoToasts('LLM review settings saved')
+
+  stage = 'newer-draft'
+  await injectFault({
+    pathPrefix: LLM_REVIEW,
+    method: 'PATCH',
+    status: 200,
+    delayMs: 900,
+    count: 1,
+  })
+  await openGroup('Custom review policy')
+  await setText('settings-llm-review-custom-policy', 'submitted policy')
+  await save()
+  await page.waitForTimeout(300)
+  await setText('settings-llm-review-custom-policy', 'newer policy')
+  await page.waitForTimeout(2200)
+  assert(
+    (await page
+      .locator('#settings-llm-review-custom-policy')
+      .inputValue()) === 'newer policy',
+    'a draft typed during the save was overwritten',
+  )
+  assert(
+    await page.locator('#settings-review-refresh').isDisabled(),
+    'the scoped refresh stayed enabled over an unsaved draft',
+  )
+  report.checks.newerDraft = { kept: 'newer policy' }
+  await clearFaults()
+
+  stage = 'mutation-failure-draft'
+  await waitForNoToasts('LLM review settings saved')
+  await injectFault({ pathPrefix: LLM_REVIEW, method: 'PATCH', status: 503, count: 1 })
+  await openGroup('Custom review policy')
+  await setText('settings-llm-review-custom-policy', 'transport-failure policy')
+  await save()
+  await page.waitForTimeout(900)
+  assert(
+    writesFor('mutation-failure-draft').length === 1,
+    'the failing save did not send one write',
+  )
+  assert(
+    (await page.getByRole('alert').count()) === 1,
+    'the transport failure did not report exactly one error',
+  )
+  assert(
+    (await page
+      .locator('#settings-llm-review-custom-policy')
+      .inputValue()) === 'transport-failure policy',
+    'the transport failure dropped the draft',
+  )
+  await page.waitForTimeout(1200)
+  assert(
+    writesFor('mutation-failure-draft').length === 1,
+    'the failed save retried itself',
+  )
+  await clearFaults()
+  await save()
+  await page.waitForTimeout(900)
+  assert(
+    writesFor('mutation-failure-draft').length === 2,
+    'the Save retry did not resend the draft',
+  )
+  const afterRetry = await storedSettings()
+  assert(
+    afterRetry.custom_policy_text === 'transport-failure policy',
+    'the retried draft was not stored',
+  )
+  report.checks.failureDraft = { writes: 2, stored: afterRetry.custom_policy_text }
+  await capture('settings-review-failure-en-light-1440')
+  passed(
+    'mutation-failure-draft',
+    'a 503 reports one error and keeps the draft without retrying itself, and the Save button resends the same draft successfully',
+  )
+
+  stage = 'scoped-refresh'
+  await waitForNoToasts('LLM review settings saved')
+  const readsBefore = readsFor('scoped-refresh').length
+  await page.locator('#settings-review-refresh').click()
+  await page.waitForTimeout(900)
+  assert(
+    readsFor('scoped-refresh').length - readsBefore === 1,
+    `the scoped refresh issued ${readsFor('scoped-refresh').length - readsBefore} reads`,
+  )
+  assert(
+    writesFor('scoped-refresh').length === 0,
+    'a refresh saved the settings',
+  )
+  await setText('settings-llm-review-model', 'dirty-model')
+  assert(
+    await page.locator('#settings-review-refresh').isDisabled(),
+    'the refresh stayed enabled over a dirty form',
+  )
+  report.checks.scopedRefresh = { reads: 1, writes: 0 }
+
+  stage = 'locale-theme-no-refetch'
+  const readsBeforeToggle = readsFor('locale-theme-no-refetch').length
+  const writesBeforeToggle = writesFor('locale-theme-no-refetch').length
+  await page.getByRole('button', { name: 'Language', exact: true }).click()
+  await page.waitForTimeout(400)
+  await page.getByRole('button', { name: /^(Dark|暗色)$/ }).click()
+  await page.waitForTimeout(600)
+  assert(
+    (await page.evaluate(() => document.documentElement.lang)) === 'zh-CN' &&
+      (await page.evaluate(() =>
+        document.documentElement.classList.contains('dark'),
+      )) === true,
+    'the locale or theme change did not reach the document',
+  )
+  assert(
+    readsFor('locale-theme-no-refetch').length === readsBeforeToggle &&
+      writesFor('locale-theme-no-refetch').length === writesBeforeToggle,
+    'a locale/theme rerender refetched or saved the review settings',
+  )
+  report.checks.localeThemeNoRefetch = { reads: 0, writes: 0 }
+
+  stage = 'responsive-en'
+  await page.evaluate(() => {
+    window.localStorage.setItem('prompt-ferry:locale', 'en-US')
+    window.localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await openReview()
+  const profile = []
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.evaluate(() => {
+      for (const node of document.querySelectorAll('details')) {
+        node.setAttribute('open', '')
+      }
+    })
+    await page.waitForTimeout(250)
+    const measured = await page.evaluate(() => {
+      const ids = [
+        'settings-llm-review-enabled',
+        'settings-llm-review-base-url',
+        'settings-llm-review-model',
+        'settings-llm-review-api-key',
+        'settings-llm-review-failure-policy',
+        'settings-llm-review-timeout-ms',
+        'settings-llm-review-pending-ttl-seconds',
+        'settings-llm-review-custom-policy',
+        'settings-llm-review-webhook-enabled',
+        'settings-llm-review-webhook-url',
+        'settings-llm-review-webhook-bearer-token',
+        'settings-llm-review-extra-headers',
+        'settings-llm-review-save',
+        'settings-review-refresh',
+      ]
+      return {
+        controls: ids.map(id => {
+          const rect = document.getElementById(id)?.getBoundingClientRect()
+          return rect
+            ? { id, left: Math.round(rect.left), right: Math.round(rect.right) }
+            : { id, left: -1, right: -1 }
+        }),
+        groups: document.querySelectorAll('details').length,
+        documentWidth: document.documentElement.scrollWidth,
+        viewport: window.innerWidth,
+      }
+    })
+    assert(measured.groups === 3, `the ${width}px layout lost a group`)
+    assert(
+      measured.documentWidth <= measured.viewport,
+      `the review tab overflows at ${width}px (${measured.documentWidth} > ${measured.viewport})`,
+    )
+    for (const control of measured.controls) {
+      assert(
+        control.left >= 0 &&
+          control.right <= measured.viewport &&
+          control.right > control.left,
+        `the ${control.id} control is not reachable at ${width}px`,
+      )
+    }
+    profile.push({ width, documentWidth: measured.documentWidth })
+    if (width === 390) await capture('settings-review-en-light-390')
+  }
+  report.checks.responsive = profile
+
+  stage = 'collapsible-groups'
+  await openReview()
+  const groupState = await page.evaluate(() => {
+    const groups = [...document.querySelectorAll('details')]
+    const states = groups.map(node => node.hasAttribute('open'))
+    // Each group opens and closes independently through its own summary.
+    groups[1]?.querySelector('summary')?.click()
+    const afterOpen = groups[1]?.hasAttribute('open')
+    groups[2]?.querySelector('summary')?.click()
+    const afterSecond = groups[2]?.hasAttribute('open')
+    const first = groups[0]?.hasAttribute('open')
+    groups[1]?.querySelector('summary')?.click()
+    const afterClose = groups[1]?.hasAttribute('open')
+    return { states, afterOpen, afterSecond, first, afterClose }
+  })
+  assert(
+    groupState.afterOpen === true &&
+      groupState.afterSecond === true &&
+      groupState.afterClose === false &&
+      groupState.first === true,
+    `a collapsed group did not open or close independently: ${JSON.stringify(groupState)}`,
+  )
+  assert(
+    (await page.locator('#settings-llm-review-custom-policy').count()) === 1 &&
+      (await page.locator('#settings-llm-review-webhook-url').count()) === 1,
+    'opening the groups lost a field',
+  )
+  report.checks.collapsible = groupState
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  stage = 'locale-zh'
+  await page.evaluate(() => {
+    window.localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    window.localStorage.setItem('prompt-ferry:theme-mode', 'dark')
+  })
+  await openReview()
+  const zh = await page.evaluate(() => ({
+    heading: (
+      document.querySelector(
+        '[data-foundation-route-id="R-SETTINGS-REVIEW"] h1',
+      )?.textContent ?? ''
+    ).trim(),
+    body: document.body.innerText,
+    labels: [...document.querySelectorAll('label')].map(node =>
+      (node.textContent ?? '').trim(),
+    ),
+  }))
+  assert(zh.heading === '审核', `the Chinese heading is wrong: ${zh.heading}`)
+  assert(
+    zh.labels.includes('审核 Base URL') &&
+      zh.labels.includes('失败策略') &&
+      zh.body.includes('仅在 PostgreSQL 存储模式下生效。'),
+    `the Chinese copy is wrong: ${JSON.stringify(zh.labels)}`,
+  )
+  await capture('settings-review-zh-dark-1440')
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.waitForTimeout(300)
+  assert(
+    !(await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    )),
+    'the Chinese dark review tab overflows at 390px',
+  )
+  await capture('settings-review-zh-dark-390')
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  collecting = false
+
+  stage = 'admin-denial'
+  await signOut()
+  await signIn('operator')
+  const operatorNav = await page.evaluate(() =>
+    [...document.querySelectorAll('nav a')].map(link =>
+      link.getAttribute('href'),
+    ),
+  )
+  const navHidden = !operatorNav.includes('/settings/review')
+  assert(navHidden, 'the ordinary-user nav exposes the review settings route')
+  await page.goto(`${BASE}/settings/review`)
+  await page.waitForTimeout(700)
+  const redirected = new URL(page.url()).pathname !== '/settings/review'
+  assert(redirected, 'an ordinary user stayed on the admin review route')
+  assert(
+    (await page
+      .locator('[data-foundation-route-id="R-SETTINGS-REVIEW"]')
+      .count()) === 0,
+    'an ordinary user rendered the review settings section',
+  )
+  const forged = await page.evaluate(async () => {
+    const patch = await fetch('/api/v1/settings/llm-review', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: false }),
+    })
+    const read = await fetch('/api/v1/settings/llm-review')
+    return { patch: patch.status, read: read.status }
+  })
+  assert(
+    forged.patch === 403 && forged.read === 403,
+    `the fixture answered a non-admin review request with ${JSON.stringify(forged)}`,
+  )
+  await page.goto(`${BASE}/settings/general`)
+  await page.waitForSelector('[data-foundation-route-id="R-SETTINGS-GENERAL"]')
+  assert(
+    (await page.locator('[data-settings-card]').count()) === 3,
+    'the ordinary user lost the general settings tab',
+  )
+  await page.goto(`${BASE}/redaction/rules`)
+  await page.waitForSelector('[data-foundation-route-id="R-REDACTION-RULES"]')
+  const redactionScoped = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/settings/redaction')
+    return response.status
+  })
+  assert(
+    redactionScoped === 200,
+    `the ordinary-user redaction setting returned ${redactionScoped}`,
+  )
+  await signOut()
+  const anonymous = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/settings/llm-review')
+    return response.status
+  })
+  assert(anonymous === 401, `an anonymous review read returned ${anonymous}`)
+  report.checks.adminDenial = {
+    navHidden,
+    redirected,
+    forgedPatch: forged.patch,
+    forgedRead: forged.read,
+    generalIntact: true,
+    redactionIntact: redactionScoped,
+    anonymousRead: anonymous,
+  }
+  passed(
+    'admin-denial',
+    'an ordinary user has no review link, is redirected away from the route without rendering it, is refused with 403 on forged review reads and writes, and still reaches the general and redaction settings while an anonymous read is refused with 401',
+  )
+  await signIn('admin')
+
+  stage = 'finish'
+  report.checks.officialPendingRoutes = 0
+  report.checks.unexpectedWindow = 'mounted admin review tab stages'
+  report.limitations.push(
+    'Evidence is the synthetic fixture and its stored settings; no PostgreSQL review execution, provider call, webhook delivery or production behaviour is claimed.',
+    'The secrets are asserted as booleans and presence flags only; the 400, 401, 403 and 503 cases run against fixture validation, the role gate and fault injection.',
+  )
+  report.checks.limitations = report.limitations
+  report.finishedAt = new Date().toISOString()
+  return report
+}

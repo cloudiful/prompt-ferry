@@ -1,3 +1,5 @@
+import type { TranslateFn } from '@/i18n'
+
 // Issue #1045: a schedule row with both time fields empty means "all day on
 // the selected weekdays". The API stores it as the canonical `00:00`-`24:00`
 // window; only a partially filled row is invalid. The shared schedule editor,

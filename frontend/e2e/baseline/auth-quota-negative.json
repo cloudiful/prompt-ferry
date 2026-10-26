@@ -1,0 +1,109 @@
+{
+  "startedAt": "2026-10-23T16:25:26.504Z",
+  "checks": {
+    "oauth": {
+      "deviceFailure": [
+        {
+          "at": "2026-10-23T16:25:30.353Z",
+          "method": "POST",
+          "path": "/api/v1/admin/endpoints/ep-openai-codex/oauth/device",
+          "query": {},
+          "status": 500,
+          "ms": 0
+        }
+      ],
+      "browserFailure": [
+        {
+          "at": "2026-10-23T16:25:31.030Z",
+          "method": "POST",
+          "path": "/api/v1/admin/endpoints/ep-openai-codex/oauth/browser",
+          "query": {},
+          "status": 500,
+          "ms": 0
+        }
+      ],
+      "dismissalBlocked": true,
+      "closed": true,
+      "afterClose": [
+        {
+          "at": "2026-10-23T16:25:33.593Z",
+          "method": "GET",
+          "path": "/api/v1/me/models",
+          "query": {
+            "first": "0",
+            "rows": "10"
+          },
+          "status": 200,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:25:34.341Z",
+          "method": "POST",
+          "path": "/api/v1/admin/endpoints/ep-openai-codex/oauth/device/poll",
+          "query": {},
+          "status": 200,
+          "ms": 1601
+        }
+      ],
+      "statusAfterCancel": true,
+      "text": "编辑上游节点\nuser\nOpenAI\nResponses\n上游计划\n官方 API Key（Platform）\n所属用户\noperator\nAPI 密钥\n启用 endpoint key 分流\n新增 API key\n名称\tAPI 密钥\t状态\t\n\n没有数据\nChatGPT 登录\n未登录\n设备码登录（Headless）\n开始登录\n\n在浏览器打开下方地址并输入设备码；确认后本页会自动完成登录。\n\n浏览器登录\n获取授权链接\n\n打开授权链接完成登录，浏览器会跳转到 http://localhost:1455/auth/callback；把地址栏中的完整跳转地址粘贴回来即可完成。\n\n端点设置\n取消\n保存上游节点"
+    },
+    "quota": {
+      "failed": [
+        {
+          "at": "2026-10-23T16:25:40.099Z",
+          "method": "GET",
+          "path": "/api/v1/admin/endpoints/ep-minimax-cn/quota-observations",
+          "query": {
+            "limit": "50"
+          },
+          "status": 500,
+          "ms": 0
+        }
+      ],
+      "text": "套餐用量 / MiniMax Platform China Production\nprimary\n可用\n最低剩余 62.0% · 2 个窗口\nminimax-m2\n观测时间：2026年10月23日 20:00\n5 小时窗口\n还有 34 分钟重置\n剩余 62.0%\n38.00 / 100.00\n周窗口\n-\n—\n按键额度历史\n趋势图\n列表\n全部按键\n\n无法加载额度历史。 重试",
+      "buttons": [
+        "",
+        "primary可用最低剩余 62.0% · 2 个窗口",
+        "按键额度历史",
+        "趋势图",
+        "列表",
+        "重试"
+      ],
+      "retry": [
+        {
+          "at": "2026-10-23T16:25:40.099Z",
+          "method": "GET",
+          "path": "/api/v1/admin/endpoints/ep-minimax-cn/quota-observations",
+          "query": {
+            "limit": "50"
+          },
+          "status": 500,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:25:41.001Z",
+          "method": "GET",
+          "path": "/__fixtures/log",
+          "query": {
+            "limit": "500"
+          },
+          "status": 200,
+          "ms": 0
+        },
+        {
+          "at": "2026-10-23T16:25:41.064Z",
+          "method": "GET",
+          "path": "/api/v1/admin/endpoints/ep-minimax-cn/quota-observations",
+          "query": {
+            "limit": "50"
+          },
+          "status": 200,
+          "ms": 0
+        }
+      ]
+    }
+  },
+  "failures": [],
+  "finishedAt": "2026-10-23T16:25:41.966Z"
+}

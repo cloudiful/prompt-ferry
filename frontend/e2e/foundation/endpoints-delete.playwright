@@ -1,0 +1,67 @@
+async page => {
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const report = { startedAt: new Date().toISOString(), checks: {}, screenshots: [] }
+  function assert(condition, message) {
+    if (!condition) throw new Error(message)
+  }
+  const consoleErrors = []
+  const pageErrors = []
+  page.setDefaultTimeout(7000)
+  const onConsole = message => {
+    if (message.type() === 'error' && !/(?:status of )?(?:401|500|503)\b/.test(message.text())) consoleErrors.push(message.text())
+  }
+  const onPageError = error => pageErrors.push(error.message)
+  page.on('console', onConsole)
+  page.on('pageerror', onPageError)
+
+  async function fixture(path) {
+    const response = await fetch(`${FIXTURE}${path}`)
+    if (!response.ok) throw new Error(`fixture GET ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  async function waitForResponse(method, pathname, status) {
+    return page.waitForResponse(response => response.request().method() === method && new URL(response.url()).pathname === pathname && response.status() === status, { timeout: 7000 })
+  }
+
+  const createdId = await page.evaluate(() => sessionStorage.getItem('p4c4-created-endpoint-id'))
+  assert(createdId, 'created endpoint id was not carried into the delete browser slice')
+  const row = page.locator(`[data-endpoint-row="${createdId}"]`)
+  await page.evaluate(() => console.log('delete-slice-start'))
+  const toggle = row.getByRole('switch')
+  const offResponse = waitForResponse('PATCH', `/api/v1/admin/endpoints/${createdId}`, 200)
+  await toggle.click()
+  await offResponse
+  assert(await toggle.getAttribute('aria-checked') === 'false', 'endpoint toggle did not render disabled state')
+  const probeResponse = waitForResponse('POST', `/api/v1/admin/endpoints/${createdId}/test`, 200)
+  await row.getByRole('button', { name: 'Test', exact: true }).click()
+  await probeResponse
+  const probeResult = row.locator('button[aria-label*="fixture upstream accepted the probe"]')
+  await probeResult.waitFor({ state: 'visible' })
+  const probeAccessibleName = await probeResult.getAttribute('aria-label')
+  assert(probeAccessibleName.includes('HTTP 200'), 'probe response was not exposed through its accessible result')
+  const onResponse = waitForResponse('PATCH', `/api/v1/admin/endpoints/${createdId}`, 200)
+  await toggle.click()
+  await onResponse
+  report.checks.toggleAndIndependentProbe = { toggledOff: true, probePath: `/api/v1/admin/endpoints/${createdId}/test`, probeResultRendered: true, accessibleName: probeAccessibleName, restored: true }
+  await page.evaluate(() => console.log('delete-slice-before-confirm'))
+
+  await page.evaluate(() => { window.confirm = () => false })
+  await row.getByRole('button', { name: 'Delete', exact: true }).click()
+  await row.waitFor({ state: 'visible' })
+  const deleteCallsBefore = (await fixture('/__fixtures/log?limit=500')).requests.filter(request => request.method === 'DELETE' && request.path === `/api/v1/admin/endpoints/${createdId}`).length
+  assert(deleteCallsBefore === 0, 'cancelled endpoint delete issued a request')
+  await page.evaluate(() => { window.confirm = () => true })
+  const deleteResponse = waitForResponse('DELETE', `/api/v1/admin/endpoints/${createdId}`, 204)
+  await row.getByRole('button', { name: 'Delete', exact: true }).click()
+  await deleteResponse
+  await row.waitFor({ state: 'hidden' })
+  report.checks.deleteCancelAndSuccess = { cancelledWrites: deleteCallsBefore, successfulDelete: true }
+  report.checks.consoleErrors = consoleErrors
+  report.checks.pageErrors = pageErrors
+  assert(pageErrors.length === 0, `browser page errors: ${JSON.stringify(pageErrors)}`)
+  page.off('console', onConsole)
+  page.off('pageerror', onPageError)
+  report.finishedAt = new Date().toISOString()
+  return report
+}

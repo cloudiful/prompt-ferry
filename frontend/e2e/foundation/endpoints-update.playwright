@@ -1,0 +1,121 @@
+async page => {
+  const FIXTURE = 'http://127.0.0.1:8789'
+  const report = { startedAt: new Date().toISOString(), checks: {}, screenshots: [] }
+  function assert(condition, message) {
+    if (!condition) throw new Error(message)
+  }
+  const consoleErrors = []
+  const pageErrors = []
+  const updatePayloads = []
+  const onConsole = message => {
+    if (message.type() === 'error' && !/(?:status of )?(?:401|500|503)\b/.test(message.text())) consoleErrors.push(message.text())
+  }
+  const onPageError = error => pageErrors.push(error.message)
+  page.on('console', onConsole)
+  page.on('pageerror', onPageError)
+
+  async function fixture(path, method = 'GET', body) {
+    const response = await fetch(`${FIXTURE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    if (!response.ok) throw new Error(`fixture ${method} ${path} -> ${response.status}`)
+    return response.json()
+  }
+
+  async function waitForResponse(method, pathname, status) {
+    return page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return response.request().method() === method && url.pathname === pathname && response.status() === status
+    }, { timeout: 7000 })
+  }
+
+  const createdId = await page.evaluate(() => sessionStorage.getItem('p4c4-created-endpoint-id'))
+  assert(createdId, 'created endpoint id was not carried into the update browser slice')
+  const dialog = page.getByRole('dialog').last()
+  const row = page.locator(`[data-endpoint-row="${createdId}"]`)
+  await row.getByRole('button', { name: 'Edit', exact: true }).click()
+  await dialog.waitFor({ state: 'visible' })
+  assert((await dialog.getByLabel('Scope').innerText()).includes('Private'), 'private endpoint scope did not reopen')
+  assert((await dialog.getByLabel('Type').innerText()).includes('MiniMax'), 'MiniMax provider did not reopen')
+  assert((await dialog.getByLabel('Region', { exact: true }).innerText()).includes('Global'), 'provider region did not reopen')
+  assert((await dialog.getByLabel('Owner').innerText()).includes('operator'), 'owner selection did not reopen')
+  assert(await dialog.getByText('Saved', { exact: true }).count() >= 1, 'saved API key state was not shown on edit')
+  assert(await dialog.getByRole('switch', { name: 'Status Primary fixture key' }).isDisabled(), 'last enabled key was not protected on edit')
+  await dialog.getByRole('button', { name: /Endpoint settings/ }).click()
+  assert((await dialog.getByLabel('Service tier').inputValue()) === 'tier-fixture', 'service tier did not survive reopening')
+  assert((await dialog.getByLabel('Proxy scheme').innerText()).includes('Keep saved proxy'), 'saved proxy did not reopen in keep state')
+  assert(await dialog.getByLabel('Proxy address').count() === 0, 'saved proxy secret was rendered into an input')
+  const startInputs = dialog.locator('input[type="time"]')
+  const endInputs = dialog.locator('input[pattern]')
+  assert(await startInputs.nth(0).inputValue() === '00:00' && await endInputs.nth(0).inputValue() === '24:00', 'all-day schedule did not reopen canonically')
+  assert(await startInputs.nth(1).inputValue() === '23:00' && await endInputs.nth(1).inputValue() === '02:00', 'overnight schedule did not reopen')
+  assert(await dialog.getByRole('button', { name: 'Sat', exact: true }).nth(1).getAttribute('aria-pressed') === 'true', 'weekend schedule days did not reopen')
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).first().click()
+  await dialog.getByLabel('Name', { exact: true }).fill('Fixture Upstream Browser Created Updated')
+
+  page.on('request', request => {
+    const url = new URL(request.url())
+    if (request.method() !== 'PATCH' || url.pathname !== `/api/v1/admin/endpoints/${createdId}`) return
+    const body = request.postDataJSON()
+    updatePayloads.push({
+      name: body.name,
+      provider: body.provider,
+      provider_region: body.provider_region,
+      scope: body.scope,
+      owner_user_id: body.owner_user_id,
+      key_lb_enabled: body.key_lb_enabled,
+      mcp_enabled: body.mcp_enabled,
+      protocol_mode: body.protocol_mode,
+      native_api_override: body.native_api_override,
+      service_tier: body.service_tier,
+      proxy_present: Object.hasOwn(body, 'proxy_url'),
+      proxy_empty: body.proxy_url === '',
+      windows_present: Object.hasOwn(body, 'active_windows'),
+      windows: body.active_windows,
+      admin_api_key_present: Object.hasOwn(body, 'admin_api_key'),
+      api_keys: (body.api_keys ?? []).map(key => ({ key_id: key.key_id, key_label: key.key_label, enabled: key.enabled, api_key_present: Boolean(key.api_key) })),
+    })
+  })
+
+  await fixture('/__fixtures/faults', 'POST', {
+    pathPrefix: `/api/v1/admin/endpoints/${createdId}`,
+    method: 'PATCH',
+    status: 503,
+    code: 'fixture_endpoint_update_unavailable',
+    message: 'fixture endpoint update failure',
+    delayMs: 600,
+  })
+  const updateFailure = waitForResponse('PATCH', `/api/v1/admin/endpoints/${createdId}`, 503)
+  await dialog.getByRole('button', { name: 'Save endpoint', exact: true }).click()
+  const saveDisabled = await dialog.getByRole('button', { name: 'Save endpoint', exact: true }).isDisabled()
+  const cancelDisabled = await dialog.getByRole('button', { name: 'Cancel', exact: true }).isDisabled()
+  const rowToggleDisabled = await row.locator('[role="switch"]').isDisabled()
+  const independentProbeEnabled = await row.locator('button[aria-label="Test"]').isEnabled()
+  const otherEndpointAvailable = await page.locator('[data-endpoint-row="ep-openrouter"] [role="switch"]').isEnabled()
+  assert(saveDisabled && cancelDisabled && rowToggleDisabled, 'endpoint write guard did not block conflicting controls and dialog dismissal')
+  assert(independentProbeEnabled && otherEndpointAvailable, 'endpoint write guard disabled independent probe or unrelated endpoint')
+  await updateFailure
+  const errorAlert = page.getByRole('alert').last()
+  await errorAlert.waitFor({ state: 'visible' })
+  const errorText = await errorAlert.innerText()
+  assert(errorText.length > 0, 'endpoint update failure was not rendered')
+  assert((await dialog.getByLabel('Name', { exact: true }).inputValue()) === 'Fixture Upstream Browser Created Updated', 'failed update discarded the form draft')
+  const updateSuccess = waitForResponse('PATCH', `/api/v1/admin/endpoints/${createdId}`, 200)
+  await dialog.getByRole('button', { name: 'Save endpoint', exact: true }).click()
+  await updateSuccess
+  await dialog.waitFor({ state: 'hidden' })
+  const payload = updatePayloads.at(-1)
+  assert(payload?.proxy_present === false && payload?.windows_present === false, 'ordinary edit sent untouched proxy or schedule')
+  assert(payload?.admin_api_key_present === false, 'untouched Admin API key was not omitted')
+  assert(payload?.api_keys?.[0]?.api_key_present === false && payload.api_keys[0].key_id, 'saved API key was not kept with its original row id and an empty secret')
+  report.checks.updateFailureDraftRetry = { saveDisabled, cancelDisabled, rowToggleDisabled, independentProbeEnabled, otherEndpointAvailable, errorVisible: true, draftRetained: true, retryStatus: 200, payload }
+  report.checks.consoleErrors = consoleErrors
+  report.checks.pageErrors = pageErrors
+  assert(pageErrors.length === 0, `browser page errors: ${JSON.stringify(pageErrors)}`)
+  page.off('console', onConsole)
+  page.off('pageerror', onPageError)
+  report.finishedAt = new Date().toISOString()
+  return report
+}
