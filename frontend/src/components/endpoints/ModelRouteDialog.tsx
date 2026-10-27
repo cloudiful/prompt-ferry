@@ -148,6 +148,10 @@ export function ModelRouteDialog({
     if (settingsTarget === target) setSettingsTarget(null)
   }
 
+  function endpointOptionFor(endpointId: string): EndpointOption | undefined {
+    return endpointOptions.find((option) => option.value === endpointId)
+  }
+
   function endpointProtocolFor(endpointId: string): NativeApi {
     return normalizeNativeApiAxis(
       endpoints.find((endpoint) => endpoint.endpoint_id === endpointId)
@@ -172,7 +176,7 @@ export function ModelRouteDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-h-[min(94vh,58rem)] max-w-5xl overflow-y-auto"
+        className="max-h-[min(94vh,58rem)] overflow-y-auto sm:max-w-[min(64rem,calc(100vw_-_2rem))]"
         onEscapeKeyDown={(event) => {
           if (savePending) event.preventDefault()
         }}
@@ -318,7 +322,7 @@ export function ModelRouteDialog({
                       onDragOver={(event) => drag.onDragOver(event, target)}
                       onDrop={(event) => drag.onDrop(event, target)}
                     >
-                      <div className="grid min-w-0 gap-2 md:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_auto_auto] md:items-center">
+                      <div className="grid min-w-0 gap-2 md:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_auto] md:items-center">
                         <div className="flex min-w-0 items-start gap-2">
                           <button
                             aria-keyshortcuts="ArrowUp ArrowDown"
@@ -350,10 +354,35 @@ export function ModelRouteDialog({
                               value={target.endpoint_id || undefined}
                             >
                               <SelectTrigger
+                                aria-describedby={
+                                  target.endpoint_id
+                                    ? `${targetKey(target)}-endpoint-value`
+                                    : undefined
+                                }
                                 aria-label={`${t('endpoint')} ${index + 1}`}
-                                className="min-w-0"
+                                className="w-full min-w-0"
                               >
-                                <SelectValue placeholder={t('endpoint')} />
+                                <SelectValue placeholder={t('endpoint')}>
+                                  <span className="flex min-w-0 items-center gap-2">
+                                    {endpointOptionFor(target.endpoint_id) ? (
+                                      <ProviderIcon
+                                        provider={
+                                          endpointOptionFor(target.endpoint_id)
+                                            ?.provider ?? 'generic'
+                                        }
+                                        size="xs"
+                                      />
+                                    ) : null}
+                                    <span
+                                      className="min-w-0 truncate"
+                                      data-target-endpoint-label
+                                      id={`${targetKey(target)}-endpoint-value`}
+                                    >
+                                      {endpointOptionFor(target.endpoint_id)
+                                        ?.label ?? target.endpoint_id}
+                                    </span>
+                                  </span>
+                                </SelectValue>
                               </SelectTrigger>
                               <SelectContent>
                                 {endpointOptions.map((option) => (
@@ -387,7 +416,7 @@ export function ModelRouteDialog({
                             value={target.upstream_model}
                           />
                         </div>
-                        <div className="flex min-w-0 items-center gap-2">
+                        <div className="flex shrink-0 items-center gap-2">
                           <Switch
                             aria-label={`${t('status')} ${t('target')} ${index + 1}`}
                             checked={target.enabled}

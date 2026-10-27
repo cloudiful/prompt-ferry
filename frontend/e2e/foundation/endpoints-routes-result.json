@@ -1,6 +1,6 @@
 {
-  "runId": "endpoints-routes-1793010932481",
-  "startedAt": "2026-10-26T10:35:32.481Z",
+  "runId": "endpoints-routes-1793105211811",
+  "startedAt": "2026-10-27T12:46:51.811Z",
   "checks": {
     "adminDenial": {
       "redirectedToApiKeys": true,
@@ -180,15 +180,136 @@
         }
       ]
     },
+    "targetRowLayout": {
+      "widths": [1440, 1024, 768, 390],
+      "rows": [
+        {
+          "width": 1440,
+          "overlapPairs": [],
+          "outsideRow": [],
+          "outsideDialog": [],
+          "stacked": false,
+          "horizontalOrderClear": true,
+          "fullNameInDom": true,
+          "accessibleDescription": true,
+          "labelWrapperMinWidth": true,
+          "labelTruncated": true,
+          "labelClipped": true,
+          "triggerOverflow": 0,
+          "modelValueIntact": true,
+          "dialog": {
+            "dialogWidth": 1024,
+            "expectedDialogWidth": 1024,
+            "leftMargin": 208,
+            "rightMargin": 208,
+            "minMargin": 208,
+            "minimumControlWidth": 225.28,
+            "triggerWidth": 402.875,
+            "modelWidth": 345.109375,
+            "documentNoOverflow": true
+          }
+        },
+        {
+          "width": 1024,
+          "overlapPairs": [],
+          "outsideRow": [],
+          "outsideDialog": [],
+          "stacked": false,
+          "horizontalOrderClear": true,
+          "fullNameInDom": true,
+          "accessibleDescription": true,
+          "labelWrapperMinWidth": true,
+          "labelTruncated": true,
+          "labelClipped": true,
+          "triggerOverflow": 0,
+          "modelValueIntact": true,
+          "dialog": {
+            "dialogWidth": 992,
+            "expectedDialogWidth": 992,
+            "leftMargin": 16,
+            "rightMargin": 16,
+            "minMargin": 16,
+            "minimumControlWidth": 218.24,
+            "triggerWidth": 385.765625,
+            "modelWidth": 330.21875,
+            "documentNoOverflow": true
+          }
+        },
+        {
+          "width": 768,
+          "overlapPairs": [],
+          "outsideRow": [],
+          "outsideDialog": [],
+          "stacked": false,
+          "horizontalOrderClear": true,
+          "fullNameInDom": true,
+          "accessibleDescription": true,
+          "labelWrapperMinWidth": true,
+          "labelTruncated": true,
+          "labelClipped": true,
+          "triggerOverflow": 0,
+          "modelValueIntact": true,
+          "dialog": {
+            "dialogWidth": 736,
+            "expectedDialogWidth": 736,
+            "leftMargin": 16,
+            "rightMargin": 16,
+            "minMargin": 16,
+            "minimumControlWidth": 161.92,
+            "triggerWidth": 248.828125,
+            "modelWidth": 211.15625,
+            "documentNoOverflow": true
+          }
+        },
+        {
+          "width": 390,
+          "overlapPairs": [],
+          "outsideRow": [],
+          "outsideDialog": [],
+          "stacked": true,
+          "horizontalOrderClear": false,
+          "fullNameInDom": true,
+          "accessibleDescription": true,
+          "labelWrapperMinWidth": true,
+          "labelTruncated": true,
+          "labelClipped": true,
+          "triggerOverflow": 0,
+          "modelValueIntact": true,
+          "dialog": {
+            "dialogWidth": 358,
+            "expectedDialogWidth": 358,
+            "leftMargin": 16,
+            "rightMargin": 16,
+            "minMargin": 16,
+            "minimumControlWidth": 160,
+            "triggerWidth": 250,
+            "modelWidth": 250,
+            "documentNoOverflow": true
+          }
+        }
+      ],
+      "operability": {
+        "keyboardSelectOpened": true,
+        "modelEditable": true,
+        "toggleClicked": true,
+        "settingsOpenedAndClosed": true,
+        "singleTargetDeleteDisabled": true
+      },
+      "savedEndpointId": "ep-openai-codex",
+      "savedModelLength": 45,
+      "savedModelUnicode": true,
+      "createdRuleDeleted": true
+    },
     "localeThemeRendering": {
       "chineseActionVisible": true,
-      "darkTheme": true
+      "darkTheme": true,
+      "longTargetDialog": true
     },
     "apiIsolation": {
       "unexpectedAdminRequests": [],
       "quotaCalls": 0,
       "endpointReadCount": 2,
-      "modelRouteReadCount": 10
+      "modelRouteReadCount": 12
     },
     "apiLedger": [
       {
@@ -312,6 +433,30 @@
         "hasBody": false
       },
       {
+        "method": "POST",
+        "path": "/api/v1/admin/model-routes",
+        "status": 200,
+        "hasBody": true
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/model-routes",
+        "status": 200,
+        "hasBody": false
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/admin/model-routes/rule-1029",
+        "status": 204,
+        "hasBody": true
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/admin/model-routes",
+        "status": 200,
+        "hasBody": false
+      },
+      {
         "method": "GET",
         "path": "/api/v1/admin/model-routes",
         "status": 200,
@@ -325,7 +470,10 @@
     "e2e/foundation/screenshots/endpoints-routes-en-light-1440.png",
     "e2e/foundation/screenshots/endpoints-routes-en-light-390.png",
     "e2e/foundation/screenshots/endpoints-routes-dialog-390.png",
-    "e2e/foundation/screenshots/endpoints-routes-zh-dark-1440.png"
+    "e2e/foundation/screenshots/endpoints-routes-target-row-1440.png",
+    "e2e/foundation/screenshots/endpoints-routes-target-row-390.png",
+    "e2e/foundation/screenshots/endpoints-routes-zh-dark-1440.png",
+    "e2e/foundation/screenshots/endpoints-routes-target-row-zh-dark-1440.png"
   ],
-  "finishedAt": "2026-10-26T10:35:52.623Z"
+  "finishedAt": "2026-10-27T12:47:21.023Z"
 }

@@ -546,6 +546,94 @@ describe('ModelRoutesPage', () => {
       ),
     )
   })
+  it('keeps the selected endpoint name and icon accessible in the target row', async () => {
+    renderPage()
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit fixture-pattern' }),
+    )
+    const editor = await screen.findByRole('dialog')
+    const dialogContent = editor
+    expect(dialogContent.getAttribute('data-slot')).toBe('dialog-content')
+    expect(dialogContent.className).toContain(
+      'sm:max-w-[min(64rem,calc(100vw_-_2rem))]',
+    )
+    expect(dialogContent.className).not.toContain('max-w-5xl')
+    expect(dialogContent.className).toContain('max-h-[min(94vh,58rem)]')
+    expect(dialogContent.className).toContain('overflow-y-auto')
+    const endpointSelect = within(editor).getByRole('combobox', {
+      name: 'Endpoint 1',
+    })
+    const fullName = 'Fixture ep-fixture-8 With Long Endpoint Name'
+    expect(endpointSelect.getAttribute('aria-label')).toBe('Endpoint 1')
+    expect(endpointSelect.textContent).toContain(fullName)
+    const describedBy = endpointSelect.getAttribute('aria-describedby')
+    expect(describedBy).toBeTruthy()
+    expect(editor.querySelector(`[id="${describedBy}"]`)?.textContent).toBe(
+      fullName,
+    )
+    const valueNode = endpointSelect.querySelector('[data-slot="select-value"]')
+    expect(valueNode?.querySelector('[role="img"]')).toBeTruthy()
+    const label = valueNode?.querySelector('[data-target-endpoint-label]')
+    expect(label?.textContent).toBe(fullName)
+    expect(label?.className).toContain('truncate')
+    expect(label?.parentElement?.className).toContain('min-w-0')
+    const modelInput = editor.querySelector('input[list]') as HTMLInputElement
+    expect(modelInput.value).toBe('existing-model')
+    fireEvent.change(modelInput, { target: { value: 'edited-long-model' } })
+    expect(modelInput.value).toBe('edited-long-model')
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
+    await waitFor(() =>
+      expect(api.persistModelRoute).toHaveBeenCalledWith(
+        'rule-offpage',
+        expect.objectContaining({
+          targets: [
+            expect.objectContaining({
+              endpoint_id: 'ep-fixture-8',
+              upstream_model: 'edited-long-model',
+            }),
+          ],
+        }),
+      ),
+    )
+  })
+
+  it('renders the endpoint placeholder and unknown endpoint ids without an icon', async () => {
+    const base = route('rule-unknown')
+    routes = [
+      {
+        ...base,
+        targets: [
+          {
+            ...base.targets[0]!,
+            endpoint_id: 'ep-removed',
+            endpoint_name: 'Removed endpoint',
+          },
+        ],
+      },
+    ]
+    renderPage()
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit fixture-pattern' }),
+    )
+    const editor = await screen.findByRole('dialog')
+    const unknownSelect = within(editor).getByRole('combobox', {
+      name: 'Endpoint 1',
+    })
+    expect(unknownSelect.textContent).toContain('ep-removed')
+    expect(unknownSelect.getAttribute('aria-describedby')).toBeTruthy()
+    expect(unknownSelect.querySelector('[role="img"]')).toBeNull()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Cancel' }).at(-1)!)
+    fireEvent.click(screen.getByRole('button', { name: 'New model route' }))
+    const createEditor = await screen.findByRole('dialog')
+    const placeholderSelect = within(createEditor).getByRole('combobox', {
+      name: 'Endpoint 1',
+    })
+    expect(placeholderSelect.textContent).toBe('Endpoint')
+    expect(placeholderSelect.getAttribute('aria-describedby')).toBeNull()
+    expect(
+      placeholderSelect.querySelector('[data-target-endpoint-label]'),
+    ).toBeNull()
+  })
 })
 
 describe('useModelRouteTargetDrag', () => {

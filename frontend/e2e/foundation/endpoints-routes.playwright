@@ -617,6 +617,234 @@ async page => {
     await responsiveDialog.waitFor({ state: 'hidden' })
   }
   await page.setViewportSize({ width: 1440, height: 900 })
+  const longEndpointName = 'OpenAI ChatGPT Subscription — Integration Workspace With A Long Name'
+  const longTargetModel = `layout-model-${'长模型-'.repeat(8)}`
+  await page.getByRole('button', { name: 'New model route' }).click()
+  const layoutDialog = page.getByRole('dialog', { name: 'New model route' })
+  await layoutDialog.waitFor({ state: 'visible' })
+  await layoutDialog.getByRole('textbox', { name: 'Model pattern' }).fill('layout-route-*')
+  const layoutTarget = layoutDialog.locator('li').first()
+  const layoutTrigger = layoutTarget.getByRole('combobox', { name: 'Endpoint 1' })
+  await layoutTrigger.click()
+  await page.getByRole('option', { name: /OpenAI ChatGPT Subscription/ }).click()
+  const layoutModel = layoutTarget.locator('input[list]')
+  await layoutModel.fill(longTargetModel)
+
+  const controlBox = async (locator, name) => {
+    const bounds = await locator.boundingBox()
+    assert(Boolean(bounds), `target row control ${name} has no measurable box`)
+    return bounds
+  }
+  const boxesOverlap = (a, b) => a.x < b.x + b.width - 1 && b.x < a.x + a.width - 1 && a.y < b.y + b.height - 1 && b.y < a.y + a.height - 1
+  const boxContained = (inner, outer) => inner.x >= outer.x - 1 && inner.y >= outer.y - 1 && inner.x + inner.width <= outer.x + outer.width + 1 && inner.y + inner.height <= outer.y + outer.height + 1
+  const measureTargetRow = async () => {
+    const row = await controlBox(layoutTarget, 'target row')
+    const controls = {
+      trigger: await controlBox(layoutTrigger, 'endpoint select'),
+      model: await controlBox(layoutModel, 'model input'),
+      modelClear: await controlBox(layoutTarget.getByRole('button', { name: /Delete Upstream model name/ }), 'model clear'),
+      grip: await controlBox(layoutTarget.locator('[data-target-drag-handle]'), 'drag grip'),
+      toggle: await controlBox(layoutTarget.getByRole('switch'), 'target switch'),
+      settings: await controlBox(layoutTarget.getByRole('button', { name: 'Target settings' }), 'target settings'),
+      delete: await controlBox(layoutTarget.getByRole('button', { name: 'Delete Target 1' }), 'target delete'),
+    }
+    const dialog = await controlBox(page.locator('[data-slot="dialog-content"]'), 'dialog content')
+    const selectState = await layoutTrigger.evaluate(node => {
+      const value = node.querySelector('[data-slot="select-value"]')
+      const label = node.querySelector('[data-target-endpoint-label]')
+      const describedBy = node.getAttribute('aria-describedby')
+      return {
+        ariaLabel: node.getAttribute('aria-label'),
+        text: node.textContent ?? '',
+        description: describedBy ? document.getElementById(describedBy)?.textContent ?? null : null,
+        valueText: value?.textContent ?? null,
+        labelWrapperMinWidth: label?.parentElement?.className.includes('min-w-0') ?? false,
+        labelText: label?.textContent ?? null,
+        labelTruncated: label ? label.className.includes('truncate') : false,
+        labelClipped: label ? label.scrollWidth > label.clientWidth : false,
+        triggerOverflow: node.scrollWidth - node.clientWidth,
+      }
+    })
+    return { row, dialog, controls, selectState }
+  }
+
+  async function waitForStableDialogLayout(width) {
+    const observation = await page.evaluate(async expectedWidth => {
+      const nextFrame = () => new Promise(resolve => requestAnimationFrame(() => resolve()))
+      const measure = () => {
+        const node = document.querySelector('[data-slot="dialog-content"]')
+        if (!node) return null
+        const rect = node.getBoundingClientRect()
+        const style = getComputedStyle(node)
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          resolvedMaxWidth: style.maxWidth,
+          resolvedWidth: style.width,
+        }
+      }
+      const deadline = performance.now() + 1000
+      let previous = null
+      let stableFrames = 0
+      while (performance.now() <= deadline) {
+        await nextFrame()
+        const current = measure()
+        const unchanged = previous !== null && current !== null &&
+          Math.abs(current.x - previous.x) < 0.5 &&
+          Math.abs(current.y - previous.y) < 0.5 &&
+          Math.abs(current.width - previous.width) < 0.5 &&
+          Math.abs(current.height - previous.height) < 0.5 &&
+          current.resolvedMaxWidth === previous.resolvedMaxWidth &&
+          current.resolvedWidth === previous.resolvedWidth
+        stableFrames = unchanged ? stableFrames + 1 : 0
+        previous = current
+        if (window.innerWidth === expectedWidth && stableFrames >= 3) {
+          return {
+            settled: true,
+            frames: stableFrames,
+            innerWidth: window.innerWidth,
+            rect: current,
+            resolvedMaxWidth: current?.resolvedMaxWidth ?? null,
+            resolvedWidth: current?.resolvedWidth ?? null,
+          }
+        }
+      }
+      return {
+        settled: false,
+        frames: stableFrames,
+        innerWidth: window.innerWidth,
+        rect: previous,
+        resolvedMaxWidth: previous?.resolvedMaxWidth ?? null,
+        resolvedWidth: previous?.resolvedWidth ?? null,
+      }
+    }, width)
+    assert(observation.settled, `dialog layout did not stabilize at ${width}px within 1000ms: ${JSON.stringify(observation)}`)
+  }
+
+  const targetRowLayout = []
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await waitForStableDialogLayout(width)
+    await layoutTarget.scrollIntoViewIfNeeded()
+    const { row, dialog, controls, selectState } = await measureTargetRow()
+    if (width === 1440) await capture('endpoints-routes-target-row-1440')
+    if (width === 390) await capture('endpoints-routes-target-row-390')
+    const controlNames = Object.keys(controls)
+    const overlapPairs = []
+    for (let first = 0; first < controlNames.length; first += 1) {
+      for (let second = first + 1; second < controlNames.length; second += 1) {
+        if (boxesOverlap(controls[controlNames[first]], controls[controlNames[second]])) overlapPairs.push(`${controlNames[first]}/${controlNames[second]}`)
+      }
+    }
+    const outsideRow = controlNames.filter(name => !boxContained(controls[name], row))
+    const outsideDialog = controlNames.filter(name => !boxContained(controls[name], dialog))
+    const horizontalOrderClear = controls.grip.x + controls.grip.width <= controls.trigger.x + 1 && controls.trigger.x + controls.trigger.width <= controls.model.x + 1 && controls.model.x + controls.model.width <= controls.toggle.x + 1
+    const stacked = controls.model.y >= controls.trigger.y + controls.trigger.height - 1 && controls.toggle.y >= controls.model.y + controls.model.height - 1
+    const modelValue = await layoutModel.inputValue()
+    const expectedDialogWidth = width >= 640 ? Math.min(width - 32, 1024) : width - 32
+    const leftMargin = dialog.x
+    const rightMargin = width - (dialog.x + dialog.width)
+    const minMargin = Math.min(leftMargin, rightMargin)
+    const minimumControlWidth = Math.max(160, 0.22 * dialog.width)
+    const documentNoOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+    assert(Math.abs(dialog.width - expectedDialogWidth) <= 1, `dialog width ${dialog.width}px did not match the intended ${expectedDialogWidth}px at ${width}px`)
+    assert(minMargin >= 15, `dialog kept only ${minMargin}px side margin at ${width}px`)
+    assert(documentNoOverflow, `route page overflowed horizontally at ${width}px`)
+    assert(controls.trigger.width >= minimumControlWidth - 1 && controls.model.width >= minimumControlWidth - 1, `endpoint select (${controls.trigger.width}px) or model input (${controls.model.width}px) stayed below ${minimumControlWidth}px at ${width}px`)
+    assert(overlapPairs.length === 0, `target row controls visually overlapped at ${width}px: ${JSON.stringify(overlapPairs)}`)
+    assert(outsideRow.length === 0, `target row controls escaped the target row at ${width}px: ${JSON.stringify(outsideRow)}`)
+    assert(outsideDialog.length === 0, `target row controls escaped the dialog at ${width}px: ${JSON.stringify(outsideDialog)}`)
+    assert(width < 768 ? stacked : !stacked && horizontalOrderClear, `target row did not keep the expected ${width < 768 ? 'stacked' : 'single-row'} layout at ${width}px`)
+    assert(selectState.ariaLabel === 'Endpoint 1', `endpoint select lost its control name at ${width}px`)
+    assert(selectState.text.includes(longEndpointName), `full endpoint name left the DOM at ${width}px`)
+    assert(selectState.description === longEndpointName, `full endpoint name was not exposed as the accessible description at ${width}px`)
+    assert(selectState.valueText?.includes(longEndpointName) && selectState.labelWrapperMinWidth && selectState.labelTruncated, `endpoint value did not keep the shrinkable full-name layout at ${width}px`)
+    assert(selectState.labelText === longEndpointName, `endpoint value text was shortened at ${width}px`)
+    assert(selectState.triggerOverflow <= 1, `endpoint select overflowed its own box at ${width}px: ${selectState.triggerOverflow}px`)
+    assert(modelValue === longTargetModel, `long upstream model value changed at ${width}px`)
+    targetRowLayout.push({
+      width,
+      overlapPairs,
+      outsideRow,
+      outsideDialog,
+      stacked,
+      horizontalOrderClear,
+      fullNameInDom: selectState.text.includes(longEndpointName),
+      accessibleDescription: selectState.description === longEndpointName,
+      labelWrapperMinWidth: selectState.labelWrapperMinWidth,
+      labelTruncated: selectState.labelTruncated,
+      labelClipped: selectState.labelClipped,
+      triggerOverflow: selectState.triggerOverflow,
+      modelValueIntact: modelValue === longTargetModel,
+      dialog: {
+        dialogWidth: dialog.width,
+        expectedDialogWidth,
+        leftMargin,
+        rightMargin,
+        minMargin,
+        minimumControlWidth,
+        triggerWidth: controls.trigger.width,
+        modelWidth: controls.model.width,
+        documentNoOverflow,
+      },
+    })
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await layoutTarget.scrollIntoViewIfNeeded()
+  await layoutTrigger.focus()
+  await layoutTrigger.press('Enter')
+  const layoutOption = page.getByRole('option', { name: /Fixture Upstream 8 With A Long Operational Name/ })
+  await layoutOption.waitFor({ state: 'visible' })
+  const keyboardSelectOpened = await layoutOption.isVisible()
+  await page.keyboard.press('Escape')
+  await layoutOption.waitFor({ state: 'hidden' })
+  await layoutModel.fill('layout-model-edited')
+  const modelEditable = await layoutModel.inputValue() === 'layout-model-edited'
+  await layoutModel.fill(longTargetModel)
+  const layoutToggle = layoutTarget.getByRole('switch')
+  const toggleBefore = await layoutToggle.getAttribute('aria-checked')
+  await layoutToggle.click()
+  await page.waitForFunction(previous => document.querySelector('[role="dialog"] li [role="switch"]')?.getAttribute('aria-checked') !== previous, toggleBefore)
+  const toggleClicked = await layoutToggle.getAttribute('aria-checked') !== toggleBefore
+  await layoutToggle.click()
+  await layoutTarget.getByRole('button', { name: 'Target settings' }).click()
+  await layoutDialog.getByRole('combobox', { name: 'Native API' }).waitFor({ state: 'visible' })
+  await layoutDialog.getByRole('button', { name: 'Cancel' }).first().click()
+  await layoutTarget.getByRole('button', { name: 'Target settings' }).waitFor({ state: 'visible' })
+  const settingsOpenedAndClosed = await layoutModel.isVisible()
+  const singleTargetDeleteDisabled = await layoutTarget.getByRole('button', { name: 'Delete Target 1' }).isDisabled()
+  assert(keyboardSelectOpened && modelEditable && toggleClicked && settingsOpenedAndClosed && singleTargetDeleteDisabled, 'target row controls were not operable after the layout fix')
+
+  const layoutCreate = waitForResponse('POST', '/api/v1/admin/model-routes', 200)
+  await layoutDialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await layoutCreate
+  await layoutDialog.waitFor({ state: 'hidden' })
+  const layoutCreateRequest = (await requestLog()).findLast(request => request.path === '/api/v1/admin/model-routes' && request.method === 'POST' && request.status === 200)
+  const layoutTargetPayload = layoutCreateRequest?.body?.targets?.[0]
+  assert(layoutCreateRequest?.body?.targets?.length === 1 && layoutTargetPayload?.endpoint_id === 'ep-openai-codex' && layoutTargetPayload?.upstream_model === longTargetModel, `long target row save changed its payload: ${JSON.stringify({ targets: layoutCreateRequest?.body?.targets })}`)
+  await page.locator('[data-model-route-row]').filter({ hasText: 'layout-route-*' }).waitFor({ state: 'visible' })
+  const layoutRow = page.locator('[data-model-route-row]').filter({ hasText: 'layout-route-*' })
+  const layoutRuleId = await layoutRow.getAttribute('data-model-route-row')
+  await page.evaluate(() => { window.confirm = () => true })
+  const layoutDelete = waitForResponse('DELETE', `/api/v1/admin/model-routes/${layoutRuleId}`, 204)
+  await layoutRow.getByRole('button', { name: 'Delete layout-route-*' }).click()
+  await layoutDelete
+  await page.locator(`[data-model-route-row="${layoutRuleId}"]`).waitFor({ state: 'hidden' })
+  report.checks.longValuesResponsive = { longPattern: retryPattern.length, longModel: longModel.length, responsive, dialogContainment }
+  report.checks.targetRowLayout = {
+    widths: [1440, 1024, 768, 390],
+    rows: targetRowLayout,
+    operability: { keyboardSelectOpened, modelEditable, toggleClicked, settingsOpenedAndClosed, singleTargetDeleteDisabled },
+    savedEndpointId: layoutTargetPayload?.endpoint_id,
+    savedModelLength: typeof layoutTargetPayload?.upstream_model === 'string' ? layoutTargetPayload.upstream_model.length : 0,
+    savedModelUnicode: typeof layoutTargetPayload?.upstream_model === 'string' && /长模型/.test(layoutTargetPayload.upstream_model),
+    createdRuleDeleted: true,
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 })
   await page.evaluate(() => {
     localStorage.setItem('prompt-ferry:locale', 'zh-CN')
     localStorage.setItem('prompt-ferry:theme-mode', 'dark')
@@ -627,8 +855,17 @@ async page => {
   assert(await page.getByRole('button', { name: '新增模型路由' }).isVisible(), 'Chinese locale did not render the route action')
   assert(await page.evaluate(() => document.documentElement.classList.contains('dark')), 'dark theme did not render on the route page')
   await capture('endpoints-routes-zh-dark-1440')
-  report.checks.longValuesResponsive = { longPattern: retryPattern.length, longModel: longModel.length, responsive, dialogContainment }
-  report.checks.localeThemeRendering = { chineseActionVisible: true, darkTheme: true }
+  await page.getByRole('button', { name: '新增模型路由' }).click()
+  const zhLayoutDialog = page.getByRole('dialog')
+  await zhLayoutDialog.waitFor({ state: 'visible' })
+  const zhLayoutTrigger = zhLayoutDialog.locator('li').first().getByRole('combobox', { name: '上游节点 1' })
+  await zhLayoutTrigger.click()
+  await page.getByRole('option', { name: /OpenAI ChatGPT Subscription/ }).click()
+  await zhLayoutDialog.locator('input[list]').fill(`模型路由-${'长名称-'.repeat(8)}`)
+  await capture('endpoints-routes-target-row-zh-dark-1440')
+  await zhLayoutDialog.getByRole('button', { name: '取消' }).last().click()
+  await zhLayoutDialog.waitFor({ state: 'hidden' })
+  report.checks.localeThemeRendering = { chineseActionVisible: true, darkTheme: true, longTargetDialog: true }
   report.checks.scenarioCoverage['long-values'] = true
 
   const finalLog = await requestLog()
