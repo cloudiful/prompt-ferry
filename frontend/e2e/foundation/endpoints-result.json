@@ -1,8 +1,8 @@
 {
   "status": "complete",
-  "runId": "endpoints-1793161731130",
-  "startedAt": "2026-10-28T04:28:51.130Z",
-  "finishedAt": "2026-10-28T04:29:30.323Z",
+  "runId": "endpoints-1793175568894",
+  "startedAt": "2026-10-28T08:19:28.894Z",
+  "finishedAt": "2026-10-28T08:20:08.608Z",
   "callbacks": [
     "endpoints",
     "endpoints-create",
@@ -895,6 +895,64 @@
       "populatedControlName": "HTTP 200 / 312ms / fixture upstream accepted the probe",
       "popoverText": "HTTP 200 / 312ms / fixture upstream accepted the probe"
     },
+    "dialogGeometry": [
+      {
+        "viewport": 1440,
+        "width": 1024,
+        "maxWidth": "1024px",
+        "margin": 416,
+        "scrollWidth": 1022,
+        "clientWidth": 1022,
+        "horizontalScroll": false,
+        "documentOverflow": false,
+        "escapedControls": 0,
+        "escapedControlDetail": [],
+        "controlCount": 15,
+        "expectedWidth": 1024
+      },
+      {
+        "viewport": 1024,
+        "width": 992,
+        "maxWidth": "992px",
+        "margin": 32,
+        "scrollWidth": 990,
+        "clientWidth": 990,
+        "horizontalScroll": false,
+        "documentOverflow": false,
+        "escapedControls": 0,
+        "escapedControlDetail": [],
+        "controlCount": 15,
+        "expectedWidth": 992
+      },
+      {
+        "viewport": 768,
+        "width": 736,
+        "maxWidth": "736px",
+        "margin": 32,
+        "scrollWidth": 734,
+        "clientWidth": 734,
+        "horizontalScroll": false,
+        "documentOverflow": false,
+        "escapedControls": 0,
+        "escapedControlDetail": [],
+        "controlCount": 15,
+        "expectedWidth": 736
+      },
+      {
+        "viewport": 390,
+        "width": 358,
+        "maxWidth": "calc(100% - 32px)",
+        "margin": 32,
+        "scrollWidth": 356,
+        "clientWidth": 356,
+        "horizontalScroll": false,
+        "documentOverflow": false,
+        "escapedControls": 0,
+        "escapedControlDetail": [],
+        "controlCount": 15,
+        "expectedWidth": 358
+      }
+    ],
     "consoleErrors": [],
     "pageErrors": [],
     "createDialogAndRetry": {
@@ -1189,6 +1247,7 @@
   },
   "screenshots": [
     "e2e/foundation/screenshots/endpoints-en-light-1440.png",
+    "e2e/foundation/screenshots/endpoints-dialog-en-light-1440.png",
     "e2e/foundation/screenshots/endpoints-created-en-light-1440.png",
     "e2e/foundation/screenshots/endpoints-quota-current-en-light-1440.png",
     "e2e/foundation/screenshots/endpoints-en-light-390-mobile.png",
@@ -1205,53 +1264,53 @@
   "segments": [
     {
       "name": "endpoints",
-      "startedAt": "2026-10-28T04:28:51.130Z",
-      "finishedAt": "2026-10-28T04:28:56.641Z"
+      "startedAt": "2026-10-28T08:19:28.894Z",
+      "finishedAt": "2026-10-28T08:19:35.346Z"
     },
     {
       "name": "endpoints-create",
-      "startedAt": "2026-10-28T04:28:57.672Z",
-      "finishedAt": "2026-10-28T04:29:01.138Z"
+      "startedAt": "2026-10-28T08:19:36.348Z",
+      "finishedAt": "2026-10-28T08:19:39.841Z"
     },
     {
       "name": "endpoints-update",
-      "startedAt": "2026-10-28T04:29:02.572Z",
-      "finishedAt": "2026-10-28T04:29:04.011Z"
+      "startedAt": "2026-10-28T08:19:41.334Z",
+      "finishedAt": "2026-10-28T08:19:42.695Z"
     },
     {
       "name": "endpoints-mutations",
-      "startedAt": "2026-10-28T04:29:05.491Z",
-      "finishedAt": "2026-10-28T04:29:07.046Z"
+      "startedAt": "2026-10-28T08:19:44.121Z",
+      "finishedAt": "2026-10-28T08:19:45.632Z"
     },
     {
       "name": "endpoints-delete",
-      "startedAt": "2026-10-28T04:29:08.506Z",
-      "finishedAt": "2026-10-28T04:29:09.032Z"
+      "startedAt": "2026-10-28T08:19:47.056Z",
+      "finishedAt": "2026-10-28T08:19:47.631Z"
     },
     {
       "name": "endpoints-quota",
-      "startedAt": "2026-10-28T04:29:10.485Z",
-      "finishedAt": "2026-10-28T04:29:13.798Z"
+      "startedAt": "2026-10-28T08:19:49.094Z",
+      "finishedAt": "2026-10-28T08:19:52.338Z"
     },
     {
       "name": "endpoints-oauth-status",
-      "startedAt": "2026-10-28T04:29:14.740Z",
-      "finishedAt": "2026-10-28T04:29:17.619Z"
+      "startedAt": "2026-10-28T08:19:53.277Z",
+      "finishedAt": "2026-10-28T08:19:56.091Z"
     },
     {
       "name": "endpoints-oauth-device",
-      "startedAt": "2026-10-28T04:29:19.065Z",
-      "finishedAt": "2026-10-28T04:29:21.709Z"
+      "startedAt": "2026-10-28T08:19:57.565Z",
+      "finishedAt": "2026-10-28T08:20:00.241Z"
     },
     {
       "name": "endpoints-oauth-browser",
-      "startedAt": "2026-10-28T04:29:23.171Z",
-      "finishedAt": "2026-10-28T04:29:26.303Z"
+      "startedAt": "2026-10-28T08:20:01.688Z",
+      "finishedAt": "2026-10-28T08:20:04.973Z"
     },
     {
       "name": "endpoints-finish",
-      "startedAt": "2026-10-28T04:29:27.751Z",
-      "finishedAt": "2026-10-28T04:29:30.323Z"
+      "startedAt": "2026-10-28T08:20:06.423Z",
+      "finishedAt": "2026-10-28T08:20:08.608Z"
     }
   ]
 }

@@ -245,6 +245,68 @@ if (existsSync(reportPath)) {
       ),
     'MCP table/actions were not verified at all required widths',
   )
+  const dialogGeometry = checks.dialogGeometry as
+    Array<Record<string, any>> | undefined
+  const expectedDialogWidths: Record<number, number> = {
+    1440: 896,
+    1024: 896,
+    768: 736,
+    390: 358,
+  }
+  if (!Array.isArray(dialogGeometry) || dialogGeometry.length !== 4) {
+    assert(false, 'MCP dialog geometry evidence is missing')
+  } else {
+    for (const width of [1440, 1024, 768, 390]) {
+      const entry = dialogGeometry.find((state) => state?.viewport === width)
+      if (!entry) {
+        assert(
+          false,
+          `MCP dialog geometry is missing the ${width}px measurement`,
+        )
+        continue
+      }
+      assert(
+        entry.horizontalScroll === false,
+        `MCP dialog has a horizontal scrollbar at ${width}px`,
+      )
+      assert(
+        entry.documentOverflow === false,
+        `MCP dialog overflows the document at ${width}px`,
+      )
+      assert(
+        entry.escapedControls === 0 && entry.controlCount > 0,
+        `an MCP dialog control escapes the dialog at ${width}px`,
+      )
+      assert(
+        entry.providerBearerSentence === false,
+        `the redundant provider bearer sentence is still rendered at ${width}px`,
+      )
+      assert(
+        typeof entry.transportWidth === 'number' &&
+          typeof entry.providerWidth === 'number' &&
+          Math.abs(entry.transportWidth - entry.providerWidth) <= 1,
+        `MCP transport and provider selects do not share one width at ${width}px`,
+      )
+      assert(
+        entry.proxyActionAdjacent === true &&
+          typeof entry.proxyGap === 'number' &&
+          entry.proxyGap >= 0 &&
+          entry.proxyGap <= 40,
+        `the MCP proxy action is detached from its label at ${width}px`,
+      )
+      assert(
+        entry.expectedWidth === expectedDialogWidths[width] &&
+          Math.abs(entry.width - expectedDialogWidths[width]) <= 1,
+        `MCP dialog width does not match the declared 56rem layout at ${width}px`,
+      )
+    }
+  }
+  assert(
+    report.screenshots?.includes(
+      'e2e/foundation/screenshots/mcp-dialog-en-light-1440.png',
+    ) === true,
+    'the MCP dialog screenshot evidence is missing',
+  )
   assert(
     checks.localeThemeRendering?.lang === 'zh-CN' &&
       checks.localeThemeRendering?.dark === true &&

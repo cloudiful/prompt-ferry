@@ -79,10 +79,12 @@ const requiredChecks = [
   'scenarioCoverage',
   'syntheticSecretSafety',
   'listGeometry',
+  'dialogGeometry',
 ]
 
 export const EXPECTED_SCREENSHOTS = [
   'e2e/foundation/screenshots/endpoints-en-light-1440.png',
+  'e2e/foundation/screenshots/endpoints-dialog-en-light-1440.png',
   'e2e/foundation/screenshots/endpoints-created-en-light-1440.png',
   'e2e/foundation/screenshots/endpoints-quota-current-en-light-1440.png',
   'e2e/foundation/screenshots/endpoints-quota-chart-en-light-1440.png',
@@ -402,6 +404,50 @@ export function evaluateEndpointsReport(
             `an inapplicable upstream quota cell is not empty at ${key}`,
           )
         }
+      }
+    }
+  }
+  const dialogGeometry = checks.dialogGeometry as
+    Array<Record<string, any>> | undefined
+  const expectedDialogWidths: Record<number, number> = {
+    1440: 1024,
+    1024: 992,
+    768: 736,
+    390: 358,
+  }
+  if (!Array.isArray(dialogGeometry) || dialogGeometry.length !== 4) {
+    failures.push('current-run endpoint dialog geometry evidence is missing')
+  } else {
+    for (const width of [1440, 1024, 768, 390]) {
+      const entry = dialogGeometry.find((state) => state?.viewport === width)
+      if (!entry) {
+        failures.push(
+          `the endpoint dialog geometry is missing the ${width}px measurement`,
+        )
+        continue
+      }
+      if (entry.horizontalScroll !== false) {
+        failures.push(
+          `the endpoint dialog has a horizontal scrollbar at ${width}px`,
+        )
+      }
+      if (entry.documentOverflow !== false) {
+        failures.push(
+          `the endpoint dialog overflows the document at ${width}px`,
+        )
+      }
+      if (entry.escapedControls !== 0 || !(entry.controlCount > 0)) {
+        failures.push(
+          `an endpoint dialog control escapes the dialog at ${width}px`,
+        )
+      }
+      if (
+        Math.abs(entry.width - expectedDialogWidths[width]) > 1 ||
+        entry.margin < 1
+      ) {
+        failures.push(
+          `the endpoint dialog width does not match the declared 64rem layout at ${width}px`,
+        )
       }
     }
   }

@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react'
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   McpCatalogResponse,
@@ -37,6 +37,10 @@ function renderDialog(initial: McpForm, locale: 'zh-CN' | 'en-US' = 'en-US') {
   const changes: McpForm[] = []
   function Harness() {
     const [form, setForm] = useState(initial)
+    const onChange = useCallback((next: McpForm) => {
+      changes.push(next)
+      setForm(next)
+    }, [])
     return (
       <LocaleProvider>
         <NotifierProvider>
@@ -47,10 +51,7 @@ function renderDialog(initial: McpForm, locale: 'zh-CN' | 'en-US' = 'en-US') {
             form={form}
             header="MCP"
             isAdmin
-            onChange={(next) => {
-              changes.push(next)
-              setForm(next)
-            }}
+            onChange={onChange}
             onOpenChange={() => {}}
             onRefreshCatalog={() => {}}
             onSave={() => {}}
@@ -183,5 +184,49 @@ describe('mcp protocol version select', () => {
       screen.getByRole('combobox', { name: '提供商' }).textContent,
     ).toContain('通用')
     chinese.view.unmount()
+  })
+
+  it('drops the redundant bearer sentence and widens the dialog', () => {
+    renderDialog({
+      ...createEmptyMcpForm(),
+      name: 'Hosted Context7',
+      provider_kind: 'context7',
+      transport: 'http',
+      url: 'https://mcp.context7.com/mcp',
+      auth_mode: 'bearer',
+    })
+    expect(
+      screen.getByRole('combobox', { name: 'Provider' }).textContent,
+    ).toContain('Context7')
+    expect(screen.queryByText(/always uses bearer token auth/i)).toBeNull()
+    expect(screen.queryByText(/固定使用 Bearer 令牌认证/)).toBeNull()
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.className).toContain(
+      'sm:max-w-[min(calc(100vw_-_2rem),56rem)]',
+    )
+    expect(dialog.className).not.toContain('max-w-3xl')
+  })
+
+  it('keeps the proxy action beside its label and one select width', () => {
+    renderDialog({ ...createEmptyMcpForm(), name: 'Aligned MCP' })
+
+    const proxyAction = screen.getByRole('button', { name: 'Proxy URL' })
+    const proxyLabel = screen.getByText('Proxy URL')
+    expect(proxyAction.parentElement).toBe(proxyLabel.parentElement)
+    expect(proxyAction.parentElement?.className).not.toContain(
+      'justify-between',
+    )
+    expect(proxyAction.previousElementSibling).not.toBeNull()
+
+    const transport = screen
+      .getAllByRole('combobox')
+      .find((element) => element.id.endsWith('-transport'))
+    const provider = screen
+      .getAllByRole('combobox')
+      .find((element) => element.id.endsWith('-provider'))
+    expect(transport).toBeDefined()
+    expect(provider).toBeDefined()
+    expect(provider?.className).toContain('sm:max-w-md')
+    expect(transport?.className).toBe(provider?.className)
   })
 })

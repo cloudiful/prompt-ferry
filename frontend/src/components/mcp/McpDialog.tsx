@@ -185,7 +185,7 @@ export function McpDialog({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
-        className="max-h-[min(94vh,58rem)] max-w-3xl overflow-y-auto"
+        className="max-h-[min(94vh,58rem)] overflow-y-auto sm:max-w-[min(calc(100vw_-_2rem),56rem)]"
         onEscapeKeyDown={(event) => {
           if (savePending) event.preventDefault()
         }}
@@ -352,7 +352,7 @@ export function McpDialog({
                   </Field>
                 ) : null}
 
-                <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(9rem,0.7fr)_minmax(0,1.3fr)]">
+                <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
                   <Field label={t('transport')}>
                     <Select
                       onValueChange={(value) =>
@@ -362,7 +362,7 @@ export function McpDialog({
                     >
                       <SelectTrigger
                         aria-label={t('transport')}
-                        className="w-full"
+                        className="w-full sm:max-w-md"
                         id={ids.transport}
                       >
                         <SelectValue />
@@ -417,39 +417,32 @@ export function McpDialog({
 
                 {form.transport === 'http' ? (
                   <>
-                    <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(10rem,0.7fr)_minmax(0,1.3fr)]">
-                      <Field
-                        hint={t('providerDefaultUrlHint')}
-                        label={t('providerKind')}
+                    <Field
+                      hint={t('providerDefaultUrlHint')}
+                      label={t('providerKind')}
+                    >
+                      <Select
+                        onValueChange={setProvider}
+                        value={form.provider_kind || 'generic'}
                       >
-                        <Select
-                          onValueChange={setProvider}
-                          value={form.provider_kind || 'generic'}
+                        <SelectTrigger
+                          aria-label={t('providerKind')}
+                          className="w-full sm:max-w-md"
+                          id={ids.provider}
                         >
-                          <SelectTrigger
-                            aria-label={t('providerKind')}
-                            className="w-full"
-                            id={ids.provider}
-                          >
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {httpProviderOptions.map((provider) => (
-                              <SelectItem key={provider.id} value={provider.id}>
-                                {provider.id === 'generic'
-                                  ? t('providerGeneric')
-                                  : provider.display_name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      {hostedPreset ? (
-                        <div className="flex items-end gap-2 pb-2 text-xs text-muted-foreground">
-                          <span>{t('providerBearerHint')}</span>
-                        </div>
-                      ) : null}
-                    </div>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {httpProviderOptions.map((provider) => (
+                            <SelectItem key={provider.id} value={provider.id}>
+                              {provider.id === 'generic'
+                                ? t('providerGeneric')
+                                : provider.display_name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
                     {!hostedPreset ? (
                       <Field label={t('authMode')}>
                         <Select
@@ -521,16 +514,14 @@ export function McpDialog({
                         </Field>
                       </div>
                     ) : null}
-                    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                      <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                        <span>{t('proxyUrl')}</span>
-                        <InfoHint text={t('mcpProxyUrlHint')} />
-                        {form.has_saved_proxy_url ? (
-                          <span className="rounded-full border px-2 py-0.5">
-                            {t('saved')}
-                          </span>
-                        ) : null}
-                      </div>
+                    <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span>{t('proxyUrl')}</span>
+                      <InfoHint text={t('mcpProxyUrlHint')} />
+                      {form.has_saved_proxy_url ? (
+                        <span className="rounded-full border px-2 py-0.5">
+                          {t('saved')}
+                        </span>
+                      ) : null}
                       <Button
                         aria-label={t('proxyUrl')}
                         aria-pressed={

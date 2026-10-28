@@ -52,7 +52,6 @@ export const mcpMessages = {
     providerGeneric: '通用',
     providerDefaultUrlHint:
       '预设使用官方端点与固定认证；自建或自定义 URL 请选择“通用”。',
-    providerBearerHint: '该预设固定使用 Bearer 令牌认证。',
     lifecyclePolicy: '连接模式',
     lifecyclePolicyAuto: '自动',
     lifecyclePolicyLegacy: '仅旧版初始化',
@@ -127,7 +126,6 @@ export const mcpMessages = {
     providerGeneric: 'Generic',
     providerDefaultUrlHint:
       'Presets pin the official endpoint and auth; choose Generic for a self-hosted or custom URL.',
-    providerBearerHint: 'This preset always uses bearer token auth.',
     lifecyclePolicy: 'Connection mode',
     lifecyclePolicyAuto: 'Auto',
     lifecyclePolicyLegacy: 'Legacy initialize only',

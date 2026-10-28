@@ -76,6 +76,8 @@ describe('ModelRouteTargetsSummary', () => {
     const chip = screen.getByRole('button', { name: longLabel })
     expect(chip.textContent).toBe(longLabel)
     expect(chip.getAttribute('title')).toBe(longLabel)
+    expect(chip.className).toContain('justify-self-start')
+    expect(chip.className).toContain('max-w-full')
     fireEvent.click(chip)
     const list = screen.getByRole('list')
     expect(within(list).getByText(longLabel)).toBeTruthy()

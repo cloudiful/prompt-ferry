@@ -179,6 +179,9 @@ describe('locale catalog', () => {
   })
 
   it('states the MCP connection consequence instead of the mechanism', () => {
+    for (const locale of locales) {
+      expect(messages[locale].providerBearerHint).toBeUndefined()
+    }
     expect(messages['zh-CN'].bearerTokenHint).not.toContain('最少使用')
     expect(messages['en-US'].bearerTokenHint).not.toContain('least-used')
     for (const locale of locales) {

@@ -328,10 +328,19 @@ if (existsSync(reportPath)) {
 
   const nullable = checks.nullableCells
   assert(
-    nullable?.listTokenCell === '- / - / -' &&
+    nullable?.listTokenCell === '- · -' &&
       nullable?.listOutputRate === '-' &&
       nullable?.detailNoFabricatedZero === true,
     'the actual nullable-token list cells and detail are not verified as dashes',
+  )
+  assert(
+    nullable?.populatedTokenCell?.text === '1.1K · 40%' &&
+      nullable?.populatedTokenCell?.whiteSpace === 'nowrap' &&
+      !nullable?.populatedTokenCell?.text?.includes('/') &&
+      (!nullable?.populatedTokenCell?.lineHeight ||
+        nullable?.populatedTokenCell?.height <=
+          nullable?.populatedTokenCell?.lineHeight * 1.5),
+    'the token cell is not a single line of total tokens and cache rate',
   )
 
   const widths = report.widthChecks ?? []
@@ -569,6 +578,7 @@ if (existsSync(reportPath)) {
   for (const screenshot of [
     'e2e/foundation/screenshots/usage-ai-records-zh-dark-1440.png',
     'e2e/foundation/screenshots/usage-ai-records-zh-dark-390.png',
+    'e2e/foundation/screenshots/usage-ai-records-token-zh-dark-1440.png',
   ]) {
     assert(
       screenshots.includes(screenshot) &&
@@ -576,6 +586,43 @@ if (existsSync(reportPath)) {
       `the zh-dark AI records screenshot evidence is missing: ${screenshot}`,
     )
   }
+
+  const tokenColumn = checks.aiRecordsTokenColumn ?? {}
+  assert(
+    tokenColumn.found === true &&
+      typeof tokenColumn.scrollLeft === 'number' &&
+      typeof tokenColumn.maxScrollLeft === 'number' &&
+      tokenColumn.scrollLeft >= tokenColumn.maxScrollLeft - 1,
+    'the zh-dark token-column capture did not scroll the request table to its end',
+  )
+  assert(
+    typeof tokenColumn.visibleCount === 'number' &&
+      tokenColumn.visibleCount > 0 &&
+      Array.isArray(tokenColumn.cells) &&
+      tokenColumn.cells.length === tokenColumn.visibleCount,
+    'the zh-dark token column is not visible in the captured evidence',
+  )
+  const tokenShape = /^[\d.,KMB-]+ · [\d.%-]+$/
+  const tokenCells = Array.isArray(tokenColumn.cells) ? tokenColumn.cells : []
+  assert(
+    tokenCells.length > 0 &&
+      tokenCells.every(
+        (cell: Record<string, any>) =>
+          cell.whiteSpace === 'nowrap' &&
+          cell.lineCount === 1 &&
+          typeof cell.height === 'number' &&
+          typeof cell.lineHeight === 'number' &&
+          cell.height <= cell.lineHeight * 1.5 &&
+          tokenShape.test(String(cell.text ?? '')),
+      ),
+    'a zh-dark token cell is not one line of total tokens and cache rate',
+  )
+  const tokenTexts = tokenCells.map((cell: Record<string, any>) => cell.text)
+  assert(
+    tokenTexts.includes('- · -') &&
+      tokenTexts.some((text: string) => text !== '- · -'),
+    'the zh-dark token evidence does not show both an empty and a populated cell',
+  )
 }
 
 if (failures.length > 0) {

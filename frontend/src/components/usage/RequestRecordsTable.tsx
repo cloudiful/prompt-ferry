@@ -208,8 +208,11 @@ export function RequestRecordsTable({
     {
       id: 'total_tokens',
       header: t('tokenCacheSummary'),
-      render: (record) =>
-        `${formatUsageTokenQuantity(record.total_tokens, locale)} / ${formatUsageTokenQuantity(record.cached_tokens, locale)} / ${formatUsagePercent(record.cache_rate)}`,
+      render: (record) => (
+        <span className="whitespace-nowrap">
+          {`${formatUsageTokenQuantity(record.total_tokens, locale)} · ${formatUsagePercent(record.cache_rate)}`}
+        </span>
+      ),
       sortField: USAGE_SORT_FIELDS.total_tokens,
     },
     {

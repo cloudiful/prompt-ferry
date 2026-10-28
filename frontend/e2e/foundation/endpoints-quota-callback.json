@@ -1,5 +1,5 @@
 {
-  "startedAt": "2026-10-28T04:29:10.485Z",
+  "startedAt": "2026-10-28T08:19:49.094Z",
   "checks": {
     "fixtureQuotaStatusScope": {
       "quotaStatusScope": "text_inference",
@@ -69,5 +69,5 @@
     "e2e/foundation/screenshots/endpoints-quota-history-en-light-1440.png",
     "e2e/foundation/screenshots/endpoints-subscription-history-en-light-1440.png"
   ],
-  "finishedAt": "2026-10-28T04:29:13.798Z"
+  "finishedAt": "2026-10-28T08:19:52.338Z"
 }

@@ -1,6 +1,6 @@
 {
-  "runId": "mcp-1793010978486",
-  "startedAt": "2026-10-26T10:36:18.486Z",
+  "runId": "mcp-1793175636277",
+  "startedAt": "2026-10-28T08:20:36.277Z",
   "checks": {
     "ownerRole": {
       "routeId": "R-MCP",
@@ -90,6 +90,72 @@
       "hiddenTimeoutPreserved": true,
       "secretsMasked": true
     },
+    "dialogGeometry": [
+      {
+        "viewport": 1440,
+        "width": 896,
+        "scrollWidth": 894,
+        "clientWidth": 894,
+        "horizontalScroll": false,
+        "documentOverflow": false,
+        "escapedControls": 0,
+        "controlCount": 19,
+        "providerBearerSentence": false,
+        "transportWidth": 448,
+        "providerWidth": 448,
+        "proxyGap": 30,
+        "proxyActionAdjacent": true,
+        "expectedWidth": 896
+      },
+      {
+        "viewport": 1024,
+        "width": 896,
+        "scrollWidth": 894,
+        "clientWidth": 894,
+        "horizontalScroll": false,
+        "documentOverflow": false,
+        "escapedControls": 0,
+        "controlCount": 19,
+        "providerBearerSentence": false,
+        "transportWidth": 448,
+        "providerWidth": 448,
+        "proxyGap": 30,
+        "proxyActionAdjacent": true,
+        "expectedWidth": 896
+      },
+      {
+        "viewport": 768,
+        "width": 736,
+        "scrollWidth": 734,
+        "clientWidth": 734,
+        "horizontalScroll": false,
+        "documentOverflow": false,
+        "escapedControls": 0,
+        "controlCount": 19,
+        "providerBearerSentence": false,
+        "transportWidth": 448,
+        "providerWidth": 448,
+        "proxyGap": 30,
+        "proxyActionAdjacent": true,
+        "expectedWidth": 736
+      },
+      {
+        "viewport": 390,
+        "width": 358,
+        "scrollWidth": 356,
+        "clientWidth": 356,
+        "horizontalScroll": false,
+        "documentOverflow": false,
+        "escapedControls": 0,
+        "controlCount": 19,
+        "providerBearerSentence": false,
+        "transportWidth": 308,
+        "providerWidth": 308,
+        "proxyGap": 30,
+        "proxyActionAdjacent": true,
+        "expectedWidth": 358
+      }
+    ],
     "createDialog": {
       "hostedCreated": "mcp-1001",
       "privateOwner": 2,
@@ -259,6 +325,7 @@
   "screenshots": [
     "e2e/foundation/screenshots/mcp-admin-en-light-1440.png",
     "e2e/foundation/screenshots/mcp-hosted-editor-en-light-1440.png",
+    "e2e/foundation/screenshots/mcp-dialog-en-light-1440.png",
     "e2e/foundation/screenshots/mcp-hosted-create-en-light-1440.png",
     "e2e/foundation/screenshots/mcp-admin-en-light-390.png",
     "e2e/foundation/screenshots/mcp-admin-zh-dark-390.png"
@@ -266,29 +333,29 @@
   "segments": [
     {
       "name": "owner-role",
-      "startedAt": "2026-10-26T10:36:21.818Z",
-      "finishedAt": "2026-10-26T10:36:23.131Z"
+      "startedAt": "2026-10-28T08:20:37.894Z",
+      "finishedAt": "2026-10-28T08:20:39.297Z"
     },
     {
       "name": "admin-paging-delete",
-      "startedAt": "2026-10-26T10:36:23.932Z",
-      "finishedAt": "2026-10-26T10:36:24.803Z"
+      "startedAt": "2026-10-28T08:20:40.058Z",
+      "finishedAt": "2026-10-28T08:20:40.833Z"
     },
     {
       "name": "catalog-editor",
-      "startedAt": "2026-10-26T10:36:24.803Z",
-      "finishedAt": "2026-10-26T10:36:31.058Z"
+      "startedAt": "2026-10-28T08:20:40.833Z",
+      "finishedAt": "2026-10-28T08:20:46.978Z"
     },
     {
       "name": "guarded-mutations",
-      "startedAt": "2026-10-26T10:36:31.058Z",
-      "finishedAt": "2026-10-26T10:36:33.554Z"
+      "startedAt": "2026-10-28T08:20:46.978Z",
+      "finishedAt": "2026-10-28T08:20:49.412Z"
     },
     {
       "name": "create-secrets-responsive",
-      "startedAt": "2026-10-26T10:36:33.554Z",
-      "finishedAt": "2026-10-26T10:36:49.160Z"
+      "startedAt": "2026-10-28T08:20:49.412Z",
+      "finishedAt": "2026-10-28T08:21:05.927Z"
     }
   ],
-  "finishedAt": "2026-10-26T10:36:49.162Z"
+  "finishedAt": "2026-10-28T08:21:05.930Z"
 }

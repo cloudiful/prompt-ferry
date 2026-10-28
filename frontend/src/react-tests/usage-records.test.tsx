@@ -402,7 +402,11 @@ describe('request records table: cells', () => {
         }),
       ],
     })
-    expect(cellText('total_tokens')).toBe('1K / 0 / 0%')
+    expect(cellText('total_tokens')).toBe('1K · 0%')
+    const tokenSpan = firstRow().querySelector(
+      '[data-usage-cell="total_tokens"] span',
+    ) as HTMLElement
+    expect(tokenSpan.className).toContain('whitespace-nowrap')
 
     view.rerender(
       <LocaleProvider>
@@ -428,7 +432,22 @@ describe('request records table: cells', () => {
         />
       </LocaleProvider>,
     )
-    expect(cellText('total_tokens')).toBe('- / - / -')
+    expect(cellText('total_tokens')).toBe('- · -')
+  })
+
+  it('shows only the total and the cache rate in the token cell', () => {
+    renderTable({
+      records: [
+        record({
+          cache_rate: 0.4,
+          cached_tokens: 400,
+          total_tokens: 1000,
+        }),
+      ],
+    })
+    const text = cellText('total_tokens')
+    expect(text).toBe('1K · 40%')
+    expect(text).not.toContain('/')
   })
 
   it('formats latency and only rates a completed AI request', () => {
