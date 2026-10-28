@@ -3,6 +3,8 @@ run-name: Docker Publish by ${{ github.actor }}
 
 on:
   push:
+    branches:
+      - "main"
     tags:
       - "v*"
   workflow_dispatch:
@@ -72,6 +74,7 @@ jobs:
           builder_name_prefix: prompt-ferry
           inline_cache: "true"
           inline_cache_tag: latest-amd64
+          publish_latest: "false"
           username: ${{ github.actor }}
           password: ${{ secrets.REGISTRY_TOKEN }}
 
@@ -81,5 +84,6 @@ jobs:
           architectures: amd64
           targets: >-
             [{"target":"runtime","image_suffix":""}]
+          publish_latest: "false"
           username: ${{ github.actor }}
           password: ${{ secrets.REGISTRY_TOKEN }}
