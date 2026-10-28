@@ -35,6 +35,19 @@ function toPair(target: ModelRouteTargetItemView): TargetPair {
   }
 }
 
+function PairChip({ pair }: { pair: TargetPair }) {
+  return (
+    <>
+      <span className="min-w-0 truncate">{pair.endpoint}</span>
+      {pair.override ? (
+        <span className="ml-1 min-w-0 truncate text-muted-foreground">
+          · {pair.override}
+        </span>
+      ) : null}
+    </>
+  )
+}
+
 export function ModelRouteTargetsSummary({
   targets,
 }: ModelRouteTargetsSummaryProps) {
@@ -53,21 +66,61 @@ export function ModelRouteTargetsSummary({
       </span>
     )
 
+  const chipClassName =
+    'inline-flex min-w-0 max-w-full items-center rounded-full border bg-background px-2 py-px text-xs'
+  const firstPair = preview[0]
+  const list = (
+    <PopoverContent
+      align="start"
+      className="max-h-[min(60vh,18rem)] w-[min(18rem,calc(100vw-2rem))] overflow-y-auto p-2"
+    >
+      <ul className="grid gap-2">
+        {pairs.map((pair) => (
+          <li className="grid min-w-0 gap-0.5" key={pair.target_id}>
+            <span className="break-words font-medium">{pair.endpoint}</span>
+            {pair.override ? (
+              <span className="break-words text-xs text-muted-foreground">
+                {pair.override}
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </PopoverContent>
+  )
+
+  if (hidden === 0 && firstPair) {
+    // One enabled target: the single chip is the disclosure itself, so touch
+    // and keyboard users can still read the complete endpoint and override.
+    return (
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-1">
+        <Popover onOpenChange={setOpen} open={open}>
+          <PopoverTrigger asChild>
+            <button
+              aria-label={firstPair.label}
+              className={`${chipClassName} cursor-pointer text-left`}
+              title={firstPair.label}
+              type="button"
+            >
+              <PairChip pair={firstPair} />
+            </button>
+          </PopoverTrigger>
+          {list}
+        </Popover>
+      </div>
+    )
+  }
+
   return (
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-1">
-      <div className="flex min-w-0 flex-wrap gap-1">
+      <div className="flex min-w-0 flex-nowrap gap-1 overflow-hidden">
         {preview.map((pair) => (
           <span
-            className="inline-flex min-w-0 max-w-full rounded-full border bg-background px-2 py-px text-xs"
+            className={chipClassName}
             key={pair.target_id}
             title={pair.label}
           >
-            <span className="min-w-0 truncate">{pair.endpoint}</span>
-            {pair.override ? (
-              <span className="ml-1 min-w-0 truncate text-muted-foreground">
-                · {pair.override}
-              </span>
-            ) : null}
+            <PairChip pair={pair} />
           </span>
         ))}
       </div>
@@ -84,25 +137,7 @@ export function ModelRouteTargetsSummary({
               +{hidden}
             </Button>
           </PopoverTrigger>
-          <PopoverContent
-            align="start"
-            className="max-h-[min(60vh,18rem)] w-[min(18rem,calc(100vw-2rem))] overflow-y-auto p-2"
-          >
-            <ul className="grid gap-2">
-              {pairs.map((pair) => (
-                <li className="grid min-w-0 gap-0.5" key={pair.target_id}>
-                  <span className="break-words font-medium">
-                    {pair.endpoint}
-                  </span>
-                  {pair.override ? (
-                    <span className="break-words text-xs text-muted-foreground">
-                      {pair.override}
-                    </span>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </PopoverContent>
+          {list}
         </Popover>
       ) : null}
     </div>

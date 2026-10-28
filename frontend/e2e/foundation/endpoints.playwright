@@ -155,6 +155,125 @@ async page => {
   await listRetry
   await page.locator('[data-endpoint-row="ep-minimax-cn"]').waitFor({ state: 'visible' })
   report.checks.errorState = { visible: true, retainedRows: (await page.locator('[data-endpoint-row]:visible').count()) > 0, retried: true, messagePresent: listErrorText.includes('fixture endpoint list failure') || listErrorText.includes('fixture_endpoint_list_unavailable') }
+
+  async function measureListGeometry() {
+    return page.evaluate(() => {
+      const visible = element => element.getBoundingClientRect().height > 0
+      const rows = Array.from(document.querySelectorAll('[data-endpoint-row]')).filter(visible)
+      const table = document.querySelector('[data-slot="table"]')
+      const container = document.querySelector('[data-slot="table-container"]')
+      const heads = Array.from(document.querySelectorAll('[data-slot="table-head"]')).filter(visible)
+      const headNames = heads.map(head => (head.textContent ?? '').trim())
+      const urls = Array.from(document.querySelectorAll('[data-endpoint-url]')).filter(visible)
+      const metas = Array.from(document.querySelectorAll('[data-endpoint-meta]')).filter(visible)
+      const owners = Array.from(document.querySelectorAll('[data-endpoint-owner]')).filter(visible)
+      const badgeRows = Array.from(document.querySelectorAll('[data-quota-badges="table"]')).filter(visible)
+      const quotaColumnIndex = headNames.indexOf('Usage')
+      const lineCount = element => {
+        const range = document.createRange()
+        range.selectNodeContents(element)
+        const tops = new Set(Array.from(range.getClientRects()).map(rect => Math.round(rect.top)))
+        return tops.size
+      }
+      const headAlignment = heads.map((head, index) => {
+        const cell = rows[0] ? Array.from(rows[0].querySelectorAll('td'))[index] : null
+        if (!cell) return { name: head.textContent ?? '', delta: null }
+        const headBox = head.getBoundingClientRect()
+        const cellBox = cell.getBoundingClientRect()
+        return {
+          name: head.textContent ?? '',
+          delta: Math.max(Math.abs(headBox.left - cellBox.left), Math.abs(headBox.right - cellBox.right)),
+        }
+      })
+      const rowQuota = rows.map(row => {
+        const cells = Array.from(row.querySelectorAll('td'))
+        const quotaCell = quotaColumnIndex >= 0 ? cells[quotaColumnIndex] : null
+        const text = quotaCell ? (quotaCell.textContent ?? '').trim() : ''
+        return {
+          empty: quotaCell === null ? null : text === '',
+          hasQuotaButton: row.querySelector('button[aria-label="Token plan usage"]') !== null,
+          text,
+        }
+      })
+      return {
+        actionHeaderName: headNames.length > 0 ? headNames[headNames.length - 1] : '',
+        badgeOverflow: badgeRows.map(badges => {
+          const box = badges.getBoundingClientRect()
+          const cell = badges.closest('td')
+          const cellBox = cell ? cell.getBoundingClientRect() : null
+          return {
+            overflowsCell: cellBox ? box.right > cellBox.right + 1 : true,
+            wrap: getComputedStyle(badges).flexWrap,
+          }
+        }),
+        documentOverflow: document.documentElement.scrollWidth > window.innerWidth,
+        headAlignment,
+        headNames,
+        metaLabels: metas.map(meta => (meta.textContent ?? '').split('·').map(part => part.trim()).filter(Boolean)),
+        ownerCount: owners.length,
+        quotaColumnIndex,
+        rowQuota,
+        tableColumns: rows[0] ? Array.from(rows[0].querySelectorAll('td')).length : 0,
+        tableScrolls: container ? getComputedStyle(container).overflowX : '',
+        urls: urls.map(url => ({
+          lines: lineCount(url),
+          overflowWrap: getComputedStyle(url).overflowWrap,
+          safeBreaks: (url.textContent ?? '').split('/').length,
+          text: url.textContent ?? '',
+          title: url.getAttribute('title') ?? '',
+          wordBreak: getComputedStyle(url).wordBreak,
+        })),
+        visibleRows: rows.length,
+        visibleTable: table ? visible(table) : false,
+      }
+    })
+  }
+
+  const listGeometry = {}
+  for (const width of [1440, 1024, 768]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.locator('[data-endpoint-row]').first().waitFor({ state: 'visible' })
+    listGeometry[`desktop-${width}`] = await measureListGeometry()
+  }
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.locator('[data-endpoint-card]').first().waitFor({ state: 'visible' })
+  listGeometry['mobile-390'] = await measureListGeometry()
+  await page.setViewportSize({ width: 1440, height: 900 })
+  report.checks.listGeometry = listGeometry
+
+  const idleRow = page.locator('[data-endpoint-row="ep-minimax-cn"]')
+  const idleControlCount = await idleRow
+    .locator('button[aria-label="Not tested"]')
+    .count()
+  assert(
+    idleControlCount === 0,
+    'a row without a test result still renders a test-result control',
+  )
+  const probeRow = page.locator('[data-endpoint-row="ep-openai-codex"]')
+  await probeRow.getByRole('button', { name: 'Test', exact: true }).click()
+  const probeResultControl = probeRow.locator('button[aria-label*="HTTP"]')
+  await probeResultControl.waitFor({ state: 'visible' })
+  const probeResultName = await probeResultControl.getAttribute('aria-label')
+  assert(
+    (probeResultName ?? '').includes('HTTP'),
+    `a row with a test result did not expose its result control: ${probeResultName}`,
+  )
+  await probeResultControl.click()
+  const probePopover = page
+    .getByText('HTTP', { exact: false })
+    .last()
+  await probePopover.waitFor({ state: 'visible' })
+  const probePopoverText = await probePopover.innerText()
+  assert(
+    probePopoverText.includes('HTTP') && probePopoverText.length > 10,
+    `the test-result popover did not show the result message: ${probePopoverText}`,
+  )
+  await page.keyboard.press('Escape')
+  report.checks.testResultControl = {
+    idleControlAbsent: idleControlCount === 0,
+    populatedControlName: probeResultName,
+    popoverText: probePopoverText,
+  }
   report.checks.consoleErrors = consoleErrors
   report.checks.pageErrors = pageErrors
   assert(pageErrors.length === 0, `browser page errors: ${JSON.stringify(pageErrors)}`)

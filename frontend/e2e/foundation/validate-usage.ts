@@ -69,6 +69,10 @@ const AI_SCENARIOS = [
   'responsive-width',
 ]
 
+// The parity matrix still declares the route scenarios above; the browser run
+// additionally verifies the AI request column geometry.
+const AI_RUN_SCENARIOS = [...AI_SCENARIOS, 'column-geometry']
+
 const MCP_SCENARIOS = [
   'route-render',
   'empty-state',
@@ -202,8 +206,8 @@ if (existsSync(reportPath)) {
 
   assert(
     JSON.stringify(Object.keys(scenarios['R-USAGE-AI'] ?? {}).sort()) ===
-      JSON.stringify([...AI_SCENARIOS].sort()),
-    'the AI route does not carry exactly the 13 verified scenarios',
+      JSON.stringify([...AI_RUN_SCENARIOS].sort()),
+    'the AI route does not carry exactly the 14 verified scenarios',
   )
   assert(
     JSON.stringify(Object.keys(scenarios['R-USAGE-MCP'] ?? {}).sort()) ===
@@ -211,7 +215,7 @@ if (existsSync(reportPath)) {
     'the MCP route does not carry exactly the 6 verified scenarios',
   )
   for (const [rowId, expected] of [
-    ['R-USAGE-AI', AI_SCENARIOS],
+    ['R-USAGE-AI', AI_RUN_SCENARIOS],
     ['R-USAGE-MCP', MCP_SCENARIOS],
   ] as const) {
     for (const scenario of expected) {
@@ -516,6 +520,60 @@ if (existsSync(reportPath)) {
     assert(
       screenshots.includes(screenshot),
       `the required usage screenshot is missing: ${screenshot}`,
+    )
+  }
+
+  const columnGeometryScenario = scenarios['R-USAGE-AI']?.['column-geometry']
+  assert(
+    columnGeometryScenario?.passed === true &&
+      Boolean(columnGeometryScenario?.evidence),
+    'R-USAGE-AI:column-geometry has no passing current-run assertion',
+  )
+  assert(
+    checks.requestTableNoWrap?.headers === true &&
+      checks.requestTableNoWrap?.dateHeader === true &&
+      checks.requestTableNoWrap?.dateTimeCells === true,
+    'the request table headers or the date/time cells were not measured as non-wrapping',
+  )
+  const columnGeometry = checks.aiRecordsZhDark ?? {}
+  for (const viewport of ['desktop', 'mobile'] as const) {
+    const measurement = columnGeometry[viewport] ?? {}
+    const rem = measurement.rem
+    const modelWidth = measurement.modelWidth
+    assert(
+      typeof rem === 'number' &&
+        Number.isFinite(rem) &&
+        rem > 0 &&
+        typeof modelWidth === 'number' &&
+        Number.isFinite(modelWidth) &&
+        modelWidth >= 14 * rem,
+      `the AI model column is not at least 14rem of measured width in the zh-dark ${viewport} records`,
+    )
+    assert(
+      measurement.headerNoWrap === true && measurement.dateTimeNoWrap === true,
+      `the zh-dark ${viewport} records headers or date/time cells wrap`,
+    )
+    assert(
+      measurement.headerOverlap === false,
+      `the zh-dark ${viewport} records headers overlap`,
+    )
+    assert(
+      measurement.documentNoOverflow === true,
+      `the zh-dark ${viewport} records overflow the document horizontally`,
+    )
+    assert(
+      measurement.containerScrolls === true,
+      `the zh-dark ${viewport} records table container does not own the scroll`,
+    )
+  }
+  for (const screenshot of [
+    'e2e/foundation/screenshots/usage-ai-records-zh-dark-1440.png',
+    'e2e/foundation/screenshots/usage-ai-records-zh-dark-390.png',
+  ]) {
+    assert(
+      screenshots.includes(screenshot) &&
+        existsSync(join(root, screenshot.replace(/^e2e\/foundation\//, ''))),
+      `the zh-dark AI records screenshot evidence is missing: ${screenshot}`,
     )
   }
 }

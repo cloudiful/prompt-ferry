@@ -88,6 +88,9 @@ async page => {
         '/api/v1/admin/endpoints/ep-minimax-cn/token-plan-usage',
     { timeout: 7000 },
   )
+  // The body is consumed as soon as the response arrives: the reload below
+  // navigates away, and a body that is read after that navigation is gone.
+  const warmQuotaUsage = warmQuotaResponse.then((response) => response.json())
   await page.reload()
   await page
     .locator('[data-foundation-route-id="R-ENDPOINTS-UPSTREAMS"]')
@@ -95,8 +98,7 @@ async page => {
   await page
     .locator('[data-endpoint-row="ep-minimax-cn"]')
     .waitFor({ state: 'visible' })
-  const quotaResponse = await warmQuotaResponse
-  const quotaUsage = await quotaResponse.json()
+  const quotaUsage = await warmQuotaUsage
   const minimaxKey = quotaUsage.keys.find(
     (key) => key.key_id === 'key-minimax-1',
   )

@@ -90,6 +90,41 @@ async page => {
     await page.getByRole('option', { name: optionName, exact: true }).click()
   }
 
+  async function candidateModels() {
+    const list = page.locator('[data-model-candidate-list]')
+    await list.waitFor({ state: 'visible' })
+    return list
+      .locator('[data-model-candidate-option]')
+      .evaluateAll(options => options.map(option => (option.textContent ?? '').trim()))
+  }
+
+  async function candidateState() {
+    return page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"]')
+      const input = dialog?.querySelector('[data-model-candidate-input]') ?? document.querySelector('[data-model-candidate-input]')
+      const list = document.querySelector('[data-model-candidate-list]')
+      const options = Array.from(document.querySelectorAll('[data-model-candidate-option]'))
+      const activeDescendant = input?.getAttribute('aria-activedescendant') ?? null
+      const activeOption = activeDescendant === null ? null : document.getElementById(activeDescendant)
+      const selected = options.find(option => option.getAttribute('aria-selected') === 'true')
+      const focused = document.activeElement
+      return {
+        activeDescendant,
+        activeOptionText: (activeOption?.textContent ?? '').trim(),
+        focusedAriaLabel: focused?.getAttribute('aria-label') ?? null,
+        focusedIsCandidateInput: focused?.hasAttribute('data-model-candidate-input') === true,
+        focusedTag: focused?.tagName.toLowerCase() ?? null,
+        inputExpanded: input?.getAttribute('aria-expanded') ?? null,
+        inputValue: input?.value ?? null,
+        listPresent: list !== null,
+        listVisible: list !== null && list.checkVisibility(),
+        optionCount: options.length,
+        selectedOptionText: (selected?.textContent ?? '').trim(),
+        toggleExpanded: document.querySelector('button[aria-label="Model candidates"]')?.getAttribute('aria-expanded') ?? null,
+      }
+    })
+  }
+
   function isAllowedAdminRequest(request) {
     if (request.path === '/api/v1/admin/model-routes' && ['GET', 'POST'].includes(request.method)) return true
     if (/^\/api\/v1\/admin\/model-routes\/[^/]+$/.test(request.path) && ['PATCH', 'DELETE'].includes(request.method)) return true
@@ -162,9 +197,103 @@ async page => {
   report.checks.allEndpointResolution.targetSelectable = true
   report.checks.catalogBehavior = { offPageCatalogFetched: true, endpointId: 'ep-fixture-8', effectiveAutoProtocol: catalogAutoLog.query.native_api ?? null }
 
+  const candidateInput = editor.locator('[data-model-candidate-input]').nth(0)
+  const candidateToggle = editor.getByRole('button', { name: 'Model candidates' })
+  const targetRowOne = editor.locator('ol > li').nth(0)
+  await candidateInput.focus()
+  assert(await page.locator('[data-model-candidate-list]').count() === 0, 'the candidate list opened on focus alone')
+  await candidateInput.fill('fixture-peek')
+  assert(await page.locator('[data-model-candidate-list]').count() === 0, 'the candidate list opened on typing alone')
+  const writesBeforeCandidate = (await requestLog()).filter(request => request.path.startsWith('/api/v1/admin/model-routes') && ['POST', 'PATCH', 'DELETE'].includes(request.method)).length
+  await candidateInput.press('ArrowDown')
+  const candidateOptions = page.locator('[data-model-candidate-option]')
+  await candidateOptions.first().waitFor({ state: 'visible' })
+  const candidateModelsList = await candidateModels()
+  assert(candidateModelsList.join('|') === 'minimax-m2|minimax-m2.1|text-embedding-3-large', `candidate list did not reflect the effective auto protocol: ${JSON.stringify(candidateModelsList)}`)
+  assert(await page.locator('[data-model-candidate-list] [aria-selected="true"]').count() === 0, 'opening the candidate list preselected an option')
+  assert(await candidateInput.getAttribute('aria-activedescendant') === null, 'opening the candidate list activated an option')
+  await candidateInput.press('ArrowDown')
+  const activeCandidate = await candidateOptions.first().textContent()
+  assert(await candidateInput.getAttribute('aria-activedescendant') !== null, 'arrow navigation did not activate an option')
+  await candidateInput.press('Enter')
+  assert(await candidateInput.inputValue() === (activeCandidate ?? '').trim(), 'Enter did not commit the deliberately active candidate')
+  assert(await page.locator('[data-model-candidate-list]').count() === 0, 'candidate selection left the list open')
+  assert(await editor.isVisible(), 'candidate selection submitted and closed the route editor')
+  assert((await requestLog()).filter(request => request.path.startsWith('/api/v1/admin/model-routes') && ['POST', 'PATCH', 'DELETE'].includes(request.method)).length === writesBeforeCandidate, 'candidate selection wrote the route')
+  await candidateInput.fill('candidate-draft')
+  await candidateInput.press('ArrowDown')
+  await page.locator('[data-model-candidate-list]').waitFor({ state: 'visible' })
+  await candidateInput.press('ArrowDown')
+  await candidateInput.press('Escape')
+  await page.locator('[data-model-candidate-list]').waitFor({ state: 'hidden' })
+  assert(await candidateInput.inputValue() === 'candidate-draft' && await editor.isVisible(), 'Escape changed the draft or closed the route editor')
+  await candidateToggle.click()
+  await page.locator('[data-model-candidate-list]').waitFor({ state: 'visible' })
+  assert(await candidateInput.inputValue() === 'candidate-draft', 'opening the candidate list changed the free-text draft')
+  await page.locator('[data-model-candidate-option]').nth(1).click()
+  assert(await candidateInput.inputValue() === 'minimax-m2.1', 'mouse selection did not commit the chosen candidate')
+  const candidateFocus = {}
+  candidateFocus.mouseCommit = await page.evaluate(() => document.activeElement?.hasAttribute('data-model-candidate-input')) === true
+  assert(candidateFocus.mouseCommit, 'mouse selection did not return focus to the model input')
+  await candidateToggle.focus()
+  await candidateToggle.press('Enter')
+  await page.locator('[data-model-candidate-list]').waitFor({ state: 'visible' })
+  candidateFocus.toggleOpenedInput = await page.evaluate(() => document.activeElement?.hasAttribute('data-model-candidate-input')) === true
+  assert(candidateFocus.toggleOpenedInput, 'keyboard toggle open did not focus the model input')
+  const keyboardToggleState = { opened: await candidateState() }
+  await candidateInput.press('ArrowDown')
+  keyboardToggleState.afterArrowDown = await candidateState()
+  const keyboardCandidate = ((await page.locator('[data-model-candidate-option]').first().textContent()) ?? '').trim()
+  const writesBeforeKeyboardCommit = (await requestLog()).filter(request => request.path.startsWith('/api/v1/admin/model-routes') && ['POST', 'PATCH', 'DELETE'].includes(request.method)).length
+  await candidateInput.press('Enter')
+  keyboardToggleState.afterEnter = await candidateState()
+  report.checks.candidateKeyboardToggle = keyboardToggleState
+  assert(await candidateInput.inputValue() === keyboardCandidate, 'keyboard toggle path did not commit the active candidate')
+  candidateFocus.keyboardCommit = await page.evaluate(() => document.activeElement?.hasAttribute('data-model-candidate-input')) === true
+  assert(candidateFocus.keyboardCommit, 'keyboard commit did not return focus to the model input')
+  assert(await editor.isVisible(), 'keyboard commit submitted and closed the route editor')
+  assert((await requestLog()).filter(request => request.path.startsWith('/api/v1/admin/model-routes') && ['POST', 'PATCH', 'DELETE'].includes(request.method)).length === writesBeforeKeyboardCommit, 'keyboard commit wrote the route')
+  await candidateInput.fill('tab-draft')
+  await candidateInput.press('ArrowDown')
+  await page.locator('[data-model-candidate-list]').waitFor({ state: 'visible' })
+  await candidateInput.press('ArrowDown')
+  await candidateInput.press('Tab')
+  await page.locator('[data-model-candidate-list]').waitFor({ state: 'hidden' })
+  candidateFocus.tabLeavesInput = await page.evaluate(() => document.activeElement?.hasAttribute('data-model-candidate-input')) === false
+  assert(candidateFocus.tabLeavesInput, 'Tab did not move focus out of the model input')
+  assert(await candidateInput.inputValue() === 'tab-draft', 'Tab selected an option or changed the draft')
+  await candidateInput.fill('escape-draft')
+  await candidateInput.press('ArrowDown')
+  await page.locator('[data-model-candidate-list]').waitFor({ state: 'visible' })
+  await candidateInput.press('ArrowDown')
+  await candidateInput.press('Escape')
+  await page.locator('[data-model-candidate-list]').waitFor({ state: 'hidden' })
+  candidateFocus.escapeKeptFocus = await page.evaluate(() => document.activeElement?.hasAttribute('data-model-candidate-input')) === true
+  assert(candidateFocus.escapeKeptFocus && await candidateInput.inputValue() === 'escape-draft' && await editor.isVisible(), 'Escape lost input focus, changed the draft or closed the editor')
+  await candidateInput.press('ArrowDown')
+  await page.locator('[data-model-candidate-list]').waitFor({ state: 'visible' })
+  await editor.getByRole('textbox', { name: 'Model pattern' }).click()
+  await page.locator('[data-model-candidate-list]').waitFor({ state: 'hidden' })
+  candidateFocus.outsideKeptFocus = await page.evaluate(() => document.activeElement?.getAttribute('aria-label') === 'Model pattern') === true
+  assert(candidateFocus.outsideKeptFocus, 'clicking another control did not keep that control focused')
+  assert(await candidateInput.inputValue() === 'escape-draft', 'clicking outside changed the free-text draft')
+  report.checks.candidateFocus = candidateFocus
+  const candidateLabelKept = await candidateInput.getAttribute('aria-label')
+  const rowEndpointLabel = await targetRowOne.getByText('Endpoint', { exact: true }).count()
+  const rowInheritLabel = await targetRowOne.getByText('Inherit', { exact: true }).count()
+  const triggerBox = await endpointOne.boundingBox()
+  const modelBox = await candidateInput.boundingBox()
+  const centerDelta = triggerBox && modelBox ? Math.abs((triggerBox.y + triggerBox.height / 2) - (modelBox.y + modelBox.height / 2)) : null
+  assert(rowEndpointLabel === 0, 'the redundant visible endpoint label remained in the target row')
+  assert(rowInheritLabel === 0, 'the default inherit summary remained in the target row')
+  assert(Boolean(candidateLabelKept), 'the upstream model field lost its accessible name')
+  assert(centerDelta !== null && centerDelta <= 2, `endpoint select and model field centers differed by ${centerDelta}px`)
+  report.checks.candidateList = { options: candidateModelsList, openedOnDemandOnly: true, preselected: false, keyboardCommit: true, escapeKeptDraft: true, noImplicitWrite: true }
+  report.checks.targetRowLabels = { visibleEndpointLabel: rowEndpointLabel, defaultInheritSummary: rowInheritLabel, accessibleModelName: true, centerDelta }
+
   const pattern = 'fixture-model-8-*' + 'route-pattern-'.repeat(5)
   await editor.getByRole('textbox', { name: 'Model pattern' }).fill(pattern)
-  const modelInput = editor.locator('input[list]').nth(0)
+  const modelInput = editor.locator('[data-model-candidate-input]').nth(0)
   const longModel = `route-model-${'long-value-'.repeat(9)}`
   await modelInput.fill(longModel)
   const clearModel = editor.getByRole('button', { name: /Delete Upstream model name/ })
@@ -191,17 +320,19 @@ async page => {
   await editor.getByRole('switch', { name: 'Normalize developer→system' }).click()
   await editor.getByRole('switch', { name: 'Thinking adaptation' }).click()
   await editor.getByRole('button', { name: 'Cancel' }).first().click()
-
+  const proxySummaryText = await editor.locator('li').nth(0).innerText()
+  assert(proxySummaryText.includes('Set'), 'non-default proxy override summary was not visible')
+  assert(proxySummaryText.includes('22:00'), 'schedule summary was not visible')
   await editor.getByRole('button', { name: 'Add target' }).click()
   const targetTwo = editor.locator('li').nth(1)
   await targetTwo.getByRole('combobox', { name: 'Endpoint 2' }).click()
   await page.getByRole('option', { name: /Fixture Upstream 8 With A Long Operational Name/ }).click()
-  await targetTwo.locator('input[list]').fill('duplicate-endpoint-model')
+  await targetTwo.locator('[data-model-candidate-input]').fill('duplicate-endpoint-model')
   await editor.getByRole('button', { name: 'Add target' }).click()
   const targetThree = editor.locator('li').nth(2)
   await targetThree.getByRole('combobox', { name: 'Endpoint 3' }).click()
   await page.getByRole('option', { name: /Fixture Upstream 10 With A Long Operational Name/ }).click()
-  await targetThree.locator('input[list]').fill('embedding-upstream-model')
+  await targetThree.locator('[data-model-candidate-input]').fill('embedding-upstream-model')
   await targetThree.getByRole('button', { name: 'Target settings' }).click()
   await editor.getByRole('combobox', { name: 'Native API' }).click()
   await page.getByRole('option', { name: 'Embeddings', exact: true }).click()
@@ -222,12 +353,12 @@ async page => {
   const endpointNineResponse = waitForResponse('GET', '/api/v1/admin/endpoints/ep-fixture-9/models', 200)
   await targetFour.getByRole('combobox', { name: 'Endpoint 4' }).click()
   await page.getByRole('option', { name: /Fixture Upstream 9 With A Long Operational Name/ }).click()
-  await targetFour.locator('input[list]').fill('coalesced-target-four-model')
+  await targetFour.locator('[data-model-candidate-input]').fill('coalesced-target-four-model')
   await editor.getByRole('button', { name: 'Add target' }).click()
   const targetFive = editor.locator('li').nth(4)
   await targetFive.getByRole('combobox', { name: 'Endpoint 5' }).click()
   await page.getByRole('option', { name: /Fixture Upstream 9 With A Long Operational Name/ }).click()
-  await targetFive.locator('input[list]').fill('coalesced-target-five-model')
+  await targetFive.locator('[data-model-candidate-input]').fill('coalesced-target-five-model')
   await endpointNineResponse
   await page.waitForTimeout(100)
   let endpointNineCatalogReads = (await requestLog()).filter(request => request.path === '/api/v1/admin/endpoints/ep-fixture-9/models' && request.method === 'GET')
@@ -254,9 +385,9 @@ async page => {
   assert(firstAfterKeyboard.includes('Fixture Upstream 8') && secondAfterKeyboard.includes('Fixture Upstream 10'), 'keyboard reorder did not move target identity')
   await targetRows.nth(1).locator('[data-target-drag-handle]').dragTo(targetRows.nth(2))
   targetRows = editor.locator('li')
-  const firstModelAfterDrag = await targetRows.nth(0).locator('input[list]').inputValue()
-  const secondModelAfterDrag = await targetRows.nth(1).locator('input[list]').inputValue()
-  const thirdModelAfterDrag = await targetRows.nth(2).locator('input[list]').inputValue()
+  const firstModelAfterDrag = await targetRows.nth(0).locator('[data-model-candidate-input]').inputValue()
+  const secondModelAfterDrag = await targetRows.nth(1).locator('[data-model-candidate-input]').inputValue()
+  const thirdModelAfterDrag = await targetRows.nth(2).locator('[data-model-candidate-input]').inputValue()
   assert(firstModelAfterDrag === longModel && secondModelAfterDrag === 'duplicate-endpoint-model' && thirdModelAfterDrag === 'embedding-upstream-model', 'drag reorder separated endpoint/model/settings association')
   const updateResponse = waitForResponse('PATCH', '/api/v1/admin/model-routes/rule-fixture-8', 200)
   await editor.getByRole('button', { name: 'Save', exact: true }).click()
@@ -283,7 +414,7 @@ async page => {
   await reopenedEditor.waitFor({ state: 'visible' })
   assert(await reopenedEditor.getByRole('textbox', { name: 'Model pattern' }).inputValue() === pattern, 'updated long pattern did not reopen')
   assert(await reopenedEditor.locator('li').count() === 5, 'updated target order did not reopen')
-  assert(await reopenedEditor.locator('li').nth(0).locator('input[list]').inputValue() === longModel && await reopenedEditor.locator('li').nth(1).locator('input[list]').inputValue() === 'duplicate-endpoint-model', 'target model values did not follow reopened order')
+  assert(await reopenedEditor.locator('li').nth(0).locator('[data-model-candidate-input]').inputValue() === longModel && await reopenedEditor.locator('li').nth(1).locator('[data-model-candidate-input]').inputValue() === 'duplicate-endpoint-model', 'target model values did not follow reopened order')
   await reopenedEditor.locator('li').nth(0).getByRole('button', { name: 'Target settings' }).click()
   assert((await reopenedEditor.getByRole('combobox', { name: 'Native API' }).innerText()).includes('Chat'), 'target native API did not reopen')
   assert(await reopenedEditor.getByRole('textbox', { name: 'Service tier' }).inputValue() === 'priority', 'service tier did not reopen')
@@ -300,6 +431,25 @@ async page => {
   await reopenedEditor.getByRole('button', { name: 'Cancel' }).last().click()
   await reopenedEditor.waitFor({ state: 'hidden' })
   report.checks.targetSettingsRoundtrip = { pattern: true, orderedModels: true, proxyKeep: true, overnightWeekdays: true, chatSettings: true, embeddingDimensions: 1536, chatHiddenForEmbeddings: true }
+
+  const summaryCell = route8.locator('td').nth(1)
+  const previewChips = summaryCell.locator('span[title]')
+  assert(await previewChips.count() === 1, 'route summary showed more than one inline preview chip')
+  const previewChipBox = await previewChips.first().boundingBox()
+  assert(Boolean(previewChipBox) && previewChipBox.height <= 28, 'route summary preview chip wrapped onto a second line')
+  const moreTargets = route8.getByRole('button', { name: '+1 enabled targets' })
+  await moreTargets.waitFor({ state: 'visible' })
+  assert((await moreTargets.innerText()).trim() === '+1', 'route summary disclosure count was not enabled minus one')
+  await moreTargets.click()
+  const summaryItems = page.locator('[data-slot="popover-content"] ul li')
+  await summaryItems.first().waitFor({ state: 'visible' })
+  assert(await summaryItems.count() === 2, 'route summary disclosure did not list every enabled target')
+  const summaryText = (await summaryItems.allInnerTexts()).join('|')
+  assert(summaryText.includes('Fixture Upstream 9 With A Long Operational Name'), 'route summary disclosure omitted the full enabled endpoint name')
+  assert(summaryText.includes('coalesced-target-four-model') && summaryText.includes('coalesced-target-five-model'), 'route summary disclosure omitted a full enabled target override')
+  await page.keyboard.press('Escape')
+  await summaryItems.first().waitFor({ state: 'hidden' })
+  report.checks.targetSummary = { inlineChips: 1, disclosureCount: 1, listedTargets: 2, fullNamesInDisclosure: true, singleLinePreview: true }
 
   await route8.getByRole('button', { name: `Edit ${pattern}` }).click()
   const proxyEditor = page.getByRole('dialog', { name: 'Edit model route' })
@@ -381,45 +531,37 @@ async page => {
   await page.route(catalogRaceRoute, catalogRaceHandler)
   await route8.getByRole('button', { name: `Edit ${pattern}` }).click()
   const catalogRaceEditor = page.getByRole('dialog', { name: 'Edit model route' })
-  const catalogRaceInput = catalogRaceEditor.locator('input[list]').nth(0)
+  const catalogRaceInput = catalogRaceEditor.locator('[data-model-candidate-input]').nth(0)
   const catalogRaceDraft = 'catalog-race-custom-draft'
   await catalogRaceInput.fill(catalogRaceDraft)
   await catalogRaceEditor.locator('li').nth(0).getByRole('button', { name: 'Target settings' }).click()
   await choose('Native API', 'Anthropic Messages')
   await catalogRaceEditor.getByRole('button', { name: 'Cancel' }).first().click()
   await oldCatalogRequestStarted
-  const oldProtocolDraftValue = await catalogRaceEditor.locator('input[list]').nth(0).inputValue()
+  const oldProtocolDraftValue = await catalogRaceEditor.locator('[data-model-candidate-input]').nth(0).inputValue()
   await catalogRaceEditor.locator('li').nth(0).getByRole('button', { name: 'Target settings' }).click()
   await choose('Native API', 'Responses')
   await catalogRaceEditor.getByRole('button', { name: 'Cancel' }).first().click()
   await newCatalogResponseFinished
+  const catalogRaceToggle = catalogRaceEditor.getByRole('button', { name: 'Model candidates' }).first()
+  await catalogRaceToggle.click()
   await page.waitForFunction(expected => {
-    const dialog = document.querySelector('[role="dialog"]')
-    const input = dialog?.querySelector('input[list]')
-    const listId = input?.getAttribute('list')
-    const models = Array.from(document.getElementById(listId ?? '')?.querySelectorAll('option') ?? []).map(option => option.value)
-    return input?.value === expected.draft && models.length === 1 && models[0] === expected.model
+    const input = document.querySelector('[data-model-candidate-input]')
+    const options = Array.from(document.querySelectorAll('[data-model-candidate-option]'))
+    return input?.value === expected.draft && options.length === 1 && (options[0]?.textContent ?? '').trim() === expected.model
   }, { draft: catalogRaceDraft, model: 'catalog-race-current-model' })
-  const catalogStateAfterCurrentResponse = await catalogRaceEditor.evaluate(dialog => {
-    const input = dialog.querySelector('input[list]')
-    const listId = input?.getAttribute('list')
-    return {
-      model: input?.value ?? null,
-      suggestions: Array.from(document.getElementById(listId ?? '')?.querySelectorAll('option') ?? []).map(option => option.value),
-    }
-  })
+  const catalogStateAfterCurrentResponse = {
+    model: await catalogRaceInput.inputValue(),
+    suggestions: await candidateModels(),
+  }
   const oldResponsePendingWhenCurrentRendered = !oldCatalogResponseFinished
   releaseOldCatalogResponse()
   await oldCatalogResponseCompleted
   await page.waitForTimeout(100)
-  const catalogStateAfterOldResponse = await catalogRaceEditor.evaluate(dialog => {
-    const input = dialog.querySelector('input[list]')
-    const listId = input?.getAttribute('list')
-    return {
-      model: input?.value ?? null,
-      suggestions: Array.from(document.getElementById(listId ?? '')?.querySelectorAll('option') ?? []).map(option => option.value),
-    }
-  })
+  const catalogStateAfterOldResponse = {
+    model: await catalogRaceInput.inputValue(),
+    suggestions: await candidateModels(),
+  }
   const catalogRaceQueries = catalogRaceRequests.map(request => request.query)
   const catalogRaceProtocols = catalogRaceRequests.map(request => request.protocol)
   const currentModelVisibleAfterCurrentResponse = catalogStateAfterCurrentResponse.suggestions.includes('catalog-race-current-model')
@@ -523,7 +665,7 @@ async page => {
   await createDialog.getByRole('textbox', { name: 'Model pattern' }).fill('created-route-*')
   await createDialog.getByRole('combobox', { name: 'Endpoint 1' }).click()
   await page.getByRole('option', { name: /Fixture Upstream 10 With A Long Operational Name/ }).click()
-  await createDialog.locator('input[list]').fill('created-upstream-model')
+  await createDialog.locator('[data-model-candidate-input]').fill('created-upstream-model')
   await createDialog.locator('li').nth(0).getByRole('button', { name: 'Target settings' }).click()
   await createDialog.getByRole('combobox', { name: 'Proxy scheme' }).click()
   await page.getByRole('option', { name: 'http', exact: true }).click()
@@ -627,7 +769,7 @@ async page => {
   const layoutTrigger = layoutTarget.getByRole('combobox', { name: 'Endpoint 1' })
   await layoutTrigger.click()
   await page.getByRole('option', { name: /OpenAI ChatGPT Subscription/ }).click()
-  const layoutModel = layoutTarget.locator('input[list]')
+  const layoutModel = layoutTarget.locator('[data-model-candidate-input]')
   await layoutModel.fill(longTargetModel)
 
   const controlBox = async (locator, name) => {
@@ -858,10 +1000,10 @@ async page => {
   await page.getByRole('button', { name: '新增模型路由' }).click()
   const zhLayoutDialog = page.getByRole('dialog')
   await zhLayoutDialog.waitFor({ state: 'visible' })
-  const zhLayoutTrigger = zhLayoutDialog.locator('li').first().getByRole('combobox', { name: '上游节点 1' })
+  const zhLayoutTrigger = zhLayoutDialog.locator('ol > li').first().getByRole('combobox', { name: '上游节点 1' })
   await zhLayoutTrigger.click()
   await page.getByRole('option', { name: /OpenAI ChatGPT Subscription/ }).click()
-  await zhLayoutDialog.locator('input[list]').fill(`模型路由-${'长名称-'.repeat(8)}`)
+  await zhLayoutDialog.locator('[data-model-candidate-input]').fill(`模型路由-${'长名称-'.repeat(8)}`)
   await capture('endpoints-routes-target-row-zh-dark-1440')
   await zhLayoutDialog.getByRole('button', { name: '取消' }).last().click()
   await zhLayoutDialog.waitFor({ state: 'hidden' })

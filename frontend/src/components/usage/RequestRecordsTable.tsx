@@ -46,6 +46,8 @@ type UsageColumn = {
   /** The backend sort field; absent means the column is not sortable. */
   sortField?: string
   render: (record: UsageRecordView) => ReactNode
+  /** Local sizing only; content, order and sort stay untouched. */
+  widthClassName?: string
 }
 
 type RequestRecordsTableProps = {
@@ -177,12 +179,14 @@ export function RequestRecordsTable({
         <span className="font-semibold">{record.model_display}</span>
       ),
       sortField: USAGE_SORT_FIELDS.model,
+      widthClassName: 'min-w-[14rem]',
     },
     {
       id: 'target',
       header: t('upstream'),
       render: (record) => <UpstreamCell record={record} />,
       sortField: USAGE_SORT_FIELDS.target,
+      widthClassName: 'min-w-[12rem]',
     },
     ...tailColumns.slice(0, 1),
     {
@@ -279,13 +283,13 @@ export function RequestRecordsTable({
               return (
                 <TableHead
                   aria-sort={ariaSort}
-                  className="whitespace-normal"
+                  className={`whitespace-nowrap ${column.widthClassName ?? ''}`}
                   data-usage-column={column.id}
                   key={column.id}
                 >
                   {column.sortField ? (
                     <button
-                      className="inline-flex items-center gap-1 text-left"
+                      className="inline-flex items-center gap-1 whitespace-nowrap text-left"
                       onClick={() => onSort(column.sortField as string)}
                       type="button"
                     >
@@ -321,7 +325,7 @@ export function RequestRecordsTable({
               >
                 {columns.map((column) => (
                   <TableCell
-                    className="whitespace-normal"
+                    className={`${column.id === 'request_date' || column.id === 'created_at' ? 'whitespace-nowrap' : 'whitespace-normal'} ${column.widthClassName ?? ''}`}
                     data-usage-cell={column.id}
                     key={column.id}
                   >

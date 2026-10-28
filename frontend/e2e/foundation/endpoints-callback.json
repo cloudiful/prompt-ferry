@@ -1,6 +1,6 @@
 {
-  "runId": "endpoints-1793010891626",
-  "startedAt": "2026-10-26T10:34:51.626Z",
+  "runId": "endpoints-1793161731130",
+  "startedAt": "2026-10-28T04:28:51.130Z",
   "checks": {
     "adminDenial": {
       "redirectedToApiKeys": true,
@@ -34,9 +34,856 @@
       "retried": true,
       "messagePresent": true
     },
+    "listGeometry": {
+      "desktop-1440": {
+        "actionHeaderName": "Actions",
+        "badgeOverflow": [
+          {
+            "overflowsCell": false,
+            "wrap": "wrap"
+          },
+          {
+            "overflowsCell": false,
+            "wrap": "wrap"
+          },
+          {
+            "overflowsCell": false,
+            "wrap": "wrap"
+          }
+        ],
+        "documentOverflow": false,
+        "headAlignment": [
+          {
+            "name": "Endpoint",
+            "delta": 0
+          },
+          {
+            "name": "Status",
+            "delta": 0
+          },
+          {
+            "name": "Usage",
+            "delta": 0
+          },
+          {
+            "name": "Test",
+            "delta": 0
+          },
+          {
+            "name": "Actions",
+            "delta": 0
+          }
+        ],
+        "headNames": ["Endpoint", "Status", "Usage", "Test", "Actions"],
+        "metaLabels": [
+          ["Public", "Chat", "Manual"],
+          ["Private", "Responses", "Manual"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"]
+        ],
+        "ownerCount": 1,
+        "quotaColumnIndex": 2,
+        "rowQuota": [
+          {
+            "empty": false,
+            "hasQuotaButton": true,
+            "text": "Available"
+          },
+          {
+            "empty": false,
+            "hasQuotaButton": true,
+            "text": "Available"
+          },
+          {
+            "empty": false,
+            "hasQuotaButton": true,
+            "text": "Available"
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          }
+        ],
+        "tableColumns": 5,
+        "tableScrolls": "auto",
+        "urls": [
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://api.minimax.chat/v1",
+            "title": "https://api.minimax.chat/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 5,
+            "text": "https://chatgpt.com/backend-api/codex",
+            "title": "https://chatgpt.com/backend-api/codex",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 5,
+            "text": "https://openrouter.ai/api/v1",
+            "title": "https://openrouter.ai/api/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-1.example.internal/v1",
+            "title": "https://upstream-1.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-2.example.internal/v1",
+            "title": "https://upstream-2.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-3.example.internal/v1",
+            "title": "https://upstream-3.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-4.example.internal/v1",
+            "title": "https://upstream-4.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-5.example.internal/v1",
+            "title": "https://upstream-5.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-6.example.internal/v1",
+            "title": "https://upstream-6.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-7.example.internal/v1",
+            "title": "https://upstream-7.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-8.example.internal/v1",
+            "title": "https://upstream-8.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-9.example.internal/v1",
+            "title": "https://upstream-9.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-10.example.internal/v1",
+            "title": "https://upstream-10.example.internal/v1",
+            "wordBreak": "normal"
+          }
+        ],
+        "visibleRows": 13,
+        "visibleTable": true
+      },
+      "desktop-1024": {
+        "actionHeaderName": "Actions",
+        "badgeOverflow": [
+          {
+            "overflowsCell": false,
+            "wrap": "wrap"
+          },
+          {
+            "overflowsCell": false,
+            "wrap": "wrap"
+          },
+          {
+            "overflowsCell": false,
+            "wrap": "wrap"
+          }
+        ],
+        "documentOverflow": false,
+        "headAlignment": [
+          {
+            "name": "Endpoint",
+            "delta": 0
+          },
+          {
+            "name": "Status",
+            "delta": 0
+          },
+          {
+            "name": "Usage",
+            "delta": 0
+          },
+          {
+            "name": "Test",
+            "delta": 0
+          },
+          {
+            "name": "Actions",
+            "delta": 0
+          }
+        ],
+        "headNames": ["Endpoint", "Status", "Usage", "Test", "Actions"],
+        "metaLabels": [
+          ["Public", "Chat", "Manual"],
+          ["Private", "Responses", "Manual"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"]
+        ],
+        "ownerCount": 1,
+        "quotaColumnIndex": 2,
+        "rowQuota": [
+          {
+            "empty": false,
+            "hasQuotaButton": true,
+            "text": "Available"
+          },
+          {
+            "empty": false,
+            "hasQuotaButton": true,
+            "text": "Available"
+          },
+          {
+            "empty": false,
+            "hasQuotaButton": true,
+            "text": "Available"
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          }
+        ],
+        "tableColumns": 5,
+        "tableScrolls": "auto",
+        "urls": [
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://api.minimax.chat/v1",
+            "title": "https://api.minimax.chat/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 5,
+            "text": "https://chatgpt.com/backend-api/codex",
+            "title": "https://chatgpt.com/backend-api/codex",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 5,
+            "text": "https://openrouter.ai/api/v1",
+            "title": "https://openrouter.ai/api/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-1.example.internal/v1",
+            "title": "https://upstream-1.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-2.example.internal/v1",
+            "title": "https://upstream-2.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-3.example.internal/v1",
+            "title": "https://upstream-3.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-4.example.internal/v1",
+            "title": "https://upstream-4.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-5.example.internal/v1",
+            "title": "https://upstream-5.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-6.example.internal/v1",
+            "title": "https://upstream-6.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-7.example.internal/v1",
+            "title": "https://upstream-7.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-8.example.internal/v1",
+            "title": "https://upstream-8.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-9.example.internal/v1",
+            "title": "https://upstream-9.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-10.example.internal/v1",
+            "title": "https://upstream-10.example.internal/v1",
+            "wordBreak": "normal"
+          }
+        ],
+        "visibleRows": 13,
+        "visibleTable": true
+      },
+      "desktop-768": {
+        "actionHeaderName": "Actions",
+        "badgeOverflow": [
+          {
+            "overflowsCell": false,
+            "wrap": "wrap"
+          },
+          {
+            "overflowsCell": false,
+            "wrap": "wrap"
+          },
+          {
+            "overflowsCell": false,
+            "wrap": "wrap"
+          }
+        ],
+        "documentOverflow": false,
+        "headAlignment": [
+          {
+            "name": "Endpoint",
+            "delta": 0
+          },
+          {
+            "name": "Status",
+            "delta": 0
+          },
+          {
+            "name": "Usage",
+            "delta": 0
+          },
+          {
+            "name": "Test",
+            "delta": 0
+          },
+          {
+            "name": "Actions",
+            "delta": 0
+          }
+        ],
+        "headNames": ["Endpoint", "Status", "Usage", "Test", "Actions"],
+        "metaLabels": [
+          ["Public", "Chat", "Manual"],
+          ["Private", "Responses", "Manual"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"]
+        ],
+        "ownerCount": 1,
+        "quotaColumnIndex": 2,
+        "rowQuota": [
+          {
+            "empty": false,
+            "hasQuotaButton": true,
+            "text": "Available"
+          },
+          {
+            "empty": false,
+            "hasQuotaButton": true,
+            "text": "Available"
+          },
+          {
+            "empty": false,
+            "hasQuotaButton": true,
+            "text": "Available"
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          },
+          {
+            "empty": true,
+            "hasQuotaButton": false,
+            "text": ""
+          }
+        ],
+        "tableColumns": 5,
+        "tableScrolls": "auto",
+        "urls": [
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://api.minimax.chat/v1",
+            "title": "https://api.minimax.chat/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 5,
+            "text": "https://chatgpt.com/backend-api/codex",
+            "title": "https://chatgpt.com/backend-api/codex",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 5,
+            "text": "https://openrouter.ai/api/v1",
+            "title": "https://openrouter.ai/api/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-1.example.internal/v1",
+            "title": "https://upstream-1.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-2.example.internal/v1",
+            "title": "https://upstream-2.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-3.example.internal/v1",
+            "title": "https://upstream-3.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-4.example.internal/v1",
+            "title": "https://upstream-4.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-5.example.internal/v1",
+            "title": "https://upstream-5.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-6.example.internal/v1",
+            "title": "https://upstream-6.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-7.example.internal/v1",
+            "title": "https://upstream-7.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-8.example.internal/v1",
+            "title": "https://upstream-8.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-9.example.internal/v1",
+            "title": "https://upstream-9.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 2,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-10.example.internal/v1",
+            "title": "https://upstream-10.example.internal/v1",
+            "wordBreak": "normal"
+          }
+        ],
+        "visibleRows": 13,
+        "visibleTable": true
+      },
+      "mobile-390": {
+        "actionHeaderName": "",
+        "badgeOverflow": [],
+        "documentOverflow": false,
+        "headAlignment": [],
+        "headNames": [],
+        "metaLabels": [
+          ["Public", "Chat", "Manual"],
+          ["Private", "Responses", "Manual"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"],
+          ["Public", "Automatic by caller protocol", "Legacy compatible"]
+        ],
+        "ownerCount": 1,
+        "quotaColumnIndex": -1,
+        "rowQuota": [],
+        "tableColumns": 0,
+        "tableScrolls": "auto",
+        "urls": [
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://api.minimax.chat/v1",
+            "title": "https://api.minimax.chat/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 5,
+            "text": "https://chatgpt.com/backend-api/codex",
+            "title": "https://chatgpt.com/backend-api/codex",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 5,
+            "text": "https://openrouter.ai/api/v1",
+            "title": "https://openrouter.ai/api/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-1.example.internal/v1",
+            "title": "https://upstream-1.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-2.example.internal/v1",
+            "title": "https://upstream-2.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-3.example.internal/v1",
+            "title": "https://upstream-3.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-4.example.internal/v1",
+            "title": "https://upstream-4.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-5.example.internal/v1",
+            "title": "https://upstream-5.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-6.example.internal/v1",
+            "title": "https://upstream-6.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-7.example.internal/v1",
+            "title": "https://upstream-7.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-8.example.internal/v1",
+            "title": "https://upstream-8.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-9.example.internal/v1",
+            "title": "https://upstream-9.example.internal/v1",
+            "wordBreak": "normal"
+          },
+          {
+            "lines": 1,
+            "overflowWrap": "break-word",
+            "safeBreaks": 4,
+            "text": "https://upstream-10.example.internal/v1",
+            "title": "https://upstream-10.example.internal/v1",
+            "wordBreak": "normal"
+          }
+        ],
+        "visibleRows": 0,
+        "visibleTable": false
+      }
+    },
+    "testResultControl": {
+      "idleControlAbsent": true,
+      "populatedControlName": "HTTP 200 / 312ms / fixture upstream accepted the probe",
+      "popoverText": "HTTP 200 / 312ms / fixture upstream accepted the probe"
+    },
     "consoleErrors": [],
     "pageErrors": []
   },
   "screenshots": ["e2e/foundation/screenshots/endpoints-en-light-1440.png"],
-  "finishedAt": "2026-10-26T10:34:56.399Z"
+  "finishedAt": "2026-10-28T04:28:56.641Z"
 }

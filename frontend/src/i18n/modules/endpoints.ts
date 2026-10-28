@@ -1,5 +1,6 @@
 export const endpointMessages = {
   'zh-CN': {
+    actions: '操作',
     addTarget: '新增目标',
     addApiKey: '新增 API key',
     apiKeyName: '名称',
@@ -181,6 +182,7 @@ export const endpointMessages = {
     tokenPlanExpired: '已到期',
     updatedAt: '更新时间',
     upstreamModelOptional: '上游模型名（可选，留空沿用原始模型）',
+    modelCandidates: '候选模型',
     upstreamModelSuggestionsFailed: '无法加载上游模型列表。',
     proxyUrl: '代理地址',
     proxyUrlHint:
@@ -248,6 +250,7 @@ export const endpointMessages = {
     embeddingDimensionsInvalid: '请输入正整数（最大 2147483647）。',
   },
   'en-US': {
+    actions: 'Actions',
     addTarget: 'Add target',
     addApiKey: 'Add API key',
     apiKeyName: 'Name',
@@ -434,6 +437,7 @@ export const endpointMessages = {
     updatedAt: 'Updated at',
     upstreamModelOptional:
       'Upstream model name (optional, leave blank to keep the original model)',
+    modelCandidates: 'Model candidates',
     upstreamModelSuggestionsFailed: 'Could not load the upstream model list.',
     proxyUrl: 'Proxy URL',
     proxyUrlHint:

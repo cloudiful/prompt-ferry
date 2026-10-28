@@ -277,6 +277,23 @@ async page => {
   assert(lastRequest('GET', '/api/v1/admin/request-records')?.first === '10', 'the page did not move before the sort cycle')
   const dateHeader = page.locator('[data-usage-column="request_date"]')
   const dateButton = dateHeader.getByRole('button')
+  const headerNoWrap = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-usage-column]')).every(
+      (cell) => getComputedStyle(cell).whiteSpace === 'nowrap',
+    ),
+  )
+  const dateTimeNoWrap = await page.evaluate(() =>
+    ['request_date', 'created_at'].every((id) => {
+      const cell = document.querySelector(`[data-usage-cell="${id}"]`)
+      return cell !== null && getComputedStyle(cell).whiteSpace === 'nowrap'
+    }),
+  )
+  const dateHeaderNoWrap = await dateHeader.evaluate(
+    (cell) => getComputedStyle(cell).whiteSpace === 'nowrap',
+  )
+  assert(headerNoWrap && dateHeaderNoWrap, 'a request table header or sort control could wrap')
+  assert(dateTimeNoWrap, 'a request date or time value could wrap')
+  report.checks.requestTableNoWrap = { headers: headerNoWrap, dateHeader: dateHeaderNoWrap, dateTimeCells: dateTimeNoWrap }
   assert((await dateButton.count()) === 1, 'Date header is missing its sort button')
   assert((await page.locator('[data-usage-column="redaction"] button').count()) === 0, 'redaction header gained a sort control')
   assert((await page.locator('[data-usage-column="throughput"] button').count()) === 0, 'throughput header gained a sort control')
@@ -967,6 +984,96 @@ async page => {
   await page.waitForTimeout(400)
   await capture('usage-ai-zh-dark-1440')
   pass('R-USAGE-AI', 'locale-switch', 'the page followed the locale toggle and translated the fold matrix copy')
+
+  stage = 'ai-zh-records'
+  await page.getByRole('button', { name: '记录', exact: true }).click()
+  await page.waitForTimeout(500)
+  const measureZhRecords = async () =>
+    page.evaluate(() => {
+      const root = document.documentElement
+      const rem = Number.parseFloat(getComputedStyle(root).fontSize)
+      const modelCell = document.querySelector(
+        '[data-usage-record-row] [data-usage-cell="model"]',
+      )
+      const rows = document.querySelectorAll('[data-usage-record-row]').length
+      const headers = [...document.querySelectorAll('[data-usage-column]')]
+      const headerRects = headers.map((cell) => cell.getBoundingClientRect())
+      const headerOverlap = headerRects.some((a, index) =>
+        headerRects.some(
+          (b, other) =>
+            index < other && a.left < b.right - 0.5 && b.left < a.right - 0.5,
+        ),
+      )
+      const container = document.querySelector('[data-slot="table-container"]')
+      return {
+        rem,
+        modelWidth: modelCell?.getBoundingClientRect().width ?? 0,
+        modelText: (modelCell?.textContent ?? '').trim(),
+        headerNoWrap: headers.every(
+          (cell) => getComputedStyle(cell).whiteSpace === 'nowrap',
+        ),
+        dateTimeNoWrap: ['request_date', 'created_at'].every((id) => {
+          const cell = document.querySelector(`[data-usage-cell="${id}"]`)
+          return cell !== null && getComputedStyle(cell).whiteSpace === 'nowrap'
+        }),
+        headerOverlap,
+        documentNoOverflow: root.scrollWidth <= window.innerWidth,
+        containerScrolls:
+          container !== null && container.scrollWidth > container.clientWidth,
+        rows,
+        columns: headers.map((cell) => cell.getAttribute('data-usage-column')),
+      }
+    })
+  const zhRecords1440 = await measureZhRecords()
+  await capture('usage-ai-records-zh-dark-1440')
+  const requiredModelWidth = 14 * zhRecords1440.rem
+  assert(
+    zhRecords1440.modelWidth >= requiredModelWidth - 0.5,
+    `zh-dark desktop AI model column ${zhRecords1440.modelWidth}px is below ${requiredModelWidth}px`,
+  )
+  assert(
+    zhRecords1440.headerNoWrap && zhRecords1440.dateTimeNoWrap,
+    'zh-dark records header, date or time could wrap',
+  )
+  assert(!zhRecords1440.headerOverlap, 'zh-dark records headers overlapped at 1440px')
+  assert(zhRecords1440.documentNoOverflow, 'zh-dark records page overflowed at 1440px')
+  assert(
+    zhRecords1440.rows > 0 && zhRecords1440.modelText.length > 0,
+    'zh-dark records data is missing at 1440px',
+  )
+  assert(
+    zhRecords1440.columns.includes('model') &&
+      zhRecords1440.columns.includes('target'),
+    'zh-dark records columns changed at 1440px',
+  )
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.waitForTimeout(400)
+  const zhRecords390 = await measureZhRecords()
+  await capture('usage-ai-records-zh-dark-390')
+  assert(
+    zhRecords390.modelWidth >= requiredModelWidth - 0.5,
+    `zh-dark mobile AI model column ${zhRecords390.modelWidth}px is below ${requiredModelWidth}px`,
+  )
+  assert(
+    zhRecords390.headerNoWrap && zhRecords390.dateTimeNoWrap,
+    'zh-dark mobile records header, date or time could wrap',
+  )
+  assert(!zhRecords390.headerOverlap, 'zh-dark records headers overlapped at 390px')
+  assert(zhRecords390.documentNoOverflow, 'zh-dark records page overflowed at 390px')
+  assert(zhRecords390.containerScrolls, 'zh-dark records table did not scroll inside its container at 390px')
+  assert(
+    zhRecords390.rows > 0 && zhRecords390.modelText.length > 0,
+    'zh-dark records data is missing at 390px',
+  )
+  report.checks.aiRecordsZhDark = {
+    desktop: zhRecords1440,
+    mobile: zhRecords390,
+    requiredModelWidth,
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.getByRole('button', { name: '概览', exact: true }).click()
+  await page.waitForTimeout(300)
+  pass('R-USAGE-AI', 'column-geometry', 'the AI model column stayed at least 14rem with non-wrapping headers in zh-dark desktop and mobile records')
 
   stage = 'ai-zh-fold-matrix'
   await page.setViewportSize({ width: 1440, height: 900 })
