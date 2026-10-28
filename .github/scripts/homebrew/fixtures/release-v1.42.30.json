@@ -1,0 +1,47 @@
+{
+  "tag_name": "v1.42.30",
+  "draft": false,
+  "prerelease": false,
+  "source_versions": {
+    "Cargo.toml": "[package]\nname = \"prompt-ferry\"\nversion = \"1.42.30\"\nlicense = \"Apache-2.0\"\n",
+    "frontend/package.json": "{\n  \"name\": \"prompt-ferry-frontend\",\n  \"private\": true,\n  \"version\": \"1.42.30\"\n}\n"
+  },
+  "assets": [
+    {
+      "name": "prompt-ferry-v1.42.30-aarch64-apple-darwin",
+      "state": "uploaded",
+      "digest": "sha256:18bedf8b4645aa63adea224bf4867b96418191ee46b85dff3c9ce7a0f7f2d9aa",
+      "browser_download_url": "https://github.com/cloudiful/prompt-ferry/releases/download/v1.42.30/prompt-ferry-v1.42.30-aarch64-apple-darwin"
+    },
+    {
+      "name": "prompt-ferry-v1.42.30-aarch64-pc-windows-msvc.exe",
+      "state": "uploaded",
+      "digest": "sha256:116a57fce694800246bcb05b08b5e0314055711927a579df406599cce81a83c0",
+      "browser_download_url": "https://github.com/cloudiful/prompt-ferry/releases/download/v1.42.30/prompt-ferry-v1.42.30-aarch64-pc-windows-msvc.exe"
+    },
+    {
+      "name": "prompt-ferry-v1.42.30-aarch64-unknown-linux-gnu",
+      "state": "uploaded",
+      "digest": "sha256:17ef1ba843510997c208d6f5bc2ffb830e250b88ff16883f3b260fa0148d41b0",
+      "browser_download_url": "https://github.com/cloudiful/prompt-ferry/releases/download/v1.42.30/prompt-ferry-v1.42.30-aarch64-unknown-linux-gnu"
+    },
+    {
+      "name": "prompt-ferry-v1.42.30-x86_64-pc-windows-msvc.exe",
+      "state": "uploaded",
+      "digest": "sha256:353e8d14f84d5ebee4368638a4969e1f970973a2e606352997a88621c0e9a064",
+      "browser_download_url": "https://github.com/cloudiful/prompt-ferry/releases/download/v1.42.30/prompt-ferry-v1.42.30-x86_64-pc-windows-msvc.exe"
+    },
+    {
+      "name": "prompt-ferry-v1.42.30-x86_64-unknown-linux-gnu",
+      "state": "uploaded",
+      "digest": "sha256:720d27212a0df99d712acb7241d77281eae6d1a0e960259a559907d11b4e3f73",
+      "browser_download_url": "https://github.com/cloudiful/prompt-ferry/releases/download/v1.42.30/prompt-ferry-v1.42.30-x86_64-unknown-linux-gnu"
+    },
+    {
+      "name": "SHA256SUMS",
+      "state": "uploaded",
+      "digest": "sha256:13eb655599bdd58b73963d64212889062124ce46b5e69ee57bb6ea925462113f",
+      "browser_download_url": "https://github.com/cloudiful/prompt-ferry/releases/download/v1.42.30/SHA256SUMS"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ROUTES } from '../parity.matrix.ts'
+import { evaluateTargetRowLayout } from './validate-target-row.ts'
 
 type RouteReport = {
   runId?: string
@@ -303,9 +304,11 @@ if (existsSync(reportPath)) {
   )
   assert(
     checks.localeThemeRendering?.chineseActionVisible === true &&
-      checks.localeThemeRendering?.darkTheme === true,
+      checks.localeThemeRendering?.darkTheme === true &&
+      checks.localeThemeRendering?.longTargetDialog === true,
     'Chinese/dark route rendering was not verified',
   )
+  failures.push(...evaluateTargetRowLayout(checks.targetRowLayout))
   assert(
     checks.apiIsolation?.unexpectedAdminRequests?.length === 0 &&
       checks.apiIsolation?.quotaCalls === 0,
@@ -331,6 +334,9 @@ if (existsSync(reportPath)) {
     'e2e/foundation/screenshots/endpoints-routes-en-light-390.png',
     'e2e/foundation/screenshots/endpoints-routes-dialog-390.png',
     'e2e/foundation/screenshots/endpoints-routes-zh-dark-1440.png',
+    'e2e/foundation/screenshots/endpoints-routes-target-row-1440.png',
+    'e2e/foundation/screenshots/endpoints-routes-target-row-390.png',
+    'e2e/foundation/screenshots/endpoints-routes-target-row-zh-dark-1440.png',
   ]
   for (const screenshot of requiredScreenshots)
     assert(
