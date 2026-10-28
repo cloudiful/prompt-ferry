@@ -94,7 +94,7 @@ export function EndpointApiKeysEditor({
       <div className="grid gap-3">
         {form.api_keys.map((key, index) => (
           <div
-            className="grid min-w-0 gap-2 rounded-md border p-3 md:grid-cols-[minmax(8rem,0.8fr)_minmax(12rem,1.5fr)_auto_auto] md:items-start"
+            className="grid min-w-0 gap-2 rounded-md border p-3 lg:grid-cols-[minmax(8rem,0.8fr)_minmax(12rem,1.5fr)_auto_auto] lg:items-start"
             data-endpoint-key-row={index}
             key={key.key_id || `new-${index}`}
           >
@@ -149,7 +149,7 @@ export function EndpointApiKeysEditor({
                 />
               </div>
             </div>
-            <label className="inline-flex min-h-9 items-center justify-center gap-2 text-xs">
+            <label className="inline-flex min-h-9 items-center justify-center gap-2 self-end text-xs">
               <span>{t('status')}</span>
               <Switch
                 aria-label={`${t('status')} ${key.key_label.trim() || t('apiKeyNameDefault', { index: index + 1 })}`}
@@ -162,7 +162,7 @@ export function EndpointApiKeysEditor({
             </label>
             <Button
               aria-label={`${t('delete')} ${key.key_label.trim() || t('apiKeyNameDefault', { index: index + 1 })}`}
-              className="justify-self-end"
+              className="justify-self-end self-end"
               disabled={!canDelete(index)}
               onClick={() => removeKey(index)}
               size="icon-sm"

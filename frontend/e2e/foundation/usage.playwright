@@ -715,6 +715,33 @@ async page => {
   await selectOption('All status', 'All status')
   await page.waitForTimeout(400)
   const search4 = page.getByPlaceholder('Search')
+  await search4.fill('req-fixture-1')
+  await search4.press('Enter')
+  await page.waitForTimeout(600)
+  await page.waitForSelector('[data-usage-record-row="1"]')
+  const tokenCell = page.locator('[data-usage-record-row="1"] [data-usage-cell="total_tokens"]')
+  const tokenCellMetrics = await tokenCell.evaluate(cell => {
+    const span = cell.querySelector('span')
+    const style = getComputedStyle(span ?? cell)
+    const box = (span ?? cell).getBoundingClientRect()
+    return {
+      whiteSpace: style.whiteSpace,
+      text: (cell.textContent ?? '').trim(),
+      height: box.height,
+      lineHeight: parseFloat(style.lineHeight || '0'),
+    }
+  })
+  assert(tokenCellMetrics.text === '1.1K · 40%', `the populated token cell is not total plus cache rate: ${JSON.stringify(tokenCellMetrics)}`)
+  assert(tokenCellMetrics.whiteSpace === 'nowrap', `the token cell does not stay on one line: ${JSON.stringify(tokenCellMetrics)}`)
+  assert(
+    !tokenCellMetrics.lineHeight ||
+      tokenCellMetrics.height <= tokenCellMetrics.lineHeight * 1.5,
+    `the token cell wrapped onto a second line: ${JSON.stringify(tokenCellMetrics)}`,
+  )
+  assert(
+    !tokenCellMetrics.text.includes('/'),
+    `the token cell still renders a cached-token count: ${JSON.stringify(tokenCellMetrics)}`,
+  )
   await search4.fill('req-fixture-4')
   await search4.press('Enter')
   await page.waitForTimeout(600)
@@ -727,7 +754,7 @@ async page => {
     (await nullRow.count()) === 1,
     `the nullable-token record is missing from the searched list: ${JSON.stringify({ rows: nullRowsAfterSearch, request: lastRequest('GET', '/api/v1/admin/request-records') })}`,
   )
-  assert((await nullRow.locator('[data-usage-cell="total_tokens"]').innerText()).trim() === '- / - / -', 'the null list token cell is not a dash triple')
+  assert((await nullRow.locator('[data-usage-cell="total_tokens"]').innerText()).trim() === '- · -', 'the null list token cell is not a total/cache-rate dash pair')
   assert((await nullRow.locator('[data-usage-cell="throughput"]').innerText()).trim() === '-', 'the null output rate is not a dash')
   await nullRow.locator('[data-usage-cell="details"] button').click()
   const nullDialog = page.getByRole('dialog')
@@ -737,7 +764,7 @@ async page => {
   assert(!(await nullDialog.innerText()).includes('0'), 'the nullable-token detail fabricated a zero value')
   await nullDialog.getByRole('button', { name: 'Close' }).click()
   await page.waitForTimeout(300)
-  report.checks.nullableCells = { listTokenCell: '- / - / -', listOutputRate: '-', detailNoFabricatedZero: true }
+  report.checks.nullableCells = { listTokenCell: '- · -', listOutputRate: '-', detailNoFabricatedZero: true, populatedTokenCell: tokenCellMetrics }
   await search4.fill('')
   await search4.press('Enter')
   await page.waitForTimeout(500)
@@ -1071,6 +1098,95 @@ async page => {
     requiredModelWidth,
   }
   await page.setViewportSize({ width: 1440, height: 900 })
+  await page.locator('[data-usage-toolbar-search]').fill('')
+  await page.locator('[data-usage-toolbar-search]').press('Enter')
+  await page.waitForFunction(
+    () => document.querySelectorAll('[data-usage-record-row]').length > 1,
+  )
+  await page.waitForFunction(() => {
+    const scroller = document.querySelector('[data-slot="table-container"]')
+    return scroller !== null && scroller.scrollWidth > 0
+  })
+  await page.evaluate(() => {
+    const scroller = document.querySelector('[data-slot="table-container"]')
+    if (scroller) scroller.scrollLeft = scroller.scrollWidth
+  })
+  await page.waitForFunction(() => {
+    const scroller = document.querySelector('[data-slot="table-container"]')
+    return (
+      scroller !== null &&
+      scroller.scrollLeft >=
+        scroller.scrollWidth - scroller.clientWidth - 1
+    )
+  })
+  const tokenColumnEvidence = await page.evaluate(() => {
+    const scroller = document.querySelector('[data-slot="table-container"]')
+    if (!scroller) return { found: false }
+    const scrollerRect = scroller.getBoundingClientRect()
+    const cells = [...document.querySelectorAll('[data-usage-cell="total_tokens"]')]
+      .map((cell) => {
+        const span = cell.querySelector('span') ?? cell
+        const style = getComputedStyle(span)
+        const rect = span.getBoundingClientRect()
+        const cellRect = cell.getBoundingClientRect()
+        const lineHeight = Number.parseFloat(style.lineHeight || '0')
+        return {
+          text: (cell.textContent ?? '').trim(),
+          fullyVisible:
+            cellRect.width > 0 &&
+            cellRect.left >= scrollerRect.left - 1 &&
+            cellRect.right <= scrollerRect.right + 1,
+          whiteSpace: style.whiteSpace,
+          height: rect.height,
+          lineHeight,
+          lineCount:
+            lineHeight > 0 ? Math.round(rect.height / lineHeight) : null,
+        }
+      })
+      .filter((cell) => cell.fullyVisible)
+    return {
+      found: true,
+      scrollLeft: scroller.scrollLeft,
+      maxScrollLeft: scroller.scrollWidth - scroller.clientWidth,
+      visibleCount: cells.length,
+      cells,
+    }
+  })
+  const tokenShape = /^[\d.,KMB-]+ · [\d.%-]+$/
+  assert(tokenColumnEvidence.found === true, 'the zh-dark request table container is missing')
+  assert(
+    tokenColumnEvidence.scrollLeft >= tokenColumnEvidence.maxScrollLeft - 1,
+    `the zh-dark request table did not scroll to its end: ${JSON.stringify(tokenColumnEvidence)}`,
+  )
+  assert(
+    tokenColumnEvidence.visibleCount > 0,
+    `the zh-dark token column is not visible: ${JSON.stringify(tokenColumnEvidence)}`,
+  )
+  for (const cell of tokenColumnEvidence.cells) {
+    assert(
+      cell.whiteSpace === 'nowrap',
+      `a zh-dark token cell does not stay on one line: ${JSON.stringify(cell)}`,
+    )
+    assert(
+      cell.lineCount === 1 && cell.height <= cell.lineHeight * 1.5,
+      `a zh-dark token cell wrapped: ${JSON.stringify(cell)}`,
+    )
+    assert(
+      tokenShape.test(cell.text),
+      `a zh-dark token cell is not total plus cache rate: ${JSON.stringify(cell)}`,
+    )
+  }
+  const tokenTexts = tokenColumnEvidence.cells.map((cell) => cell.text)
+  assert(
+    tokenTexts.includes('- · -'),
+    `the zh-dark token column has no empty dash state: ${JSON.stringify(tokenTexts)}`,
+  )
+  assert(
+    tokenTexts.some((text) => text !== '- · -'),
+    `the zh-dark token column has no populated value: ${JSON.stringify(tokenTexts)}`,
+  )
+  report.checks.aiRecordsTokenColumn = tokenColumnEvidence
+  await capture('usage-ai-records-token-zh-dark-1440')
   await page.getByRole('button', { name: '概览', exact: true }).click()
   await page.waitForTimeout(300)
   pass('R-USAGE-AI', 'column-geometry', 'the AI model column stayed at least 14rem with non-wrapping headers in zh-dark desktop and mobile records')

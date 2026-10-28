@@ -524,6 +524,10 @@ describe('upstream building block', () => {
       within(endpointCard('endpoint-1')).getByRole('button', { name: 'Edit' }),
     )
     const dialog = await screen.findByRole('dialog')
+    expect(dialog.className).toContain(
+      'sm:max-w-[min(calc(100vw_-_2rem),64rem)]',
+    )
+    expect(dialog.className).not.toContain('max-w-4xl')
     api.persistEndpoint.mockRejectedValueOnce({
       error: { code: 'fixture_save_failed', message: 'save failed' },
     })

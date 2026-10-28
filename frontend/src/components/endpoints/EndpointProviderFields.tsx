@@ -96,9 +96,9 @@ export function EndpointProviderFields({
 
   return (
     <div className="grid gap-3">
-      <div className="grid gap-3 md:grid-cols-[8rem_minmax(12rem,1fr)_minmax(12rem,1.4fr)_minmax(12rem,1fr)]">
-        <label className="grid min-w-0 gap-1 text-xs font-medium">
-          <span>{t('scope')}</span>
+      <div className="grid items-start gap-3 lg:grid-cols-[8rem_minmax(12rem,1fr)_minmax(12rem,1.4fr)_minmax(12rem,1fr)]">
+        <label className="grid min-w-0 grid-rows-[1rem_auto] gap-1 text-xs font-medium">
+          <span className="truncate">{t('scope')}</span>
           <Select
             onValueChange={(value) =>
               onChange((current) => ({
@@ -118,8 +118,8 @@ export function EndpointProviderFields({
             </SelectContent>
           </Select>
         </label>
-        <label className="grid min-w-0 gap-1 text-xs font-medium">
-          <span>{t('type')}</span>
+        <label className="grid min-w-0 grid-rows-[1rem_auto] gap-1 text-xs font-medium">
+          <span className="truncate">{t('type')}</span>
           <Select
             onValueChange={(value) => changeProvider(value as EndpointProvider)}
             value={provider}
@@ -140,10 +140,10 @@ export function EndpointProviderFields({
           </Select>
         </label>
         <label
-          className="grid min-w-0 gap-1 text-xs font-medium"
+          className="grid min-w-0 grid-rows-[1rem_auto] gap-1 text-xs font-medium"
           htmlFor="endpoint-name"
         >
-          <span>{t('name')}</span>
+          <span className="truncate">{t('name')}</span>
           <Input
             autoComplete="off"
             id="endpoint-name"
@@ -154,8 +154,8 @@ export function EndpointProviderFields({
             value={form.name}
           />
         </label>
-        <label className="grid min-w-0 gap-1 text-xs font-medium">
-          <span>{t('modelRouteNativeApi')}</span>
+        <label className="grid min-w-0 grid-rows-[1rem_auto] gap-1 text-xs font-medium">
+          <span className="truncate">{t('modelRouteNativeApi')}</span>
           <Select
             onValueChange={(value) =>
               changeProtocol(value as (typeof PROTOCOLS)[number]['value'])

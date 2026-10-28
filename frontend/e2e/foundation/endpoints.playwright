@@ -274,6 +274,147 @@ async page => {
     populatedControlName: probeResultName,
     popoverText: probePopoverText,
   }
+
+  await page.getByRole('button', { name: 'New endpoint', exact: true }).click()
+  const dialog = page.getByRole('dialog').last()
+  const dialogName = dialog.getByLabel('Name', { exact: true })
+  await dialogName.waitFor({ state: 'visible' })
+  await dialogName.fill('Fixture dialog geometry endpoint')
+  async function waitForStableDialogLayout(width) {
+    await page.waitForFunction(
+      (expected) => window.innerWidth === expected,
+      width,
+    )
+    await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          const nodes = document.querySelectorAll(
+            '[data-slot="dialog-content"]',
+          )
+          const node = nodes[nodes.length - 1]
+          let previous = null
+          let stable = 0
+          const step = () => {
+            if (!node) {
+              resolve(false)
+              return
+            }
+            const rect = node.getBoundingClientRect()
+            const maxWidth = getComputedStyle(node).maxWidth
+            const unchanged =
+              previous !== null &&
+              Math.abs(rect.width - previous.width) < 0.5 &&
+              Math.abs(rect.x - previous.x) < 0.5 &&
+              maxWidth === previous.maxWidth
+            stable = unchanged ? stable + 1 : 0
+            previous = { width: rect.width, x: rect.x, maxWidth }
+            if (stable >= 3) {
+              resolve(true)
+              return
+            }
+            requestAnimationFrame(step)
+          }
+          requestAnimationFrame(step)
+        }),
+    )
+  }
+  const dialogGeometry = []
+  for (const width of [1440, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await waitForStableDialogLayout(width)
+    await dialogName.waitFor({ state: 'visible' })
+    const measured = await dialog.evaluate(node => {
+      const box = node.getBoundingClientRect()
+      const visible = element => {
+        if (element.getBoundingClientRect().height <= 0) return false
+        const style = getComputedStyle(element)
+        if (
+          style.visibility === 'hidden' ||
+          style.opacity === '0' ||
+          style.pointerEvents === 'none'
+        )
+          return false
+        return element.getAttribute('aria-hidden') !== 'true'
+      }
+      const controls = Array.from(
+        node.querySelectorAll(
+          'input, select, [data-slot="select-trigger"], button',
+        ),
+      ).filter(visible)
+      const escaped = controls.filter(element => {
+        const rect = element.getBoundingClientRect()
+        return rect.left < box.left - 1 || rect.right > box.right + 1
+      })
+      return {
+        viewport: window.innerWidth,
+        width: box.width,
+        maxWidth: getComputedStyle(node).maxWidth,
+        margin: window.innerWidth - box.width,
+        scrollWidth: node.scrollWidth,
+        clientWidth: node.clientWidth,
+        horizontalScroll: node.scrollWidth > node.clientWidth + 1,
+        documentOverflow:
+          document.documentElement.scrollWidth > window.innerWidth,
+        escapedControls: escaped.length,
+        escapedControlDetail: escaped.map(element => {
+          const rect = element.getBoundingClientRect()
+          return {
+            tag: element.tagName.toLowerCase(),
+            type: element.getAttribute('type'),
+            id: element.id,
+            ariaLabel: element.getAttribute('aria-label'),
+            slot: element.getAttribute('data-slot'),
+            left: rect.left,
+            right: rect.right,
+            width: rect.width,
+          }
+        }),
+        controlCount: controls.length,
+      }
+    })
+    assert(
+      measured.horizontalScroll === false,
+      `endpoint dialog owned a horizontal scrollbar at ${width}px: ${JSON.stringify(measured)}`,
+    )
+    assert(
+      measured.documentOverflow === false,
+      `endpoint dialog overflowed the document at ${width}px: ${JSON.stringify(measured)}`,
+    )
+    assert(
+      measured.escapedControls === 0 && measured.controlCount > 0,
+      `an endpoint dialog control escaped the dialog at ${width}px: ${JSON.stringify(measured)}`,
+    )
+    const expectedWidth =
+      width >= 640 ? Math.min(width - 32, 1024) : width - 32
+    assert(
+      Math.abs(measured.width - expectedWidth) <= 1,
+      `endpoint dialog width did not match the declared 64rem layout at ${width}px: ${JSON.stringify(measured)}`,
+    )
+    if (width >= 1024) {
+      const tops = []
+      for (const label of ['Scope', 'Type', 'Name', 'Native API']) {
+        const controlBox = await dialog
+          .getByLabel(label, { exact: true })
+          .boundingBox()
+        assert(Boolean(controlBox), `${label} was missing at ${width}px`)
+        tops.push(controlBox.y)
+      }
+      const spread = Math.max(...tops) - Math.min(...tops)
+      assert(
+        spread <= 1,
+        `endpoint provider controls did not share one baseline at ${width}px: ${JSON.stringify(tops)}`,
+      )
+    }
+    dialogGeometry.push({ ...measured, expectedWidth })
+    if (width === 1440) {
+      await capture('endpoints-dialog-en-light-1440')
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).first().click()
+  await dialog.waitFor({ state: 'hidden' })
+  report.checks.dialogGeometry = dialogGeometry
+
   report.checks.consoleErrors = consoleErrors
   report.checks.pageErrors = pageErrors
   assert(pageErrors.length === 0, `browser page errors: ${JSON.stringify(pageErrors)}`)

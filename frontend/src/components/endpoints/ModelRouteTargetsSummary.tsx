@@ -40,7 +40,7 @@ function PairChip({ pair }: { pair: TargetPair }) {
     <>
       <span className="min-w-0 truncate">{pair.endpoint}</span>
       {pair.override ? (
-        <span className="ml-1 min-w-0 truncate text-muted-foreground">
+        <span className="ml-1 min-w-0 shrink-[100] truncate text-muted-foreground">
           · {pair.override}
         </span>
       ) : null}
@@ -67,7 +67,7 @@ export function ModelRouteTargetsSummary({
     )
 
   const chipClassName =
-    'inline-flex min-w-0 max-w-full items-center rounded-full border bg-background px-2 py-px text-xs'
+    'inline-flex min-w-0 max-w-full items-center justify-self-start rounded-full border bg-background px-2 py-px text-xs'
   const firstPair = preview[0]
   const list = (
     <PopoverContent
@@ -93,7 +93,7 @@ export function ModelRouteTargetsSummary({
     // One enabled target: the single chip is the disclosure itself, so touch
     // and keyboard users can still read the complete endpoint and override.
     return (
-      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-1">
+      <div className="grid min-w-0 max-w-[min(100%,24rem)] grid-cols-[minmax(0,1fr)_auto] gap-1">
         <Popover onOpenChange={setOpen} open={open}>
           <PopoverTrigger asChild>
             <button
@@ -112,7 +112,7 @@ export function ModelRouteTargetsSummary({
   }
 
   return (
-    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-1">
+    <div className="grid min-w-0 max-w-[min(100%,24rem)] grid-cols-[minmax(0,1fr)_auto] gap-1">
       <div className="flex min-w-0 flex-nowrap gap-1 overflow-hidden">
         {preview.map((pair) => (
           <span

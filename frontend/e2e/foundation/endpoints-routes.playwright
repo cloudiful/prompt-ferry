@@ -437,6 +437,25 @@ async page => {
   assert(await previewChips.count() === 1, 'route summary showed more than one inline preview chip')
   const previewChipBox = await previewChips.first().boundingBox()
   assert(Boolean(previewChipBox) && previewChipBox.height <= 28, 'route summary preview chip wrapped onto a second line')
+  const chipGeometry = await summaryCell.evaluate(cell => {
+    const chip = cell.querySelector('span[title]')
+    if (!chip) return null
+    const box = chip.getBoundingClientRect()
+    const cellBox = cell.getBoundingClientRect()
+    const style = getComputedStyle(chip)
+    return {
+      width: box.width,
+      height: box.height,
+      cellWidth: cellBox.width,
+      chipLeft: box.left,
+      cellLeft: cellBox.left,
+      justifySelf: style.justifySelf,
+      maxWidth: style.maxWidth,
+    }
+  })
+  assert(Boolean(chipGeometry), 'route summary chip geometry was not measurable')
+  assert(chipGeometry.width <= 384.5, `route summary chip exceeded its 24rem cap: ${JSON.stringify(chipGeometry)}`)
+  assert(chipGeometry.cellWidth - chipGeometry.width > 1, `route summary chip still fills its column: ${JSON.stringify(chipGeometry)}`)
   const moreTargets = route8.getByRole('button', { name: '+1 enabled targets' })
   await moreTargets.waitFor({ state: 'visible' })
   assert((await moreTargets.innerText()).trim() === '+1', 'route summary disclosure count was not enabled minus one')
@@ -449,7 +468,7 @@ async page => {
   assert(summaryText.includes('coalesced-target-four-model') && summaryText.includes('coalesced-target-five-model'), 'route summary disclosure omitted a full enabled target override')
   await page.keyboard.press('Escape')
   await summaryItems.first().waitFor({ state: 'hidden' })
-  report.checks.targetSummary = { inlineChips: 1, disclosureCount: 1, listedTargets: 2, fullNamesInDisclosure: true, singleLinePreview: true }
+  report.checks.targetSummary = { inlineChips: 1, disclosureCount: 1, listedTargets: 2, fullNamesInDisclosure: true, singleLinePreview: true, chipGeometry }
 
   await route8.getByRole('button', { name: `Edit ${pattern}` }).click()
   const proxyEditor = page.getByRole('dialog', { name: 'Edit model route' })

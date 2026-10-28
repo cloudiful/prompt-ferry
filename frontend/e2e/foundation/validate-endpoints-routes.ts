@@ -181,6 +181,18 @@ if (existsSync(reportPath)) {
     'target reorder or settings payload evidence is incomplete',
   )
   assert(
+    checks.targetSummary?.inlineChips === 1 &&
+      checks.targetSummary?.disclosureCount === 1 &&
+      checks.targetSummary?.listedTargets === 2 &&
+      checks.targetSummary?.fullNamesInDisclosure === true &&
+      checks.targetSummary?.singleLinePreview === true &&
+      checks.targetSummary?.chipGeometry?.width <= 384.5 &&
+      checks.targetSummary?.chipGeometry?.cellWidth -
+        checks.targetSummary?.chipGeometry?.width >
+        1,
+    'the route summary chip filled its column or exceeded its content cap',
+  )
+  assert(
     checks.targetSettingsRoundtrip?.pattern === true &&
       checks.targetSettingsRoundtrip?.orderedModels === true &&
       checks.targetSettingsRoundtrip?.proxyKeep === true &&

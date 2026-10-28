@@ -132,6 +132,36 @@ async page => {
     return page.getByRole('dialog')
   }
 
+  async function waitForStableDialogLayout(width) {
+    await page.waitForFunction(expected => window.innerWidth === expected, width)
+    await page.evaluate(() => new Promise(resolve => {
+      const nodes = document.querySelectorAll('[data-slot="dialog-content"]')
+      const node = nodes[nodes.length - 1]
+      let previous = null
+      let stable = 0
+      const step = () => {
+        if (!node) {
+          resolve(false)
+          return
+        }
+        const rect = node.getBoundingClientRect()
+        const maxWidth = getComputedStyle(node).maxWidth
+        const unchanged = previous !== null &&
+          Math.abs(rect.width - previous.width) < 0.5 &&
+          Math.abs(rect.x - previous.x) < 0.5 &&
+          maxWidth === previous.maxWidth
+        stable = unchanged ? stable + 1 : 0
+        previous = { width: rect.width, x: rect.x, maxWidth }
+        if (stable >= 3) {
+          resolve(true)
+          return
+        }
+        requestAnimationFrame(step)
+      }
+      requestAnimationFrame(step)
+    }))
+  }
+
   async function segment(name, action) {
     const start = new Date().toISOString()
     await action()
@@ -608,6 +638,77 @@ async page => {
     assert(await dialog.getByRole('textbox', { name: 'Endpoint' }).count() === 0, 'hosted provider URL was not pinned')
     assert(await dialog.getByRole('combobox', { name: 'Auth mode' }).count() === 0, 'hosted provider bearer mode was editable')
     assert(await dialog.getByRole('switch', { name: 'Status Bearer tokens 1' }).isDisabled(), 'last enabled bearer token could be disabled')
+    const dialogGeometry = []
+    for (const width of [1440, 1024, 768, 390]) {
+      await page.setViewportSize({ width, height: 900 })
+      await waitForStableDialogLayout(width)
+      await dialog.getByRole('textbox', { name: 'Name' }).waitFor({ state: 'visible' })
+      const measured = await dialog.evaluate(node => {
+        const box = node.getBoundingClientRect()
+        const visible = element => {
+          if (element.getBoundingClientRect().height <= 0) return false
+          const style = getComputedStyle(element)
+          if (
+            style.visibility === 'hidden' ||
+            style.opacity === '0' ||
+            style.pointerEvents === 'none'
+          )
+            return false
+          return element.getAttribute('aria-hidden') !== 'true'
+        }
+        const controls = Array.from(node.querySelectorAll('input, select, [data-slot="select-trigger"], button')).filter(visible)
+        const escapedControls = controls.filter(element => {
+          const rect = element.getBoundingClientRect()
+          return rect.left < box.left - 1 || rect.right > box.right + 1
+        }).length
+        const proxyAction = node.querySelector('button[aria-label="Proxy URL"]')
+        const proxyLabel = Array.from(node.querySelectorAll('span')).find(span => (span.textContent ?? '').trim() === 'Proxy URL')
+        const proxyActionRect = proxyAction?.getBoundingClientRect()
+        const proxyLabelRect = proxyLabel?.getBoundingClientRect()
+        const transportTrigger = node.querySelector('[data-slot="select-trigger"][id$="-transport"]')
+        const providerTrigger = node.querySelector('[data-slot="select-trigger"][id$="-provider"]')
+        const proxyGap = proxyActionRect && proxyLabelRect ? proxyActionRect.left - proxyLabelRect.right : null
+        const proxySameRow = proxyActionRect && proxyLabelRect
+          ? Math.abs(proxyActionRect.top + proxyActionRect.height / 2 - (proxyLabelRect.top + proxyLabelRect.height / 2)) <= 6
+          : false
+        return {
+          viewport: window.innerWidth,
+          width: box.width,
+          scrollWidth: node.scrollWidth,
+          clientWidth: node.clientWidth,
+          horizontalScroll: node.scrollWidth > node.clientWidth + 1,
+          documentOverflow: document.documentElement.scrollWidth > window.innerWidth,
+          escapedControls,
+          controlCount: controls.length,
+          providerBearerSentence: node.textContent.includes('always uses bearer token auth'),
+          transportWidth: transportTrigger?.getBoundingClientRect().width ?? null,
+          providerWidth: providerTrigger?.getBoundingClientRect().width ?? null,
+          proxyGap,
+          proxyActionAdjacent: proxySameRow && proxyGap !== null && proxyGap >= 0 && proxyGap <= 40,
+        }
+      })
+      assert(measured.horizontalScroll === false, `MCP dialog owned a horizontal scrollbar at ${width}px: ${JSON.stringify(measured)}`)
+      assert(measured.documentOverflow === false, `MCP dialog overflowed the document at ${width}px: ${JSON.stringify(measured)}`)
+      assert(measured.escapedControls === 0 && measured.controlCount > 0, `an MCP dialog control escaped the dialog at ${width}px: ${JSON.stringify(measured)}`)
+      assert(measured.providerBearerSentence === false, `the redundant provider bearer sentence was still rendered at ${width}px`)
+      assert(
+        typeof measured.transportWidth === 'number' &&
+          typeof measured.providerWidth === 'number' &&
+          Math.abs(measured.transportWidth - measured.providerWidth) <= 1,
+        `MCP transport and provider selects do not share one width at ${width}px: ${JSON.stringify(measured)}`,
+      )
+      assert(
+        measured.proxyActionAdjacent === true,
+        `the MCP proxy action is detached from its label at ${width}px: ${JSON.stringify(measured)}`,
+      )
+      const expectedWidth = width >= 640 ? Math.min(width - 32, 896) : width - 32
+      assert(Math.abs(measured.width - expectedWidth) <= 1, `MCP dialog width ${measured.width}px did not match the intended ${expectedWidth}px at ${width}px`)
+      dialogGeometry.push({ ...measured, expectedWidth })
+      if (width === 1440) await capture('mcp-dialog-en-light-1440')
+    }
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await waitForStableDialogLayout(1440)
+    report.checks.dialogGeometry = dialogGeometry
     await capture('mcp-hosted-create-en-light-1440')
     const hostedCreate = waitForResponse('POST', '/api/v1/admin/mcp-servers', 200)
     await dialog.getByRole('button', { name: 'Save', exact: true }).click()

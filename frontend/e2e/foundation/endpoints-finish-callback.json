@@ -1,5 +1,5 @@
 {
-  "startedAt": "2026-10-28T04:29:27.751Z",
+  "startedAt": "2026-10-28T08:20:06.423Z",
   "checks": {
     "responsiveContainment": [
       {
@@ -72,5 +72,5 @@
     "e2e/foundation/screenshots/endpoints-en-light-1440-final.png",
     "e2e/foundation/screenshots/endpoints-quota-fresh-en-light-1440.png"
   ],
-  "finishedAt": "2026-10-28T04:29:30.323Z"
+  "finishedAt": "2026-10-28T08:20:08.608Z"
 }

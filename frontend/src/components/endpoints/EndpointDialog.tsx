@@ -148,7 +148,7 @@ export function EndpointDialog({
       open={open}
     >
       <DialogContent
-        className="max-h-[calc(100vh-2rem)] max-w-4xl overflow-y-auto"
+        className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-[min(calc(100vw_-_2rem),64rem)]"
         onEscapeKeyDown={(event) => {
           if (pending) event.preventDefault()
         }}
