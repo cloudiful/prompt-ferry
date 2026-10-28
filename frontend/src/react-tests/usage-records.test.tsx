@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react'
 import { useState } from 'react'
 import { act } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -145,6 +151,55 @@ describe('request records table: columns', () => {
       'throughput',
       'error',
     ])
+  })
+
+  it('keeps every header label and the date/time values on one line', () => {
+    renderTable()
+    const headers = Array.from(
+      document.querySelectorAll('[data-usage-column]'),
+    ) as HTMLElement[]
+    expect(headers.length).toBeGreaterThan(0)
+    for (const cell of headers)
+      expect(cell.className).toContain('whitespace-nowrap')
+    expect(
+      within(header('request_date')).getByRole('button').className,
+    ).toContain('whitespace-nowrap')
+    const dateCell = firstRow().querySelector(
+      '[data-usage-cell="request_date"]',
+    ) as HTMLElement
+    const timeCell = firstRow().querySelector(
+      '[data-usage-cell="created_at"]',
+    ) as HTMLElement
+    const modelCell = firstRow().querySelector(
+      '[data-usage-cell="model"]',
+    ) as HTMLElement
+    expect(dateCell.className).toContain('whitespace-nowrap')
+    expect(timeCell.className).toContain('whitespace-nowrap')
+    expect(modelCell.className).toContain('whitespace-normal')
+  })
+
+  it('keeps a usable AI model column and bounded upstream sizing', () => {
+    renderTable()
+    const modelHeader = header('model')
+    const modelCell = firstRow().querySelector(
+      '[data-usage-cell="model"]',
+    ) as HTMLElement
+    const targetHeader = header('target')
+    const targetCell = firstRow().querySelector(
+      '[data-usage-cell="target"]',
+    ) as HTMLElement
+    expect(modelHeader.className).toContain('min-w-[14rem]')
+    expect(modelCell.className).toContain('min-w-[14rem]')
+    expect(targetHeader.className).toContain('min-w-[12rem]')
+    expect(targetCell.className).toContain('min-w-[12rem]')
+    expect(modelHeader.className).toContain('whitespace-nowrap')
+    expect(cellText('model').length).toBeGreaterThan(0)
+    cleanup()
+    renderTable({
+      category: 'mcp',
+      records: [record({ request_category: 'mcp' })],
+    })
+    expect(header('target').className).not.toContain('min-w-[12rem]')
   })
 
   it('drops the user column for an ordinary user', () => {

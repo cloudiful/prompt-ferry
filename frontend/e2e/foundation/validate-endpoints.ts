@@ -78,6 +78,7 @@ const requiredChecks = [
   'pageErrors',
   'scenarioCoverage',
   'syntheticSecretSafety',
+  'listGeometry',
 ]
 
 export const EXPECTED_SCREENSHOTS = [
@@ -255,6 +256,154 @@ export function evaluateEndpointsReport(
   }
   if (checks.adminUserOptionsRead !== true) {
     failures.push('admin upstream owner-options read was not observed')
+  }
+  const listGeometry = checks.listGeometry as
+    Record<string, any> | undefined | null
+  if (!listGeometry || typeof listGeometry !== 'object') {
+    failures.push('current-run upstream list geometry evidence is missing')
+  } else {
+    for (const key of [
+      'desktop-1440',
+      'desktop-1024',
+      'desktop-768',
+      'mobile-390',
+    ]) {
+      const measurement = listGeometry[key]
+      if (!measurement || typeof measurement !== 'object') {
+        failures.push(
+          `the upstream list geometry is missing the ${key} measurement`,
+        )
+        continue
+      }
+      const urls = Array.isArray(measurement.urls) ? measurement.urls : []
+      if (urls.length === 0) {
+        failures.push(
+          `the upstream list geometry recorded no endpoint URL at ${key}`,
+        )
+      }
+      for (const url of urls) {
+        if (url?.wordBreak === 'break-all') {
+          failures.push(`an endpoint URL still breaks mid token at ${key}`)
+        }
+        if (url?.overflowWrap !== 'break-word') {
+          failures.push(
+            `an endpoint URL does not wrap at word boundaries at ${key}`,
+          )
+        }
+        if (
+          typeof url?.text !== 'string' ||
+          url.text.length === 0 ||
+          url.text !== url?.title
+        ) {
+          failures.push(
+            `an endpoint URL is not fully present in the DOM and its title at ${key}`,
+          )
+        }
+        if (
+          !Number.isFinite(url?.lines) ||
+          !Number.isFinite(url?.safeBreaks) ||
+          url.lines < 1 ||
+          url.lines > url.safeBreaks
+        ) {
+          failures.push(
+            `an endpoint URL wraps beyond its safe break points at ${key}`,
+          )
+        }
+      }
+      const metas = Array.isArray(measurement.metaLabels)
+        ? measurement.metaLabels
+        : []
+      if (metas.length === 0) {
+        failures.push(
+          `the upstream list geometry recorded no endpoint meta line at ${key}`,
+        )
+      }
+      for (const labels of metas) {
+        if (!Array.isArray(labels) || labels.length === 0) {
+          failures.push(`an endpoint meta line is empty at ${key}`)
+          continue
+        }
+        if (new Set(labels).size !== labels.length) {
+          failures.push(`an endpoint meta line repeats a label at ${key}`)
+        }
+      }
+      if (!key.startsWith('desktop-')) continue
+      const headNames = Array.isArray(measurement.headNames)
+        ? measurement.headNames
+        : []
+      if (
+        JSON.stringify(headNames) !==
+        JSON.stringify(['Endpoint', 'Status', 'Usage', 'Test', 'Actions'])
+      ) {
+        failures.push(
+          `the upstream list header set is not the honest column set at ${key}: ${JSON.stringify(headNames)}`,
+        )
+      }
+      if (measurement.actionHeaderName !== 'Actions') {
+        failures.push(
+          `the upstream list action header has no accessible name at ${key}`,
+        )
+      }
+      const alignment = Array.isArray(measurement.headAlignment)
+        ? measurement.headAlignment
+        : []
+      if (
+        alignment.length !== headNames.length ||
+        alignment.some(
+          (entry: any) => !Number.isFinite(entry?.delta) || entry.delta > 1,
+        )
+      ) {
+        failures.push(
+          `the upstream list headers do not align with their cells at ${key}`,
+        )
+      }
+      if (measurement.tableColumns !== headNames.length) {
+        failures.push(
+          `the upstream list row columns do not match the header set at ${key}`,
+        )
+      }
+      if (measurement.documentOverflow !== false) {
+        failures.push(
+          `the upstream list overflows the document horizontally at ${key}`,
+        )
+      }
+      if (measurement.tableScrolls !== 'auto') {
+        failures.push(
+          `the upstream list table container does not own the horizontal scroll at ${key}`,
+        )
+      }
+      const badges = Array.isArray(measurement.badgeOverflow)
+        ? measurement.badgeOverflow
+        : []
+      for (const badge of badges) {
+        if (badge?.overflowsCell !== false) {
+          failures.push(
+            `the upstream usage badges overflow their cell at ${key}`,
+          )
+        }
+        if (badge?.wrap !== 'wrap') {
+          failures.push(
+            `the upstream usage badges do not wrap inside their cell at ${key}`,
+          )
+        }
+      }
+      const rowQuota = Array.isArray(measurement.rowQuota)
+        ? measurement.rowQuota
+        : []
+      for (const entry of rowQuota) {
+        if (typeof entry?.empty !== 'boolean') {
+          failures.push(
+            `an upstream row did not record its quota cell state at ${key}`,
+          )
+          continue
+        }
+        if (entry.empty !== !entry.hasQuotaButton) {
+          failures.push(
+            `an inapplicable upstream quota cell is not empty at ${key}`,
+          )
+        }
+      }
+    }
   }
   if (
     checks.adminDenial?.redirectedToApiKeys !== true ||

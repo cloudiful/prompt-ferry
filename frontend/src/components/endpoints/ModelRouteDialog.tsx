@@ -35,6 +35,7 @@ import { useLocale } from '@/lib/i18n'
 import { useModelRouteTargetDrag } from '@/lib/use-model-route-target-drag'
 import {
   canSaveTargets,
+  hasTargetProxy,
   hasTargetSchedule,
   hasTargetSettings,
   suggestProtocolForTarget,
@@ -218,6 +219,7 @@ export function ModelRouteDialog({
           </fieldset>
         ) : (
           <form
+            autoComplete="off"
             className="grid min-w-0 gap-4"
             onSubmit={(event) => {
               event.preventDefault()
@@ -323,11 +325,11 @@ export function ModelRouteDialog({
                       onDrop={(event) => drag.onDrop(event, target)}
                     >
                       <div className="grid min-w-0 gap-2 md:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_auto] md:items-center">
-                        <div className="flex min-w-0 items-start gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
                           <button
                             aria-keyshortcuts="ArrowUp ArrowDown"
                             aria-label={`${t('target')} ${index + 1}`}
-                            className="mt-1 inline-flex size-8 shrink-0 cursor-grab items-center justify-center rounded border text-muted-foreground focus-visible:outline-2 focus-visible:outline-primary active:cursor-grabbing"
+                            className="inline-flex size-8 shrink-0 cursor-grab items-center justify-center rounded border text-muted-foreground focus-visible:outline-2 focus-visible:outline-primary active:cursor-grabbing"
                             data-target-drag-handle
                             draggable
                             onDragStart={(event) =>
@@ -345,8 +347,7 @@ export function ModelRouteDialog({
                               className="size-4"
                             />
                           </button>
-                          <label className="grid min-w-0 flex-1 gap-1 text-xs font-medium">
-                            <span>{t('endpoint')}</span>
+                          <div className="grid min-w-0 flex-1 gap-1">
                             <Select
                               onValueChange={(endpoint_id) =>
                                 updateTarget(target, { endpoint_id })
@@ -403,7 +404,7 @@ export function ModelRouteDialog({
                                 ))}
                               </SelectContent>
                             </Select>
-                          </label>
+                          </div>
                         </div>
                         <div className="min-w-0">
                           <EndpointModelInput
@@ -449,18 +450,24 @@ export function ModelRouteDialog({
                           </Button>
                         </div>
                       </div>
-                      <div className="flex min-w-0 flex-wrap gap-x-2 text-xs text-muted-foreground">
-                        <span>{targetProxySummary(target, t)}</span>
-                        {hasTargetSchedule(target) ? (
-                          <span
-                            title={target.active_windows
-                              .map((window) => `${window.start}–${window.end}`)
-                              .join(', ')}
-                          >
-                            {targetScheduleSummary(target, t)}
-                          </span>
-                        ) : null}
-                      </div>
+                      {hasTargetProxy(target) || hasTargetSchedule(target) ? (
+                        <div className="flex min-w-0 flex-wrap gap-x-2 text-xs text-muted-foreground">
+                          {hasTargetProxy(target) ? (
+                            <span>{targetProxySummary(target, t)}</span>
+                          ) : null}
+                          {hasTargetSchedule(target) ? (
+                            <span
+                              title={target.active_windows
+                                .map(
+                                  (window) => `${window.start}–${window.end}`,
+                                )
+                                .join(', ')}
+                            >
+                              {targetScheduleSummary(target, t)}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </li>
                   ))}
                 </ol>

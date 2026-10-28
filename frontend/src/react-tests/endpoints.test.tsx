@@ -428,6 +428,7 @@ describe('upstream building block', () => {
     expect(tablePills?.textContent).toBe(cardPills?.textContent)
     expect(tablePills?.textContent).toContain('Short 40%')
     expect(tablePills?.textContent).toContain('Long 70%')
+    expect(tablePills?.className).toContain('flex-wrap')
     expect(
       endpointCard('endpoint-3').querySelector('[data-quota-badges]'),
     ).toBeNull()
@@ -823,6 +824,8 @@ describe('upstream building block', () => {
       expect(api.updateEndpointEnabled).toHaveBeenCalledTimes(2),
     )
 
+    // Nothing has been tested on this row yet, so it carries no result control.
+    expect(firstRow.queryByRole('button', { name: 'Not tested' })).toBeNull()
     fireEvent.click(firstRow.getByRole('button', { name: 'Test' }))
     await waitFor(() =>
       expect(api.runEndpointTest).toHaveBeenCalledWith('endpoint-1'),

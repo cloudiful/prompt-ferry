@@ -226,17 +226,17 @@ describe('model route item view', () => {
     ).toBe('azure-openai · gpt-5')
   })
 
-  it('shows two pairs at most and counts the rest', () => {
+  it('shows one pair at most and counts the rest', () => {
     const many = Array.from({ length: 5 }, (_unused, index) =>
       targetView({ target_id: `target-${index}` }),
     )
     expect(routeTargetPreview([])).toEqual([])
     expect(routeTargetPreview(many.slice(0, 1))).toHaveLength(1)
-    expect(routeTargetPreview(many.slice(0, 2))).toHaveLength(2)
-    expect(routeTargetPreview(many)).toHaveLength(2)
+    expect(routeTargetPreview(many.slice(0, 2))).toHaveLength(1)
+    expect(routeTargetPreview(many)).toHaveLength(1)
     expect(hiddenRouteTargetCount([])).toBe(0)
-    expect(hiddenRouteTargetCount(many.slice(0, 2))).toBe(0)
-    expect(hiddenRouteTargetCount(many)).toBe(3)
+    expect(hiddenRouteTargetCount(many.slice(0, 1))).toBe(0)
+    expect(hiddenRouteTargetCount(many)).toBe(4)
   })
 
   it('never counts a disabled target towards the disclosure', () => {
@@ -262,7 +262,7 @@ describe('model route item view', () => {
       backendTarget({ target_id: 'target-2', enabled: true }),
     ])
     expect(enabledRouteTargets(toggled.targets)).toHaveLength(2)
-    expect(hiddenRouteTargetCount(toggled.targets)).toBe(0)
+    expect(hiddenRouteTargetCount(toggled.targets)).toBe(1)
   })
 
   it('marks every tested target passing as a green result', () => {

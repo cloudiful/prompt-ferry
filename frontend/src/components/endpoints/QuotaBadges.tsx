@@ -40,7 +40,7 @@ export function QuotaBadges({
   )
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 
-  if (!eligible) return <span className="text-muted-foreground">—</span>
+  if (!eligible) return null
 
   const source = computeTokenPlanBadges(snapshot)
   const pills = tokenPlanBadgePills(
@@ -52,10 +52,7 @@ export function QuotaBadges({
   if (pills.length === 0)
     return <span className="text-muted-foreground">—</span>
 
-  const wrapper =
-    density === 'table'
-      ? 'inline-flex min-w-0 items-center gap-1'
-      : 'flex min-w-0 flex-wrap items-center gap-1'
+  const wrapper = 'flex min-w-0 flex-wrap items-center gap-1'
   const pill =
     density === 'table'
       ? 'max-w-full truncate px-1.5 py-px text-[0.7rem]'

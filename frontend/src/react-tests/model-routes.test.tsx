@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   act,
   cleanup,
+  createEvent,
   fireEvent,
   render,
   renderHook,
@@ -307,7 +308,7 @@ describe('ModelRoutesPage', () => {
       await screen.findByRole('button', { name: 'Edit fixture-pattern' }),
     )
     const editor = await screen.findByRole('dialog')
-    expect(editor.querySelector('input[list]')).toBeTruthy()
+    expect(editor.querySelector('[data-model-candidate-input]')).toBeTruthy()
     await waitFor(() =>
       expect(api.fetchEndpointModels).toHaveBeenCalledWith(
         'ep-fixture-8',
@@ -342,7 +343,9 @@ describe('ModelRoutesPage', () => {
         'chat',
       ),
     )
-    const modelInput = document.querySelector('input[list]') as HTMLInputElement
+    const modelInput = document.querySelector(
+      '[data-model-candidate-input]',
+    ) as HTMLInputElement
     fireEvent.change(modelInput, { target: { value: 'custom-draft-model' } })
     fireEvent.click(screen.getByRole('button', { name: 'Target settings' }))
     fireEvent.click(screen.getByRole('combobox', { name: 'Native API' }))
@@ -355,24 +358,304 @@ describe('ModelRoutesPage', () => {
       ),
     )
     const currentInput = document.querySelector(
-      'input[list]',
+      '[data-model-candidate-input]',
     ) as HTMLInputElement
     expect(currentInput.value).toBe('custom-draft-model')
-    const listId = currentInput.getAttribute('list')
     const suggestions = () =>
       Array.from(
-        document.getElementById(listId!)?.querySelectorAll('option') ?? [],
-      ).map((option) => option.value)
+        document.querySelectorAll('[data-model-candidate-option]'),
+      ).map((option) => option.textContent)
+    fireEvent.click(screen.getByRole('button', { name: 'Model candidates' }))
     await waitFor(() => expect(suggestions()).toEqual(['responses-only-model']))
     await act(async () => resolveInitial({ models: ['stale-chat-model'] }))
     expect(suggestions()).toEqual(['responses-only-model'])
     expect(currentInput.disabled).toBe(false)
+    fireEvent.keyDown(currentInput, { key: 'Escape' })
+    expect(screen.queryByRole('listbox')).toBeNull()
     fireEvent.click(
       screen.getByRole('button', { name: /Delete Upstream model name/ }),
     )
     expect(
-      (document.querySelector('input[list]') as HTMLInputElement).value,
+      (
+        document.querySelector(
+          '[data-model-candidate-input]',
+        ) as HTMLInputElement
+      ).value,
     ).toBe('')
+  })
+
+  it('opens the candidate list only on demand and never commits implicitly', async () => {
+    api.fetchEndpointModels.mockResolvedValue({
+      models: ['alpha-model', 'beta-model'],
+    })
+    renderPage()
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit fixture-pattern' }),
+    )
+    await screen.findByRole('dialog')
+    const input = document.querySelector(
+      '[data-model-candidate-input]',
+    ) as HTMLInputElement
+    await waitFor(() => expect(api.fetchEndpointModels).toHaveBeenCalled())
+
+    fireEvent.focus(input)
+    expect(screen.queryByRole('listbox')).toBeNull()
+    fireEvent.change(input, { target: { value: 'alp' } })
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(input.value).toBe('alp')
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    const list = await screen.findByRole('listbox')
+    expect(
+      within(list)
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['alpha-model', 'beta-model'])
+    expect(list.querySelector('[aria-selected="true"]')).toBeNull()
+    expect(input.getAttribute('aria-activedescendant')).toBeNull()
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    expect(input.getAttribute('aria-activedescendant')).toBe(`${list.id}-0`)
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(input.value).toBe('alpha-model')
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(api.persistModelRoute).not.toHaveBeenCalled()
+
+    fireEvent.change(input, { target: { value: 'manual-draft' } })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await screen.findByRole('listbox')
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(input.value).toBe('manual-draft')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Model candidates' }))
+    const reopened = await screen.findByRole('listbox')
+    expect(reopened.querySelector('[aria-selected="true"]')).toBeNull()
+    fireEvent.click(
+      within(reopened).getByRole('option', { name: 'beta-model' }),
+    )
+    expect(input.value).toBe('beta-model')
+    expect(screen.queryByRole('listbox')).toBeNull()
+  })
+
+  it('opens the candidate list from the toggle with the input focused and commits with Enter', async () => {
+    api.fetchEndpointModels.mockResolvedValue({
+      models: ['alpha-model', 'beta-model'],
+    })
+    renderPage()
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit fixture-pattern' }),
+    )
+    await screen.findByRole('dialog')
+    const input = document.querySelector(
+      '[data-model-candidate-input]',
+    ) as HTMLInputElement
+    await waitFor(() => expect(api.fetchEndpointModels).toHaveBeenCalled())
+    const toggle = screen.getByRole('button', { name: 'Model candidates' })
+    toggle.focus()
+    fireEvent.keyDown(toggle, { key: 'Enter' })
+    // jsdom does not synthesize the native button activation for Enter.
+    fireEvent.click(toggle)
+    await screen.findByRole('listbox')
+    expect(document.activeElement).toBe(input)
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(input.value).toBe('alpha-model')
+    expect(document.activeElement).toBe(input)
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(api.persistModelRoute).not.toHaveBeenCalled()
+  })
+
+  it('reopens the candidate list from the toggle with no active option and commits the first candidate with Enter', async () => {
+    api.fetchEndpointModels.mockResolvedValue({
+      models: ['alpha-model', 'beta-model', 'gamma-model'],
+    })
+    renderPage()
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit fixture-pattern' }),
+    )
+    await screen.findByRole('dialog')
+    const input = document.querySelector(
+      '[data-model-candidate-input]',
+    ) as HTMLInputElement
+    await waitFor(() => expect(api.fetchEndpointModels).toHaveBeenCalled())
+    const toggle = screen.getByRole('button', { name: 'Model candidates' })
+
+    // The pointer picks the second candidate and stays over that option.
+    fireEvent.click(toggle)
+    const list = await screen.findByRole('listbox')
+    const options = within(list).getAllByRole('option')
+    fireEvent.mouseOver(options[1]!)
+    fireEvent.click(options[1]!)
+    expect(input.value).toBe('beta-model')
+    expect(screen.queryByRole('listbox')).toBeNull()
+
+    // Reopening from the toggle leaves no candidate active, not even while the
+    // pointer rests over an option.
+    fireEvent.click(toggle)
+    const reopened = await screen.findByRole('listbox')
+    const reopenedOptions = within(reopened).getAllByRole('option')
+    fireEvent.mouseOver(reopenedOptions[1]!)
+    expect(reopened.querySelector('[aria-selected="true"]')).toBeNull()
+    expect(input.getAttribute('aria-activedescendant')).toBeNull()
+
+    // The first arrow press activates the first candidate and Enter commits it.
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    expect(input.getAttribute('aria-activedescendant')).toBe(`${reopened.id}-0`)
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(input.value).toBe('alpha-model')
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(api.persistModelRoute).not.toHaveBeenCalled()
+  })
+
+  it('closes the list on Tab without selecting or blocking the tab', async () => {
+    api.fetchEndpointModels.mockResolvedValue({
+      models: ['alpha-model', 'beta-model'],
+    })
+    renderPage()
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit fixture-pattern' }),
+    )
+    await screen.findByRole('dialog')
+    const input = document.querySelector(
+      '[data-model-candidate-input]',
+    ) as HTMLInputElement
+    await waitFor(() => expect(api.fetchEndpointModels).toHaveBeenCalled())
+    fireEvent.change(input, { target: { value: 'manual-tab-draft' } })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await screen.findByRole('listbox')
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    const tab = createEvent.keyDown(input, { key: 'Tab' })
+    fireEvent(input, tab)
+    expect(tab.defaultPrevented).toBe(false)
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(input.value).toBe('manual-tab-draft')
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(api.persistModelRoute).not.toHaveBeenCalled()
+  })
+
+  it('returns focus to the input after Escape without closing the dialog', async () => {
+    api.fetchEndpointModels.mockResolvedValue({
+      models: ['alpha-model', 'beta-model'],
+    })
+    renderPage()
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit fixture-pattern' }),
+    )
+    await screen.findByRole('dialog')
+    const input = document.querySelector(
+      '[data-model-candidate-input]',
+    ) as HTMLInputElement
+    await waitFor(() => expect(api.fetchEndpointModels).toHaveBeenCalled())
+    fireEvent.change(input, { target: { value: 'escape-draft' } })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await screen.findByRole('listbox')
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(input.value).toBe('escape-draft')
+    expect(document.activeElement).toBe(input)
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(api.persistModelRoute).not.toHaveBeenCalled()
+  })
+
+  it('lets another control take focus without stealing it back', async () => {
+    api.fetchEndpointModels.mockResolvedValue({
+      models: ['alpha-model', 'beta-model'],
+    })
+    renderPage()
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit fixture-pattern' }),
+    )
+    await screen.findByRole('dialog')
+    const input = document.querySelector(
+      '[data-model-candidate-input]',
+    ) as HTMLInputElement
+    await waitFor(() => expect(api.fetchEndpointModels).toHaveBeenCalled())
+    fireEvent.change(input, { target: { value: 'outside-draft' } })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await screen.findByRole('listbox')
+    const patternInput = screen.getByRole('textbox', { name: 'Model pattern' })
+    patternInput.focus()
+    fireEvent.focusIn(patternInput)
+    await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull())
+    expect(document.activeElement).toBe(patternInput)
+    expect(input.value).toBe('outside-draft')
+    expect(screen.getByRole('dialog')).toBeTruthy()
+  })
+
+  it('shows the loading status and a busy list until the catalog resolves', async () => {
+    let resolveCatalog!: (value: { models: string[] }) => void
+    api.fetchEndpointModels.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCatalog = resolve
+        }),
+    )
+    renderPage()
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit fixture-pattern' }),
+    )
+    await screen.findByRole('dialog')
+    const input = document.querySelector(
+      '[data-model-candidate-input]',
+    ) as HTMLInputElement
+    await waitFor(() =>
+      expect(document.querySelector('[role="status"]')).toBeTruthy(),
+    )
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    const list = await screen.findByRole('listbox')
+    expect(list.getAttribute('aria-busy')).toBe('true')
+    expect(within(list).queryAllByRole('option')).toHaveLength(0)
+    await act(async () => resolveCatalog({ models: ['alpha-model'] }))
+    await waitFor(() =>
+      expect(within(list).getAllByRole('option')).toHaveLength(1),
+    )
+    expect(list.getAttribute('aria-busy')).toBe('false')
+  })
+
+  it('keeps the model field editable when the catalog fails', async () => {
+    api.fetchEndpointModels.mockRejectedValue(
+      new Error('fixture catalog failure'),
+    )
+    renderPage()
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit fixture-pattern' }),
+    )
+    await screen.findByRole('dialog')
+    expect(
+      await screen.findByText('Could not load the upstream model list.'),
+    ).toBeTruthy()
+    const input = document.querySelector(
+      '[data-model-candidate-input]',
+    ) as HTMLInputElement
+    expect(input.disabled).toBe(false)
+    fireEvent.change(input, { target: { value: 'manual-model' } })
+    expect(input.value).toBe('manual-model')
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    const list = await screen.findByRole('listbox')
+    expect(within(list).queryAllByRole('option')).toHaveLength(0)
+  })
+
+  it('turns browser autocomplete, capitalization and spellchecking off', async () => {
+    renderPage()
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit fixture-pattern' }),
+    )
+    await screen.findByRole('dialog')
+    const form = document.querySelector(
+      '[data-slot="dialog-content"] form',
+    ) as HTMLFormElement
+    expect(form.getAttribute('autocomplete')).toBe('off')
+    const input = document.querySelector(
+      '[data-model-candidate-input]',
+    ) as HTMLInputElement
+    expect(input.getAttribute('autocomplete')).toBe('off')
+    expect(input.getAttribute('autocapitalize')).toBe('off')
+    expect(input.getAttribute('spellcheck')).toBe('false')
   })
 
   it('keeps the failed update draft, blocks dialog dismissal and retries after failure', async () => {
@@ -526,7 +809,9 @@ describe('ModelRoutesPage', () => {
       }),
     )
     fireEvent.change(
-      document.querySelector('input[list]') as HTMLInputElement,
+      document.querySelector(
+        '[data-model-candidate-input]',
+      ) as HTMLInputElement,
       { target: { value: 'custom-upstream-model' } },
     )
     fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
@@ -577,7 +862,11 @@ describe('ModelRoutesPage', () => {
     expect(label?.textContent).toBe(fullName)
     expect(label?.className).toContain('truncate')
     expect(label?.parentElement?.className).toContain('min-w-0')
-    const modelInput = editor.querySelector('input[list]') as HTMLInputElement
+    expect(within(editor).queryByText('Endpoint', { exact: true })).toBeNull()
+    expect(within(editor).queryByText('Inherit')).toBeNull()
+    const modelInput = editor.querySelector(
+      '[data-model-candidate-input]',
+    ) as HTMLInputElement
     expect(modelInput.value).toBe('existing-model')
     fireEvent.change(modelInput, { target: { value: 'edited-long-model' } })
     expect(modelInput.value).toBe('edited-long-model')

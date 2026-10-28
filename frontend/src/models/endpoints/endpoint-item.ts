@@ -12,11 +12,34 @@ export type EndpointViewItemLabels = {
   endpointSourceManual: string
   nativeApiChat: string
   nativeApiAnthropicMessages: string
+  nativeApiEmbeddings?: string
   nativeApiResponses: string
   nativeApiRealtime: string
   ownerLabel: string
   scopeAdmin: string
   scopeUser: string
+}
+
+/**
+ * The distinct meta labels of an endpoint row: the scope, the protocol and the
+ * protocol source. The automatic-routing phrase resolves to one label for both
+ * the protocol and its source, so it is shown once.
+ */
+export function endpointMetaLabels(
+  item: {
+    native_api: string
+    native_api_label: string
+    native_api_source_label: string
+    scope_label: string
+  },
+  embeddingsLabel: string,
+): string[] {
+  const protocolLabel =
+    item.native_api === 'embeddings' ? embeddingsLabel : item.native_api_label
+  const labels = [item.scope_label, protocolLabel, item.native_api_source_label]
+  return labels.filter(
+    (label, index) => Boolean(label) && labels.indexOf(label) === index,
+  )
 }
 
 export function createEndpointListItemView(
@@ -50,7 +73,9 @@ export function createEndpointListItemView(
             ? options.nativeApiAnthropicMessages
             : endpoint.native_api === 'realtime'
               ? options.nativeApiRealtime
-              : options.nativeApiResponses,
+              : endpoint.native_api === 'embeddings'
+                ? (options.nativeApiEmbeddings ?? options.nativeApiResponses)
+                : options.nativeApiResponses,
     native_api_source: endpoint.native_api_source,
     native_api_source_label:
       endpoint.native_api_source === 'auto'

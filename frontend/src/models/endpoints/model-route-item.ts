@@ -56,7 +56,7 @@ export function createModelRouteListItemView(
  * How many target pairs a route row shows before the rest move into the
  * disclosure.
  */
-export const ROUTE_TARGET_PREVIEW_LIMIT = 2
+export const ROUTE_TARGET_PREVIEW_LIMIT = 1
 
 /**
  * The configured targets a route row may show: the target itself is enabled

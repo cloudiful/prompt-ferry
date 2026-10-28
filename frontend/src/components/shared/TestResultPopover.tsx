@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, Minus, X } from 'lucide-react'
+import { AlertTriangle, Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Popover,
@@ -19,22 +19,27 @@ export function TestResultPopover({
   onSelect,
   severity,
 }: TestResultPopoverProps) {
+  const detail =
+    detailLabel && onSelect ? (
+      <Button onClick={onSelect} size="xs" type="button" variant="outline">
+        {detailLabel}
+      </Button>
+    ) : null
+
+  if (severity === null) {
+    return detail === null ? null : (
+      <div className="flex min-w-0 items-center gap-1">{detail}</div>
+    )
+  }
+
   const Icon =
-    severity === 'success'
-      ? Check
-      : severity === 'warning'
-        ? AlertTriangle
-        : severity === 'error'
-          ? X
-          : Minus
+    severity === 'success' ? Check : severity === 'warning' ? AlertTriangle : X
   const tone =
     severity === 'success'
       ? 'text-success'
       : severity === 'warning'
         ? 'text-warning'
-        : severity === 'error'
-          ? 'text-destructive'
-          : 'text-muted-foreground'
+        : 'text-destructive'
 
   return (
     <div className="flex min-w-0 items-center gap-1">
@@ -59,11 +64,7 @@ export function TestResultPopover({
           {message}
         </PopoverContent>
       </Popover>
-      {detailLabel && onSelect ? (
-        <Button onClick={onSelect} size="xs" type="button" variant="outline">
-          {detailLabel}
-        </Button>
-      ) : null}
+      {detail}
     </div>
   )
 }

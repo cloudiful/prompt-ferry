@@ -276,7 +276,21 @@ export function RequestRecordsOverviewPanel({
             <div className="mb-2 text-sm font-semibold">
               {t('overviewTrend')}
             </div>
-            <UsageChart option={trendOption as EChartsOption} />
+            <Suspense
+              fallback={
+                <div
+                  className="flex h-[20rem] min-h-[16rem] w-full min-w-0 items-center justify-center"
+                  data-usage-chart-placeholder
+                >
+                  <LoaderCircle
+                    aria-hidden="true"
+                    className="size-4 animate-spin text-muted-foreground"
+                  />
+                </div>
+              }
+            >
+              <UsageChart option={trendOption as EChartsOption} />
+            </Suspense>
           </section>
 
           <section className="overflow-hidden rounded-lg border bg-card">

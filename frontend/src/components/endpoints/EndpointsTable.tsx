@@ -24,6 +24,7 @@ import {
   networkTestKey,
   type EndpointListItemView,
 } from '@/models/endpoints'
+import { endpointMetaLabels } from '@/models/endpoints/endpoint-item'
 
 type EndpointsTableProps = {
   first: number
@@ -127,32 +128,35 @@ export function EndpointsTable({
           </p>
         ) : (
           <Table className="table-fixed">
+            <colgroup>
+              {showQuotaColumn ? (
+                <>
+                  <col className="w-[34%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[22%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[20%]" />
+                </>
+              ) : (
+                <>
+                  <col className="w-[50%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[20%]" />
+                </>
+              )}
+            </colgroup>
             <TableHeader>
               <TableRow>
-                <TableHead className={showQuotaColumn ? 'w-[24%]' : 'w-[34%]'}>
-                  {t('endpoint')}
-                </TableHead>
-                <TableHead className={showQuotaColumn ? 'w-[14%]' : 'w-[18%]'}>
-                  {t('user')}
-                </TableHead>
-                <TableHead className={showQuotaColumn ? 'w-[14%]' : 'w-[16%]'}>
-                  {t('status')}
-                </TableHead>
+                <TableHead>{t('endpoint')}</TableHead>
+                <TableHead>{t('status')}</TableHead>
                 {showQuotaColumn ? (
-                  <TableHead className="w-[20%]">
-                    {t('tokenPlanUsageColumn')}
-                  </TableHead>
+                  <TableHead>{t('tokenPlanUsageColumn')}</TableHead>
                 ) : null}
-                <TableHead className={showQuotaColumn ? 'w-[10%]' : 'w-[12%]'}>
-                  {t('test')}
+                <TableHead>{t('test')}</TableHead>
+                <TableHead className="text-right">
+                  <span className="sr-only">{t('actions')}</span>
                 </TableHead>
-                <TableHead
-                  className={
-                    showQuotaColumn
-                      ? 'w-[18%] text-right'
-                      : 'w-[20%] text-right'
-                  }
-                />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -178,20 +182,31 @@ export function EndpointsTable({
                             {item.name}
                           </div>
                           <div
-                            className="break-all text-xs text-muted-foreground"
+                            className="break-words text-xs text-muted-foreground"
+                            data-endpoint-url
                             title={item.base_url}
                           >
                             {item.base_url}
                           </div>
-                          <div className="text-xs text-muted-foreground">
-                            {item.scope_label} · {item.native_api_label} ·{' '}
-                            {item.native_api_source_label}
+                          <div
+                            className="text-xs text-muted-foreground"
+                            data-endpoint-meta
+                          >
+                            {endpointMetaLabels(
+                              item,
+                              t('nativeApiEmbeddings'),
+                            ).join(' · ')}
                           </div>
+                          {item.owner_label ? (
+                            <div
+                              className="text-xs text-muted-foreground"
+                              data-endpoint-owner
+                            >
+                              {item.owner_label}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
-                    </TableCell>
-                    <TableCell className="whitespace-normal break-words">
-                      {item.owner_label || '—'}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -214,16 +229,14 @@ export function EndpointsTable({
                       </div>
                     </TableCell>
                     {showQuotaColumn ? (
-                      <TableCell>
+                      <TableCell className="min-w-0 whitespace-normal">
                         {isQuotaEligible(item) ? (
                           <QuotaBadges
                             density="table"
                             eligible
                             endpointId={item.endpoint_id}
                           />
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
+                        ) : null}
                       </TableCell>
                     ) : null}
                     <TableCell>

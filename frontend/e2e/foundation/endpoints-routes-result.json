@@ -1,6 +1,6 @@
 {
-  "runId": "endpoints-routes-1793105211811",
-  "startedAt": "2026-10-27T12:46:51.811Z",
+  "runId": "endpoints-routes-1793161577051",
+  "startedAt": "2026-10-28T04:26:17.051Z",
   "checks": {
     "adminDenial": {
       "redirectedToApiKeys": true,
@@ -46,6 +46,72 @@
       "concurrentIdenticalRequests": true,
       "successfulCacheHit": true
     },
+    "candidateKeyboardToggle": {
+      "opened": {
+        "activeDescendant": null,
+        "activeOptionText": "",
+        "focusedAriaLabel": "Upstream model name (optional, leave blank to keep the original model)",
+        "focusedIsCandidateInput": true,
+        "focusedTag": "input",
+        "inputExpanded": "true",
+        "inputValue": "minimax-m2.1",
+        "listPresent": true,
+        "listVisible": true,
+        "optionCount": 3,
+        "selectedOptionText": "",
+        "toggleExpanded": "true"
+      },
+      "afterArrowDown": {
+        "activeDescendant": "_r_4s_-0",
+        "activeOptionText": "minimax-m2",
+        "focusedAriaLabel": "Upstream model name (optional, leave blank to keep the original model)",
+        "focusedIsCandidateInput": true,
+        "focusedTag": "input",
+        "inputExpanded": "true",
+        "inputValue": "minimax-m2.1",
+        "listPresent": true,
+        "listVisible": true,
+        "optionCount": 3,
+        "selectedOptionText": "minimax-m2",
+        "toggleExpanded": "true"
+      },
+      "afterEnter": {
+        "activeDescendant": null,
+        "activeOptionText": "",
+        "focusedAriaLabel": "Upstream model name (optional, leave blank to keep the original model)",
+        "focusedIsCandidateInput": true,
+        "focusedTag": "input",
+        "inputExpanded": "false",
+        "inputValue": "minimax-m2",
+        "listPresent": false,
+        "listVisible": false,
+        "optionCount": 0,
+        "selectedOptionText": "",
+        "toggleExpanded": "false"
+      }
+    },
+    "candidateFocus": {
+      "mouseCommit": true,
+      "toggleOpenedInput": true,
+      "keyboardCommit": true,
+      "tabLeavesInput": true,
+      "escapeKeptFocus": true,
+      "outsideKeptFocus": true
+    },
+    "candidateList": {
+      "options": ["minimax-m2", "minimax-m2.1", "text-embedding-3-large"],
+      "openedOnDemandOnly": true,
+      "preselected": false,
+      "keyboardCommit": true,
+      "escapeKeptDraft": true,
+      "noImplicitWrite": true
+    },
+    "targetRowLabels": {
+      "visibleEndpointLabel": 0,
+      "defaultInheritSummary": 0,
+      "accessibleModelName": true,
+      "centerDelta": 0
+    },
     "targetSettingsAndOrdering": {
       "keyboardOrderMoved": true,
       "dragOrderRestoredAssociation": true,
@@ -73,6 +139,13 @@
       "chatSettings": true,
       "embeddingDimensions": 1536,
       "chatHiddenForEmbeddings": true
+    },
+    "targetSummary": {
+      "inlineChips": 1,
+      "disclosureCount": 1,
+      "listedTargets": 2,
+      "fullNamesInDisclosure": true,
+      "singleLinePreview": true
     },
     "proxyClear": true,
     "embeddingDimensionNullRoundtrip": {
@@ -205,7 +278,7 @@
             "minMargin": 208,
             "minimumControlWidth": 225.28,
             "triggerWidth": 402.875,
-            "modelWidth": 345.109375,
+            "modelWidth": 305.109375,
             "documentNoOverflow": true
           }
         },
@@ -231,7 +304,7 @@
             "minMargin": 16,
             "minimumControlWidth": 218.24,
             "triggerWidth": 385.765625,
-            "modelWidth": 330.21875,
+            "modelWidth": 290.21875,
             "documentNoOverflow": true
           }
         },
@@ -257,7 +330,7 @@
             "minMargin": 16,
             "minimumControlWidth": 161.92,
             "triggerWidth": 248.828125,
-            "modelWidth": 211.15625,
+            "modelWidth": 171.15625,
             "documentNoOverflow": true
           }
         },
@@ -283,7 +356,7 @@
             "minMargin": 16,
             "minimumControlWidth": 160,
             "triggerWidth": 250,
-            "modelWidth": 250,
+            "modelWidth": 210,
             "documentNoOverflow": true
           }
         }
@@ -475,5 +548,5 @@
     "e2e/foundation/screenshots/endpoints-routes-zh-dark-1440.png",
     "e2e/foundation/screenshots/endpoints-routes-target-row-zh-dark-1440.png"
   ],
-  "finishedAt": "2026-10-27T12:47:21.023Z"
+  "finishedAt": "2026-10-28T04:26:46.270Z"
 }

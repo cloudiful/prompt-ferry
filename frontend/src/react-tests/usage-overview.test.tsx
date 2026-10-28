@@ -9,6 +9,7 @@ import { messages } from '@/i18n'
 import { LocaleProvider } from '@/lib/i18n'
 import { ThemeProvider } from '@/lib/theme'
 import { RequestRecordsOverviewPanel } from '@/components/usage/RequestRecordsOverviewPanel'
+import type { UsageChartProps } from '@/components/shared/UsageChart'
 import type {
   UsageCategory,
   UsagePerspective,
@@ -17,6 +18,51 @@ import type {
 import type { UsageOverviewDrilldown } from '@/lib/usage-overview'
 
 const copy = messages['en-US']
+
+/** The pending chart chunk a test holds open. */
+type ChartSuspension = {
+  pending: boolean
+  ready: Promise<void>
+  resolve: () => void
+}
+
+let chartSuspension: ChartSuspension | null = null
+
+vi.mock('@/components/shared/UsageChart', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/components/shared/UsageChart')>()
+  const Chart = actual.UsageChart
+  return {
+    ...actual,
+    UsageChart: (props: UsageChartProps) => {
+      const suspension = chartSuspension
+      if (suspension !== null && suspension.pending) throw suspension.ready
+      return <Chart {...props} />
+    },
+  }
+})
+
+/** Keeps the chart chunk unresolved until the returned suspension resolves. */
+function suspendChartChunk(): ChartSuspension {
+  let resolve!: () => void
+  const ready = new Promise<void>((settle) => {
+    resolve = settle
+  })
+  const suspension: ChartSuspension = {
+    pending: true,
+    ready,
+    resolve: () => {
+      suspension.pending = false
+      resolve()
+    },
+  }
+  chartSuspension = suspension
+  return suspension
+}
+
+function releaseChartChunk(): void {
+  chartSuspension = null
+}
 
 class TestResizeObserver implements ResizeObserver {
   readonly disconnect = vi.fn()
@@ -499,5 +545,41 @@ describe('request records overview: distribution', () => {
     })
     fireEvent.click(trigger)
     expect(onDrilldown).not.toHaveBeenCalled()
+  })
+})
+
+describe('request records overview: chart suspension', () => {
+  it('commits the metrics and the distribution while the chart chunk is pending', async () => {
+    suspendChartChunk()
+    try {
+      await renderPanel({ overview: overview() })
+      expect(document.querySelectorAll('[data-usage-metric]')).toHaveLength(10)
+      expect(rowByLabel('gpt-4o')).toBeTruthy()
+      expect(
+        document.querySelector('[data-usage-chart-placeholder]'),
+      ).toBeTruthy()
+      expect(document.querySelector('[data-usage-chart]')).toBeNull()
+    } finally {
+      releaseChartChunk()
+    }
+  })
+
+  it('shows the trend chart once the chunk resolves', async () => {
+    const suspension = suspendChartChunk()
+    try {
+      await renderPanel({ overview: overview() })
+      expect(
+        document.querySelector('[data-usage-chart-placeholder]'),
+      ).toBeTruthy()
+      await act(async () => {
+        suspension.resolve()
+      })
+      expect(document.querySelector('[data-usage-chart]')).toBeTruthy()
+      expect(
+        document.querySelector('[data-usage-chart-placeholder]'),
+      ).toBeNull()
+    } finally {
+      releaseChartChunk()
+    }
   })
 })
