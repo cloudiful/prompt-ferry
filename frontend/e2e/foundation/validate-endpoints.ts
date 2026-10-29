@@ -277,59 +277,84 @@ export function evaluateEndpointsReport(
         )
         continue
       }
-      const urls = Array.isArray(measurement.urls) ? measurement.urls : []
-      if (urls.length === 0) {
+      if (!Number.isFinite(measurement.urlCount)) {
         failures.push(
-          `the upstream list geometry recorded no endpoint URL at ${key}`,
+          `the upstream list geometry did not record its endpoint URL count at ${key}`,
+        )
+      } else if (measurement.urlCount !== 0) {
+        failures.push(
+          `the upstream list still renders ${String(measurement.urlCount)} endpoint URLs at ${key}`,
         )
       }
-      for (const url of urls) {
-        if (url?.wordBreak === 'break-all') {
-          failures.push(`an endpoint URL still breaks mid token at ${key}`)
-        }
-        if (url?.overflowWrap !== 'break-word') {
+      if (!Number.isFinite(measurement.metaCount)) {
+        failures.push(
+          `the upstream list geometry did not record its endpoint meta line count at ${key}`,
+        )
+      } else if (measurement.metaCount !== 0) {
+        failures.push(
+          `the upstream list still renders ${String(measurement.metaCount)} endpoint meta lines at ${key}`,
+        )
+      }
+      if (typeof measurement.listTextHasUrl !== 'boolean') {
+        failures.push(
+          `the upstream list geometry did not record its list copy at ${key}`,
+        )
+      } else if (measurement.listTextHasUrl) {
+        failures.push(
+          `the upstream list copy still contains an endpoint URL at ${key}`,
+        )
+      }
+      if (typeof measurement.listTextHasRoutingLabels !== 'boolean') {
+        failures.push(
+          `the upstream list geometry did not record its routing labels at ${key}`,
+        )
+      } else if (measurement.listTextHasRoutingLabels) {
+        failures.push(
+          `the upstream list copy still contains scope, protocol or route-source labels at ${key}`,
+        )
+      }
+      const names = Array.isArray(measurement.names) ? measurement.names : []
+      if (names.length === 0) {
+        failures.push(
+          `the upstream list geometry recorded no endpoint name at ${key}`,
+        )
+      }
+      for (const name of names) {
+        if (
+          typeof name?.text !== 'string' ||
+          name.text.length === 0 ||
+          name.text !== name?.title
+        ) {
           failures.push(
-            `an endpoint URL does not wrap at word boundaries at ${key}`,
+            `an endpoint name is not fully present in the DOM and its title at ${key}`,
           )
         }
         if (
-          typeof url?.text !== 'string' ||
-          url.text.length === 0 ||
-          url.text !== url?.title
+          !Number.isFinite(name?.lines) ||
+          name.lines < 1 ||
+          name.lines > 6
         ) {
           failures.push(
-            `an endpoint URL is not fully present in the DOM and its title at ${key}`,
+            `an endpoint name wraps beyond its available width at ${key}`,
           )
         }
+        if (name?.overflowsHost !== false) {
+          failures.push(`an endpoint name escaped its cell or card at ${key}`)
+        }
+      }
+      if (!key.startsWith('desktop-')) {
         if (
-          !Number.isFinite(url?.lines) ||
-          !Number.isFinite(url?.safeBreaks) ||
-          url.lines < 1 ||
-          url.lines > url.safeBreaks
+          measurement.documentOverflow !== false ||
+          !Number.isFinite(measurement.visibleCards) ||
+          measurement.visibleCards === 0 ||
+          measurement.visibleRows !== 0
         ) {
           failures.push(
-            `an endpoint URL wraps beyond its safe break points at ${key}`,
+            `the upstream mobile list is not a contained card list at ${key}`,
           )
         }
+        continue
       }
-      const metas = Array.isArray(measurement.metaLabels)
-        ? measurement.metaLabels
-        : []
-      if (metas.length === 0) {
-        failures.push(
-          `the upstream list geometry recorded no endpoint meta line at ${key}`,
-        )
-      }
-      for (const labels of metas) {
-        if (!Array.isArray(labels) || labels.length === 0) {
-          failures.push(`an endpoint meta line is empty at ${key}`)
-          continue
-        }
-        if (new Set(labels).size !== labels.length) {
-          failures.push(`an endpoint meta line repeats a label at ${key}`)
-        }
-      }
-      if (!key.startsWith('desktop-')) continue
       const headNames = Array.isArray(measurement.headNames)
         ? measurement.headNames
         : []
@@ -367,6 +392,14 @@ export function evaluateEndpointsReport(
       if (measurement.documentOverflow !== false) {
         failures.push(
           `the upstream list overflows the document horizontally at ${key}`,
+        )
+      }
+      if (!Number.isFinite(measurement.visibleRows) || measurement.visibleRows === 0) {
+        failures.push(`the upstream list rendered no desktop rows at ${key}`)
+      }
+      if (measurement.visibleCards !== 0) {
+        failures.push(
+          `the upstream list rendered mobile cards in the desktop table at ${key}`,
         )
       }
       if (measurement.tableScrolls !== 'auto') {

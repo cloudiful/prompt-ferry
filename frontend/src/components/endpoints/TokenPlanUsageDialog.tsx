@@ -253,14 +253,14 @@ export function TokenPlanUsageDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[calc(100vh-2rem)] max-w-6xl overflow-y-auto p-4 sm:p-6">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col gap-3 overflow-hidden p-4 sm:max-w-[min(calc(100vw_-_2rem),72rem)] sm:p-6">
+        <DialogHeader className="min-w-0 shrink-0 pr-8">
           <DialogTitle className="break-words">
             {t('tokenPlanUsage')} / {endpointName}
           </DialogTitle>
         </DialogHeader>
         <div
-          className="grid max-h-[min(70vh,42rem)] min-w-0 grid-cols-[minmax(0,1fr)] gap-4 overflow-y-auto pr-1 text-xs"
+          className="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] gap-4 overflow-y-auto overscroll-contain pr-1 text-xs"
           data-quota-dialog={endpointId}
           data-quota-provider={provider}
         >

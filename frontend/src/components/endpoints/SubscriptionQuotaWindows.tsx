@@ -85,7 +85,7 @@ export function SubscriptionQuotaWindows({
   if (groups.length === 0) return null
 
   return (
-    <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+    <div className="@container grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 @[40rem]:grid-cols-2">
       {groups.map((group) => {
         const observation = group.observation
         const observedAt = observation?.observed_at
