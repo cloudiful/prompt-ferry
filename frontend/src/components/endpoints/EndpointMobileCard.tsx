@@ -11,7 +11,6 @@ import {
   networkTestKey,
   type EndpointListItemView,
 } from '@/models/endpoints'
-import { endpointMetaLabels } from '@/models/endpoints/endpoint-item'
 
 type EndpointMobileCardProps = {
   item: EndpointListItemView
@@ -47,22 +46,16 @@ export function EndpointMobileCard({
       <div className="flex min-w-0 items-start gap-2">
         <ProviderIcon provider={item.provider} size="md" />
         <div className="min-w-0 flex-1">
-          <div className="truncate font-semibold" title={item.name}>
-            {item.name}
-          </div>
           <div
-            className="break-words text-xs text-muted-foreground"
-            data-endpoint-url
-            title={item.base_url}
+            className="break-words font-semibold"
+            data-endpoint-name
+            title={item.name}
           >
-            {item.base_url}
+            {item.name}
           </div>
         </div>
       </div>
       <div className="grid min-w-0 gap-2 text-sm">
-        <div className="break-words text-muted-foreground" data-endpoint-meta>
-          {endpointMetaLabels(item, t('nativeApiEmbeddings')).join(' · ')}
-        </div>
         {item.owner_label ? (
           <div className="grid gap-0.5">
             <span className="text-xs text-muted-foreground">{t('owner')}</span>

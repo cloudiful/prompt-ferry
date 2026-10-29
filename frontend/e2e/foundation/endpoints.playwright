@@ -160,6 +160,7 @@ async page => {
     return page.evaluate(() => {
       const visible = element => element.getBoundingClientRect().height > 0
       const rows = Array.from(document.querySelectorAll('[data-endpoint-row]')).filter(visible)
+      const cards = Array.from(document.querySelectorAll('[data-endpoint-card]')).filter(visible)
       const table = document.querySelector('[data-slot="table"]')
       const container = document.querySelector('[data-slot="table-container"]')
       const heads = Array.from(document.querySelectorAll('[data-slot="table-head"]')).filter(visible)
@@ -175,6 +176,8 @@ async page => {
         const tops = new Set(Array.from(range.getClientRects()).map(rect => Math.round(rect.top)))
         return tops.size
       }
+      const region = document.querySelector('main') ?? document.body
+      const regionText = region.innerText ?? ''
       const headAlignment = heads.map((head, index) => {
         const cell = rows[0] ? Array.from(rows[0].querySelectorAll('td'))[index] : null
         if (!cell) return { name: head.textContent ?? '', delta: null }
@@ -195,6 +198,9 @@ async page => {
           text,
         }
       })
+      const nameCells = [...rows, ...cards]
+        .map(entry => entry.querySelector('[data-endpoint-name]'))
+        .filter(Boolean)
       return {
         actionHeaderName: headNames.length > 0 ? headNames[headNames.length - 1] : '',
         badgeOverflow: badgeRows.map(badges => {
@@ -209,20 +215,30 @@ async page => {
         documentOverflow: document.documentElement.scrollWidth > window.innerWidth,
         headAlignment,
         headNames,
-        metaLabels: metas.map(meta => (meta.textContent ?? '').split('·').map(part => part.trim()).filter(Boolean)),
+        listTextHasUrl: /https?:\/\//.test(regionText),
+        listTextHasRoutingLabels:
+          regionText.includes('Automatic by caller protocol') ||
+          regionText.includes('Legacy compatible'),
+        metaCount: metas.length,
+        names: nameCells.map(name => {
+          const box = name.getBoundingClientRect()
+          const host = name.closest('td, article')
+          const hostBox = host ? host.getBoundingClientRect() : null
+          return {
+            lines: lineCount(name),
+            overflowsHost: hostBox ? box.right > hostBox.right + 1 : true,
+            text: (name.textContent ?? '').trim(),
+            title: name.getAttribute('title') ?? '',
+            wraps: getComputedStyle(name).overflowWrap,
+          }
+        }),
         ownerCount: owners.length,
         quotaColumnIndex,
         rowQuota,
         tableColumns: rows[0] ? Array.from(rows[0].querySelectorAll('td')).length : 0,
         tableScrolls: container ? getComputedStyle(container).overflowX : '',
-        urls: urls.map(url => ({
-          lines: lineCount(url),
-          overflowWrap: getComputedStyle(url).overflowWrap,
-          safeBreaks: (url.textContent ?? '').split('/').length,
-          text: url.textContent ?? '',
-          title: url.getAttribute('title') ?? '',
-          wordBreak: getComputedStyle(url).wordBreak,
-        })),
+        urlCount: urls.length,
+        visibleCards: cards.length,
         visibleRows: rows.length,
         visibleTable: table ? visible(table) : false,
       }

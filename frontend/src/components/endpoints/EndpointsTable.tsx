@@ -24,7 +24,6 @@ import {
   networkTestKey,
   type EndpointListItemView,
 } from '@/models/endpoints'
-import { endpointMetaLabels } from '@/models/endpoints/endpoint-item'
 
 type EndpointsTableProps = {
   first: number
@@ -131,18 +130,18 @@ export function EndpointsTable({
             <colgroup>
               {showQuotaColumn ? (
                 <>
-                  <col className="w-[34%]" />
-                  <col className="w-[14%]" />
-                  <col className="w-[22%]" />
+                  <col className="w-[42%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[24%]" />
                   <col className="w-[10%]" />
-                  <col className="w-[20%]" />
+                  <col className="w-[12%]" />
                 </>
               ) : (
                 <>
-                  <col className="w-[50%]" />
-                  <col className="w-[16%]" />
+                  <col className="w-[56%]" />
                   <col className="w-[14%]" />
-                  <col className="w-[20%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[16%]" />
                 </>
               )}
             </colgroup>
@@ -176,26 +175,11 @@ export function EndpointsTable({
                         <ProviderIcon provider={item.provider} />
                         <div className="min-w-0">
                           <div
-                            className="truncate font-medium"
+                            className="break-words font-medium"
+                            data-endpoint-name
                             title={item.name}
                           >
                             {item.name}
-                          </div>
-                          <div
-                            className="break-words text-xs text-muted-foreground"
-                            data-endpoint-url
-                            title={item.base_url}
-                          >
-                            {item.base_url}
-                          </div>
-                          <div
-                            className="text-xs text-muted-foreground"
-                            data-endpoint-meta
-                          >
-                            {endpointMetaLabels(
-                              item,
-                              t('nativeApiEmbeddings'),
-                            ).join(' · ')}
                           </div>
                           {item.owner_label ? (
                             <div

@@ -63,6 +63,12 @@ function row(endpointId: string): HTMLElement {
   ) as HTMLElement
 }
 
+function card(endpointId: string): HTMLElement {
+  return document.querySelector(
+    `[data-endpoint-card="${endpointId}"]`,
+  ) as HTMLElement
+}
+
 function cellTexts(endpointId: string): string[] {
   return Array.from(row(endpointId).querySelectorAll('td')).map((cell) =>
     (cell.textContent ?? '').trim(),
@@ -82,47 +88,36 @@ describe('upstream endpoint list table', () => {
     ).not.toContain('—')
   })
 
-  it('keeps the whole endpoint URL in the DOM and wraps it at word boundaries', () => {
+  it('shows only the endpoint name and icon in desktop and mobile rows', () => {
     const baseUrl = 'https://chatgpt.com/backend-api/codex'
-    renderTable([item({ base_url: baseUrl })])
-    const url = document.querySelector(
-      '[data-endpoint-row="endpoint-1"] [data-endpoint-url]',
-    ) as HTMLElement
-    expect(url.textContent).toBe(baseUrl)
-    expect(url.getAttribute('title')).toBe(baseUrl)
-    expect(url.className).toContain('break-words')
-    expect(url.className).not.toContain('break-all')
-  })
-
-  it('joins only the distinct scope, protocol and source labels', () => {
-    renderTable([
-      item({ endpoint_id: 'endpoint-1' }),
-      item({
-        endpoint_id: 'endpoint-2',
-        native_api_source_label: 'Legacy compatible',
-      }),
-    ])
-    const meta = (endpointId: string) =>
-      (row(endpointId).querySelector('[data-endpoint-meta]') as HTMLElement)
-        .textContent
-    expect(meta('endpoint-1')).toBe('Admin · Automatic by caller protocol')
-    expect(meta('endpoint-2')).toBe(
-      'Admin · Automatic by caller protocol · Legacy compatible',
-    )
-  })
-
-  it('labels an embeddings endpoint with its own protocol', () => {
     renderTable([
       item({
+        base_url: baseUrl,
         native_api: 'embeddings',
         native_api_label: 'Responses',
         native_api_source_label: 'Manual',
+        scope_label: 'Public',
       }),
     ])
-    const meta = row('endpoint-1').querySelector(
-      '[data-endpoint-meta]',
-    ) as HTMLElement
-    expect(meta.textContent).toBe('Admin · Embeddings · Manual')
+    const desktopRow = row('endpoint-1')
+    const mobileCard = card('endpoint-1')
+    for (const container of [desktopRow, mobileCard]) {
+      expect(container.querySelector('[data-endpoint-url]')).toBeNull()
+      expect(container.querySelector('[data-endpoint-meta]')).toBeNull()
+      expect(container.textContent).not.toContain(baseUrl)
+      expect(container.textContent).not.toContain('Automatic by caller')
+      expect(container.textContent).not.toContain('Embeddings')
+    }
+    const name = within(desktopRow).getByTitle('Fixture upstream')
+    expect(name.textContent).toBe('Fixture upstream')
+  })
+
+  it('keeps long endpoint names wrapping inside their cell instead of truncating the DOM', () => {
+    const longName = 'A'.repeat(60)
+    renderTable([item({ name: longName })])
+    const name = within(row('endpoint-1')).getByTitle(longName)
+    expect(name.className).toContain('break-words')
+    expect(name.className).not.toContain('truncate')
   })
 
   it('shows the owner inline only for an endpoint that has one', () => {
@@ -161,6 +156,19 @@ describe('upstream endpoint list table', () => {
     expect(
       within(inapplicable[3] as HTMLTableCellElement).getByRole('button', {
         name: 'Test',
+      }),
+    ).toBeTruthy()
+  })
+
+  it('keeps every row action available after dropping the URL and meta lines', () => {
+    renderTable([item({ has_oauth_token: true, provider: 'openai' })])
+    const desktopRow = row('endpoint-1')
+    for (const name of ['Test', 'Token plan usage', 'Edit', 'Delete']) {
+      expect(within(desktopRow).getByRole('button', { name })).toBeTruthy()
+    }
+    expect(
+      within(card('endpoint-1')).getByRole('switch', {
+        name: 'Toggle endpoint Fixture upstream',
       }),
     ).toBeTruthy()
   })
