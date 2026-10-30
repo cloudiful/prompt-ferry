@@ -123,6 +123,11 @@ export type FixtureState = {
    * fixture control endpoint serialises this state.
    */
   privateCacheAlertSecret: string
+  /**
+   * The stored SMTP alert password. A synthetic value only, kept out of the
+   * public settings response for the same reason as the DingTalk secret.
+   */
+  privateCacheAlertSmtpPassword: string
   nextId: number
 }
 
@@ -1847,6 +1852,17 @@ export function createState(): FixtureState {
         min_turns: 8,
         threshold: 0.85,
         window_minutes: 30,
+        smtp: {
+          enabled: false,
+          from: '',
+          has_smtp_password: false,
+          host: '',
+          password: '',
+          port: 465,
+          tls: 'implicit_tls',
+          to: [],
+          username: '',
+        },
       },
     },
     redaction: {
@@ -1963,6 +1979,7 @@ export function createState(): FixtureState {
       s3_secret_key: 'fixture-synthetic-s3-secret-key',
     },
     privateCacheAlertSecret: 'fixture-synthetic-dingtalk-secret',
+    privateCacheAlertSmtpPassword: '',
     relayConfig: {
       admin_bind: '127.0.0.1:9444',
       bind: '0.0.0.0:9443',

@@ -2892,7 +2892,7 @@ paths:
       operationId: get_cache_alert_setting
       responses:
         '200':
-          description: Continuous-session cache alert settings; the stored DingTalk secret is never echoed back and `has_dingtalk_secret` reports whether one is stored
+          description: Continuous-session cache alert settings; the stored DingTalk secret and SMTP password are never echoed back and `has_dingtalk_secret` / `smtp.has_smtp_password` report whether one is stored
           content:
             application/json:
               schema:
@@ -2905,11 +2905,11 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CacheAlertSettings'
+              $ref: '#/components/schemas/CacheAlertSettingsRequest'
         required: true
       responses:
         '200':
-          description: Updated cache alert settings; a blank dingtalk_secret keeps the stored value
+          description: Updated cache alert settings; a blank dingtalk_secret or smtp.password keeps the stored value and an omitted smtp object keeps the stored SMTP configuration
           content:
             application/json:
               schema:
@@ -3831,9 +3831,10 @@ components:
     CacheAlertSettings:
       type: object
       description: |-
-        Continuous-session cache alert policy. DingTalk is the only delivery
-        channel for now; `dingtalk_secret` is stored but never echoed back by the
-        admin API, and an empty value on write keeps the stored one.
+        Continuous-session cache alert policy. DingTalk and SMTP are independent
+        delivery channels; `dingtalk_secret` and `smtp.password` are stored but never
+        echoed back by the admin API, and an empty value on write keeps the stored
+        one.
       properties:
         cooldown_minutes:
           type: integer
@@ -3860,13 +3861,52 @@ components:
           type: integer
           format: int32
           default: 30
+    CacheAlertSettingsRequest:
+      type: object
+      description: |-
+        Write request for the cache alert policy.
+
+        `smtp` is optional on purpose: an older client that omits it keeps the
+        stored SMTP configuration, while an explicit object (including
+        `enabled: false`) replaces it. A blank SMTP password keeps the stored one.
+      properties:
+        cooldown_minutes:
+          type: integer
+          format: int32
+          default: 60
+        dingtalk_secret:
+          type: string
+          default: ''
+        dingtalk_webhook_url:
+          type: string
+          default: ''
+        enabled:
+          type: boolean
+          default: false
+        min_turns:
+          type: integer
+          format: int32
+          default: 5
+        smtp:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/CacheAlertSmtpSettings'
+          default: null
+        threshold:
+          type: number
+          format: double
+          default: 0.2
+        window_minutes:
+          type: integer
+          format: int32
+          default: 30
     CacheAlertSettingsResponse:
       type: object
       description: |-
-        Admin API view of [`CacheAlertSettings`]: the write-only DingTalk secret is
-        always blanked, and `has_dingtalk_secret` reports whether a non-blank secret
-        is actually stored. The request schema and the persisted JSON never carry
-        this derived flag.
+        Admin API view of [`CacheAlertSettings`]: the write-only secrets are always
+        blanked, and `has_dingtalk_secret` / `smtp.has_smtp_password` report whether
+        a non-blank secret is actually stored. The request schema and the persisted
+        JSON never carry these derived flags.
       required:
       - enabled
       - window_minutes
@@ -3891,12 +3931,102 @@ components:
         min_turns:
           type: integer
           format: int32
+        smtp:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/CacheAlertSmtpSettingsResponse'
+            description: |-
+              Optional in the schema so a legacy client that never read it keeps
+              compiling; the server always sends it.
         threshold:
           type: number
           format: double
         window_minutes:
           type: integer
           format: int32
+    CacheAlertSmtpSettings:
+      type: object
+      description: |-
+        SMTP delivery configuration for the continuous-session cache alert.
+
+        `password` is stored like the DingTalk secret: persisted as written, never
+        echoed by the admin API, and an empty value on write keeps the stored one.
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        from:
+          type: string
+          default: ''
+        host:
+          type: string
+          default: ''
+        password:
+          type: string
+          default: ''
+        port:
+          type: integer
+          format: int32
+          default: 465
+          minimum: 0
+        tls:
+          oneOf:
+          - $ref: '#/components/schemas/CacheAlertSmtpTls'
+          default: implicit_tls
+        to:
+          type: array
+          items:
+            type: string
+          default: []
+        username:
+          type: string
+          default: ''
+    CacheAlertSmtpSettingsResponse:
+      type: object
+      description: |-
+        Admin API view of the SMTP channel: the password is always blanked and
+        `has_smtp_password` reports whether one is stored.
+      required:
+      - enabled
+      - host
+      - port
+      - tls
+      - from
+      - to
+      - username
+      - password
+      - has_smtp_password
+      properties:
+        enabled:
+          type: boolean
+        from:
+          type: string
+        has_smtp_password:
+          type: boolean
+        host:
+          type: string
+        password:
+          type: string
+        port:
+          type: integer
+          format: int32
+          minimum: 0
+        tls:
+          $ref: '#/components/schemas/CacheAlertSmtpTls'
+        to:
+          type: array
+          items:
+            type: string
+        username:
+          type: string
+    CacheAlertSmtpTls:
+      type: string
+      description: |-
+        Transport security for the SMTP channel. Only encrypted transports are
+        exposed: an operator can pick implicit TLS or STARTTLS, never plaintext.
+      enum:
+      - implicit_tls
+      - start_tls
     CanonicalQuotaWindow:
       type: object
       description: |-

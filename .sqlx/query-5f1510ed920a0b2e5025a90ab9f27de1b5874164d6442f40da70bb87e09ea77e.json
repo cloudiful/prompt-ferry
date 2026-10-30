@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT last_alerted_at AS \"last_alerted_at!\"\nFROM cache_alert_state\nWHERE conversation_id = $1\n",
+  "query": "SELECT last_alerted_at AS \"last_alerted_at!\"\nFROM cache_alert_state\nWHERE conversation_id = $1 AND channel = $2\n",
   "describe": {
     "columns": [
       {
@@ -17,12 +17,13 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Text"
       ]
     },
     "nullable": [
       false
     ]
   },
-  "hash": "73d256fbdbe0506a1b98c3f4ea3e23ad0a8f69e67881273ce9105c6a780f083b"
+  "hash": "5f1510ed920a0b2e5025a90ab9f27de1b5874164d6442f40da70bb87e09ea77e"
 }

@@ -7,13 +7,15 @@ use cloudiful_notifier::{
 use crate::{db::LowCacheConversation, worker_admin_types::CacheAlertSettings};
 
 /// DingTalk text robots deliver `title + "\n" + body`; the title doubles as
-/// the robot keyword surface.
-const CACHE_ALERT_TITLE: &str = "缓存率异常告警";
+/// the robot keyword surface. SMTP reuses the same metadata-only alert body
+/// through this title.
+pub(crate) const CACHE_ALERT_TITLE: &str = "缓存率异常告警";
 
-/// Hard ceiling for one alert delivery. The shared worker HTTP client only
-/// bounds connection establishment, so a hung DingTalk endpoint would
-/// otherwise stall the alert tick and hold its single-flight lease.
-const CACHE_ALERT_DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
+/// Hard ceiling for one alert delivery per channel. The shared worker HTTP
+/// client only bounds connection establishment, so a hung DingTalk endpoint or
+/// SMTP server would otherwise stall the alert tick and hold its single-flight
+/// lease.
+pub(crate) const CACHE_ALERT_DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Deliver one low-cache conversation alert through the DingTalk robot.
 ///
@@ -100,7 +102,7 @@ fn optional_secret(value: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-fn cache_alert_message(
+pub(crate) fn cache_alert_message(
     settings: &CacheAlertSettings,
     conversation: &LowCacheConversation,
 ) -> MessageEnvelope {

@@ -1,7 +1,7 @@
 import type {
   ApprovalRequest,
   BillingPriceRuleRequest,
-  CacheAlertSettings,
+  CacheAlertSettingsRequest,
   CacheAlertSettingsResponse,
   ConfigExportRequest,
   ConfigImportApplied,
@@ -212,6 +212,19 @@ const CACHE_ALERT_DEFAULT = {
   cooldown_minutes: 60,
 } as const
 
+/** The SMTP channel's own serde defaults. */
+const CACHE_ALERT_SMTP_DEFAULT = {
+  enabled: false,
+  host: '',
+  port: 465,
+  tls: 'implicit_tls',
+  from: '',
+  to: [] as string[],
+  username: '',
+  password: '',
+  has_smtp_password: false,
+} as const
+
 /**
  * The backend's `CacheAlertSettings::validate`, message for message. The four
  * numeric fields are bounds-checked; the threshold is also required to be finite
@@ -254,16 +267,111 @@ function validateCacheAlert(settings: {
   return null
 }
 
-/** The redacted admin view: the stored secret never leaves the fixture state. */
+/**
+ * The redacted admin view: the stored secret never leaves the fixture state.
+ */
 function cacheAlertResponse(state: {
   settings: { cacheAlert: CacheAlertSettingsResponse }
   privateCacheAlertSecret: string
+  privateCacheAlertSmtpPassword: string
 }): CacheAlertSettingsResponse {
   return {
     ...state.settings.cacheAlert,
     dingtalk_secret: '',
     has_dingtalk_secret: state.privateCacheAlertSecret.trim() !== '',
+    smtp: {
+      ...CACHE_ALERT_SMTP_DEFAULT,
+      ...(state.settings.cacheAlert.smtp ?? {}),
+      password: '',
+      has_smtp_password: state.privateCacheAlertSmtpPassword.trim() !== '',
+    },
   }
+}
+
+/**
+ * The backend's host rule: a name or an address, never a scheme or a path.
+ */
+function validCacheAlertSmtpHost(value: string): boolean {
+  const trimmed = value.trim()
+  if (trimmed === '' || trimmed.length > 253) return false
+  if (
+    trimmed.includes('://') ||
+    trimmed.includes('/') ||
+    trimmed.includes('@')
+  ) {
+    return false
+  }
+  return !/[\s\p{Cc}]/u.test(trimmed)
+}
+
+/**
+ * The backend's address rule: one `@`, a dotted domain and no whitespace.
+ */
+function validCacheAlertEmail(value: string): boolean {
+  const trimmed = value.trim()
+  if (trimmed === '' || trimmed.length > 254) return false
+  if (/[\s\p{Cc}]/u.test(trimmed)) return false
+  const separator = trimmed.lastIndexOf('@')
+  if (separator <= 0) return false
+  const local = trimmed.slice(0, separator)
+  const domain = trimmed.slice(separator + 1)
+  if (local.length === 0 || local.length > 64 || local.includes('@'))
+    return false
+  if (
+    domain.length === 0 ||
+    !domain.includes('.') ||
+    domain.startsWith('.') ||
+    domain.endsWith('.') ||
+    domain.includes('..')
+  ) {
+    return false
+  }
+  return /^[A-Za-z0-9.-]+$/.test(domain)
+}
+
+/**
+ * The backend's `CacheAlertSmtpSettings::validate`, message for message. The
+ * credentials stay paired, the host and the addresses are checked whenever
+ * they carry a value, and the required ones only while the channel is on.
+ */
+function validateCacheAlertSmtp(smtp: {
+  enabled: boolean
+  host: string
+  port: number
+  from: string
+  to: string[]
+  username: string
+  password: string
+}): string | null {
+  if (!Number.isInteger(smtp.port) || smtp.port < 1 || smtp.port > 65535) {
+    return 'smtp.port must be between 1 and 65535'
+  }
+  const hasUsername = smtp.username.trim() !== ''
+  const hasPassword = smtp.password.trim() !== ''
+  if (hasUsername !== hasPassword) {
+    return 'smtp.username and smtp.password must be set together'
+  }
+  if (smtp.host.trim() !== '' && !validCacheAlertSmtpHost(smtp.host)) {
+    return 'smtp.host must be a host name or address without a scheme'
+  }
+  if (smtp.from.trim() !== '' && !validCacheAlertEmail(smtp.from)) {
+    return 'smtp.from must be a valid email address'
+  }
+  if (!smtp.to.every((recipient) => validCacheAlertEmail(recipient))) {
+    return 'smtp.to must contain only valid email addresses'
+  }
+  if (smtp.enabled) {
+    if (smtp.host.trim() === '') {
+      return 'smtp.host is required when the SMTP channel is enabled'
+    }
+    if (smtp.from.trim() === '') {
+      return 'smtp.from is required when the SMTP channel is enabled'
+    }
+    if (smtp.to.length === 0) {
+      return 'smtp.to must contain at least one email address'
+    }
+  }
+  return null
 }
 
 /** Trim, drop empties and dedupe in order, as `ip_acl::normalize_entries` does. */
@@ -524,7 +632,7 @@ const SETTING_PATHS: Array<{
     // its presence is reported.
     read: (ctx) => cacheAlertResponse(ctx.state),
     write: (ctx, body) => {
-      const request = body as unknown as Partial<CacheAlertSettings>
+      const request = body as unknown as Partial<CacheAlertSettingsRequest>
       // The backend type carries serde defaults, so a partial payload fills every
       // missing field with the default instead of merging the previous record.
       const candidate = {
@@ -547,6 +655,50 @@ const SETTING_PATHS: Array<{
       // A blank value keeps the stored write-only secret.
       ctx.state.privateCacheAlertSecret =
         submittedSecret === '' ? storedSecret : submittedSecret
+      // An omitted SMTP object keeps the stored configuration, exactly as the
+      // server does for a client that never knew the channel.
+      let smtp = ctx.state.settings.cacheAlert.smtp ?? null
+      if (request.smtp !== undefined && request.smtp !== null) {
+        const requested = request.smtp
+        const requestedUsername = (requested.username ?? '').trim()
+        const submittedPassword = (requested.password ?? '').trim()
+        const storedUsername = (smtp?.username ?? '').trim()
+        // A blank password keeps the stored one only while the username stays
+        // the same; a changed username drops it instead of pairing it with
+        // another account.
+        const password =
+          submittedPassword === ''
+            ? requestedUsername === storedUsername
+              ? ctx.state.privateCacheAlertSmtpPassword
+              : ''
+            : submittedPassword
+        const smtpCandidate = {
+          enabled: requested.enabled ?? false,
+          host: (requested.host ?? '').trim(),
+          port: requested.port ?? CACHE_ALERT_SMTP_DEFAULT.port,
+          tls: requested.tls ?? CACHE_ALERT_SMTP_DEFAULT.tls,
+          from: (requested.from ?? '').trim(),
+          to: (requested.to ?? [])
+            .map((recipient) => recipient.trim())
+            .filter((recipient) => recipient !== ''),
+          username: requestedUsername,
+          password,
+        }
+        const smtpFailure = validateCacheAlertSmtp(smtpCandidate)
+        if (smtpFailure) return error('bad_request', smtpFailure, 400)
+        ctx.state.privateCacheAlertSmtpPassword = smtpCandidate.password
+        smtp = {
+          enabled: smtpCandidate.enabled,
+          from: smtpCandidate.from,
+          has_smtp_password: smtpCandidate.password !== '',
+          host: smtpCandidate.host,
+          password: '',
+          port: smtpCandidate.port,
+          tls: smtpCandidate.tls,
+          to: smtpCandidate.to,
+          username: smtpCandidate.username,
+        }
+      }
       ctx.state.settings.cacheAlert = {
         enabled: candidate.enabled,
         window_minutes: candidate.window_minutes,
@@ -556,6 +708,7 @@ const SETTING_PATHS: Array<{
         dingtalk_webhook_url: candidate.dingtalk_webhook_url.trim(),
         dingtalk_secret: '',
         has_dingtalk_secret: ctx.state.privateCacheAlertSecret.trim() !== '',
+        smtp,
       }
       return cacheAlertResponse(ctx.state)
     },

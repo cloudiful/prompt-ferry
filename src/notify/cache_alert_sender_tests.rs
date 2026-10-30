@@ -41,6 +41,7 @@ fn settings() -> CacheAlertSettings {
             "https://oapi.dingtalk.com/robot/send?access_token={WEBHOOK_SECRET}"
         ),
         dingtalk_secret: String::new(),
+        smtp: Default::default(),
     }
 }
 

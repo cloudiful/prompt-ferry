@@ -101,28 +101,34 @@ pub async fn set_cache_alert_settings(
     Ok(normalized)
 }
 
-/// Cooldown clock for one conversation; `None` means it was never alerted.
+/// Cooldown clock for one conversation and channel; `None` means that channel
+/// never alerted this conversation.
 pub async fn last_cache_alert_at(
     pool: &PgPool,
     conversation_id: Uuid,
+    channel: &str,
 ) -> Result<Option<DateTime<Utc>>> {
-    Ok(
-        sqlx::query_file!("src/sql/usage/get_cache_alert_state.sql", conversation_id)
-            .fetch_optional(pool)
-            .await?
-            .map(|row| row.last_alerted_at),
+    Ok(sqlx::query_file!(
+        "src/sql/usage/get_cache_alert_state.sql",
+        conversation_id,
+        channel
     )
+    .fetch_optional(pool)
+    .await?
+    .map(|row| row.last_alerted_at))
 }
 
 pub async fn record_cache_alert(
     pool: &PgPool,
     conversation_id: Uuid,
+    channel: &str,
     cache_rate: f64,
     turns: i32,
 ) -> Result<()> {
     sqlx::query_file!(
         "src/sql/usage/upsert_cache_alert_state.sql",
         conversation_id,
+        channel,
         cache_rate,
         turns,
     )

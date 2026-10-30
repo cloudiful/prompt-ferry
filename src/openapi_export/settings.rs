@@ -3,7 +3,7 @@ use crate::{
     llm_review::LlmReviewSettings,
     protocol::RelayIpPolicy,
     worker_admin_types::{
-        CacheAlertSettings, CacheAlertSettingsResponse, EndpointSettingRequest,
+        CacheAlertSettingsRequest, CacheAlertSettingsResponse, EndpointSettingRequest,
         ModelRouteWhitelistRequest, ModelRouteWhitelistResponse, RawObjectStoreSettingsRequest,
         RawObjectStoreSettingsResponse, RelayIpPolicyResponse, RequestContentLoggingRequest,
         RequestContentLoggingResponse, UsageRetentionSettings,
@@ -127,7 +127,7 @@ pub(super) fn set_usage_retention() {}
 #[utoipa::path(
     get,
     path = "/api/v1/settings/cache-alert",
-    responses((status = 200, body = CacheAlertSettingsResponse, description = "Continuous-session cache alert settings; the stored DingTalk secret is never echoed back and `has_dingtalk_secret` reports whether one is stored")),
+    responses((status = 200, body = CacheAlertSettingsResponse, description = "Continuous-session cache alert settings; the stored DingTalk secret and SMTP password are never echoed back and `has_dingtalk_secret` / `smtp.has_smtp_password` report whether one is stored")),
     tag = "settings"
 )]
 pub(super) fn get_cache_alert_setting() {}
@@ -135,8 +135,8 @@ pub(super) fn get_cache_alert_setting() {}
 #[utoipa::path(
     put,
     path = "/api/v1/settings/cache-alert",
-    request_body = CacheAlertSettings,
-    responses((status = 200, body = CacheAlertSettingsResponse, description = "Updated cache alert settings; a blank dingtalk_secret keeps the stored value")),
+    request_body = CacheAlertSettingsRequest,
+    responses((status = 200, body = CacheAlertSettingsResponse, description = "Updated cache alert settings; a blank dingtalk_secret or smtp.password keeps the stored value and an omitted smtp object keeps the stored SMTP configuration")),
     tag = "settings"
 )]
 pub(super) fn set_cache_alert_setting() {}
