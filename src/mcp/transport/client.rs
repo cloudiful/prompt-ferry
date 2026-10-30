@@ -739,6 +739,11 @@ async fn call_tool(
     params: &Value,
 ) -> anyhow::Result<Value> {
     let params = parse_params::<CallToolRequestParams>(params, "tools/call missing params")?;
+    ensure_continuation_supported(
+        peer,
+        "tools/call",
+        params.input_responses.is_some() || params.request_state.is_some(),
+    )?;
     let version = negotiated_protocol(peer);
     let response =
         tool_headers::call_tool_with_warmup(peer, params, &version, server.transport == "http")
@@ -759,6 +764,11 @@ async fn read_resource(
 ) -> anyhow::Result<Value> {
     let params =
         parse_params::<ReadResourceRequestParams>(params, "resources/read missing params.uri")?;
+    ensure_continuation_supported(
+        peer,
+        "resources/read",
+        params.input_responses.is_some() || params.request_state.is_some(),
+    )?;
     match peer.read_resource_once(params).await? {
         ReadResourceResponse::Complete(result) => Ok(serde_json::to_value(result)?),
         ReadResourceResponse::InputRequired(result) => Ok(serde_json::to_value(result)?),
@@ -768,6 +778,11 @@ async fn read_resource(
 
 async fn get_prompt(peer: &rmcp::Peer<rmcp::RoleClient>, params: &Value) -> anyhow::Result<Value> {
     let params = parse_params::<GetPromptRequestParams>(params, "prompts/get missing params.name")?;
+    ensure_continuation_supported(
+        peer,
+        "prompts/get",
+        params.input_responses.is_some() || params.request_state.is_some(),
+    )?;
     match peer.get_prompt_once(params).await? {
         GetPromptResponse::Complete(result) => Ok(serde_json::to_value(result)?),
         GetPromptResponse::InputRequired(result) => Ok(serde_json::to_value(result)?),
@@ -787,6 +802,28 @@ fn negotiated_protocol(peer: &rmcp::Peer<rmcp::RoleClient>) -> ProtocolVersion {
     peer.peer_info()
         .map(|info| info.protocol_version.clone())
         .unwrap_or(ProtocolVersion::V_2025_11_25)
+}
+
+/// MRTR continuations (`inputResponses`/`requestState`) only exist from
+/// `2026-07-28`. Forwarding them to an older upstream would either be silently
+/// ignored or lose the continuation, so fail explicitly instead of pretending
+/// the retry happened.
+fn ensure_continuation_supported(
+    peer: &rmcp::Peer<rmcp::RoleClient>,
+    method: &str,
+    has_continuation: bool,
+) -> anyhow::Result<()> {
+    if !has_continuation {
+        return Ok(());
+    }
+    let version = negotiated_protocol(peer);
+    if version >= ProtocolVersion::V_2026_07_28 {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "{method} request carries an MRTR continuation (inputResponses/requestState) that the upstream protocol {} cannot express; refusing to drop or fabricate it",
+        version.as_str()
+    ))
 }
 
 /// Full serde deserialization of request params so `_meta`, `inputResponses`,

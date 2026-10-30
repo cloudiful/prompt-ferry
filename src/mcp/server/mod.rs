@@ -21,7 +21,7 @@ use super::{
 mod ops;
 mod value;
 
-use value::{internal_error, server_info};
+use value::{dispatch_error, internal_error, server_info};
 
 #[derive(Clone)]
 pub(super) struct RequestScope {
@@ -90,7 +90,7 @@ impl ProxyService {
                 request,
             )
             .await
-            .map_err(internal_error);
+            .map_err(dispatch_error);
         }
 
         let server = self.load_server(scope).await?;
@@ -102,7 +102,7 @@ impl ProxyService {
             scope.selected_credential.as_ref(),
         )
         .await
-        .map_err(internal_error)
+        .map_err(dispatch_error)
     }
 
     async fn load_server(&self, scope: &RequestScope) -> Result<McpServer, ErrorData> {

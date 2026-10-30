@@ -867,3 +867,1099 @@ async fn origin_in_allowlist_and_missing_origin_are_accepted() {
     .await;
     assert_eq!(status, 200);
 }
+
+// ---------------------------------------------------------------------------
+// Cross-version entry coverage: legacy-shaped upstream, modern/legacy peers
+// ---------------------------------------------------------------------------
+
+mod legacy_shape {
+    use std::borrow::Cow;
+
+    use rmcp::{
+        ErrorData, ServerHandler,
+        model::{
+            CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult,
+            CompleteRequestParams, CompleteResult, CompletionInfo, ContentBlock, ErrorCode,
+            GetPromptRequestParams, GetPromptResponse, GetPromptResult, Implementation,
+            InitializeResult, ListToolsResult, PaginatedRequestParams, PromptMessage,
+            ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
+            ResourceContents, Role, ServerCapabilities, ServerConfig, Tool,
+        },
+        service::{RequestContext, RoleServer},
+        transport::streamable_http_server::{
+            StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+        },
+    };
+    use serde_json::json;
+
+    /// Upstream that negotiated `2025-11-25`, so rmcp strips the SEP-2322
+    /// `resultType` from its ordinary results exactly like the built-in MiniMax
+    /// bridge and other pre-`2026-07-28` upstreams.
+    #[derive(Clone, Copy)]
+    pub(super) struct LegacyShapeUpstream;
+
+    impl ServerHandler for LegacyShapeUpstream {
+        fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+            Cow::Borrowed(&[ProtocolVersion::V_2025_11_25])
+        }
+
+        fn get_info(&self) -> ServerConfig {
+            let capabilities = ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .enable_prompts()
+                .enable_completions()
+                .build();
+            InitializeResult::new(capabilities)
+                .with_server_info(Implementation::new("legacy-shape-upstream", "1.0"))
+        }
+
+        async fn list_tools(
+            &self,
+            _request: Option<PaginatedRequestParams>,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<ListToolsResult, rmcp::ErrorData> {
+            Ok(ListToolsResult::with_all_items(vec![
+                Tool::new(
+                    "legacy_echo",
+                    "echoes a fixed legacy payload",
+                    json!({"type": "object"}).as_object().unwrap().clone(),
+                ),
+                Tool::new(
+                    "legacy_structured",
+                    "returns structured content with an error flag",
+                    json!({"type": "object"}).as_object().unwrap().clone(),
+                ),
+                Tool::new(
+                    "legacy_error",
+                    "returns a JSON-RPC error",
+                    json!({"type": "object"}).as_object().unwrap().clone(),
+                ),
+            ]))
+        }
+
+        async fn call_tool(
+            &self,
+            request: CallToolRequestParams,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<CallToolResponse, rmcp::ErrorData> {
+            match request.name.as_ref() {
+                "legacy_structured" => {
+                    let mut result =
+                        CallToolResult::success(vec![ContentBlock::text("legacy-structured")]);
+                    result.structured_content = Some(json!({"answer": 42}));
+                    result.is_error = Some(true);
+                    Ok(result.into())
+                }
+                "legacy_error" => Err(ErrorData::new(
+                    ErrorCode(-32001),
+                    "legacy tool failed",
+                    Some(json!({"detail": "boom"})),
+                )),
+                _ => Ok(
+                    CallToolResult::success(vec![ContentBlock::text("legacy-tool-result")]).into(),
+                ),
+            }
+        }
+
+        async fn read_resource(
+            &self,
+            _request: ReadResourceRequestParams,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<ReadResourceResponse, rmcp::ErrorData> {
+            let mut result = ReadResourceResult::new(vec![ResourceContents::text(
+                "legacy-resource",
+                "legacy://resource",
+            )]);
+            result.ttl_ms = Some(60);
+            result.cache_scope = Some(CacheScope::Public);
+            Ok(ReadResourceResponse::Complete(result))
+        }
+
+        async fn get_prompt(
+            &self,
+            _request: GetPromptRequestParams,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<GetPromptResponse, rmcp::ErrorData> {
+            Ok(GetPromptResponse::Complete(GetPromptResult::new(vec![
+                PromptMessage::new_text(Role::User, "legacy-prompt"),
+            ])))
+        }
+
+        async fn complete(
+            &self,
+            _request: CompleteRequestParams,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<CompleteResult, rmcp::ErrorData> {
+            let completion = CompletionInfo::with_all_values(vec!["legacy-completion".to_string()])
+                .expect("single completion value");
+            Ok(CompleteResult::new(completion))
+        }
+    }
+
+    pub(super) async fn spawn() -> String {
+        let service = StreamableHttpService::new(
+            || Ok(LegacyShapeUpstream),
+            LocalSessionManager::default().into(),
+            StreamableHttpServerConfig::default().disable_allowed_hosts(),
+        );
+        let router = axum::Router::new().nest_service("/mcp", service);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        format!("http://{addr}/mcp")
+    }
+}
+
+async fn sqlite_storage_with_http_server(url: &str) -> (McpRuntimeStorage, McpCatalogCache) {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    use crate::{
+        db::{ConfigRepository, McpServerInput},
+        relay_secrets::RelaySecretManager,
+        standalone_config::StandaloneConfigStore,
+    };
+
+    let path = std::env::temp_dir().join(format!(
+        "prompt-ferry-entry-cross-version-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let store = std::sync::Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
+    let manager = RelaySecretManager::from_base64(&STANDARD.encode([9_u8; 32])).expect("manager");
+    let repository = ConfigRepository::sqlite(store, manager);
+    repository
+        .create_mcp_server(
+            uuid::Uuid::new_v4(),
+            McpServerInput {
+                scope: "admin".to_string(),
+                owner_user_id: None,
+                source_endpoint_id: None,
+                name: "legacy-shape".to_string(),
+                aggregate_naming_mode: "qualified_only".to_string(),
+                transport: "http".to_string(),
+                provider_kind: None,
+                url: Some(url.to_string()),
+                command: None,
+                args: serde_json::json!([]),
+                env_json: serde_json::json!({}),
+                bearer_tokens_json: serde_json::json!([]),
+                http_headers_json: serde_json::json!({}),
+                auth_mode: "none".to_string(),
+                basic_username: None,
+                basic_password: None,
+                proxy_url: None,
+                tool_filter_mode: "blacklist".to_string(),
+                allowed_tools: serde_json::json!([]),
+                disabled_tools: serde_json::json!([]),
+                disabled_resources: serde_json::json!([]),
+                enabled: true,
+                timeout_ms: 30_000,
+                lifecycle_policy: "auto".to_string(),
+                lifecycle_manual_protocol_version: None,
+            },
+        )
+        .await
+        .expect("create MCP server");
+    (
+        McpRuntimeStorage::from_repository(repository),
+        McpCatalogCache::new(),
+    )
+}
+
+fn v2_request_body(method: &str, id: i64, mut params: Value) -> Vec<u8> {
+    params["_meta"] = serde_json::from_str(MCP_V2_META).expect("protocol meta");
+    serde_json::to_vec(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": method,
+        "params": params,
+    }))
+    .expect("request body")
+}
+
+fn legacy_request_body(method: &str, id: i64, params: Value) -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": method,
+        "params": params,
+    }))
+    .expect("request body")
+}
+
+fn v2_headers_with(method: &str, extra: &[(&str, &str)]) -> Vec<(String, String)> {
+    let mut headers = v2_headers(method);
+    for (name, value) in extra {
+        headers.push((name.to_string(), value.to_string()));
+    }
+    headers
+}
+
+fn named_request<'a>(
+    method: &'a str,
+    path: &'a str,
+    server_name: &'a str,
+    headers: &'a [(String, String)],
+    body: &'a [u8],
+) -> McpRequestContext<'a> {
+    McpRequestContext {
+        user_id: None,
+        server_name: Some(server_name),
+        method,
+        path,
+        headers,
+        body,
+        selected_credential: None,
+    }
+}
+
+async fn initialize_legacy_session(
+    storage: &McpRuntimeStorage,
+    cache: &McpCatalogCache,
+    server_name: Option<&str>,
+) -> String {
+    let (status, _, headers, _) = collect_response(
+        handle_stream_with_storage(
+            storage,
+            cache,
+            McpRequestContext {
+                user_id: None,
+                server_name,
+                method: "POST",
+                path: "/mcp",
+                headers: &[],
+                body: br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+                selected_credential: None,
+            },
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(status, 200);
+    headers
+        .iter()
+        .find(|(name, _)| name == "mcp-session-id")
+        .map(|(_, value)| value.clone())
+        .expect("legacy initialize must establish a session")
+}
+
+#[tokio::test]
+async fn entry_2026_peer_receives_complete_result_type_from_legacy_shape_upstream() {
+    let url = legacy_shape::spawn().await;
+    let (storage, cache) = sqlite_storage_with_http_server(&url).await;
+
+    let (status, _, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &v2_headers_with("tools/call", &[("mcp-name", "legacy_echo")]),
+                &v2_request_body(
+                    "tools/call",
+                    2,
+                    serde_json::json!({"name": "legacy_echo", "arguments": {}}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = last_sse_json(&body);
+    assert_eq!(value["result"]["resultType"].as_str(), Some("complete"));
+    assert_eq!(
+        value["result"]["content"][0]["text"].as_str(),
+        Some("legacy-tool-result")
+    );
+
+    let (status, _, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &v2_headers_with("resources/read", &[("mcp-name", "legacy://resource")]),
+                &v2_request_body(
+                    "resources/read",
+                    3,
+                    serde_json::json!({"uri": "legacy://resource"}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = last_sse_json(&body);
+    assert_eq!(value["result"]["resultType"].as_str(), Some("complete"));
+    assert_eq!(value["result"]["ttlMs"], serde_json::json!(60));
+    assert_eq!(value["result"]["cacheScope"].as_str(), Some("public"));
+
+    let (status, _, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &v2_headers_with("prompts/get", &[("mcp-name", "legacy_prompt")]),
+                &v2_request_body(
+                    "prompts/get",
+                    4,
+                    serde_json::json!({"name": "legacy_prompt", "arguments": {}}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = last_sse_json(&body);
+    assert_eq!(value["result"]["resultType"].as_str(), Some("complete"));
+
+    let (status, _, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &v2_headers("completion/complete"),
+                &v2_request_body(
+                    "completion/complete",
+                    5,
+                    serde_json::json!({
+                        "ref": {"type": "ref/prompt", "name": "legacy_prompt"},
+                        "argument": {"name": "arg", "value": "leg"},
+                    }),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = last_sse_json(&body);
+    assert_eq!(value["result"]["resultType"].as_str(), Some("complete"));
+    assert_eq!(
+        value["result"]["completion"]["values"][0].as_str(),
+        Some("legacy-completion")
+    );
+}
+
+#[tokio::test]
+async fn entry_aggregate_2026_peer_receives_complete_result_type() {
+    let url = legacy_shape::spawn().await;
+    let (storage, cache) = sqlite_storage_with_http_server(&url).await;
+
+    let (status, _, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            request(
+                "POST",
+                "/mcp",
+                &v2_headers_with("tools/call", &[("mcp-name", "legacy-shape__legacy_echo")]),
+                &v2_request_body(
+                    "tools/call",
+                    6,
+                    serde_json::json!({"name": "legacy-shape__legacy_echo", "arguments": {}}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = last_sse_json(&body);
+    assert_eq!(value["result"]["resultType"].as_str(), Some("complete"));
+    assert_eq!(
+        value["result"]["content"][0]["text"].as_str(),
+        Some("legacy-tool-result")
+    );
+}
+
+#[tokio::test]
+async fn entry_2025_peer_receives_no_modern_result_type_or_cache_metadata() {
+    let url = legacy_shape::spawn().await;
+    let (storage, cache) = sqlite_storage_with_http_server(&url).await;
+    let session_id = initialize_legacy_session(&storage, &cache, Some("legacy-shape")).await;
+    let headers = vec![
+        ("mcp-session-id".to_string(), session_id),
+        ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
+    ];
+
+    let (status, _, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &headers,
+                &legacy_request_body(
+                    "tools/call",
+                    2,
+                    serde_json::json!({"name": "legacy_echo", "arguments": {}}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = last_sse_json(&body);
+    assert!(
+        value["result"].get("resultType").is_none(),
+        "legacy peer must not receive resultType: {value}"
+    );
+
+    let (status, _, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &headers,
+                &legacy_request_body(
+                    "resources/read",
+                    3,
+                    serde_json::json!({"uri": "legacy://resource"}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = last_sse_json(&body);
+    assert!(
+        value["result"].get("resultType").is_none(),
+        "legacy peer must not receive resultType: {value}"
+    );
+    assert!(
+        value["result"].get("ttlMs").is_none(),
+        "legacy peer must not receive modern cache metadata: {value}"
+    );
+    assert!(
+        value["result"].get("cacheScope").is_none(),
+        "legacy peer must not receive modern cache metadata: {value}"
+    );
+    assert_eq!(
+        value["result"]["contents"][0]["text"].as_str(),
+        Some("legacy-resource")
+    );
+
+    let (status, _, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &headers,
+                &legacy_request_body(
+                    "prompts/get",
+                    4,
+                    serde_json::json!({"name": "legacy_prompt", "arguments": {}}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = last_sse_json(&body);
+    assert!(
+        value["result"].get("resultType").is_none(),
+        "legacy peer must not receive resultType: {value}"
+    );
+    assert_eq!(
+        value["result"]["messages"][0]["content"]["text"].as_str(),
+        Some("legacy-prompt")
+    );
+
+    let (status, _, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &headers,
+                &legacy_request_body(
+                    "completion/complete",
+                    5,
+                    serde_json::json!({
+                        "ref": {"type": "ref/prompt", "name": "legacy_prompt"},
+                        "argument": {"name": "arg", "value": "leg"},
+                    }),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = last_sse_json(&body);
+    assert!(
+        value["result"].get("resultType").is_none(),
+        "legacy peer must not receive resultType: {value}"
+    );
+    assert_eq!(
+        value["result"]["completion"]["values"][0].as_str(),
+        Some("legacy-completion")
+    );
+}
+
+fn entry_response_json(content_type: &str, body: &[u8]) -> Value {
+    if content_type.starts_with("text/event-stream") {
+        last_sse_json(body)
+    } else {
+        serde_json::from_slice(body).expect("JSON response body")
+    }
+}
+
+#[tokio::test]
+async fn entry_2026_peer_preserves_structured_content_and_is_error() {
+    let url = legacy_shape::spawn().await;
+    let (storage, cache) = sqlite_storage_with_http_server(&url).await;
+
+    let (status, content_type, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &v2_headers_with("tools/call", &[("mcp-name", "legacy_structured")]),
+                &v2_request_body(
+                    "tools/call",
+                    20,
+                    serde_json::json!({"name": "legacy_structured", "arguments": {}}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = entry_response_json(&content_type, &body);
+    assert_eq!(value["id"], serde_json::json!(20));
+    assert_eq!(value["result"]["resultType"].as_str(), Some("complete"));
+    assert_eq!(
+        value["result"]["content"][0]["text"].as_str(),
+        Some("legacy-structured")
+    );
+    assert_eq!(
+        value["result"]["structuredContent"],
+        serde_json::json!({"answer": 42})
+    );
+    assert_eq!(value["result"]["isError"], serde_json::json!(true));
+}
+
+#[tokio::test]
+async fn entry_2026_peer_must_preserve_upstream_jsonrpc_error_object() {
+    let url = legacy_shape::spawn().await;
+    let (storage, cache) = sqlite_storage_with_http_server(&url).await;
+
+    let (status, content_type, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &v2_headers_with("tools/call", &[("mcp-name", "legacy_error")]),
+                &v2_request_body(
+                    "tools/call",
+                    21,
+                    serde_json::json!({"name": "legacy_error", "arguments": {}}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    let value = entry_response_json(&content_type, &body);
+    assert_eq!(
+        value["id"],
+        serde_json::json!(21),
+        "actual downstream response: {value}"
+    );
+    assert_eq!(
+        value["error"]["code"],
+        serde_json::json!(-32001),
+        "actual downstream response: {value}"
+    );
+    assert_eq!(
+        value["error"]["message"].as_str(),
+        Some("legacy tool failed")
+    );
+    assert_eq!(
+        value["error"]["data"],
+        serde_json::json!({"detail": "boom"})
+    );
+    assert!(
+        value.get("result").is_none(),
+        "error must not carry a result"
+    );
+    assert_eq!(status, 200);
+}
+
+#[tokio::test]
+async fn entry_aggregate_2026_peer_gets_complete_results_for_all_methods() {
+    let url = legacy_shape::spawn().await;
+    let (storage, cache) = sqlite_storage_with_http_server(&url).await;
+
+    let resource_uri = "mcp://legacy-shape/legacy-resource";
+    let (status, content_type, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            request(
+                "POST",
+                "/mcp",
+                &v2_headers_with("resources/read", &[("mcp-name", resource_uri)]),
+                &v2_request_body(
+                    "resources/read",
+                    30,
+                    serde_json::json!({"uri": resource_uri}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = entry_response_json(&content_type, &body);
+    assert_eq!(value["result"]["resultType"].as_str(), Some("complete"));
+    assert_eq!(value["result"]["ttlMs"], serde_json::json!(60));
+    assert_eq!(value["result"]["cacheScope"].as_str(), Some("public"));
+
+    let prompt_name = "legacy-shape__legacy_prompt";
+    let (status, content_type, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            request(
+                "POST",
+                "/mcp",
+                &v2_headers_with("prompts/get", &[("mcp-name", prompt_name)]),
+                &v2_request_body(
+                    "prompts/get",
+                    31,
+                    serde_json::json!({"name": prompt_name, "arguments": {}}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = entry_response_json(&content_type, &body);
+    assert_eq!(value["result"]["resultType"].as_str(), Some("complete"));
+
+    let (status, content_type, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            request(
+                "POST",
+                "/mcp",
+                &v2_headers("completion/complete"),
+                &v2_request_body(
+                    "completion/complete",
+                    32,
+                    serde_json::json!({
+                        "ref": {"type": "ref/prompt", "name": prompt_name},
+                        "argument": {"name": "arg", "value": "leg"},
+                    }),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = entry_response_json(&content_type, &body);
+    assert_eq!(value["result"]["resultType"].as_str(), Some("complete"));
+}
+
+#[tokio::test]
+async fn entry_aggregate_2025_peer_gets_degraded_results_for_all_methods() {
+    let url = legacy_shape::spawn().await;
+    let (storage, cache) = sqlite_storage_with_http_server(&url).await;
+    let session_id = initialize_legacy_session(&storage, &cache, None).await;
+    let headers = vec![
+        ("mcp-session-id".to_string(), session_id),
+        ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
+    ];
+
+    let (status, content_type, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            request(
+                "POST",
+                "/mcp",
+                &headers,
+                &legacy_request_body(
+                    "resources/read",
+                    40,
+                    serde_json::json!({"uri": "mcp://legacy-shape/legacy-resource"}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = entry_response_json(&content_type, &body);
+    assert!(value["result"].get("resultType").is_none());
+    assert!(value["result"].get("ttlMs").is_none());
+    assert!(value["result"].get("cacheScope").is_none());
+
+    let (status, content_type, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            request(
+                "POST",
+                "/mcp",
+                &headers,
+                &legacy_request_body(
+                    "prompts/get",
+                    41,
+                    serde_json::json!({
+                        "name": "legacy-shape__legacy_prompt",
+                        "arguments": {},
+                    }),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = entry_response_json(&content_type, &body);
+    assert!(value["result"].get("resultType").is_none());
+
+    let (status, content_type, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            request(
+                "POST",
+                "/mcp",
+                &headers,
+                &legacy_request_body(
+                    "completion/complete",
+                    42,
+                    serde_json::json!({
+                        "ref": {"type": "ref/prompt", "name": "legacy-shape__legacy_prompt"},
+                        "argument": {"name": "arg", "value": "leg"},
+                    }),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = entry_response_json(&content_type, &body);
+    assert!(value["result"].get("resultType").is_none());
+}
+
+fn assert_preserved_upstream_error(value: &Value, id: i64) {
+    assert_eq!(
+        value["id"],
+        serde_json::json!(id),
+        "actual downstream response: {value}"
+    );
+    assert_eq!(
+        value["error"]["code"],
+        serde_json::json!(-32001),
+        "actual downstream response: {value}"
+    );
+    assert_eq!(
+        value["error"]["message"].as_str(),
+        Some("legacy tool failed"),
+        "actual downstream response: {value}"
+    );
+    assert_eq!(
+        value["error"]["data"],
+        serde_json::json!({"detail": "boom"}),
+        "actual downstream response: {value}"
+    );
+    assert!(
+        value.get("result").is_none(),
+        "error must not carry a result: {value}"
+    );
+}
+
+#[tokio::test]
+async fn entry_2025_named_peer_preserves_upstream_jsonrpc_error_object() {
+    let url = legacy_shape::spawn().await;
+    let (storage, cache) = sqlite_storage_with_http_server(&url).await;
+    let session_id = initialize_legacy_session(&storage, &cache, Some("legacy-shape")).await;
+    let headers = vec![
+        ("mcp-session-id".to_string(), session_id),
+        ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
+    ];
+
+    let (status, content_type, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &headers,
+                &legacy_request_body(
+                    "tools/call",
+                    22,
+                    serde_json::json!({"name": "legacy_error", "arguments": {}}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    assert_preserved_upstream_error(&entry_response_json(&content_type, &body), 22);
+}
+
+#[tokio::test]
+async fn entry_2026_aggregate_peer_preserves_upstream_jsonrpc_error_object() {
+    let url = legacy_shape::spawn().await;
+    let (storage, cache) = sqlite_storage_with_http_server(&url).await;
+
+    let (status, content_type, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            request(
+                "POST",
+                "/mcp",
+                &v2_headers_with("tools/call", &[("mcp-name", "legacy-shape__legacy_error")]),
+                &v2_request_body(
+                    "tools/call",
+                    23,
+                    serde_json::json!({"name": "legacy-shape__legacy_error", "arguments": {}}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    assert_preserved_upstream_error(&entry_response_json(&content_type, &body), 23);
+}
+
+#[tokio::test]
+async fn entry_2025_aggregate_peer_preserves_upstream_jsonrpc_error_object() {
+    let url = legacy_shape::spawn().await;
+    let (storage, cache) = sqlite_storage_with_http_server(&url).await;
+    let session_id = initialize_legacy_session(&storage, &cache, None).await;
+    let headers = vec![
+        ("mcp-session-id".to_string(), session_id),
+        ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
+    ];
+
+    let (status, content_type, _, body) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            request(
+                "POST",
+                "/mcp",
+                &headers,
+                &legacy_request_body(
+                    "tools/call",
+                    24,
+                    serde_json::json!({"name": "legacy-shape__legacy_error", "arguments": {}}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "unexpected body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    assert_preserved_upstream_error(&entry_response_json(&content_type, &body), 24);
+}
