@@ -183,6 +183,19 @@ describe('cache alert pure model and mapper', () => {
       dingtalk_webhook_url: '',
       has_dingtalk_secret: false,
       secret: { mode: 'keep' },
+      smtp: {
+        configured: false,
+        enabled: false,
+        from: '',
+        has_password: false,
+        host: '',
+        password: { mode: 'keep' },
+        port: 465,
+        stored_username: '',
+        tls: 'implicit_tls',
+        to: [''],
+        username: '',
+      },
     })
   })
 
@@ -230,6 +243,9 @@ describe('cache alert pure model and mapper', () => {
 
     const keepBody = cacheAlertFormToRequest(createCacheAlertForm())
     expect(keepBody.dingtalk_secret).toBe('')
+    // A DingTalk-only save leaves the SMTP object out, so the server keeps
+    // whatever SMTP configuration it already holds.
+    expect(Object.hasOwn(body, 'smtp')).toBe(false)
   })
 
   it('parses the float threshold exactly and rejects out-of-range integers', () => {

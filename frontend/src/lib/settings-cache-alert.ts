@@ -41,7 +41,10 @@ import {
   isCacheAlertCapabilityUnavailable,
   mergeCacheAlertResponse,
   setCacheAlertSecretDraft,
+  setCacheAlertSmtpPasswordDraft,
   type CacheAlertForm,
+  type CacheAlertSmtpForm,
+  type CacheAlertSmtpLeaf,
 } from './settings-cache-alert-model'
 
 const SETTINGS_CACHE_ALERT_NAMESPACE = ['settings-cache-alert'] as const
@@ -73,11 +76,18 @@ export type SettingsCacheAlertState = {
   resetIdentity: (identity: SettingsIdentity | null) => void
   ensureLoaded: (queryClient: QueryClient) => Promise<void>
   refresh: (queryClient: QueryClient) => Promise<void>
-  setField: <K extends Exclude<keyof CacheAlertForm, 'has_dingtalk_secret'>>(
+  setField: <
+    K extends Exclude<keyof CacheAlertForm, 'has_dingtalk_secret' | 'smtp'>,
+  >(
     field: K,
     value: CacheAlertForm[K],
   ) => void
   setSecretDraft: (value: string) => void
+  setSmtpField: <K extends CacheAlertSmtpLeaf>(
+    field: K,
+    value: CacheAlertSmtpForm[K],
+  ) => void
+  setSmtpPasswordDraft: (value: string) => void
   save: () => Promise<AsyncActionOutcome<void>>
 }
 
@@ -227,6 +237,17 @@ export const useSettingsCacheAlertStore = create<SettingsCacheAlertState>(
     setSecretDraft(value) {
       invalidatePendingRead()
       set({ form: setCacheAlertSecretDraft(get().form, value) })
+    },
+
+    setSmtpField(field, value) {
+      invalidatePendingRead()
+      const form = get().form
+      set({ form: { ...form, smtp: { ...form.smtp, [field]: value } } })
+    },
+
+    setSmtpPasswordDraft(value) {
+      invalidatePendingRead()
+      set({ form: setCacheAlertSmtpPasswordDraft(get().form, value) })
     },
 
     async save() {

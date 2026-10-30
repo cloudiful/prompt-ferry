@@ -192,9 +192,10 @@ export type BridgeStatus = {
 };
 
 /**
- * Continuous-session cache alert policy. DingTalk is the only delivery
- * channel for now; `dingtalk_secret` is stored but never echoed back by the
- * admin API, and an empty value on write keeps the stored one.
+ * Continuous-session cache alert policy. DingTalk and SMTP are independent
+ * delivery channels; `dingtalk_secret` and `smtp.password` are stored but never
+ * echoed back by the admin API, and an empty value on write keeps the stored
+ * one.
  */
 export type CacheAlertSettings = {
     cooldown_minutes?: number;
@@ -207,10 +208,28 @@ export type CacheAlertSettings = {
 };
 
 /**
- * Admin API view of [`CacheAlertSettings`]: the write-only DingTalk secret is
- * always blanked, and `has_dingtalk_secret` reports whether a non-blank secret
- * is actually stored. The request schema and the persisted JSON never carry
- * this derived flag.
+ * Write request for the cache alert policy.
+ *
+ * `smtp` is optional on purpose: an older client that omits it keeps the
+ * stored SMTP configuration, while an explicit object (including
+ * `enabled: false`) replaces it. A blank SMTP password keeps the stored one.
+ */
+export type CacheAlertSettingsRequest = {
+    cooldown_minutes?: number;
+    dingtalk_secret?: string;
+    dingtalk_webhook_url?: string;
+    enabled?: boolean;
+    min_turns?: number;
+    smtp?: null | CacheAlertSmtpSettings;
+    threshold?: number;
+    window_minutes?: number;
+};
+
+/**
+ * Admin API view of [`CacheAlertSettings`]: the write-only secrets are always
+ * blanked, and `has_dingtalk_secret` / `smtp.has_smtp_password` report whether
+ * a non-blank secret is actually stored. The request schema and the persisted
+ * JSON never carry these derived flags.
  */
 export type CacheAlertSettingsResponse = {
     cooldown_minutes: number;
@@ -219,9 +238,49 @@ export type CacheAlertSettingsResponse = {
     enabled: boolean;
     has_dingtalk_secret: boolean;
     min_turns: number;
+    smtp?: null | CacheAlertSmtpSettingsResponse;
     threshold: number;
     window_minutes: number;
 };
+
+/**
+ * SMTP delivery configuration for the continuous-session cache alert.
+ *
+ * `password` is stored like the DingTalk secret: persisted as written, never
+ * echoed by the admin API, and an empty value on write keeps the stored one.
+ */
+export type CacheAlertSmtpSettings = {
+    enabled?: boolean;
+    from?: string;
+    host?: string;
+    password?: string;
+    port?: number;
+    tls?: CacheAlertSmtpTls;
+    to?: Array<string>;
+    username?: string;
+};
+
+/**
+ * Admin API view of the SMTP channel: the password is always blanked and
+ * `has_smtp_password` reports whether one is stored.
+ */
+export type CacheAlertSmtpSettingsResponse = {
+    enabled: boolean;
+    from: string;
+    has_smtp_password: boolean;
+    host: string;
+    password: string;
+    port: number;
+    tls: CacheAlertSmtpTls;
+    to: Array<string>;
+    username: string;
+};
+
+/**
+ * Transport security for the SMTP channel. Only encrypted transports are
+ * exposed: an operator can pick implicit TLS or STARTTLS, never plaintext.
+ */
+export type CacheAlertSmtpTls = 'implicit_tls' | 'start_tls';
 
 /**
  * One additive canonical quota observation (issue #844 P1). `source_id`
@@ -4861,7 +4920,7 @@ export type GetCacheAlertSettingData = {
 
 export type GetCacheAlertSettingResponses = {
     /**
-     * Continuous-session cache alert settings; the stored DingTalk secret is never echoed back and `has_dingtalk_secret` reports whether one is stored
+     * Continuous-session cache alert settings; the stored DingTalk secret and SMTP password are never echoed back and `has_dingtalk_secret` / `smtp.has_smtp_password` report whether one is stored
      */
     200: CacheAlertSettingsResponse;
 };
@@ -4869,7 +4928,7 @@ export type GetCacheAlertSettingResponses = {
 export type GetCacheAlertSettingResponse = GetCacheAlertSettingResponses[keyof GetCacheAlertSettingResponses];
 
 export type SetCacheAlertSettingData = {
-    body: CacheAlertSettings;
+    body: CacheAlertSettingsRequest;
     path?: never;
     query?: never;
     url: '/api/v1/settings/cache-alert';
@@ -4877,7 +4936,7 @@ export type SetCacheAlertSettingData = {
 
 export type SetCacheAlertSettingResponses = {
     /**
-     * Updated cache alert settings; a blank dingtalk_secret keeps the stored value
+     * Updated cache alert settings; a blank dingtalk_secret or smtp.password keeps the stored value and an omitted smtp object keeps the stored SMTP configuration
      */
     200: CacheAlertSettingsResponse;
 };

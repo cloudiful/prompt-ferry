@@ -2,10 +2,12 @@
 //!
 //! Every `min(window_minutes, 60)` minutes the monitor aggregates completed
 //! AI turns per conversation, keeps the ones whose fold-aware cache read rate
-//! is below the configured threshold, skips conversations still inside their
-//! cooldown, and delivers a DingTalk alert for the rest. One failing
-//! conversation never stops the others; the job is coordinated so only one
-//! worker evaluates each tick.
+//! is below the configured threshold, skips channels still inside their own
+//! cooldown, and delivers the configured DingTalk and SMTP alerts. Each channel
+//! keeps an independent cooldown clock, so a delivery that succeeded on one
+//! channel does not repeat while a failed channel retries on the next tick. One
+//! failing conversation or channel never stops the others; the job is
+//! coordinated so only one worker evaluates each tick.
 
 use super::background_job::{
     connect_coordinated_store, coordinated_scheduler, run_coordinated_scheduler, run_scheduler,
@@ -43,17 +45,49 @@ pub struct CacheAlertDependencies {
     pub client: reqwest::Client,
 }
 
+/// One enabled delivery channel for the current policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CacheAlertChannel {
+    Dingtalk,
+    Smtp,
+}
+
+impl CacheAlertChannel {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Dingtalk => notify::CACHE_ALERT_CHANNEL_DINGTALK,
+            Self::Smtp => notify::CACHE_ALERT_CHANNEL_SMTP,
+        }
+    }
+}
+
+/// Channels the current policy can actually deliver through. The global
+/// `enabled` switch gates both; DingTalk additionally needs its webhook and
+/// SMTP needs its own channel switch.
+fn enabled_channels(settings: &CacheAlertSettings) -> Vec<CacheAlertChannel> {
+    if !settings.enabled {
+        return Vec::new();
+    }
+    let mut channels = Vec::new();
+    if !settings.dingtalk_webhook_url.trim().is_empty() {
+        channels.push(CacheAlertChannel::Dingtalk);
+    }
+    if settings.smtp.enabled {
+        channels.push(CacheAlertChannel::Smtp);
+    }
+    channels
+}
+
 /// One alerting pass. Returns the number of alerts actually delivered
-/// (cooldown skips and disabled policies count zero).
+/// (cooldown skips, disabled policies, and disabled channels count zero).
 pub async fn run_cache_alert_check(deps: &CacheAlertDependencies) -> anyhow::Result<usize> {
     let settings = deps.settings.read().await.clone().normalized();
     if !settings.enabled {
         return Ok(0);
     }
-    if settings.dingtalk_webhook_url.trim().is_empty() {
-        warn!(
-            "cache alert monitor is enabled but the DingTalk webhook is not configured; skipping"
-        );
+    let channels = enabled_channels(&settings);
+    if channels.is_empty() {
+        warn!("cache alert monitor is enabled but no delivery channel is configured; skipping");
         return Ok(0);
     }
     let conversations = db::find_low_cache_conversations(
@@ -67,60 +101,76 @@ pub async fn run_cache_alert_check(deps: &CacheAlertDependencies) -> anyhow::Res
     let mut delivered = 0usize;
     for conversation in conversations {
         let conversation_id = conversation.conversation_id;
-        // Both sides of the comparison come from the database clock: `window_end`
-        // is the candidate query's `NOW()` and `last_alerted_at` is written by
-        // `record_cache_alert`, so a worker clock that drifts from the database
-        // cannot move the cooldown window.
-        match db::last_cache_alert_at(&deps.pool, conversation_id).await {
-            Ok(Some(last_alerted_at))
-                if cooldown_active(conversation.window_end, last_alerted_at, cooldown) =>
-            {
-                continue;
-            }
-            Ok(_) => {}
-            Err(error) => {
-                warn!(
-                    conversation_id = %conversation_id,
-                    error = %error,
-                    "cache alert cooldown lookup failed"
-                );
-                continue;
-            }
-        }
         let cache_rate = conversation.cache_rate.unwrap_or_default();
-        match notify::send_cache_alert(&deps.client, &settings, &conversation).await {
-            Ok(()) => {
-                if let Err(error) = db::record_cache_alert(
-                    &deps.pool,
-                    conversation_id,
-                    cache_rate,
-                    conversation.turns,
-                )
-                .await
+        for channel in &channels {
+            // Both sides of the comparison come from the database clock:
+            // `window_end` is the candidate query's `NOW()` and
+            // `last_alerted_at` is written by `record_cache_alert`, so a worker
+            // clock that drifts from the database cannot move the cooldown
+            // window. Each channel has its own row and therefore its own clock.
+            match db::last_cache_alert_at(&deps.pool, conversation_id, channel.name()).await {
+                Ok(Some(last_alerted_at))
+                    if cooldown_active(conversation.window_end, last_alerted_at, cooldown) =>
                 {
+                    continue;
+                }
+                Ok(_) => {}
+                Err(error) => {
                     warn!(
                         conversation_id = %conversation_id,
+                        channel = channel.name(),
                         error = %error,
-                        "cache alert state write failed"
+                        "cache alert cooldown lookup failed"
+                    );
+                    continue;
+                }
+            }
+            let delivery = match channel {
+                CacheAlertChannel::Dingtalk => {
+                    notify::send_cache_alert(&deps.client, &settings, &conversation).await
+                }
+                CacheAlertChannel::Smtp => {
+                    notify::send_cache_alert_email(&deps.client, &settings, &conversation).await
+                }
+            };
+            match delivery {
+                Ok(()) => {
+                    if let Err(error) = db::record_cache_alert(
+                        &deps.pool,
+                        conversation_id,
+                        channel.name(),
+                        cache_rate,
+                        conversation.turns,
+                    )
+                    .await
+                    {
+                        warn!(
+                            conversation_id = %conversation_id,
+                            channel = channel.name(),
+                            error = %error,
+                            "cache alert state write failed"
+                        );
+                    }
+                    delivered += 1;
+                    info!(
+                        conversation_id = %conversation_id,
+                        channel = channel.name(),
+                        model = conversation.model.as_deref().unwrap_or("-"),
+                        turns = conversation.turns,
+                        cache_rate = cache_rate,
+                        threshold = settings.threshold,
+                        window_minutes = settings.window_minutes,
+                        "cache alert delivered"
                     );
                 }
-                delivered += 1;
-                info!(
-                    conversation_id = %conversation_id,
-                    model = conversation.model.as_deref().unwrap_or("-"),
-                    turns = conversation.turns,
-                    cache_rate = cache_rate,
-                    threshold = settings.threshold,
-                    window_minutes = settings.window_minutes,
-                    "cache alert delivered"
-                );
-            }
-            Err(error) => {
-                warn!(
-                    conversation_id = %conversation_id,
-                    error = %error,
-                    "cache alert delivery failed"
-                );
+                Err(error) => {
+                    warn!(
+                        conversation_id = %conversation_id,
+                        channel = channel.name(),
+                        error = %error,
+                        "cache alert delivery failed"
+                    );
+                }
             }
         }
     }
@@ -259,8 +309,68 @@ impl CacheAlertRuntime {
 
 #[cfg(test)]
 mod tests {
-    use super::{CACHE_ALERT_TICK_INTERVAL, CACHE_ALERT_TICK_MINUTES, cooldown_active};
+    use super::{
+        CACHE_ALERT_TICK_INTERVAL, CACHE_ALERT_TICK_MINUTES, CacheAlertChannel, cooldown_active,
+        enabled_channels,
+    };
+    use crate::worker_admin_types::{CacheAlertSettings, CacheAlertSmtpSettings};
     use chrono::{Duration, TimeZone, Utc};
+
+    #[test]
+    fn legacy_dingtalk_only_policy_keeps_its_single_channel() {
+        let settings = CacheAlertSettings {
+            enabled: true,
+            dingtalk_webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=x".to_string(),
+            ..CacheAlertSettings::default()
+        };
+
+        assert_eq!(
+            enabled_channels(&settings),
+            vec![CacheAlertChannel::Dingtalk]
+        );
+    }
+
+    #[test]
+    fn smtp_channel_adds_itself_without_removing_dingtalk() {
+        let settings = CacheAlertSettings {
+            enabled: true,
+            dingtalk_webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=x".to_string(),
+            smtp: CacheAlertSmtpSettings {
+                enabled: true,
+                ..CacheAlertSmtpSettings::default()
+            },
+            ..CacheAlertSettings::default()
+        };
+
+        assert_eq!(
+            enabled_channels(&settings),
+            vec![CacheAlertChannel::Dingtalk, CacheAlertChannel::Smtp]
+        );
+    }
+
+    #[test]
+    fn disabled_policy_or_channels_are_not_attempted() {
+        let disabled = CacheAlertSettings {
+            enabled: false,
+            dingtalk_webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=x".to_string(),
+            smtp: CacheAlertSmtpSettings {
+                enabled: true,
+                ..CacheAlertSmtpSettings::default()
+            },
+            ..CacheAlertSettings::default()
+        };
+        assert!(enabled_channels(&disabled).is_empty());
+
+        let smtp_only = CacheAlertSettings {
+            enabled: true,
+            smtp: CacheAlertSmtpSettings {
+                enabled: true,
+                ..CacheAlertSmtpSettings::default()
+            },
+            ..CacheAlertSettings::default()
+        };
+        assert_eq!(enabled_channels(&smtp_only), vec![CacheAlertChannel::Smtp]);
+    }
 
     #[test]
     fn scheduler_tick_is_short_enough_for_a_settings_driven_cadence() {
