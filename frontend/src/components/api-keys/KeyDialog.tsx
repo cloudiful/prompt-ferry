@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'react'
 import { Copy, LoaderCircle, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -15,6 +16,7 @@ import { useLocale } from '@/lib/i18n'
 type KeyDialogProps = {
   generatedSecret: string
   keyLabel: string
+  onCloseAutoFocus?: ComponentProps<typeof DialogContent>['onCloseAutoFocus']
   onCopySecret: () => void
   onKeyLabelChange: (value: string) => void
   onOpenChange: (open: boolean) => void
@@ -26,6 +28,7 @@ type KeyDialogProps = {
 export function KeyDialog({
   generatedSecret,
   keyLabel,
+  onCloseAutoFocus,
   onCopySecret,
   onKeyLabelChange,
   onOpenChange,
@@ -37,7 +40,7 @@ export function KeyDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent showCloseButton={false}>
+      <DialogContent onCloseAutoFocus={onCloseAutoFocus} showCloseButton={false}>
         <DialogHeader>
           <DialogTitle>{t('generateKey')}</DialogTitle>
         </DialogHeader>

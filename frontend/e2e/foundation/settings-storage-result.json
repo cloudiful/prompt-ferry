@@ -1,7 +1,7 @@
 {
-  "runId": "settings-storage-1793011261332",
-  "startedAt": "2026-10-26T10:41:01.332Z",
-  "finishedAt": "2026-10-26T10:41:54.181Z",
+  "runId": "settings-storage-1793383441295",
+  "startedAt": "2026-10-30T18:04:01.295Z",
+  "finishedAt": "2026-10-30T18:04:57.348Z",
   "checks": {
     "routeRender": {
       "routeId": "R-SETTINGS-STORAGE",
@@ -977,6 +977,12 @@
     },
     {
       "stage": "scoped-refresh",
+      "method": "GET",
+      "path": "/api/v1/settings/raw-object-store",
+      "body": null
+    },
+    {
+      "stage": "locale-theme-return",
       "method": "GET",
       "path": "/api/v1/settings/raw-object-store",
       "body": null

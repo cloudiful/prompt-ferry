@@ -1,6 +1,6 @@
 {
-  "runId": "redaction-preview-1793011011568",
-  "startedAt": "2026-10-26T10:36:51.568Z",
+  "runId": "redaction-preview-1793383289700",
+  "startedAt": "2026-10-30T18:01:29.700Z",
   "checks": {
     "routeRender": {
       "routeId": true,
@@ -152,6 +152,6 @@
   "consoleErrorCount": 0,
   "pageErrorCount": 0,
   "previewRequestCount": 10,
-  "settingsRequestCount": 1,
-  "finishedAt": "2026-10-26T10:37:00.948Z"
+  "settingsRequestCount": 3,
+  "finishedAt": "2026-10-30T18:01:39.534Z"
 }

@@ -7,7 +7,8 @@ import {
   waitFor,
 } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, Route, Routes } from 'react-router'
+import { AppShell } from '@/layouts/AppShell'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RelayIpPolicyResponse } from '@/generated/admin-api'
 
@@ -105,7 +106,11 @@ function renderPage(path = '/settings/network') {
       <LocaleProvider>
         <NotifierProvider>
           <MemoryRouter initialEntries={[path]}>
-            <SettingsPage />
+            <Routes>
+              <Route element={<AppShell />}>
+                <Route path="/settings/:tab" element={<SettingsPage />} />
+              </Route>
+            </Routes>
           </MemoryRouter>
         </NotifierProvider>
       </LocaleProvider>

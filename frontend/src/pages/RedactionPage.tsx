@@ -4,6 +4,7 @@ import { LoaderCircle, RefreshCw, Save } from 'lucide-react'
 import { RedactionPreviewPanel } from '@/components/redaction/RedactionPreviewPanel'
 import { RedactionRulesPanel } from '@/components/redaction/RedactionRulesPanel'
 import { Button } from '@/components/ui/button'
+import { HeaderActions } from '@/components/layout/HeaderActions'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Select,
@@ -119,10 +120,7 @@ export function RedactionPage() {
         isPreview ? 'R-REDACTION-PREVIEW' : 'R-REDACTION-RULES'
       }
     >
-      <header className="flex min-w-0 flex-wrap items-end justify-between gap-3">
-        <h1 className="m-0 text-xl font-semibold">
-          {t(isPreview ? 'redactionPreview' : 'redactionRules')}
-        </h1>
+      <HeaderActions>
         <div className="flex min-w-0 flex-wrap items-end gap-2">
           <div className="flex min-h-9 items-center gap-2">
             <span className="text-sm text-muted-foreground">
@@ -232,7 +230,7 @@ export function RedactionPage() {
             <span>{t('redaction')}</span>
           </label>
         </div>
-      </header>
+      </HeaderActions>
 
       {!ready ? (
         redaction.loadError ? (

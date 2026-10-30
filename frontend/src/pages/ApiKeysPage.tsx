@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
+import { HeaderActions } from '@/components/layout/HeaderActions'
 import {
   Select,
   SelectContent,
@@ -57,6 +58,7 @@ export function ApiKeysPage() {
   const dialogOwnerRef = useRef(SELF_USER_ID)
   const dialogGenerationRef = useRef(0)
   const createOpenRef = useRef(false)
+  const createButtonRef = useRef<HTMLButtonElement>(null)
   const notifiedErrors = useRef(new WeakSet<object>())
 
   selectedUserIdRef.current = selectedUserId
@@ -318,7 +320,7 @@ export function ApiKeysPage() {
       className="grid min-w-0 max-w-full gap-3"
       data-foundation-route-id="R-API-KEYS"
     >
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <HeaderActions>
         {isAdmin && (
           <Select onValueChange={changeOwner} value={String(selectedUserId)}>
             <SelectTrigger
@@ -355,12 +357,13 @@ export function ApiKeysPage() {
         <Button
           aria-label={t('generateKey')}
           onClick={openCreateDialog}
+          ref={createButtonRef}
           size="sm"
           type="button"
         >
           <span>{t('generateKey')}</span>
         </Button>
-      </div>
+      </HeaderActions>
 
       <ApiKeysTable
         first={keyPageQuery.data?.first ?? first}
@@ -388,6 +391,11 @@ export function ApiKeysPage() {
       <KeyDialog
         generatedSecret={generatedSecret}
         keyLabel={keyLabel}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          const button = createButtonRef.current
+          if (button?.isConnected && !button.disabled) button.focus()
+        }}
         onCopySecret={() => void copySecret(generatedSecret)}
         onKeyLabelChange={setKeyLabel}
         onOpenChange={changeCreateDialog}

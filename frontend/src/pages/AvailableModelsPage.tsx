@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { HeaderActions } from '@/components/layout/HeaderActions'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -84,7 +85,7 @@ export function AvailableModelsPage() {
       className="grid min-w-0 max-w-full gap-3"
       data-foundation-route-id="R-AVAILABLE-MODELS"
     >
-      <div className="flex justify-end">
+      <HeaderActions>
         <Button
           aria-label={t('refresh')}
           onClick={() => void refresh()}
@@ -99,7 +100,7 @@ export function AvailableModelsPage() {
           )}
           <span>{t('refresh')}</span>
         </Button>
-      </div>
+      </HeaderActions>
       <div className="min-w-0">
         <Table aria-busy={query.isFetching}>
           <TableHeader>

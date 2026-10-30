@@ -16,6 +16,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { HeaderActions } from '@/components/layout/HeaderActions'
 import {
   Table,
   TableBody,
@@ -238,7 +239,7 @@ export function RelaysPage() {
       className="grid min-w-0 max-w-full gap-3"
       data-foundation-route-id="R-RELAYS"
     >
-      <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+      <HeaderActions>
         <Badge variant="secondary">
           {query.data?.connected_count ?? 0}/{query.data?.enabled_count ?? 0}
         </Badge>
@@ -265,7 +266,7 @@ export function RelaysPage() {
           )}
           <span>{t('refresh')}</span>
         </Button>
-      </div>
+      </HeaderActions>
 
       {query.isError && (
         <Alert>

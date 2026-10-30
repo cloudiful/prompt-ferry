@@ -1,7 +1,7 @@
 {
-  "runId": "usage-1793175685763",
-  "startedAt": "2026-10-28T08:21:25.763Z",
-  "finishedAt": "2026-10-28T08:22:52.659Z",
+  "runId": "usage-1793383006875",
+  "startedAt": "2026-10-30T17:56:46.875Z",
+  "finishedAt": "2026-10-30T17:58:36.037Z",
   "checks": {
     "aiRouteRender": {
       "cards": 10,
@@ -16,10 +16,28 @@
     "modeLocal": {
       "requests": 0
     },
+    "advancedFiltersDefault": {
+      "collapsed": true,
+      "mounted": true
+    },
     "pagination": {
       "pageOne": 10,
       "pageTwo": 10,
       "persistedRows": 10
+    },
+    "navigation": {
+      "desktop": {
+        "links": 10,
+        "minLinkHeight": 36,
+        "nestedRowGap": 2,
+        "label": "Prompt Ferry Admin"
+      },
+      "mobile": {
+        "links": 10,
+        "minLinkHeight": 36,
+        "nestedRowGap": 2,
+        "label": "Prompt Ferry Admin"
+      }
     },
     "requestTableNoWrap": {
       "headers": true,
@@ -31,12 +49,896 @@
       "clientKey": true,
       "state": true
     },
+    "advancedFilters": {
+      "collapsed": true,
+      "retainedDraft": true,
+      "retainedFilter": true,
+      "activeCount": 2,
+      "noRequest": true,
+      "mounted": true
+    },
+    "rangeCalendar": {
+      "sameDay": true,
+      "crossYear": true,
+      "nonDefaultTimes": true,
+      "cancelFocus": true,
+      "scroll": true
+    },
     "range": {
       "preset": "7d",
       "custom": "custom"
     },
     "aiEmpty": true,
-    "errorRetry": true,
+    "errorRetry": {
+      "retryEvents": [
+        {
+          "at": 1793383032102,
+          "event": "failure-refresh"
+        },
+        {
+          "at": 1793383032151,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383032151,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383032503,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 503
+        },
+        {
+          "at": 1793383033023,
+          "event": "retry-refresh"
+        },
+        {
+          "at": 1793383033090,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383033091,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383033131,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383033207,
+          "event": "records-visible"
+        },
+        {
+          "at": 1793383033943,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383033943,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383034943,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383035513,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383035514,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383035687,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383035687,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383035707,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383036212,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383038442,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383038997,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383039528,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383040575,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383041018,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383041567,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383041823,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383041823,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383041841,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383043691,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383043692,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383043708,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383045262,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383045942,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383046607,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383047268,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/4",
+          "status": 200
+        },
+        {
+          "at": 1793383047334,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/4/session-route-options",
+          "status": 200
+        },
+        {
+          "at": 1793383047334,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/4/request-full",
+          "status": 200
+        },
+        {
+          "at": 1793383048368,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383048935,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383049590,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/27",
+          "status": 200
+        },
+        {
+          "at": 1793383049642,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/27/session-route-options",
+          "status": 200
+        },
+        {
+          "at": 1793383049642,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/27/request-full",
+          "status": 200
+        },
+        {
+          "at": 1793383050997,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383051646,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/28",
+          "status": 200
+        },
+        {
+          "at": 1793383051695,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/28/session-route-options",
+          "status": 200
+        },
+        {
+          "at": 1793383051695,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/28/request-full",
+          "status": 200
+        },
+        {
+          "at": 1793383052904,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383053549,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/36",
+          "status": 200
+        },
+        {
+          "at": 1793383053608,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/36/session-route-options",
+          "status": 200
+        },
+        {
+          "at": 1793383053609,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/36/request-full",
+          "status": 200
+        },
+        {
+          "at": 1793383059971,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383059971,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383059971,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383065935,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383068039,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383073320,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383073320,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383073320,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383074722,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383077471,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383077472,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383077472,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383078847,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/1",
+          "status": 200
+        },
+        {
+          "at": 1793383078976,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/1/session-route-options",
+          "status": 200
+        },
+        {
+          "at": 1793383078977,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/1/request-full",
+          "status": 200
+        },
+        {
+          "at": 1793383079832,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/1/request-full",
+          "status": 200
+        },
+        {
+          "at": 1793383081407,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/5",
+          "status": 200
+        },
+        {
+          "at": 1793383081559,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/5/session-route-options",
+          "status": 200
+        },
+        {
+          "at": 1793383081559,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/5/request-full",
+          "status": 200
+        },
+        {
+          "at": 1793383082429,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/2",
+          "status": 200
+        },
+        {
+          "at": 1793383082511,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/2/session-route-options",
+          "status": 200
+        },
+        {
+          "at": 1793383082511,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/2/request-full",
+          "status": 200
+        },
+        {
+          "at": 1793383083961,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383083961,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383083961,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383085644,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383085664,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383085665,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383085991,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383086016,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383086016,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383087043,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383087567,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383088096,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383088949,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/101",
+          "status": 200
+        },
+        {
+          "at": 1793383088978,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/101/session-route-options",
+          "status": 200
+        },
+        {
+          "at": 1793383090104,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383090104,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383090122,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383090876,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383091431,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/102",
+          "status": 200
+        },
+        {
+          "at": 1793383091454,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/102/session-route-options",
+          "status": 200
+        },
+        {
+          "at": 1793383092573,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383092574,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383092574,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383094105,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383094126,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383094126,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383094859,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383095450,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383096837,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383096867,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383096868,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383098505,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383098505,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383098506,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383100065,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/10",
+          "status": 404
+        },
+        {
+          "at": 1793383100158,
+          "method": "POST",
+          "path": "/api/v1/admin/request-records/1/reset-session-affinity",
+          "status": 403
+        },
+        {
+          "at": 1793383100351,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/1",
+          "status": 200
+        },
+        {
+          "at": 1793383100563,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/1/session-route-options",
+          "status": 200
+        },
+        {
+          "at": 1793383100566,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/1/request-full",
+          "status": 200
+        },
+        {
+          "at": 1793383104276,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383104276,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383104276,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383105842,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/1",
+          "status": 200
+        },
+        {
+          "at": 1793383105948,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/1/session-route-options",
+          "status": 200
+        },
+        {
+          "at": 1793383105951,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/1/request-full",
+          "status": 200
+        },
+        {
+          "at": 1793383107175,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/1/session-route-options",
+          "status": 200
+        },
+        {
+          "at": 1793383108135,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/1/session-route-options",
+          "status": 200
+        },
+        {
+          "at": 1793383109372,
+          "method": "POST",
+          "path": "/api/v1/admin/request-records/1/reset-session-affinity",
+          "status": 200
+        },
+        {
+          "at": 1793383109421,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/1/session-route-options",
+          "status": 200
+        },
+        {
+          "at": 1793383111150,
+          "method": "POST",
+          "path": "/api/v1/admin/request-records/1/reset-session-affinity",
+          "status": 200
+        },
+        {
+          "at": 1793383111205,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/1/session-route-options",
+          "status": 200
+        },
+        {
+          "at": 1793383111951,
+          "method": "POST",
+          "path": "/api/v1/admin/request-records/14/reset-session-affinity",
+          "status": 400
+        },
+        {
+          "at": 1793383113041,
+          "method": "POST",
+          "path": "/api/v1/admin/request-records/clear",
+          "status": 503
+        },
+        {
+          "at": 1793383113812,
+          "method": "POST",
+          "path": "/api/v1/admin/request-records/clear",
+          "status": 200
+        },
+        {
+          "at": 1793383113858,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/overview",
+          "status": 200
+        },
+        {
+          "at": 1793383113858,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records/facets",
+          "status": 200
+        },
+        {
+          "at": 1793383113898,
+          "method": "GET",
+          "path": "/api/v1/admin/request-records",
+          "status": 200
+        },
+        {
+          "at": 1793383116028,
+          "method": "POST",
+          "path": "/api/v1/admin/request-records/clear",
+          "status": 400
+        },
+        {
+          "at": 1793383116032,
+          "method": "POST",
+          "path": "/api/v1/admin/request-records/clear",
+          "status": 400
+        },
+        {
+          "at": 1793383116037,
+          "method": "POST",
+          "path": "/api/v1/admin/request-records/clear",
+          "status": 400
+        }
+      ],
+      "alerts": [
+        {
+          "at": 1793383032519,
+          "visible": true
+        }
+      ],
+      "hitTargets": [
+        {
+          "name": "Advanced filters (2 active)",
+          "hit": true,
+          "blocker": "<span>Advanced filters</span>",
+          "width": 1440
+        },
+        {
+          "name": "Time range",
+          "hit": true,
+          "blocker": "<span class=\"max-w-40 truncate\">Last 24h</span>",
+          "width": 1440
+        },
+        {
+          "name": "Overview",
+          "hit": true,
+          "blocker": "<span class=\"hidden sm:inline\">Overview</span>",
+          "width": 1440
+        },
+        {
+          "name": "Records",
+          "hit": true,
+          "blocker": "<span class=\"hidden sm:inline\">Records</span>",
+          "width": 1440
+        },
+        {
+          "name": "Clear history",
+          "hit": true,
+          "blocker": "<button data-slot=\"button\" data-variant=\"outline\" data-size=\"sm\" class=\"inline-flex shrink-0 items-center justify-center text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible",
+          "width": 1440
+        },
+        {
+          "name": "Refresh",
+          "hit": true,
+          "blocker": "<button data-slot=\"button\" data-variant=\"outline\" data-size=\"icon-sm\" class=\"inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outl",
+          "width": 1440
+        },
+        {
+          "name": "Expand navigation",
+          "hit": true,
+          "blocker": "<button data-slot=\"sheet-trigger\" data-variant=\"ghost\" data-size=\"icon\" class=\"inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all ou",
+          "width": 390
+        },
+        {
+          "name": "Advanced filters (2 active)",
+          "hit": true,
+          "blocker": "<span>Advanced filters</span>",
+          "width": 390
+        },
+        {
+          "name": "Time range",
+          "hit": true,
+          "blocker": "<span class=\"max-w-40 truncate\">Last 24h</span>",
+          "width": 390
+        },
+        {
+          "name": "Overview",
+          "hit": true,
+          "blocker": "<span aria-hidden=\"true\" class=\"sm:hidden\">Ov</span>",
+          "width": 390
+        },
+        {
+          "name": "Records",
+          "hit": true,
+          "blocker": "<span aria-hidden=\"true\" class=\"sm:hidden\">Re</span>",
+          "width": 390
+        },
+        {
+          "name": "Clear history",
+          "hit": true,
+          "blocker": "<button data-slot=\"button\" data-variant=\"outline\" data-size=\"sm\" class=\"inline-flex shrink-0 items-center justify-center text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible",
+          "width": 390
+        },
+        {
+          "name": "Refresh",
+          "hit": true,
+          "blocker": "<button data-slot=\"button\" data-variant=\"outline\" data-size=\"icon-sm\" class=\"inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outl",
+          "width": 390
+        }
+      ]
+    },
     "loadingState": {
       "busy": 1
     },
@@ -61,13 +963,13 @@
       "desktop": {
         "rem": 16,
         "modelWidth": 224,
-        "modelText": "usage-zero-fixture-b",
+        "modelText": "minimax-m2",
         "headerNoWrap": true,
         "dateTimeNoWrap": true,
         "headerOverlap": false,
         "documentNoOverflow": true,
         "containerScrolls": true,
-        "rows": 1,
+        "rows": 10,
         "columns": [
           "details",
           "request_date",
@@ -86,13 +988,13 @@
       "mobile": {
         "rem": 16,
         "modelWidth": 224,
-        "modelText": "usage-zero-fixture-b",
+        "modelText": "minimax-m2",
         "headerNoWrap": true,
         "dateTimeNoWrap": true,
         "headerOverlap": false,
         "documentNoOverflow": true,
         "containerScrolls": true,
-        "rows": 1,
+        "rows": 10,
         "columns": [
           "details",
           "request_date",
@@ -112,8 +1014,8 @@
     },
     "aiRecordsTokenColumn": {
       "found": true,
-      "scrollLeft": 846,
-      "maxScrollLeft": 846,
+      "scrollLeft": 845,
+      "maxScrollLeft": 845,
       "visibleCount": 10,
       "cells": [
         {
@@ -249,6 +1151,10 @@
         "passed": true,
         "evidence": "page two had distinct rows and the page size persisted"
       },
+      "responsive-width": {
+        "passed": true,
+        "evidence": "no document overflow at 1440/1024/768/390"
+      },
       "mutation-update": {
         "passed": true,
         "evidence": "admin override save/clear and reset confirmation verified"
@@ -280,10 +1186,6 @@
       "column-geometry": {
         "passed": true,
         "evidence": "the AI model column stayed at least 14rem with non-wrapping headers in zh-dark desktop and mobile records"
-      },
-      "responsive-width": {
-        "passed": true,
-        "evidence": "no document overflow at 1440/1024/768/390"
       },
       "long-values": {
         "passed": true,
@@ -323,6 +1225,8 @@
   },
   "screenshots": [
     "e2e/foundation/screenshots/usage-ai-overview-en-light-1440.png",
+    "e2e/foundation/screenshots/usage-range-en-light-1440.png",
+    "e2e/foundation/screenshots/usage-range-en-light-390.png",
     "e2e/foundation/screenshots/usage-fold-en-light-1440-collapsed.png",
     "e2e/foundation/screenshots/usage-fold-en-light-1440-expanded.png",
     "e2e/foundation/screenshots/usage-fold-upstream-en-light-1440-expanded.png",
@@ -333,6 +1237,8 @@
     "e2e/foundation/screenshots/usage-fold-en-light-1024.png",
     "e2e/foundation/screenshots/usage-fold-en-light-768.png",
     "e2e/foundation/screenshots/usage-fold-en-light-390.png",
+    "e2e/foundation/screenshots/usage-range-zh-dark-1440.png",
+    "e2e/foundation/screenshots/usage-range-zh-dark-390.png",
     "e2e/foundation/screenshots/usage-ai-zh-dark-1440.png",
     "e2e/foundation/screenshots/usage-ai-records-zh-dark-1440.png",
     "e2e/foundation/screenshots/usage-ai-records-zh-dark-390.png",
@@ -356,8 +1262,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:21:27.147Z",
-      "end": "2026-10-28T08:21:27.147Z",
+      "start": "2026-10-29T17:56:50.102Z",
+      "end": "2026-10-30T17:56:50.102Z",
       "search": null,
       "user": null,
       "model": null,
@@ -408,8 +1314,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:21:27.148Z",
-      "end": "2026-10-28T08:21:27.148Z",
+      "start": "2026-10-29T17:56:50.103Z",
+      "end": "2026-10-30T17:56:50.103Z",
       "search": null,
       "user": null,
       "model": null,
@@ -434,8 +1340,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:21:27.797Z",
-      "end": "2026-10-28T08:21:27.797Z",
+      "start": "2026-10-29T17:56:50.738Z",
+      "end": "2026-10-30T17:56:50.738Z",
       "search": null,
       "user": null,
       "model": null,
@@ -486,8 +1392,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:21:28.972Z",
-      "end": "2026-10-28T08:21:28.972Z",
+      "start": "2026-10-29T17:56:52.176Z",
+      "end": "2026-10-30T17:56:52.176Z",
       "search": null,
       "user": null,
       "model": null,
@@ -538,8 +1444,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:21:28.972Z",
-      "end": "2026-10-28T08:21:28.972Z",
+      "start": "2026-10-29T17:56:52.177Z",
+      "end": "2026-10-30T17:56:52.177Z",
       "search": null,
       "user": null,
       "model": null,
@@ -564,8 +1470,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:21:29.603Z",
-      "end": "2026-10-28T08:21:29.603Z",
+      "start": "2026-10-29T17:56:52.988Z",
+      "end": "2026-10-30T17:56:52.988Z",
       "search": null,
       "user": null,
       "model": null,
@@ -616,8 +1522,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:21:29.603Z",
-      "end": "2026-10-28T08:21:29.603Z",
+      "start": "2026-10-29T17:56:52.988Z",
+      "end": "2026-10-30T17:56:52.988Z",
       "search": null,
       "user": null,
       "model": null,
@@ -694,8 +1600,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:21:32.913Z",
-      "end": "2026-10-28T08:21:32.913Z",
+      "start": "2026-10-29T17:56:56.640Z",
+      "end": "2026-10-30T17:56:56.640Z",
       "search": null,
       "user": null,
       "model": null,
@@ -746,8 +1652,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:21:32.913Z",
-      "end": "2026-10-28T08:21:32.913Z",
+      "start": "2026-10-29T17:56:56.640Z",
+      "end": "2026-10-30T17:56:56.640Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1057,9 +1963,399 @@
       "rows": null,
       "sortField": null,
       "sortOrder": null,
+      "range": "custom",
+      "start": "2026-10-01T10:15:00.000Z",
+      "end": "2026-10-01T11:45:00.000Z",
+      "search": null,
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": null,
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": "model",
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/request-records",
+      "first": "0",
+      "rows": "10",
+      "sortField": "created_at",
+      "sortOrder": "-1",
+      "range": "custom",
+      "start": "2026-10-01T10:15:00.000Z",
+      "end": "2026-10-01T11:45:00.000Z",
+      "search": "fixture",
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": "failed",
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": null,
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/request-records/facets",
+      "first": null,
+      "rows": null,
+      "sortField": null,
+      "sortOrder": null,
+      "range": null,
+      "start": "2026-10-01T10:15:00.000Z",
+      "end": "2026-10-01T11:45:00.000Z",
+      "search": null,
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": null,
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": null,
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/request-records/overview",
+      "first": null,
+      "rows": null,
+      "sortField": null,
+      "sortOrder": null,
+      "range": "24h",
+      "start": "2026-10-29T17:57:06.036Z",
+      "end": "2026-10-30T17:57:06.036Z",
+      "search": null,
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": null,
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": "model",
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/request-records/facets",
+      "first": null,
+      "rows": null,
+      "sortField": null,
+      "sortOrder": null,
+      "range": null,
+      "start": "2026-10-29T17:57:06.036Z",
+      "end": "2026-10-30T17:57:06.036Z",
+      "search": null,
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": null,
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": null,
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/request-records",
+      "first": "0",
+      "rows": "10",
+      "sortField": "created_at",
+      "sortOrder": "-1",
+      "range": "24h",
+      "start": null,
+      "end": null,
+      "search": "fixture",
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": "failed",
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": null,
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/request-records/overview",
+      "first": null,
+      "rows": null,
+      "sortField": null,
+      "sortOrder": null,
+      "range": "custom",
+      "start": "2025-12-31T23:15:00.000Z",
+      "end": "2026-01-02T02:45:00.000Z",
+      "search": null,
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": null,
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": "model",
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/request-records",
+      "first": "0",
+      "rows": "10",
+      "sortField": "created_at",
+      "sortOrder": "-1",
+      "range": "custom",
+      "start": "2025-12-31T23:15:00.000Z",
+      "end": "2026-01-02T02:45:00.000Z",
+      "search": "fixture",
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": "failed",
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": null,
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/request-records/facets",
+      "first": null,
+      "rows": null,
+      "sortField": null,
+      "sortOrder": null,
+      "range": null,
+      "start": "2025-12-31T23:15:00.000Z",
+      "end": "2026-01-02T02:45:00.000Z",
+      "search": null,
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": null,
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": null,
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/request-records/overview",
+      "first": null,
+      "rows": null,
+      "sortField": null,
+      "sortOrder": null,
+      "range": "custom",
+      "start": "2026-10-30T16:57:08.084Z",
+      "end": "2026-10-30T17:57:08.084Z",
+      "search": null,
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": null,
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": "model",
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/request-records",
+      "first": "0",
+      "rows": "10",
+      "sortField": "created_at",
+      "sortOrder": "-1",
+      "range": "custom",
+      "start": "2026-10-30T16:57:08.084Z",
+      "end": "2026-10-30T17:57:08.084Z",
+      "search": "fixture",
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": "failed",
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": null,
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/request-records/facets",
+      "first": null,
+      "rows": null,
+      "sortField": null,
+      "sortOrder": null,
+      "range": null,
+      "start": "2026-10-30T16:57:08.084Z",
+      "end": "2026-10-30T17:57:08.084Z",
+      "search": null,
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": null,
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": null,
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/request-records/overview",
+      "first": null,
+      "rows": null,
+      "sortField": null,
+      "sortOrder": null,
+      "range": "custom",
+      "start": "2026-10-30T12:57:08.668Z",
+      "end": "2026-10-30T17:57:08.668Z",
+      "search": null,
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": null,
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": "model",
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/request-records",
+      "first": "0",
+      "rows": "10",
+      "sortField": "created_at",
+      "sortOrder": "-1",
+      "range": "custom",
+      "start": "2026-10-30T12:57:08.668Z",
+      "end": "2026-10-30T17:57:08.668Z",
+      "search": "fixture",
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": "failed",
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": null,
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/request-records/facets",
+      "first": null,
+      "rows": null,
+      "sortField": null,
+      "sortOrder": null,
+      "range": null,
+      "start": "2026-10-30T12:57:08.668Z",
+      "end": "2026-10-30T17:57:08.668Z",
+      "search": null,
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": null,
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": null,
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/request-records/overview",
+      "first": null,
+      "rows": null,
+      "sortField": null,
+      "sortOrder": null,
       "range": "7d",
-      "start": "2026-10-21T08:21:38.999Z",
-      "end": "2026-10-28T08:21:38.999Z",
+      "start": "2026-10-23T17:57:09.253Z",
+      "end": "2026-10-30T17:57:09.253Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1110,8 +2406,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-21T08:21:39.000Z",
-      "end": "2026-10-28T08:21:39.000Z",
+      "start": "2026-10-23T17:57:09.253Z",
+      "end": "2026-10-30T17:57:09.253Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1214,8 +2510,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:21:40.643Z",
-      "end": "2026-10-28T08:21:40.643Z",
+      "start": "2026-10-29T17:57:11.635Z",
+      "end": "2026-10-30T17:57:11.635Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1240,8 +2536,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:21:40.643Z",
-      "end": "2026-10-28T08:21:40.643Z",
+      "start": "2026-10-29T17:57:11.635Z",
+      "end": "2026-10-30T17:57:11.635Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1292,8 +2588,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:21:41.093Z",
-      "end": "2026-10-28T08:21:41.093Z",
+      "start": "2026-10-29T17:57:12.118Z",
+      "end": "2026-10-30T17:57:12.118Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1318,8 +2614,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:21:41.094Z",
-      "end": "2026-10-28T08:21:41.094Z",
+      "start": "2026-10-29T17:57:12.118Z",
+      "end": "2026-10-30T17:57:12.118Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1370,8 +2666,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:21:41.976Z",
-      "end": "2026-10-28T08:21:41.976Z",
+      "start": "2026-10-29T17:57:13.051Z",
+      "end": "2026-10-30T17:57:13.051Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1396,8 +2692,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:21:41.977Z",
-      "end": "2026-10-28T08:21:41.977Z",
+      "start": "2026-10-29T17:57:13.051Z",
+      "end": "2026-10-30T17:57:13.051Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1448,8 +2744,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:21:42.778Z",
-      "end": "2026-10-28T08:21:42.778Z",
+      "start": "2026-10-29T17:57:13.919Z",
+      "end": "2026-10-30T17:57:13.919Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1474,8 +2770,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:21:42.778Z",
-      "end": "2026-10-28T08:21:42.778Z",
+      "start": "2026-10-29T17:57:13.919Z",
+      "end": "2026-10-30T17:57:13.919Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1526,8 +2822,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "30d",
-      "start": "2026-09-28T08:21:44.293Z",
-      "end": "2026-10-28T08:21:44.293Z",
+      "start": "2026-09-30T17:57:15.470Z",
+      "end": "2026-10-30T17:57:15.470Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1578,8 +2874,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-09-28T08:21:44.294Z",
-      "end": "2026-10-28T08:21:44.294Z",
+      "start": "2026-09-30T17:57:15.470Z",
+      "end": "2026-10-30T17:57:15.470Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1604,8 +2900,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "7d",
-      "start": "2026-10-21T08:21:44.410Z",
-      "end": "2026-10-28T08:21:44.410Z",
+      "start": "2026-10-23T17:57:15.652Z",
+      "end": "2026-10-30T17:57:15.652Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1630,8 +2926,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-21T08:21:44.410Z",
-      "end": "2026-10-28T08:21:44.410Z",
+      "start": "2026-10-23T17:57:15.652Z",
+      "end": "2026-10-30T17:57:15.652Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1734,8 +3030,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "7d",
-      "start": "2026-10-21T08:21:48.211Z",
-      "end": "2026-10-28T08:21:48.211Z",
+      "start": "2026-10-23T17:57:19.501Z",
+      "end": "2026-10-30T17:57:19.501Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1812,8 +3108,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "7d",
-      "start": "2026-10-21T08:21:50.260Z",
-      "end": "2026-10-28T08:21:50.260Z",
+      "start": "2026-10-23T17:57:21.535Z",
+      "end": "2026-10-30T17:57:21.535Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1838,8 +3134,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "7d",
-      "start": "2026-10-21T08:21:50.526Z",
-      "end": "2026-10-28T08:21:50.526Z",
+      "start": "2026-10-23T17:57:21.800Z",
+      "end": "2026-10-30T17:57:21.800Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1864,8 +3160,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-21T08:21:50.527Z",
-      "end": "2026-10-28T08:21:50.527Z",
+      "start": "2026-10-23T17:57:21.800Z",
+      "end": "2026-10-30T17:57:21.800Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1916,8 +3212,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "7d",
-      "start": "2026-10-21T08:21:52.394Z",
-      "end": "2026-10-28T08:21:52.394Z",
+      "start": "2026-10-23T17:57:23.669Z",
+      "end": "2026-10-30T17:57:23.669Z",
       "search": null,
       "user": null,
       "model": null,
@@ -1942,8 +3238,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-21T08:21:52.394Z",
-      "end": "2026-10-28T08:21:52.394Z",
+      "start": "2026-10-23T17:57:23.669Z",
+      "end": "2026-10-30T17:57:23.669Z",
       "search": null,
       "user": null,
       "model": null,
@@ -2482,14 +3778,66 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/admin/request-records/overview",
+      "first": null,
+      "rows": null,
+      "sortField": null,
+      "sortOrder": null,
+      "range": "24h",
+      "start": "2026-10-29T17:57:39.945Z",
+      "end": "2026-10-30T17:57:39.945Z",
+      "search": null,
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": null,
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": "model",
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/admin/request-records",
       "first": "0",
       "rows": "10",
       "sortField": "created_at",
       "sortOrder": "-1",
-      "range": "7d",
+      "range": "24h",
       "start": null,
       "end": null,
+      "search": null,
+      "user": null,
+      "model": null,
+      "clientKeyId": null,
+      "state": null,
+      "redaction": null,
+      "endpointId": null,
+      "mcpServerId": null,
+      "mcpSlot": null,
+      "perspective": null,
+      "category": "ai",
+      "mcpScope": "service",
+      "cursor": null,
+      "limit": null,
+      "order": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/request-records/facets",
+      "first": null,
+      "rows": null,
+      "sortField": null,
+      "sortOrder": null,
+      "range": null,
+      "start": "2026-10-29T17:57:39.945Z",
+      "end": "2026-10-30T17:57:39.945Z",
       "search": null,
       "user": null,
       "model": null,
@@ -2513,9 +3861,9 @@
       "rows": null,
       "sortField": null,
       "sortOrder": null,
-      "range": "7d",
-      "start": "2026-10-21T08:22:11.645Z",
-      "end": "2026-10-28T08:22:11.645Z",
+      "range": "24h",
+      "start": "2026-10-29T17:57:45.902Z",
+      "end": "2026-10-30T17:57:45.902Z",
       "search": null,
       "user": null,
       "model": null,
@@ -2539,9 +3887,9 @@
       "rows": null,
       "sortField": null,
       "sortOrder": null,
-      "range": "7d",
-      "start": "2026-10-21T08:22:13.743Z",
-      "end": "2026-10-28T08:22:13.743Z",
+      "range": "24h",
+      "start": "2026-10-29T17:57:48.002Z",
+      "end": "2026-10-30T17:57:48.002Z",
       "search": null,
       "user": null,
       "model": null,
@@ -2566,8 +3914,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:22:17.101Z",
-      "end": "2026-10-28T08:22:17.101Z",
+      "start": "2026-10-29T17:57:53.292Z",
+      "end": "2026-10-30T17:57:53.292Z",
       "search": null,
       "user": null,
       "model": null,
@@ -2618,8 +3966,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:22:17.102Z",
-      "end": "2026-10-28T08:22:17.102Z",
+      "start": "2026-10-29T17:57:53.292Z",
+      "end": "2026-10-30T17:57:53.292Z",
       "search": null,
       "user": null,
       "model": null,
@@ -2670,8 +4018,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:22:20.699Z",
-      "end": "2026-10-28T08:22:20.699Z",
+      "start": "2026-10-29T17:57:57.415Z",
+      "end": "2026-10-30T17:57:57.415Z",
       "search": null,
       "user": null,
       "model": null,
@@ -2722,8 +4070,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:22:20.699Z",
-      "end": "2026-10-28T08:22:20.699Z",
+      "start": "2026-10-29T17:57:57.415Z",
+      "end": "2026-10-30T17:57:57.415Z",
       "search": null,
       "user": null,
       "model": null,
@@ -3008,8 +4356,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:22:26.529Z",
-      "end": "2026-10-28T08:22:26.529Z",
+      "start": "2026-10-29T17:58:03.929Z",
+      "end": "2026-10-30T17:58:03.929Z",
       "search": null,
       "user": null,
       "model": null,
@@ -3060,8 +4408,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:22:26.529Z",
-      "end": "2026-10-28T08:22:26.529Z",
+      "start": "2026-10-29T17:58:03.929Z",
+      "end": "2026-10-30T17:58:03.929Z",
       "search": null,
       "user": null,
       "model": null,
@@ -3086,8 +4434,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:22:27.794Z",
-      "end": "2026-10-28T08:22:27.794Z",
+      "start": "2026-10-29T17:58:05.603Z",
+      "end": "2026-10-30T17:58:05.603Z",
       "search": null,
       "user": null,
       "model": null,
@@ -3138,8 +4486,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:22:27.794Z",
-      "end": "2026-10-28T08:22:27.794Z",
+      "start": "2026-10-29T17:58:05.603Z",
+      "end": "2026-10-30T17:58:05.603Z",
       "search": null,
       "user": null,
       "model": null,
@@ -3164,8 +4512,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:22:28.110Z",
-      "end": "2026-10-28T08:22:28.110Z",
+      "start": "2026-10-29T17:58:05.936Z",
+      "end": "2026-10-30T17:58:05.936Z",
       "search": null,
       "user": null,
       "model": null,
@@ -3190,8 +4538,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:22:28.110Z",
-      "end": "2026-10-28T08:22:28.110Z",
+      "start": "2026-10-29T17:58:05.936Z",
+      "end": "2026-10-30T17:58:05.936Z",
       "search": null,
       "user": null,
       "model": null,
@@ -3372,8 +4720,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:22:32.260Z",
-      "end": "2026-10-28T08:22:32.260Z",
+      "start": "2026-10-29T17:58:10.068Z",
+      "end": "2026-10-30T17:58:10.068Z",
       "search": null,
       "user": null,
       "model": null,
@@ -3398,8 +4746,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:22:32.260Z",
-      "end": "2026-10-28T08:22:32.260Z",
+      "start": "2026-10-29T17:58:10.068Z",
+      "end": "2026-10-30T17:58:10.068Z",
       "search": null,
       "user": null,
       "model": null,
@@ -3528,8 +4876,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:22:34.443Z",
-      "end": "2026-10-28T08:22:34.443Z",
+      "start": "2026-10-29T17:58:12.519Z",
+      "end": "2026-10-30T17:58:12.519Z",
       "search": null,
       "user": null,
       "model": null,
@@ -3580,8 +4928,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:22:34.443Z",
-      "end": "2026-10-28T08:22:34.443Z",
+      "start": "2026-10-29T17:58:12.519Z",
+      "end": "2026-10-30T17:58:12.519Z",
       "search": null,
       "user": null,
       "model": null,
@@ -3606,8 +4954,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:22:35.676Z",
-      "end": "2026-10-28T08:22:35.676Z",
+      "start": "2026-10-29T17:58:14.068Z",
+      "end": "2026-10-30T17:58:14.068Z",
       "search": null,
       "user": null,
       "model": null,
@@ -3658,8 +5006,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:22:35.676Z",
-      "end": "2026-10-28T08:22:35.676Z",
+      "start": "2026-10-29T17:58:14.068Z",
+      "end": "2026-10-30T17:58:14.068Z",
       "search": null,
       "user": null,
       "model": null,
@@ -3814,8 +5162,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:22:38.366Z",
-      "end": "2026-10-28T08:22:38.366Z",
+      "start": "2026-10-29T17:58:18.351Z",
+      "end": "2026-10-30T17:58:18.351Z",
       "search": null,
       "user": null,
       "model": null,
@@ -3866,8 +5214,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:22:38.366Z",
-      "end": "2026-10-28T08:22:38.366Z",
+      "start": "2026-10-29T17:58:18.351Z",
+      "end": "2026-10-30T17:58:18.351Z",
       "search": null,
       "user": null,
       "model": null,
@@ -4074,8 +5422,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:22:41.423Z",
-      "end": "2026-10-28T08:22:41.423Z",
+      "start": "2026-10-29T17:58:24.220Z",
+      "end": "2026-10-30T17:58:24.220Z",
       "search": null,
       "user": null,
       "model": null,
@@ -4126,8 +5474,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:22:41.423Z",
-      "end": "2026-10-28T08:22:41.423Z",
+      "start": "2026-10-29T17:58:24.220Z",
+      "end": "2026-10-30T17:58:24.220Z",
       "search": null,
       "user": null,
       "model": null,
@@ -4568,8 +5916,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": "24h",
-      "start": "2026-10-27T08:22:50.411Z",
-      "end": "2026-10-28T08:22:50.411Z",
+      "start": "2026-10-29T17:58:33.812Z",
+      "end": "2026-10-30T17:58:33.812Z",
       "search": null,
       "user": null,
       "model": null,
@@ -4594,8 +5942,8 @@
       "sortField": null,
       "sortOrder": null,
       "range": null,
-      "start": "2026-10-27T08:22:50.411Z",
-      "end": "2026-10-28T08:22:50.411Z",
+      "start": "2026-10-29T17:58:33.812Z",
+      "end": "2026-10-30T17:58:33.812Z",
       "search": null,
       "user": null,
       "model": null,

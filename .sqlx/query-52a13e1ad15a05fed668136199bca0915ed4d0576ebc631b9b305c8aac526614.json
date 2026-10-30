@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_records\n    (request_id, user_id, path, created_at, request_category, mcp_server_name,\n     ok, request_state, input_tokens, cache_read_tokens, cache_write_tokens,\n     output_tokens, total_tokens, duration_ms, ttft_ms)\nVALUES ($1, $2, '/p3t-fixture', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Timestamptz",
+        "Text",
+        "Text",
+        "Bool",
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "52a13e1ad15a05fed668136199bca0915ed4d0576ebc631b9b305c8aac526614"
+}

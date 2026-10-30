@@ -1,4 +1,5 @@
-import { render } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { UsageRangePicker } from '@/components/usage/UsageRangePicker'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RequestRecordListRow } from '@/generated/admin-api'
 import { RequestRecordsTable } from '@/components/usage/RequestRecordsTable'
@@ -26,6 +27,62 @@ beforeEach(() => {
       value: TestResizeObserver,
     })
   }
+})
+
+describe('custom range validation', () => {
+  it('updates display zone without changing committed instants', () => {
+    const apply = vi.fn()
+    render(
+      <LocaleProvider>
+        <UsageRangePicker
+          range="custom"
+          start="2026-10-01T00:00:00.000Z"
+          end="2026-10-01T02:00:00.000Z"
+          onApply={apply}
+        />
+      </LocaleProvider>,
+    )
+    const trigger = screen.getByRole('button', { name: copy.timeRange })
+    expect(trigger.textContent).toBe('2026-10-01 00:00 – 2026-10-01 02:00')
+    act(() => setDisplayTimeZone('Asia/Tokyo'))
+    expect(trigger.textContent).toBe('2026-10-01 09:00 – 2026-10-01 11:00')
+    expect(apply).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['2026-03-08T05:00:00.000Z', '2026-03-09T04:00:00.000Z', '02:30'],
+    ['2026-11-01T04:00:00.000Z', '2026-11-02T05:00:00.000Z', '01:30'],
+  ])(
+    'rejects nonexistent or ambiguous wall time for %s',
+    (start, end, time) => {
+      setDisplayTimeZone('America/New_York')
+      const apply = vi.fn()
+      render(
+        <LocaleProvider>
+          <UsageRangePicker
+            range="custom"
+            start={start}
+            end={end}
+            onApply={apply}
+          />
+        </LocaleProvider>,
+      )
+      fireEvent.click(screen.getByRole('button', { name: copy.timeRange }))
+      const popup = document.querySelector(
+        '[data-slot="popover-content"]',
+      ) as HTMLElement
+      fireEvent.change(within(popup).getByLabelText(copy.startTime), {
+        target: { value: time },
+      })
+      fireEvent.click(
+        within(popup).getByRole('button', { name: copy.applyTimeRange }),
+      )
+      expect(within(popup).getByRole('alert').textContent).toBe(
+        copy.invalidTimeRange,
+      )
+      expect(apply).not.toHaveBeenCalled()
+    },
+  )
 })
 
 function record(

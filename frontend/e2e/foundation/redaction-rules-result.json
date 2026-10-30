@@ -1,6 +1,6 @@
 {
-  "runId": "redaction-rules-1793011023313",
-  "startedAt": "2026-10-26T10:37:03.313Z",
+  "runId": "redaction-rules-1793383272276",
+  "startedAt": "2026-10-30T18:01:12.276Z",
   "checks": {
     "routeAndInitialReads": true,
     "initialPage": true,
@@ -18,6 +18,14 @@
     "pageSizePersistence": true,
     "dirtyLocalSearch": true,
     "warningPriority": true,
+    "globalReveal": {
+      "defaultMasked": true,
+      "revealsAllRows": true,
+      "newRowsFollow": true,
+      "hidesAllRows": true,
+      "resetAfterSave": true,
+      "resetOnScopeChange": true
+    },
     "normalization": {
       "trimmed": true,
       "emptyDropped": true,
@@ -36,7 +44,6 @@
     "deleteConfirmation": {
       "cancelNoWrite": true,
       "confirmedLocalDelete": true,
-      "revealIndexShift": true,
       "nativeConfirmUsed": false
     },
     "invalidRegex": {
@@ -55,7 +62,7 @@
         "width": 1440,
         "documentWidth": 1440,
         "viewportWidth": 1440,
-        "tableScrolls": true,
+        "tableScrolls": false,
         "actionsReachable": true,
         "hasRows": true
       },
@@ -95,7 +102,7 @@
         "width": 1440,
         "documentWidth": 1440,
         "viewportWidth": 1440,
-        "tableScrolls": true,
+        "tableScrolls": false,
         "actionsReachable": true,
         "hasRows": true
       },
@@ -165,7 +172,7 @@
   "apiFailures": [],
   "consoleErrorCount": 0,
   "pageErrorCount": 0,
-  "redactionApiRequestCount": 41,
-  "userOptionsRequestCount": 2,
-  "finishedAt": "2026-10-26T10:37:21.276Z"
+  "redactionApiRequestCount": 45,
+  "userOptionsRequestCount": 4,
+  "finishedAt": "2026-10-30T18:01:26.671Z"
 }

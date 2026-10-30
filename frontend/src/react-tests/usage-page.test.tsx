@@ -28,6 +28,7 @@ import { useUsageStore } from '@/lib/usage'
 import { useUsageDetailStore } from '@/lib/usage-detail'
 import { getPendingActions } from '@/lib/async-action'
 import { UsagePage } from '@/pages/UsagePage'
+import { AppShell } from '@/layouts/AppShell'
 
 const copy = messages['en-US']
 
@@ -264,10 +265,12 @@ function renderPage(path = '/request-records/ai') {
           <NotifierProvider>
             <MemoryRouter initialEntries={[path]}>
               <Routes>
-                <Route
-                  element={<UsagePage />}
-                  path="/request-records/:category"
-                />
+                <Route element={<AppShell />}>
+                  <Route
+                    element={<UsagePage />}
+                    path="/request-records/:category"
+                  />
+                </Route>
               </Routes>
             </MemoryRouter>
           </NotifierProvider>
@@ -279,6 +282,141 @@ function renderPage(path = '/request-records/ai') {
 }
 
 describe('usage page integration', () => {
+  it('uses one custom window for all reads and slides it on mode changes', async () => {
+    const { client } = renderPage()
+    await waitFor(() =>
+      expect(api.requestRecordOverview).toHaveBeenCalledTimes(1),
+    )
+    const clock = vi
+      .spyOn(Date, 'now')
+      .mockReturnValue(Date.parse('2026-01-01T12:00:00Z'))
+    try {
+      await act(async () => {
+        await useUsageStore.getState().setRange(client, '1h')
+      })
+      const expected = {
+        start: '2026-01-01T11:00:00.000Z',
+        end: '2026-01-01T12:00:00.000Z',
+      }
+      expect(
+        api.listRequestRecords.mock.calls.at(-1)?.[0]?.query,
+      ).toMatchObject({ ...expected, range: 'custom' })
+      expect(
+        api.requestRecordOverview.mock.calls.at(-1)?.[0]?.query,
+      ).toMatchObject({ ...expected, range: 'custom' })
+      expect(
+        api.requestRecordFacets.mock.calls.at(-1)?.[0]?.query,
+      ).toMatchObject(expected)
+      clock.mockReturnValue(Date.parse('2026-01-01T13:00:00Z'))
+      await act(async () => {
+        await useUsageStore.getState().setMode('records', client)
+      })
+      expect(
+        api.listRequestRecords.mock.calls.at(-1)?.[0]?.query,
+      ).toMatchObject({
+        start: expected.end,
+        end: '2026-01-01T13:00:00.000Z',
+        range: 'custom',
+      })
+      await act(async () => {
+        await useUsageStore.getState().setRange(client, '5h')
+      })
+      const fiveHours = {
+        start: '2026-01-01T08:00:00.000Z',
+        end: '2026-01-01T13:00:00.000Z',
+      }
+      expect(
+        api.listRequestRecords.mock.calls.at(-1)?.[0]?.query,
+      ).toMatchObject({ ...fiveHours, range: 'custom' })
+      expect(
+        api.requestRecordOverview.mock.calls.at(-1)?.[0]?.query,
+      ).toMatchObject({ ...fiveHours, range: 'custom' })
+      expect(
+        api.requestRecordFacets.mock.calls.at(-1)?.[0]?.query,
+      ).toMatchObject(fiveHours)
+      clock.mockReturnValue(Date.parse('2026-01-01T14:00:00Z'))
+      await act(async () => {
+        await useUsageStore.getState().refreshAll(client)
+      })
+      expect(
+        api.requestRecordOverview.mock.calls.at(-1)?.[0]?.query,
+      ).toMatchObject({
+        start: '2026-01-01T09:00:00.000Z',
+        end: '2026-01-01T14:00:00.000Z',
+        range: 'custom',
+      })
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
+  it('selects the one-hour preset from the range control', async () => {
+    renderPage()
+    await waitFor(() =>
+      expect(api.requestRecordOverview).toHaveBeenCalledTimes(1),
+    )
+    fireEvent.click(screen.getByRole('button', { name: copy.timeRange }))
+    fireEvent.click(screen.getByRole('button', { name: copy.last1Hour }))
+    await waitFor(() => expect(useUsageStore.getState().range).toBe('1h'))
+    await waitFor(() =>
+      expect(
+        api.requestRecordOverview.mock.calls.at(-1)?.[0]?.query?.range,
+      ).toBe('custom'),
+    )
+  })
+
+  it('passes the active query client on mode switch without extra reads', async () => {
+    const { client } = renderPage()
+    await waitFor(() =>
+      expect(useUsageStore.getState().pageLoading).toBe(false),
+    )
+    await waitFor(() =>
+      expect(api.requestRecordOverview).toHaveBeenCalledTimes(1),
+    )
+    const original = useUsageStore.getState().setMode
+    const setMode = vi.fn(original)
+    useUsageStore.setState({ setMode })
+    try {
+      const counts = [
+        api.listRequestRecords.mock.calls.length,
+        api.requestRecordFacets.mock.calls.length,
+        api.requestRecordOverview.mock.calls.length,
+      ]
+      fireEvent.click(screen.getByRole('button', { name: copy.recordsMode }))
+      expect(setMode).toHaveBeenCalledWith('records', client)
+      expect(useUsageStore.getState().mode).toBe('records')
+      expect([
+        api.listRequestRecords.mock.calls.length,
+        api.requestRecordFacets.mock.calls.length,
+        api.requestRecordOverview.mock.calls.length,
+      ]).toEqual(counts)
+      await act(async () => {
+        await original('overview')
+      })
+      expect(useUsageStore.getState().mode).toBe('overview')
+    } finally {
+      useUsageStore.setState({ setMode: original })
+    }
+  })
+
+  it('reports a rejected mode change through the existing notifier', async () => {
+    renderPage()
+    await waitFor(() =>
+      expect(api.requestRecordOverview).toHaveBeenCalledTimes(1),
+    )
+    const original = useUsageStore.getState().setMode
+    const setMode = vi.fn().mockRejectedValue(new Error('mode refresh failed'))
+    useUsageStore.setState({ setMode })
+    try {
+      fireEvent.click(screen.getByRole('button', { name: copy.recordsMode }))
+      expect((await screen.findByRole('alert')).textContent).toContain(
+        'mode refresh failed',
+      )
+    } finally {
+      useUsageStore.setState({ setMode: original })
+    }
+  })
+
   it('loads each read once on mount and shows the overview', async () => {
     // The stage names the gate a failure happened in, so a captured failure
     // says which observation was still open.

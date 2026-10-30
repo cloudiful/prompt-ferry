@@ -11,7 +11,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
-import { LocaleToggle, ThemeToggle } from '@/components/auth/DisplayControls'
+import { HeaderActionsContext } from '@/components/layout/HeaderActions'
 import { cn } from '@/lib/utils'
 import {
   defaultNavPath,
@@ -160,6 +160,7 @@ export function AppShell() {
   )
   const relayLogout = useRelaySessionStore((state) => state.logout)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [headerActions, setHeaderActions] = useState<HTMLDivElement | null>(null)
   const isAdmin = me?.is_admin ?? false
   const currentRoute = routeForPath(location.pathname)
   const titleKey = currentRoute?.titleKey ?? 'workspaceTitle'
@@ -230,7 +231,7 @@ export function AppShell() {
       </aside>
 
       <div className="min-w-0 lg:pl-64">
-        <header className="sticky top-0 z-20 flex min-h-16 items-center gap-2 border-b bg-background/95 px-3 backdrop-blur sm:px-5">
+        <header className="sticky top-0 z-20 flex min-h-16 flex-wrap items-center gap-2 border-b bg-background/95 px-3 py-2 backdrop-blur sm:px-5">
           <Sheet
             open={mobileMenuOpen}
             onOpenChange={(open) => {
@@ -299,14 +300,13 @@ export function AppShell() {
               {t(titleKey)}
             </h1>
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <LocaleToggle />
-            <ThemeToggle />
-          </div>
+          <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2" ref={setHeaderActions} />
         </header>
 
         <main className="min-w-0 p-4 sm:p-6">
-          <Outlet />
+          <HeaderActionsContext.Provider value={headerActions}>
+            <Outlet />
+          </HeaderActionsContext.Provider>
         </main>
       </div>
     </div>

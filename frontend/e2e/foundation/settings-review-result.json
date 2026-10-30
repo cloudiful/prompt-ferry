@@ -1,7 +1,7 @@
 {
-  "runId": "settings-review-1793011197262",
-  "startedAt": "2026-10-26T10:39:57.262Z",
-  "finishedAt": "2026-10-26T10:40:58.751Z",
+  "runId": "settings-review-1793383372471",
+  "startedAt": "2026-10-30T18:02:52.471Z",
+  "finishedAt": "2026-10-30T18:03:58.316Z",
   "checks": {
     "routeRender": {
       "routeId": "R-SETTINGS-REVIEW",
@@ -335,6 +335,7 @@
   ],
   "apiFailures": [],
   "expectedApiFailures": [
+    "401 GET /api/v1/auth/me",
     "401 GET /api/v1/auth/me",
     "400 PATCH /api/v1/settings/llm-review",
     "400 PATCH /api/v1/settings/llm-review",
@@ -1072,6 +1073,12 @@
     },
     {
       "stage": "scoped-refresh",
+      "method": "GET",
+      "path": "/api/v1/settings/llm-review",
+      "body": null
+    },
+    {
+      "stage": "locale-theme-return",
       "method": "GET",
       "path": "/api/v1/settings/llm-review",
       "body": null

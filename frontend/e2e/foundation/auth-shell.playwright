@@ -1,6 +1,15 @@
 async (page) => {
-  const BASE = 'http://127.0.0.1:5171'
-  const FIXTURE = 'http://127.0.0.1:8789'
+  const BASE = 'http://127.0.0.1:5188'
+  const FIXTURE = 'http://127.0.0.1:8798'
+  const context = await page.context().browser().newContext({ serviceWorkers: 'block' })
+  page = await context.newPage()
+  await context.route('**/*', async route => {
+    const url = new URL(route.request().url())
+    if (url.origin !== BASE) return route.abort()
+    if (!url.pathname.startsWith('/api/')) return route.continue()
+    const response = await route.fetch({ url: `${FIXTURE}${url.pathname}${url.search}`, maxRedirects: 0 })
+    await route.fulfill({ response })
+  })
   const screenshots = 'e2e/foundation/screenshots'
   const consoleErrors = []
   const pageErrors = []
@@ -209,8 +218,14 @@ async (page) => {
   )
   report.checks.adminRedirect = page.url().replace(BASE, '')
 
-  await page.getByRole('button', { name: '语言' }).click()
-  await page.getByRole('button', { name: 'Light' }).click()
+  await page.goto(`${BASE}/settings/general`)
+  await waitForRouteId('R-SETTINGS-GENERAL')
+  await page.getByRole('combobox', { name: '语言' }).click()
+  await page.getByRole('option', { name: 'English', exact: true }).click()
+  await page.getByRole('combobox', { name: 'Theme' }).click()
+  await page.getByRole('option', { name: 'Light', exact: true }).click()
+  await page.goto(`${BASE}/request-records/ai?filter=seed&order=desc`)
+  await waitForRouteId('R-USAGE-AI')
   await page.waitForFunction(
     () =>
       document.documentElement.lang === 'en-US' &&

@@ -1,8 +1,14 @@
 {
-  "runId": "general-settings-1793010955188",
-  "startedAt": "2026-10-26T10:35:55.188Z",
-  "finishedAt": "2026-10-26T10:36:15.361Z",
+  "runId": "general-settings-1793383119365",
+  "startedAt": "2026-10-30T17:58:39.365Z",
+  "finishedAt": "2026-10-30T17:59:17.387Z",
   "checks": {
+    "headerActions": {
+      "widths": [1440, 390],
+      "keyboard": true,
+      "focusReturn": true,
+      "navigationCleanup": true
+    },
     "zeroRequests": {
       "settings": 0,
       "during": "operator preferences page"
@@ -16,10 +22,10 @@
       "filtered": 2
     },
     "crossPage": {
-      "rawInstant": "2026-10-26T10:35:53.966Z",
-      "rendered": "19:35:53",
-      "expectedTokyo": "19:35:53",
-      "utc": "10:35:53",
+      "rawInstant": "2026-10-30T17:58:37.943Z",
+      "rendered": "02:58:37",
+      "expectedTokyo": "02:58:37",
+      "utc": "17:58:37",
       "zoneKept": true
     },
     "timeZoneClear": {
@@ -51,6 +57,14 @@
     "admin": {
       "cards": 3,
       "adminNavVisible": true
+    },
+    "adminHeaderActions": {
+      "widths": [1440, 390],
+      "createKeyboard": true,
+      "focusReturn": true,
+      "navigationCleanup": true,
+      "relayCreateAndRefresh": true,
+      "billingApprovalsModelsRefresh": true
     },
     "settingsApiRequests": 0,
     "officialPendingRoutes": 0,
@@ -90,11 +104,9 @@
   "expectedApiFailures": [
     "401 GET /api/v1/auth/me",
     "401 GET /api/v1/auth/me",
-    "401 GET /api/v1/auth/me",
-    "401 GET /api/v1/auth/me",
     "401 GET /api/v1/auth/me"
   ],
-  "expectedConsoleStatusErrors": 5,
+  "expectedConsoleStatusErrors": 3,
   "unexpectedRequests": [],
   "consoleErrorCount": 0,
   "pageErrorCount": 0,

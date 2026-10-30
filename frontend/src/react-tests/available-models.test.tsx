@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AvailableModelsResponse, MeResponse } from '@/generated/admin-api'
 import { meListModels } from '@/generated/admin-api'
 import { AvailableModelsPage } from '@/pages/AvailableModelsPage'
+import { AppShell } from '@/layouts/AppShell'
+import { MemoryRouter, Route, Routes } from 'react-router'
 import { LocaleProvider } from '@/lib/i18n'
 import { NotifierProvider } from '@/lib/notifier'
 import { useSessionStore } from '@/lib/session'
@@ -68,7 +70,20 @@ function renderPage() {
     <QueryClientProvider client={queryClient}>
       <LocaleProvider>
         <NotifierProvider>
-          <AvailableModelsPage />
+          <MemoryRouter initialEntries={['/available-models']}>
+            <Routes>
+              <Route element={<AppShell />}>
+                <Route
+                  path="/available-models"
+                  element={<AvailableModelsPage />}
+                />
+                <Route
+                  path="/settings/general"
+                  element={<div>Settings fixture</div>}
+                />
+              </Route>
+            </Routes>
+          </MemoryRouter>
         </NotifierProvider>
       </LocaleProvider>
     </QueryClientProvider>,
@@ -103,6 +118,16 @@ afterEach(() => {
 })
 
 describe('available models route', () => {
+  it('removes the models header action when navigating to a page without actions', async () => {
+    modelsMock.mockResolvedValue({ data: modelPage([]) })
+    renderPage()
+    const header = document.querySelector('header')!
+    expect(within(header).getByRole('button', { name: 'Refresh' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('link', { name: 'General' }))
+    expect(screen.getByText('Settings fixture')).toBeTruthy()
+    expect(within(header).queryByRole('button', { name: 'Refresh' })).toBeNull()
+  })
+
   it('renders model ids and names and loads subsequent pages from the self API', async () => {
     modelsMock.mockImplementation(async ({ query }) => ({
       data:
@@ -118,6 +143,9 @@ describe('available models route', () => {
     renderPage()
 
     expect(await screen.findByText('model-alpha')).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'Refresh' }).closest('header'),
+    ).toBeTruthy()
     expect(screen.getByText('Model Alpha')).toBeTruthy()
     expect(modelsMock).toHaveBeenCalledWith(
       expect.objectContaining({ query: { first: 0, rows: 10 } }),

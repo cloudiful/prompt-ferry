@@ -1,6 +1,6 @@
 {
-  "runId": "billing-1793010792867",
-  "startedAt": "2026-10-26T10:33:12.867Z",
+  "runId": "billing-1793383216784",
+  "startedAt": "2026-10-30T18:00:16.784Z",
   "checks": {
     "routeRender": {
       "routeId": true,
@@ -1744,6 +1744,102 @@
       "usageStatus": null,
       "pricingStatus": null,
       "requestId": null,
+      "startAt": "2026-09-30T16:00:00.000Z",
+      "endAt": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/billing/charges",
+      "first": "0",
+      "rows": "10",
+      "kind": null,
+      "userId": null,
+      "clientKeyId": null,
+      "requestedModel": null,
+      "endpointId": null,
+      "usageStatus": null,
+      "pricingStatus": null,
+      "requestId": null,
+      "startAt": "2026-09-30T16:00:00.000Z",
+      "endAt": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/billing/price-rules",
+      "first": "0",
+      "rows": "10",
+      "kind": null,
+      "userId": null,
+      "clientKeyId": null,
+      "requestedModel": null,
+      "endpointId": null,
+      "usageStatus": null,
+      "pricingStatus": null,
+      "requestId": null,
+      "startAt": null,
+      "endAt": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/billing/summary",
+      "first": null,
+      "rows": null,
+      "kind": null,
+      "userId": null,
+      "clientKeyId": null,
+      "requestedModel": null,
+      "endpointId": null,
+      "usageStatus": null,
+      "pricingStatus": null,
+      "requestId": null,
+      "startAt": "2026-09-30T16:00:00.000Z",
+      "endAt": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/billing/charges",
+      "first": "0",
+      "rows": "10",
+      "kind": null,
+      "userId": null,
+      "clientKeyId": null,
+      "requestedModel": null,
+      "endpointId": null,
+      "usageStatus": null,
+      "pricingStatus": null,
+      "requestId": null,
+      "startAt": "2026-09-30T16:00:00.000Z",
+      "endAt": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/billing/price-rules",
+      "first": "0",
+      "rows": "10",
+      "kind": null,
+      "userId": null,
+      "clientKeyId": null,
+      "requestedModel": null,
+      "endpointId": null,
+      "usageStatus": null,
+      "pricingStatus": null,
+      "requestId": null,
+      "startAt": null,
+      "endAt": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/billing/summary",
+      "first": null,
+      "rows": null,
+      "kind": null,
+      "userId": null,
+      "clientKeyId": null,
+      "requestedModel": null,
+      "endpointId": null,
+      "usageStatus": null,
+      "pricingStatus": null,
+      "requestId": null,
       "startAt": null,
       "endAt": null
     },
@@ -1791,7 +1887,7 @@
         "cache_read_rate": "0.00100",
         "cache_write_rate": "0.00200",
         "output_rate": "0.01000",
-        "effective_from": "2026-10-26T10:33:00.000Z"
+        "effective_from": "2026-10-30T18:00:00.000Z"
       }
     },
     {
@@ -1817,7 +1913,7 @@
         "cache_read_rate": "0",
         "cache_write_rate": "0",
         "output_rate": "0",
-        "effective_from": "2026-10-26T10:33:00.000Z"
+        "effective_from": "2026-10-30T18:00:00.000Z"
       }
     },
     {
@@ -1830,7 +1926,7 @@
         "cache_read_rate": "0",
         "cache_write_rate": "0",
         "output_rate": "0",
-        "effective_from": "2026-10-26T10:33:00.000Z"
+        "effective_from": "2026-10-30T18:00:00.000Z"
       }
     },
     {
@@ -1843,7 +1939,7 @@
         "cache_read_rate": "0",
         "cache_write_rate": "0",
         "output_rate": "0",
-        "effective_from": "2026-10-26T10:33:00.000Z"
+        "effective_from": "2026-10-30T18:00:00.000Z"
       }
     },
     {
@@ -1856,7 +1952,7 @@
         "cache_read_rate": "0",
         "cache_write_rate": "0",
         "output_rate": "0",
-        "effective_from": "2026-10-26T10:33:00.000Z"
+        "effective_from": "2026-10-30T18:00:00.000Z"
       }
     },
     {
@@ -1884,8 +1980,8 @@
       "bytes": 113
     }
   ],
-  "userOptionsRequestCount": 5,
-  "endpointsRequestCount": 4,
+  "userOptionsRequestCount": 7,
+  "endpointsRequestCount": 6,
   "chargePages": [
     {
       "count": 25,
@@ -2048,6 +2144,18 @@
       "first": 0,
       "rows": 10,
       "total": 33
+    },
+    {
+      "count": 10,
+      "first": 0,
+      "rows": 10,
+      "total": 33
+    },
+    {
+      "count": 10,
+      "first": 0,
+      "rows": 10,
+      "total": 33
     }
   ],
   "summaries": [
@@ -2162,8 +2270,16 @@
     {
       "amount": "0.092620",
       "count": 33
+    },
+    {
+      "amount": "0.092620",
+      "count": 33
+    },
+    {
+      "amount": "0.092620",
+      "count": 33
     }
   ],
-  "authMeRequestCount": 16,
-  "finishedAt": "2026-10-26T10:34:13.519Z"
+  "authMeRequestCount": 20,
+  "finishedAt": "2026-10-30T18:01:09.293Z"
 }

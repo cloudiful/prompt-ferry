@@ -8,7 +8,8 @@ import {
   waitFor,
   within,
 } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, Route, Routes } from 'react-router'
+import { AppShell } from '@/layouts/AppShell'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   ApprovalPageResponse,
@@ -95,7 +96,11 @@ function renderPage() {
       <LocaleProvider>
         <NotifierProvider>
           <MemoryRouter initialEntries={['/approvals']}>
-            <ApprovalsPage />
+            <Routes>
+              <Route element={<AppShell />}>
+                <Route path="/approvals" element={<ApprovalsPage />} />
+              </Route>
+            </Routes>
           </MemoryRouter>
         </NotifierProvider>
       </LocaleProvider>
@@ -140,6 +145,9 @@ describe('approvals page', () => {
   it('mounts the admin route and reads the pending approvals first', async () => {
     useSessionStore.setState({ me: admin })
     renderPage()
+    expect(
+      screen.getByRole('button', { name: 'Refresh' }).closest('header'),
+    ).toBeTruthy()
 
     expect(
       document.querySelector('[data-foundation-route-id="R-APPROVALS"]'),

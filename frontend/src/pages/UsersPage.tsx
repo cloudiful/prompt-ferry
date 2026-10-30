@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
+import { HeaderActions } from '@/components/layout/HeaderActions'
 import { CreateUserDialog } from '@/components/users/CreateUserDialog'
 import { ResetPasswordDialog } from '@/components/users/ResetPasswordDialog'
 import { UsersTable } from '@/components/users/UsersTable'
@@ -301,7 +302,7 @@ export function UsersPage() {
       className="grid min-w-0 max-w-full gap-3"
       data-foundation-route-id="R-USERS"
     >
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <HeaderActions>
         <Button
           aria-label={t('refresh')}
           onClick={() => void refresh()}
@@ -322,7 +323,7 @@ export function UsersPage() {
         >
           <span>{t('createUser')}</span>
         </Button>
-      </div>
+      </HeaderActions>
 
       <UsersTable
         first={query.data?.first ?? first}

@@ -21,6 +21,7 @@ import {
   type TestResultSurface,
 } from '@/components/shared/TestResultPopover'
 import { Button } from '@/components/ui/button'
+import { HeaderActions } from '@/components/layout/HeaderActions'
 import {
   EMPTY_MCP_CATALOG,
   fetchMcpCatalog,
@@ -506,7 +507,7 @@ export function McpPage() {
 
   return (
     <section className="grid min-w-0 gap-3" data-foundation-route-id="R-MCP">
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <HeaderActions>
         <Button
           disabled={asyncAction.isPending(mcpActionKey(null))}
           onClick={openCreateDialog}
@@ -533,7 +534,7 @@ export function McpPage() {
           )}
           {t('refresh')}
         </Button>
-      </div>
+      </HeaderActions>
       {pageError ? (
         <div
           className="grid gap-2 rounded-lg border border-destructive/40 p-3"

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM users WHERE user_id = ANY($1::BIGINT[]) AND login_name = ANY($2::TEXT[])\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8Array",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ad10020d938946bafd95cffa6e7781df83a7ba1777822fd374bca5f8c8992476"
+}

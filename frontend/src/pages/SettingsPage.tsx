@@ -3,6 +3,7 @@ import { useLocation } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { HeaderActions } from '@/components/layout/HeaderActions'
 import { SettingsCacheAlertTab } from '@/components/settings/SettingsCacheAlertTab'
 import { SettingsConfigArchiveTab } from '@/components/settings/SettingsConfigArchiveTab'
 import { SettingsGeneralTab } from '@/components/settings/SettingsGeneralTab'
@@ -271,8 +272,7 @@ export function SettingsPage() {
         data-foundation-route-id="R-SETTINGS-REQUESTS"
         data-settings-tab={tab}
       >
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-          <h1 className="m-0 text-lg font-semibold">{t('settingsUsage')}</h1>
+        <HeaderActions>
           <Button
             aria-label={t('refresh')}
             disabled={refreshBlocked}
@@ -285,7 +285,7 @@ export function SettingsPage() {
             <RefreshCw aria-hidden="true" />
             {t('refresh')}
           </Button>
-        </div>
+        </HeaderActions>
         <SettingsRequestsTab />
       </section>
     )
@@ -308,8 +308,7 @@ export function SettingsPage() {
         data-foundation-route-id="R-SETTINGS-NETWORK"
         data-settings-tab={tab}
       >
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-          <h1 className="m-0 text-lg font-semibold">{t('settingsNetwork')}</h1>
+        <HeaderActions>
           <Button
             aria-label={t('refresh')}
             disabled={refreshBlocked}
@@ -322,7 +321,7 @@ export function SettingsPage() {
             <RefreshCw aria-hidden="true" />
             {t('refresh')}
           </Button>
-        </div>
+        </HeaderActions>
         <SettingsNetworkTab />
       </section>
     )
@@ -345,8 +344,7 @@ export function SettingsPage() {
         data-foundation-route-id="R-SETTINGS-REVIEW"
         data-settings-tab={tab}
       >
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-          <h1 className="m-0 text-lg font-semibold">{t('settingsReview')}</h1>
+        <HeaderActions>
           <Button
             aria-label={t('refresh')}
             disabled={refreshBlocked}
@@ -359,7 +357,7 @@ export function SettingsPage() {
             <RefreshCw aria-hidden="true" />
             {t('refresh')}
           </Button>
-        </div>
+        </HeaderActions>
         <SettingsReviewTab />
       </section>
     )
@@ -380,8 +378,7 @@ export function SettingsPage() {
         data-foundation-route-id="R-SETTINGS-STORAGE"
         data-settings-tab={tab}
       >
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-          <h1 className="m-0 text-lg font-semibold">{t('settingsStorage')}</h1>
+        <HeaderActions>
           <Button
             aria-label={t('refresh')}
             disabled={refreshBlocked}
@@ -394,7 +391,7 @@ export function SettingsPage() {
             <RefreshCw aria-hidden="true" />
             {t('refresh')}
           </Button>
-        </div>
+        </HeaderActions>
         <SettingsStorageTab />
       </section>
     )
@@ -415,10 +412,7 @@ export function SettingsPage() {
         data-foundation-route-id="R-SETTINGS-CACHE-ALERT"
         data-settings-tab={tab}
       >
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-          <h1 className="m-0 text-lg font-semibold">
-            {t('settingsCacheAlert')}
-          </h1>
+        <HeaderActions>
           <Button
             aria-label={t('refresh')}
             disabled={refreshBlocked}
@@ -431,7 +425,7 @@ export function SettingsPage() {
             <RefreshCw aria-hidden="true" />
             {t('refresh')}
           </Button>
-        </div>
+        </HeaderActions>
         <SettingsCacheAlertTab />
       </section>
     )
@@ -445,9 +439,6 @@ export function SettingsPage() {
         data-foundation-route-id="R-SETTINGS-CONFIG-ARCHIVE"
         data-settings-tab={tab}
       >
-        <h1 className="m-0 text-lg font-semibold">
-          {t('settingsConfigArchive')}
-        </h1>
         <SettingsConfigArchiveTab />
       </section>
     )
@@ -462,7 +453,6 @@ export function SettingsPage() {
       data-foundation-route-id="R-SETTINGS-GENERAL"
       data-settings-tab={tab}
     >
-      <h1 className="text-lg font-semibold">{t('settingsGeneral')}</h1>
       <SettingsGeneralTab />
     </section>
   )

@@ -17,6 +17,8 @@
     "test:legacy": "bun test --isolate ./tests/theme-first-paint.test.ts ./tests/dev-proxy-scope.test.ts"
   },
   "dependencies": {
+    "@daypicker/react": "^10",
+    "@js-temporal/polyfill": "^0.5.1",
     "@tailwindcss/vite": "4.3.3",
     "@tanstack/react-query": "5.104.3",
     "class-variance-authority": "0.7.1",

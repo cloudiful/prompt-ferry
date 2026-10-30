@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM request_records WHERE request_id = ANY($1::UUID[]) AND user_id = ANY($2::BIGINT[])\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f07e30300dcb9f15fd323a96015690a9ce57e435d409dc9176e4d1409756a66c"
+}

@@ -22,6 +22,7 @@ import {
   type TestResultSurface,
 } from '@/components/shared/TestResultPopover'
 import { Button } from '@/components/ui/button'
+import { HeaderActions } from '@/components/layout/HeaderActions'
 import {
   endpointRecordsQueryKey,
   endpointUserOptionsQueryKey,
@@ -397,7 +398,7 @@ export function ModelRoutesPage() {
       className="grid min-w-0 gap-3"
       data-foundation-route-id="R-ENDPOINTS-ROUTES"
     >
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <HeaderActions>
         <Button onClick={openCreateDialog} type="button">
           <Plus />
           {t('newModelRoute')}
@@ -415,7 +416,7 @@ export function ModelRoutesPage() {
           )}
           {t('refresh')}
         </Button>
-      </div>
+      </HeaderActions>
       {routePageQuery.error ? (
         <div
           className="grid gap-2 rounded-lg border border-destructive/40 p-3"

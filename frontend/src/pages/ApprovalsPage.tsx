@@ -8,6 +8,7 @@ import type {
 import { ApprovalDetailDialog } from '@/components/approvals/ApprovalDetailDialog'
 import { ApprovalsPanel } from '@/components/approvals/ApprovalsPanel'
 import { Button } from '@/components/ui/button'
+import { HeaderActions } from '@/components/layout/HeaderActions'
 import { useLocale } from '@/lib/i18n'
 import { useNotifier } from '@/lib/notifier'
 import { usePageTitle } from '@/lib/router'
@@ -113,7 +114,7 @@ export function ApprovalsPage() {
       className="grid min-w-0 max-w-full gap-3"
       data-foundation-route-id="R-APPROVALS"
     >
-      <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+      <HeaderActions>
         <Button
           aria-label={t('refresh')}
           disabled={loading}
@@ -129,7 +130,7 @@ export function ApprovalsPage() {
           )}
           {t('refresh')}
         </Button>
-      </div>
+      </HeaderActions>
 
       <ApprovalsPanel
         approvals={approvals}

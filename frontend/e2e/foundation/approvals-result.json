@@ -1,6 +1,6 @@
 {
-  "runId": "approvals-1793010752955",
-  "startedAt": "2026-10-26T10:32:32.955Z",
+  "runId": "approvals-1793383186125",
+  "startedAt": "2026-10-30T17:59:46.125Z",
   "checks": {
     "routeRender": {
       "routeId": true,
@@ -276,6 +276,24 @@
       "path": "/api/v1/admin/approvals",
       "rawPath": "/api/v1/admin/approvals",
       "status": "resolved",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
+      "first": "0",
+      "rows": "10",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/approvals",
+      "rawPath": "/api/v1/admin/approvals",
+      "status": "pending",
       "first": "0",
       "rows": "10",
       "body": null
@@ -629,5 +647,5 @@
       "body": null
     }
   ],
-  "finishedAt": "2026-10-26T10:33:10.421Z"
+  "finishedAt": "2026-10-30T18:00:13.922Z"
 }

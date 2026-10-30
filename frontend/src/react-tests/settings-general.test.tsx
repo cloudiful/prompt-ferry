@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, Route, Routes } from 'react-router'
+import { AppShell } from '@/layouts/AppShell'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { messages } from '@/i18n'
 import { resolveSettingsTab } from '@/models/settings'
@@ -78,7 +79,11 @@ function renderPage(path = '/settings/general') {
         <ThemeProvider>
           <NotifierProvider>
             <MemoryRouter initialEntries={[path]}>
-              <SettingsPage />
+              <Routes>
+                <Route element={<AppShell />}>
+                  <Route path="/settings/:tab" element={<SettingsPage />} />
+                </Route>
+              </Routes>
             </MemoryRouter>
           </NotifierProvider>
         </ThemeProvider>
