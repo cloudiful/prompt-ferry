@@ -4,6 +4,10 @@ import { Button } from '@/components/ui/button'
 import { EndpointDialog } from '@/components/endpoints/EndpointDialog'
 import { EndpointsTable } from '@/components/endpoints/EndpointsTable'
 import { TokenPlanUsageDialog } from '@/components/endpoints/TokenPlanUsageDialog'
+import {
+  testResultKey,
+  type TestResultSurface,
+} from '@/components/shared/TestResultPopover'
 import type {
   EndpointTestResponse,
   ProviderEndpoint,
@@ -66,6 +70,9 @@ export function EndpointsPage() {
   const [testResults, setTestResults] = useState<
     Record<string, EndpointTestResponse>
   >({})
+  const [openTestResultKey, setOpenTestResultKey] = useState<string | null>(
+    null,
+  )
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogEndpointId, setDialogEndpointId] = useState<string | null>(null)
   const [dialogForm, setDialogForm] = useState<EndpointForm | null>(null)
@@ -209,6 +216,12 @@ export function EndpointsPage() {
     rowsRef.current = change.rows
     setFirst(change.first)
     setRows(change.rows)
+    setOpenTestResultKey(null)
+  }
+
+  function changeTestResultOpen(key: string, open: boolean): void {
+    if (open) return
+    setOpenTestResultKey((current) => (current === key ? null : current))
   }
 
   function openTokenPlanUsage(endpointId: string): void {
@@ -237,6 +250,7 @@ export function EndpointsPage() {
     rowsRef.current = nextRows
     setFirst(page.first)
     setRows(nextRows)
+    setOpenTestResultKey(null)
   }
 
   function openCreateDialog(): void {
@@ -387,8 +401,12 @@ export function EndpointsPage() {
     }
   }
 
-  async function testEndpoint(endpointId: string): Promise<void> {
+  async function testEndpoint(
+    endpointId: string,
+    surface: TestResultSurface,
+  ): Promise<void> {
     const capturedId = endpointId
+    const capturedSurface = surface
     try {
       const outcome = await asyncAction.run(
         networkTestKey('endpoint', capturedId),
@@ -397,6 +415,7 @@ export function EndpointsPage() {
       )
       if (!outcome.executed) return
       setTestResults((current) => ({ ...current, [capturedId]: outcome.value }))
+      setOpenTestResultKey(testResultKey(capturedSurface, capturedId))
     } catch (cause) {
       reportApiError(cause)
     }
@@ -452,11 +471,13 @@ export function EndpointsPage() {
         onDelete={(endpointId) => void deleteEndpoint(endpointId)}
         onEdit={openEditDialog}
         onPage={changePage}
-        onTest={(endpointId) => void testEndpoint(endpointId)}
+        onResultOpenChange={changeTestResultOpen}
+        onTest={(endpointId, surface) => void testEndpoint(endpointId, surface)}
         onTokenPlanUsage={openTokenPlanUsage}
         onToggle={(endpointId, enabled) =>
           void toggleEndpoint(endpointId, enabled)
         }
+        openResultKey={openTestResultKey}
         pendingActions={asyncAction.pendingActions}
         rows={endpointPageQuery.data?.rows ?? rows}
         total={endpointPageQuery.data?.total ?? 0}

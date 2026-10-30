@@ -5,7 +5,7 @@ import {
   screen,
   within,
 } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ModelRouteTargetsSummary } from '@/components/endpoints/ModelRouteTargetsSummary'
 import { LocaleProvider } from '@/lib/i18n'
 import type { ModelRouteTargetItemView } from '@/models/endpoints'
@@ -24,10 +24,17 @@ function target(
   }
 }
 
-function renderSummary(targets: ModelRouteTargetItemView[]) {
+function renderSummary(
+  targets: ModelRouteTargetItemView[],
+  props: {
+    onToggleTarget?: (targetId: string, enabled: boolean) => void
+    pending?: boolean
+    pendingTargetId?: string | null
+  } = {},
+) {
   return render(
     <LocaleProvider>
-      <ModelRouteTargetsSummary targets={targets} />
+      <ModelRouteTargetsSummary targets={targets} {...props} />
     </LocaleProvider>,
   )
 }
@@ -41,12 +48,18 @@ afterEach(() => {
 })
 
 describe('ModelRouteTargetsSummary', () => {
-  it('keeps the empty and disabled-only states', () => {
+  it('keeps the empty state and offers the disclosure when every target is off', () => {
     renderSummary([])
     expect(screen.getByText('-')).toBeTruthy()
     cleanup()
     renderSummary([target('a', { enabled: false })])
-    expect(screen.getByText('No enabled targets')).toBeTruthy()
+    const disclosure = screen.getByRole('button', {
+      name: 'No enabled targets',
+    })
+    fireEvent.click(disclosure)
+    const list = screen.getByRole('list')
+    expect(within(list).getAllByRole('listitem')).toHaveLength(1)
+    expect(within(list).getByText('Endpoint a')).toBeTruthy()
   })
 
   it('shows one chip for two enabled targets and discloses the rest', () => {
@@ -81,5 +94,65 @@ describe('ModelRouteTargetsSummary', () => {
     fireEvent.click(chip)
     const list = screen.getByRole('list')
     expect(within(list).getByText(longLabel)).toBeTruthy()
+  })
+
+  it('lists every configured target and names each switch', () => {
+    renderSummary([
+      target('a'),
+      target('b', { enabled: false }),
+      target('c', { endpoint_enabled: false }),
+    ])
+    fireEvent.click(screen.getByRole('button', { name: 'Endpoint a' }))
+    const list = screen.getByRole('list')
+    expect(within(list).getAllByRole('listitem')).toHaveLength(3)
+
+    const enabled = within(list).getByRole('switch', {
+      name: 'Target Endpoint a',
+    })
+    expect(enabled.getAttribute('aria-checked')).toBe('true')
+    const disabled = within(list).getByRole('switch', {
+      name: 'Target Endpoint b',
+    })
+    expect(disabled.getAttribute('aria-checked')).toBe('false')
+    const unavailable = within(list).getByRole('switch', {
+      name: 'Target Endpoint c',
+    })
+    expect(unavailable.getAttribute('aria-checked')).toBe('true')
+    expect(within(list).getByText('Upstream unavailable')).toBeTruthy()
+  })
+
+  it('switches one target and leaves the others alone', () => {
+    const onToggleTarget = vi.fn()
+    renderSummary([target('a'), target('b', { enabled: false })], {
+      onToggleTarget,
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Endpoint a' }))
+    const list = screen.getByRole('list')
+    fireEvent.click(
+      within(list).getByRole('switch', { name: 'Target Endpoint b' }),
+    )
+    expect(onToggleTarget).toHaveBeenCalledTimes(1)
+    expect(onToggleTarget).toHaveBeenCalledWith('b', true)
+  })
+
+  it('disables every target switch while the route write is pending', () => {
+    const onToggleTarget = vi.fn()
+    renderSummary([target('a'), target('b', { enabled: false })], {
+      onToggleTarget,
+      pending: true,
+      pendingTargetId: 'a',
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Endpoint a' }))
+    const list = screen.getByRole('list')
+    const first = within(list).getByRole('switch', {
+      name: 'Target Endpoint a',
+    })
+    const second = within(list).getByRole('switch', {
+      name: 'Target Endpoint b',
+    })
+    expect((first as HTMLButtonElement).disabled).toBe(true)
+    expect((second as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(first)
+    expect(onToggleTarget).not.toHaveBeenCalled()
   })
 })

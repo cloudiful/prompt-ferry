@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { ChevronsUpDown, X } from 'lucide-react'
 import type { NativeApi } from '@/generated/admin-api'
 import { Button } from '@/components/ui/button'
@@ -60,6 +60,19 @@ export function EndpointModelInput({
   const models = current ? catalog.models : []
   const failed = current && catalog.error
   const loading = activeKey !== null && (!current || catalog.loading)
+  const query = value.trim().toLocaleLowerCase()
+  const matching = useMemo(
+    () =>
+      query === ''
+        ? models
+        : models.filter((model) => model.toLocaleLowerCase().includes(query)),
+    [models, query],
+  )
+  // A filter, catalog, endpoint or protocol change invalidates whatever the
+  // operator had highlighted before; the option list is never longer than the
+  // current match set, so aria-activedescendant always names a real option.
+  const activeIndex = active >= 0 && active < matching.length ? active : -1
+  const empty = !loading && !failed && query !== '' && matching.length === 0
 
   useEffect(() => {
     let currentRequest = true
@@ -99,6 +112,11 @@ export function EndpointModelInput({
     setActive(-1)
   }, [activeKey])
 
+  useEffect(() => {
+    setActive(-1)
+    setHovered(-1)
+  }, [activeKey, catalog.models, query])
+
   function closeList(): void {
     setOpen(false)
     setActive(-1)
@@ -112,13 +130,27 @@ export function EndpointModelInput({
     setHovered(-1)
   }
 
+  function openList(): void {
+    setOpen(true)
+    setActive(-1)
+    setHovered(-1)
+  }
+
+  function handleValueChange(next: string): void {
+    onChange(next)
+    // Editing the text shows the matches for what the operator just typed;
+    // nothing is highlighted until an explicit arrow press.
+    if (endpointId) openList()
+  }
+
   function move(delta: number): void {
-    if (models.length === 0) return
+    if (matching.length === 0) return
     setActive((index) => {
       // Without an active option the first arrow press activates the first or
-      // the last option; afterwards the movement clamps and never wraps.
-      if (index < 0) return delta > 0 ? 0 : models.length - 1
-      return Math.min(models.length - 1, Math.max(0, index + delta))
+      // the last match; afterwards the movement clamps and never wraps.
+      if (index < 0 || index >= matching.length)
+        return delta > 0 ? 0 : matching.length - 1
+      return Math.min(matching.length - 1, Math.max(0, index + delta))
     })
   }
 
@@ -129,11 +161,14 @@ export function EndpointModelInput({
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>): void {
     if (disabled) return
+    // A composing IME owns Enter, Escape and the arrow keys until the
+    // composition is committed, so the candidate list never selects or
+    // submits mid-composition.
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return
     if (event.key === 'ArrowDown') {
       event.preventDefault()
       if (!open) {
-        setOpen(true)
-        setActive(-1)
+        openList()
         return
       }
       move(1)
@@ -142,8 +177,7 @@ export function EndpointModelInput({
     if (event.key === 'ArrowUp') {
       event.preventDefault()
       if (!open) {
-        setOpen(true)
-        setActive(-1)
+        openList()
         return
       }
       move(-1)
@@ -151,19 +185,19 @@ export function EndpointModelInput({
     }
     if (event.key === 'Home' && open) {
       event.preventDefault()
-      if (models.length > 0) setActive(0)
+      if (matching.length > 0) setActive(0)
       return
     }
     if (event.key === 'End' && open) {
       event.preventDefault()
-      if (models.length > 0) setActive(models.length - 1)
+      if (matching.length > 0) setActive(matching.length - 1)
       return
     }
     if (event.key === 'Enter') {
       // A free-text field inside the route form never submits the form; Enter
-      // only commits an option the operator deliberately activated.
+      // only commits a match the operator deliberately activated.
       event.preventDefault()
-      const model = open && active >= 0 ? models[active] : undefined
+      const model = open && activeIndex >= 0 ? matching[activeIndex] : undefined
       if (model !== undefined) choose(model)
       return
     }
@@ -181,7 +215,7 @@ export function EndpointModelInput({
       <div className="flex min-w-0 gap-1">
         <Input
           aria-activedescendant={
-            open && active >= 0 ? `${listId}-${active}` : undefined
+            open && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined
           }
           aria-autocomplete="list"
           aria-controls={listId}
@@ -192,7 +226,7 @@ export function EndpointModelInput({
           autoComplete="off"
           data-model-candidate-input
           disabled={disabled}
-          onChange={(event) => onChange(event.currentTarget.value)}
+          onChange={(event) => handleValueChange(event.currentTarget.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           ref={inputRef}
@@ -204,7 +238,10 @@ export function EndpointModelInput({
           <Button
             aria-label={`${t('delete')} ${t('upstreamModelOptional')}`}
             disabled={disabled}
-            onClick={() => onChange('')}
+            onClick={() => {
+              onChange('')
+              closeList()
+            }}
             size="icon"
             type="button"
             variant="outline"
@@ -216,7 +253,7 @@ export function EndpointModelInput({
           onOpenChange={(next) => {
             setOpen(next)
             // An open list never starts with an active option, so the first
-            // arrow press always activates the first or the last candidate.
+            // arrow press always activates the first or the last match.
             if (next) {
               setActive(-1)
               setHovered(-1)
@@ -262,10 +299,10 @@ export function EndpointModelInput({
               id={listId}
               role="listbox"
             >
-              {models.map((model, index) => (
+              {matching.map((model, index) => (
                 <li
-                  aria-selected={index === active}
-                  className={`flex min-h-8 cursor-pointer items-center rounded px-2 text-xs ${index === active || (active < 0 && index === hovered) ? 'bg-accent text-accent-foreground' : ''}`}
+                  aria-selected={index === activeIndex}
+                  className={`flex min-h-8 cursor-pointer items-center rounded px-2 text-xs ${index === activeIndex || (activeIndex < 0 && index === hovered) ? 'bg-accent text-accent-foreground' : ''}`}
                   data-model-candidate-option
                   id={`${listId}-${index}`}
                   key={model}
@@ -280,6 +317,15 @@ export function EndpointModelInput({
                 </li>
               ))}
             </ul>
+            {empty ? (
+              <p
+                className="px-2 py-3 text-xs text-muted-foreground"
+                data-model-candidate-empty
+                role="status"
+              >
+                {t('noData')}
+              </p>
+            ) : null}
           </PopoverContent>
         </Popover>
         {loading ? (

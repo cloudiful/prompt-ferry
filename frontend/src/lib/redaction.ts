@@ -70,7 +70,7 @@ type RedactionState = {
   customStringRows: number
   customStringSearch: string
   customStringDirty: boolean
-  customStringReveal: ReadonlySet<number>
+  customStringRevealAll: boolean
   validationError: boolean
   previewText: string
   previewInputKind: RedactionInputKindSchema
@@ -90,7 +90,7 @@ type RedactionState = {
     patch: Partial<CustomStringRuleSchema>,
   ) => void
   removeCustomStringRule: (arrayIndex: number) => void
-  toggleCustomStringReveal: (arrayIndex: number) => void
+  setCustomStringRevealAll: (revealed: boolean) => void
   setEnabled: (enabled: boolean) => void
   setBuiltinRule: (rule: RedactionRuleKey, enabled: boolean) => void
   save: () => Promise<AsyncActionOutcome<RedactionConfigSchema>>
@@ -353,7 +353,7 @@ export const useRedactionStore = create<RedactionState>((set, get) => ({
   customStringRows: initialPageSize(),
   customStringSearch: '',
   customStringDirty: false,
-  customStringReveal: new Set<number>(),
+  customStringRevealAll: false,
   validationError: false,
   previewText: '',
   previewInputKind: 'text',
@@ -394,7 +394,7 @@ export const useRedactionStore = create<RedactionState>((set, get) => ({
       customStringRows: initialPageSize(),
       customStringSearch: '',
       customStringDirty: false,
-      customStringReveal: new Set<number>(),
+      customStringRevealAll: false,
       validationError: false,
       previewText: '',
       previewInputKind: 'text',
@@ -467,7 +467,7 @@ export const useRedactionStore = create<RedactionState>((set, get) => ({
       customStringTotal: 0,
       customStringFirst: 0,
       customStringDirty: false,
-      customStringReveal: new Set<number>(),
+      customStringRevealAll: false,
       validationError: false,
       previewResult: null,
     })
@@ -505,7 +505,7 @@ export const useRedactionStore = create<RedactionState>((set, get) => ({
             : (response.user_id ?? latest.targetUserId),
         loadedTargetToken: token,
         customStringDirty: false,
-        customStringReveal: new Set<number>(),
+        customStringRevealAll: false,
         validationError: false,
         customStringPage: [],
         customStringTotal: 0,
@@ -566,9 +566,6 @@ export const useRedactionStore = create<RedactionState>((set, get) => ({
       ...state.config.custom_strings,
       { pattern: '', match_type: 'contains', scope: 'text' },
     ]
-    const arrayIndex = customStrings.length - 1
-    const revealed = new Set(state.customStringReveal)
-    revealed.add(arrayIndex)
     const config = { ...state.config, custom_strings: customStrings }
     const local = localRedactionPage({
       config,
@@ -582,7 +579,6 @@ export const useRedactionStore = create<RedactionState>((set, get) => ({
       customStringFirst: 0,
       customStringPage: local.items,
       customStringTotal: local.total,
-      customStringReveal: revealed,
       validationError: false,
     })
   },
@@ -623,27 +619,18 @@ export const useRedactionStore = create<RedactionState>((set, get) => ({
       rows: state.customStringRows,
       search: state.customStringSearch,
     })
-    const revealed = new Set<number>()
-    for (const current of state.customStringReveal) {
-      if (current === arrayIndex) continue
-      revealed.add(current > arrayIndex ? current - 1 : current)
-    }
     set({
       config,
       customStringDirty: true,
       customStringFirst: local.first,
       customStringPage: local.items,
       customStringTotal: local.total,
-      customStringReveal: revealed,
       validationError: false,
     })
   },
 
-  toggleCustomStringReveal(arrayIndex) {
-    const revealed = new Set(get().customStringReveal)
-    if (revealed.has(arrayIndex)) revealed.delete(arrayIndex)
-    else revealed.add(arrayIndex)
-    set({ customStringReveal: revealed })
+  setCustomStringRevealAll(revealed) {
+    set({ customStringRevealAll: revealed })
   },
 
   setEnabled(enabled) {
@@ -703,14 +690,19 @@ export const useRedactionStore = create<RedactionState>((set, get) => ({
           if (
             latest.identityKey === identityKey &&
             latest.identityGeneration === identityGeneration &&
-            token === redactionTargetToken(latest) &&
-            sameConfig(latest.config, submitted)
+            token === redactionTargetToken(latest)
           ) {
-            set({
-              config: normalizeRedactionConfig(response.config),
-              customStringDirty: false,
-              customStringReveal: new Set<number>(),
-            })
+            // Re-mask on save success even when a newer edit kept the response
+            // config out, so a revealed row cannot be mistaken for another one.
+            set(
+              sameConfig(latest.config, submitted)
+                ? {
+                    config: normalizeRedactionConfig(response.config),
+                    customStringDirty: false,
+                    customStringRevealAll: false,
+                  }
+                : { customStringRevealAll: false },
+            )
           }
           const afterWrite = get()
           if (

@@ -366,10 +366,16 @@ describe('ModelRoutesPage', () => {
         document.querySelectorAll('[data-model-candidate-option]'),
       ).map((option) => option.textContent)
     fireEvent.click(screen.getByRole('button', { name: 'Model candidates' }))
-    await waitFor(() => expect(suggestions()).toEqual(['responses-only-model']))
+    await waitFor(() => expect(suggestions()).toEqual([]))
+    expect(
+      document.querySelector('[data-model-candidate-empty]')?.textContent,
+    ).toBe('No data')
     await act(async () => resolveInitial({ models: ['stale-chat-model'] }))
-    expect(suggestions()).toEqual(['responses-only-model'])
+    // The late chat response never leaks a suggestion into the responses list.
+    expect(suggestions()).toEqual([])
     expect(currentInput.disabled).toBe(false)
+    fireEvent.change(currentInput, { target: { value: 'responses' } })
+    await waitFor(() => expect(suggestions()).toEqual(['responses-only-model']))
     fireEvent.keyDown(currentInput, { key: 'Escape' })
     expect(screen.queryByRole('listbox')).toBeNull()
     fireEvent.click(
@@ -384,7 +390,7 @@ describe('ModelRoutesPage', () => {
     ).toBe('')
   })
 
-  it('opens the candidate list only on demand and never commits implicitly', async () => {
+  it('opens and filters candidates while typing without committing implicitly', async () => {
     api.fetchEndpointModels.mockResolvedValue({
       models: ['alpha-model', 'beta-model'],
     })
@@ -400,19 +406,21 @@ describe('ModelRoutesPage', () => {
 
     fireEvent.focus(input)
     expect(screen.queryByRole('listbox')).toBeNull()
-    fireEvent.change(input, { target: { value: 'alp' } })
-    expect(screen.queryByRole('listbox')).toBeNull()
-    expect(input.value).toBe('alp')
-
-    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.change(input, { target: { value: 'ALP' } })
     const list = await screen.findByRole('listbox')
     expect(
       within(list)
         .getAllByRole('option')
         .map((option) => option.textContent),
-    ).toEqual(['alpha-model', 'beta-model'])
+    ).toEqual(['alpha-model'])
+    expect(input.value).toBe('ALP')
     expect(list.querySelector('[aria-selected="true"]')).toBeNull()
     expect(input.getAttribute('aria-activedescendant')).toBeNull()
+    // Enter without an active match never commits or submits.
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(input.value).toBe('ALP')
+    expect(screen.getByRole('listbox')).toBeTruthy()
+    expect(api.persistModelRoute).not.toHaveBeenCalled()
 
     fireEvent.keyDown(input, { key: 'ArrowDown' })
     expect(input.getAttribute('aria-activedescendant')).toBe(`${list.id}-0`)
@@ -422,15 +430,20 @@ describe('ModelRoutesPage', () => {
     expect(screen.getByRole('dialog')).toBeTruthy()
     expect(api.persistModelRoute).not.toHaveBeenCalled()
 
-    fireEvent.change(input, { target: { value: 'manual-draft' } })
+    fireEvent.change(input, { target: { value: 'MANUAL-DRAFT' } })
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-model-candidate-empty]')?.textContent,
+      ).toBe('No data'),
+    )
+    expect(input.value).toBe('MANUAL-DRAFT')
     fireEvent.keyDown(input, { key: 'ArrowDown' })
-    await screen.findByRole('listbox')
-    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    expect(screen.queryByRole('listbox')).toBeTruthy()
     fireEvent.keyDown(input, { key: 'Escape' })
     expect(screen.queryByRole('listbox')).toBeNull()
-    expect(input.value).toBe('manual-draft')
+    expect(input.value).toBe('MANUAL-DRAFT')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Model candidates' }))
+    fireEvent.change(input, { target: { value: 'beta' } })
     const reopened = await screen.findByRole('listbox')
     expect(reopened.querySelector('[aria-selected="true"]')).toBeNull()
     fireEvent.click(
@@ -453,6 +466,10 @@ describe('ModelRoutesPage', () => {
       '[data-model-candidate-input]',
     ) as HTMLInputElement
     await waitFor(() => expect(api.fetchEndpointModels).toHaveBeenCalled())
+    // Start from an empty draft so the toggle offers the full catalog.
+    fireEvent.change(input, { target: { value: '' } })
+    await screen.findByRole('listbox')
+    fireEvent.keyDown(input, { key: 'Escape' })
     const toggle = screen.getByRole('button', { name: 'Model candidates' })
     toggle.focus()
     fireEvent.keyDown(toggle, { key: 'Enter' })
@@ -482,6 +499,9 @@ describe('ModelRoutesPage', () => {
     ) as HTMLInputElement
     await waitFor(() => expect(api.fetchEndpointModels).toHaveBeenCalled())
     const toggle = screen.getByRole('button', { name: 'Model candidates' })
+    fireEvent.change(input, { target: { value: '' } })
+    await screen.findByRole('listbox')
+    fireEvent.keyDown(input, { key: 'Escape' })
 
     // The pointer picks the second candidate and stays over that option.
     fireEvent.click(toggle)
@@ -494,6 +514,10 @@ describe('ModelRoutesPage', () => {
 
     // Reopening from the toggle leaves no candidate active, not even while the
     // pointer rests over an option.
+    fireEvent.click(
+      screen.getByRole('button', { name: /Delete Upstream model name/ }),
+    )
+    expect(input.value).toBe('')
     fireEvent.click(toggle)
     const reopened = await screen.findByRole('listbox')
     const reopenedOptions = within(reopened).getAllByRole('option')
@@ -609,6 +633,8 @@ describe('ModelRoutesPage', () => {
     fireEvent.keyDown(input, { key: 'ArrowDown' })
     const list = await screen.findByRole('listbox')
     expect(list.getAttribute('aria-busy')).toBe('true')
+    expect(within(list).queryAllByRole('option')).toHaveLength(0)
+    fireEvent.change(input, { target: { value: 'alpha' } })
     expect(within(list).queryAllByRole('option')).toHaveLength(0)
     await act(async () => resolveCatalog({ models: ['alpha-model'] }))
     await waitFor(() =>

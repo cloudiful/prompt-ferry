@@ -499,6 +499,43 @@ describe('usage page integration', () => {
     expect(api.requestRecordOverview).not.toHaveBeenCalled()
   })
 
+  it('collapses the record filters by default and keeps the draft and active filters', async () => {
+    renderPage()
+    await waitFor(() => expect(api.listRequestRecords).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: copy.recordsMode }))
+
+    const toggle = screen.getByRole('button', { name: copy.advancedFilters })
+    const panel = document.querySelector(
+      '[data-usage-filter-panel]',
+    ) as HTMLElement
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(toggle.getAttribute('aria-controls')).toBe(panel.id)
+    expect(panel.hasAttribute('hidden')).toBe(true)
+    expect(screen.getByRole('button', { name: copy.clearHistory })).toBeTruthy()
+
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(panel.hasAttribute('hidden')).toBe(false)
+
+    const input = screen.getByPlaceholderText(copy.search) as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'draft needle' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() =>
+      expect(toggle.getAttribute('aria-label')).toBe(
+        copy.advancedFiltersActive.replace('{count}', '1'),
+      ),
+    )
+    expect(document.querySelector('[data-usage-active-filters]')).toBeTruthy()
+
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(panel.hasAttribute('hidden')).toBe(true)
+    expect(input.value).toBe('draft needle')
+    expect(toggle.getAttribute('aria-label')).toBe(
+      copy.advancedFiltersActive.replace('{count}', '1'),
+    )
+  })
+
   it('loads the MCP category from the route without refreshing twice', async () => {
     renderPage('/request-records/mcp')
     await waitFor(() => expect(api.requestRecordOverview).toHaveBeenCalled())

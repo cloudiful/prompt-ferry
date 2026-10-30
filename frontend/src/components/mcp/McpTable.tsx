@@ -1,5 +1,9 @@
 import { LoaderCircle, Pencil, RefreshCw, Trash2 } from 'lucide-react'
-import { TestResultPopover } from '@/components/shared/TestResultPopover'
+import {
+  TestResultPopover,
+  testResultKey,
+  type TestResultSurface,
+} from '@/components/shared/TestResultPopover'
 import { TablePagination } from '@/components/shared/TablePagination'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -27,8 +31,10 @@ type McpTableProps = {
   onDelete: (server: McpServer) => void
   onEdit: (server: McpServer) => void
   onPageChange: (change: TablePageChange) => void
-  onTest: (server: McpServer) => void
+  onResultOpenChange: (key: string, open: boolean) => void
+  onTest: (server: McpServer, surface: TestResultSurface) => void
   onToggle: (server: McpServer) => void
+  openResultKey: string | null
   pendingActions: Readonly<Record<string, string>>
   rows: number
   total: number
@@ -41,8 +47,10 @@ export function McpTable({
   onDelete,
   onEdit,
   onPageChange,
+  onResultOpenChange,
   onTest,
   onToggle,
+  openResultKey,
   pendingActions,
   rows,
   total,
@@ -56,7 +64,6 @@ export function McpTable({
           <TableRow>
             <TableHead>{t('name')}</TableHead>
             <TableHead>{t('status')}</TableHead>
-            <TableHead>{t('test')}</TableHead>
             <TableHead>
               <span className="sr-only">{t('edit')}</span>
             </TableHead>
@@ -67,7 +74,7 @@ export function McpTable({
             <TableRow>
               <TableCell
                 className="py-6 text-center text-sm text-muted-foreground"
-                colSpan={4}
+                colSpan={3}
               >
                 {busy ? (
                   <span
@@ -93,6 +100,7 @@ export function McpTable({
                 pendingActions,
                 mcpTestKey(item.server_id),
               )
+              const resultKey = testResultKey('desktop', item.server_id)
               return (
                 <TableRow
                   data-mcp-server-row={item.server_id}
@@ -131,34 +139,37 @@ export function McpTable({
                     </div>
                   </TableCell>
                   <TableCell>
-                    <TestResultPopover
-                      message={item.test_message}
-                      severity={
-                        item.test_ok === null
-                          ? null
-                          : item.test_ok
-                            ? 'success'
-                            : 'error'
-                      }
-                    />
-                  </TableCell>
-                  <TableCell>
                     <div className="flex justify-end gap-1">
-                      <Button
-                        aria-label={t('refreshCatalog')}
-                        disabled={testing}
-                        onClick={() => onTest(item.server)}
-                        size="icon-sm"
-                        title={t('refreshCatalog')}
-                        type="button"
-                        variant="ghost"
+                      <TestResultPopover
+                        message={item.test_message}
+                        onOpenChange={(open) =>
+                          onResultOpenChange(resultKey, open)
+                        }
+                        open={openResultKey === resultKey}
+                        severity={
+                          item.test_ok === null
+                            ? null
+                            : item.test_ok
+                              ? 'success'
+                              : 'error'
+                        }
                       >
-                        {testing ? (
-                          <LoaderCircle className="animate-spin" />
-                        ) : (
-                          <RefreshCw />
-                        )}
-                      </Button>
+                        <Button
+                          aria-label={t('refreshCatalog')}
+                          disabled={testing}
+                          onClick={() => onTest(item.server, 'desktop')}
+                          size="icon-sm"
+                          title={t('refreshCatalog')}
+                          type="button"
+                          variant="ghost"
+                        >
+                          {testing ? (
+                            <LoaderCircle className="animate-spin" />
+                          ) : (
+                            <RefreshCw />
+                          )}
+                        </Button>
+                      </TestResultPopover>
                       <Button
                         aria-label={t('edit')}
                         disabled={Boolean(action)}

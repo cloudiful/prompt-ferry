@@ -259,7 +259,7 @@ async page => {
 
   const idleRow = page.locator('[data-endpoint-row="ep-minimax-cn"]')
   const idleControlCount = await idleRow
-    .locator('button[aria-label="Not tested"]')
+    .locator('button[aria-label*="HTTP"]')
     .count()
   assert(
     idleControlCount === 0,
@@ -267,17 +267,10 @@ async page => {
   )
   const probeRow = page.locator('[data-endpoint-row="ep-openai-codex"]')
   await probeRow.getByRole('button', { name: 'Test', exact: true }).click()
-  const probeResultControl = probeRow.locator('button[aria-label*="HTTP"]')
-  await probeResultControl.waitFor({ state: 'visible' })
-  const probeResultName = await probeResultControl.getAttribute('aria-label')
-  assert(
-    (probeResultName ?? '').includes('HTTP'),
-    `a row with a test result did not expose its result control: ${probeResultName}`,
-  )
-  await probeResultControl.click()
   const probePopover = page
-    .getByText('HTTP', { exact: false })
-    .last()
+    .locator('[data-slot="popover-content"]')
+    .filter({ hasText: 'HTTP' })
+    .first()
   await probePopover.waitFor({ state: 'visible' })
   const probePopoverText = await probePopover.innerText()
   assert(
@@ -285,9 +278,17 @@ async page => {
     `the test-result popover did not show the result message: ${probePopoverText}`,
   )
   await page.keyboard.press('Escape')
+  await probePopover.waitFor({ state: 'hidden' })
+  const persistentResultCount = await probeRow
+    .locator('button[aria-label*="HTTP"]')
+    .count()
+  assert(
+    persistentResultCount === 0,
+    'the closed test result kept a permanent result control in the row',
+  )
   report.checks.testResultControl = {
     idleControlAbsent: idleControlCount === 0,
-    populatedControlName: probeResultName,
+    persistentResultAbsent: persistentResultCount === 0,
     popoverText: probePopoverText,
   }
 

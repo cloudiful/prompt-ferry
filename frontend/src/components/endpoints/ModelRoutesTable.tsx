@@ -1,5 +1,9 @@
 import { LoaderCircle, Pencil, RefreshCw, Trash2 } from 'lucide-react'
-import { TestResultPopover } from '@/components/shared/TestResultPopover'
+import {
+  TestResultPopover,
+  testResultKey,
+  type TestResultSurface,
+} from '@/components/shared/TestResultPopover'
 import { TablePagination } from '@/components/shared/TablePagination'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -16,7 +20,10 @@ import {
   modelRouteActionKey,
   type ModelRouteListItemView,
 } from '@/models/endpoints'
-import { modelRouteTestCounts } from '@/models/endpoints/model-route-item'
+import {
+  modelRouteTargetToggleOriginTarget,
+  modelRouteTestCounts,
+} from '@/models/endpoints/model-route-item'
 import {
   STANDARD_PAGE_SIZE_OPTIONS,
   type TablePageChange,
@@ -29,9 +36,12 @@ type ModelRoutesTableProps = {
   onDelete: (ruleId: string) => void
   onEdit: (ruleId: string) => void
   onPageChange: (change: TablePageChange) => void
-  onProbe: (ruleId: string) => void
+  onProbe: (ruleId: string, surface: TestResultSurface) => void
+  onResultOpenChange: (key: string, open: boolean) => void
   onShowDetails: (ruleId: string) => void
   onToggle: (ruleId: string, enabled: boolean) => void
+  onToggleTarget: (ruleId: string, targetId: string, enabled: boolean) => void
+  openResultKey: string | null
   pendingActions: Readonly<Record<string, string>>
   rows: number
   total: number
@@ -44,8 +54,11 @@ export function ModelRoutesTable({
   onEdit,
   onPageChange,
   onProbe,
+  onResultOpenChange,
   onShowDetails,
   onToggle,
+  onToggleTarget,
+  openResultKey,
   pendingActions,
   rows,
   total,
@@ -60,7 +73,6 @@ export function ModelRoutesTable({
             <TableHead>{t('modelPattern')}</TableHead>
             <TableHead>{t('endpoint')}</TableHead>
             <TableHead>{t('status')}</TableHead>
-            <TableHead>{t('test')}</TableHead>
             <TableHead>
               <span className="sr-only">{t('edit')}</span>
             </TableHead>
@@ -71,7 +83,7 @@ export function ModelRoutesTable({
             <TableRow>
               <TableCell
                 className="py-8 text-center text-muted-foreground"
-                colSpan={5}
+                colSpan={4}
               >
                 {t('noModelRoutes')}
               </TableCell>
@@ -81,6 +93,7 @@ export function ModelRoutesTable({
               const writeKey = modelRouteActionKey(item.rule_id)
               const pending = pendingActions[writeKey]
               const counts = modelRouteTestCounts(item.test_results)
+              const resultKey = testResultKey('desktop', item.rule_id)
               return (
                 <TableRow
                   data-model-route-row={item.rule_id}
@@ -97,7 +110,16 @@ export function ModelRoutesTable({
                   </TableCell>
                   <TableCell className="min-w-0 max-w-[28rem]">
                     <div className="grid min-w-0 gap-1">
-                      <ModelRouteTargetsSummary targets={item.targets} />
+                      <ModelRouteTargetsSummary
+                        onToggleTarget={(targetId, enabled) =>
+                          onToggleTarget(item.rule_id, targetId, enabled)
+                        }
+                        pending={Boolean(pending)}
+                        pendingTargetId={modelRouteTargetToggleOriginTarget(
+                          pending,
+                        )}
+                        targets={item.targets}
+                      />
                       {item.owner_label ? (
                         <span className="text-xs text-muted-foreground">
                           {item.owner_label}
@@ -107,9 +129,6 @@ export function ModelRoutesTable({
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2 whitespace-nowrap">
-                      <span className="rounded-full border px-2 py-0.5 text-xs">
-                        {item.scope_label}
-                      </span>
                       <Switch
                         aria-label={`${t('status')} ${item.model_pattern}`}
                         checked={item.enabled}
@@ -127,34 +146,37 @@ export function ModelRoutesTable({
                     </div>
                   </TableCell>
                   <TableCell>
-                    <TestResultPopover
-                      detailLabel={
-                        counts.total
-                          ? `${counts.passed}/${counts.total}`
-                          : undefined
-                      }
-                      message={item.test_message}
-                      onSelect={() => onShowDetails(item.rule_id)}
-                      severity={item.test_severity}
-                    />
-                  </TableCell>
-                  <TableCell>
                     <div className="flex justify-end gap-1">
-                      <Button
-                        aria-label={`${t('test')} ${item.model_pattern}`}
-                        disabled={item.testing}
-                        onClick={() => onProbe(item.rule_id)}
-                        size="icon-sm"
-                        title={t('test')}
-                        type="button"
-                        variant="ghost"
+                      <TestResultPopover
+                        detailLabel={
+                          counts.total
+                            ? `${counts.passed}/${counts.total}`
+                            : undefined
+                        }
+                        message={item.test_message}
+                        onOpenChange={(open) =>
+                          onResultOpenChange(resultKey, open)
+                        }
+                        onSelect={() => onShowDetails(item.rule_id)}
+                        open={openResultKey === resultKey}
+                        severity={item.test_severity}
                       >
-                        {item.testing ? (
-                          <LoaderCircle className="animate-spin" />
-                        ) : (
-                          <RefreshCw />
-                        )}
-                      </Button>
+                        <Button
+                          aria-label={`${t('test')} ${item.model_pattern}`}
+                          disabled={item.testing}
+                          onClick={() => onProbe(item.rule_id, 'desktop')}
+                          size="icon-sm"
+                          title={t('test')}
+                          type="button"
+                          variant="ghost"
+                        >
+                          {item.testing ? (
+                            <LoaderCircle className="animate-spin" />
+                          ) : (
+                            <RefreshCw />
+                          )}
+                        </Button>
+                      </TestResultPopover>
                       <Button
                         aria-label={`${t('edit')} ${item.model_pattern}`}
                         disabled={Boolean(pending)}

@@ -3,7 +3,11 @@ import { QuotaBadges } from '@/components/endpoints/QuotaBadges'
 import { ProviderIcon } from '@/components/providers/ProviderIcon'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { TestResultPopover } from '@/components/shared/TestResultPopover'
+import {
+  TestResultPopover,
+  testResultKey,
+  type TestResultSurface,
+} from '@/components/shared/TestResultPopover'
 import { useLocale } from '@/lib/i18n'
 import { isQuotaEligible } from '@/models/endpoints/quota'
 import {
@@ -16,9 +20,11 @@ type EndpointMobileCardProps = {
   item: EndpointListItemView
   onDelete: (endpointId: string) => void
   onEdit: (endpointId: string) => void
-  onTest: (endpointId: string) => void
+  onResultOpenChange: (key: string, open: boolean) => void
+  onTest: (endpointId: string, surface: TestResultSurface) => void
   onTokenPlanUsage: (endpointId: string) => void
   onToggle: (endpointId: string, enabled: boolean) => void
+  openResultKey: string | null
   pendingActions: Readonly<Record<string, string>>
 }
 
@@ -26,9 +32,11 @@ export function EndpointMobileCard({
   item,
   onDelete,
   onEdit,
+  onResultOpenChange,
   onTest,
   onTokenPlanUsage,
   onToggle,
+  openResultKey,
   pendingActions,
 }: EndpointMobileCardProps) {
   const { t } = useLocale()
@@ -37,6 +45,7 @@ export function EndpointMobileCard({
   const rowPending = Object.hasOwn(pendingActions, rowKey)
   const rowOrigin = pendingActions[rowKey]
   const probePending = Object.hasOwn(pendingActions, probeKey)
+  const resultKey = testResultKey('mobile', item.endpoint_id)
 
   return (
     <article
@@ -79,13 +88,6 @@ export function EndpointMobileCard({
             />
           ) : null}
         </div>
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="text-xs text-muted-foreground">{t('test')}</span>
-          <TestResultPopover
-            message={item.test_message}
-            severity={item.test_severity}
-          />
-        </div>
         {isQuotaEligible(item) ? (
           <div className="grid min-w-0 gap-1">
             <span className="text-xs text-muted-foreground">
@@ -111,19 +113,26 @@ export function EndpointMobileCard({
             {t('tokenPlanUsage')}
           </Button>
         ) : null}
-        <Button
-          disabled={probePending}
-          onClick={() => onTest(item.endpoint_id)}
-          type="button"
-          variant="outline"
+        <TestResultPopover
+          message={item.test_message}
+          onOpenChange={(open) => onResultOpenChange(resultKey, open)}
+          open={openResultKey === resultKey}
+          severity={item.test_severity}
         >
-          {probePending ? (
-            <LoaderCircle aria-hidden="true" className="animate-spin" />
-          ) : (
-            <RefreshCw aria-hidden="true" />
-          )}
-          {t('test')}
-        </Button>
+          <Button
+            disabled={probePending}
+            onClick={() => onTest(item.endpoint_id, 'mobile')}
+            type="button"
+            variant="outline"
+          >
+            {probePending ? (
+              <LoaderCircle aria-hidden="true" className="animate-spin" />
+            ) : (
+              <RefreshCw aria-hidden="true" />
+            )}
+            {t('test')}
+          </Button>
+        </TestResultPopover>
         <Button
           disabled={rowPending}
           onClick={() => onEdit(item.endpoint_id)}

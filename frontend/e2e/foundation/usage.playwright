@@ -167,6 +167,21 @@ async page => {
     await page.waitForTimeout(200)
   }
 
+  async function openFilters() {
+    const toggle = page.locator('[data-usage-advanced-filters]')
+    if ((await toggle.getAttribute('aria-expanded')) !== 'true') {
+      await toggle.click()
+      await page.waitForTimeout(200)
+    }
+    assert(
+      (await toggle.getAttribute('aria-expanded')) === 'true',
+      'the advanced filters did not expand',
+    )
+    const panel = page.locator('[data-usage-filter-panel]')
+    assert((await panel.count()) === 1, 'the advanced filter panel is not mounted')
+    assert(!(await panel.isHidden()), 'the advanced filter panel stayed hidden')
+  }
+
   async function mode(name) {
     try {
       await page.getByRole('button', { name, exact: true }).click()
@@ -248,6 +263,19 @@ async page => {
 
   stage = 'ai-records-pagination'
   await mode('Records')
+  const advancedToggle = page.locator('[data-usage-advanced-filters]')
+  assert(
+    (await advancedToggle.getAttribute('aria-expanded')) === 'false',
+    'the advanced filters are expanded by default',
+  )
+  assert(
+    await page.locator('[data-usage-filter-panel]').isHidden(),
+    'the advanced filter panel is visible by default',
+  )
+  report.checks.advancedFiltersDefault = {
+    collapsed: true,
+    mounted: (await page.locator('[data-usage-filter-panel]').count()) === 1,
+  }
   const defaultRows = await page.locator('[data-usage-record-row]').count()
   assert(defaultRows === 25, `default page rows: expected 25, got ${defaultRows}`)
   await page.getByRole('combobox', { name: 'Rows per page' }).click()
@@ -269,6 +297,54 @@ async page => {
   )
   report.checks.pagination = { pageOne: pageOne.length, pageTwo: pageTwo.length, persistedRows: 10 }
   pass('R-USAGE-AI', 'pagination', 'page two had distinct rows and the page size persisted')
+
+  stage = 'navigation-compact'
+  const measureNav = (selector) =>
+    page.evaluate((selector) => {
+      const nav = document.querySelector(selector)
+      if (!nav) return null
+      const links = [...nav.querySelectorAll('a')]
+      const nested = [...nav.querySelectorAll('div.grid > div.grid')]
+      return {
+        links: links.length,
+        minLinkHeight: Math.min(
+          ...links.map((link) => Math.round(link.getBoundingClientRect().height)),
+        ),
+        nestedRowGap: nested.length
+          ? Number.parseFloat(getComputedStyle(nested[0]).rowGap || '0')
+          : 0,
+        label: nav.getAttribute('aria-label'),
+      }
+    }, selector)
+  const desktopNav = await measureNav('aside nav')
+  assert(
+    desktopNav !== null && desktopNav.links > 0,
+    'the desktop navigation links are missing',
+  )
+  assert(
+    desktopNav.minLinkHeight >= 36,
+    `the desktop navigation links are below the touch height: ${desktopNav.minLinkHeight}`,
+  )
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.waitForTimeout(250)
+  await page.getByRole('button', { name: 'Expand navigation' }).click()
+  await page.locator('[data-slot="sheet-content"]').waitFor({ state: 'visible' })
+  await page.waitForTimeout(600)
+  const mobileNav = await measureNav('[data-slot="sheet-content"] nav')
+  assert(mobileNav !== null && mobileNav.links > 0, 'the mobile navigation links are missing')
+  assert(
+    mobileNav.minLinkHeight >= 36,
+    `the mobile navigation links are below the touch height: ${mobileNav.minLinkHeight}`,
+  )
+  assert(
+    desktopNav.nestedRowGap <= 4 && mobileNav.nestedRowGap <= 4,
+    `the navigation row gap is not compact: ${desktopNav.nestedRowGap}/${mobileNav.nestedRowGap}`,
+  )
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  await page.waitForTimeout(200)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  report.checks.navigation = { desktop: desktopNav, mobile: mobileNav }
+  pass('R-USAGE-AI', 'responsive-width', 'both navigation shells kept touch height with compact row spacing')
 
   stage = 'ai-sort-keyboard'
   await page.waitForTimeout(300)
@@ -299,6 +375,7 @@ async page => {
   assert((await page.locator('[data-usage-column="throughput"] button').count()) === 0, 'throughput header gained a sort control')
   // The header button is reached with Tab from the page's own search control,
   // so the proof is real tab order rather than a programmatic focus call.
+  await openFilters()
   await page.getByPlaceholder('Search').click()
   let tabReachedDate = false
   for (let step = 0; step < 12; step += 1) {
@@ -343,6 +420,7 @@ async page => {
   stage = 'ai-search-and-filters'
   await page.getByRole('button', { name: 'First page' }).click().catch(() => {})
   await page.waitForTimeout(250)
+  await openFilters()
   const search = page.getByPlaceholder('Search')
   const listBeforeSearch = requestsFor('GET', '/api/v1/admin/request-records').length
   await search.fill('fixture')
@@ -361,6 +439,50 @@ async page => {
   assert(lastRequest('GET', '/api/v1/admin/request-records')?.state === 'failed', 'state select did not apply immediately')
   assert(requestsFor('GET', '/api/v1/admin/request-records/facets').length === facetsBefore, 'a record filter refreshed the facets')
   report.checks.filters = { searchEnterOnly: true, clientKey: true, state: true }
+
+  stage = 'ai-advanced-filter-retention'
+  const filterToggle = page.locator('[data-usage-advanced-filters]')
+  const filterPanel = page.locator('[data-usage-filter-panel]')
+  const draft = 'uncommitted draft'
+  await page.locator('[data-usage-toolbar-search]').fill(draft)
+  const requestsBeforeToggle = report.requests.length
+  await filterToggle.click()
+  await page.waitForTimeout(200)
+  assert(
+    (await filterToggle.getAttribute('aria-expanded')) === 'false',
+    'collapsing the advanced filters did not update aria-expanded',
+  )
+  assert(await filterPanel.isHidden(), 'the collapsed advanced filter panel stayed visible')
+  assert((await filterPanel.count()) === 1, 'collapsing unmounted the filter panel and its draft')
+  const activeBadge = (await filterToggle.locator('[data-usage-active-filters]').innerText()).trim()
+  assert(activeBadge === '2', `the collapsed filters do not show the two active filters: ${activeBadge}`)
+  assert(
+    (await filterToggle.getAttribute('aria-label')) === 'Advanced filters (2 active)',
+    'the collapsed toggle does not carry the active-filter accessible name',
+  )
+  await filterToggle.click()
+  await page.waitForTimeout(200)
+  assert(
+    (await page.locator('[data-usage-toolbar-search]').inputValue()) === draft,
+    'reopening the advanced filters lost the uncommitted search draft',
+  )
+  assert(
+    (await page.getByRole('combobox', { name: 'All status' }).innerText()).includes('Failed'),
+    'reopening the advanced filters lost the applied status filter',
+  )
+  assert(
+    report.requests.length === requestsBeforeToggle,
+    'collapsing or reopening the advanced filters issued a request',
+  )
+  report.checks.advancedFilters = {
+    collapsed: true,
+    retainedDraft: true,
+    retainedFilter: true,
+    activeCount: Number(activeBadge),
+    noRequest: true,
+    mounted: true,
+  }
+  pass('R-USAGE-AI', 'mutation-update', 'the advanced filters collapsed without dropping the draft or applied filter')
 
   stage = 'ai-range'
   await page.getByRole('button', { name: 'Time range' }).click()
@@ -712,6 +834,7 @@ async page => {
   stage = 'ai-nullable-cells'
   await mode('Records')
   await page.waitForTimeout(400)
+  await openFilters()
   await selectOption('All status', 'All status')
   await page.waitForTimeout(400)
   const search4 = page.getByPlaceholder('Search')
@@ -771,6 +894,7 @@ async page => {
 
   stage = 'ai-detail-variants'
   async function openSearchedRecord(recordId) {
+    await openFilters()
     const search = page.getByPlaceholder('Search')
     await search.fill(`req-fixture-${recordId}`)
     await search.press('Enter')
@@ -1098,6 +1222,7 @@ async page => {
     requiredModelWidth,
   }
   await page.setViewportSize({ width: 1440, height: 900 })
+  await openFilters()
   await page.locator('[data-usage-toolbar-search]').fill('')
   await page.locator('[data-usage-toolbar-search]').press('Enter')
   await page.waitForFunction(
@@ -1445,10 +1570,11 @@ async page => {
   stage = 'mcp-route'
   await go('/request-records/mcp', 'R-USAGE-MCP')
   assert((await page.locator('[data-usage-metric]').count()) === 5, 'MCP metric cards are not five')
-  assert((await page.getByRole('combobox', { name: 'MCP record scope' }).count()) === 1, 'MCP scope select missing')
   assert((await page.getByRole('combobox', { name: 'View' }).count()) === 0, 'MCP shows the model perspective select')
   await mode('Records')
   await page.waitForTimeout(400)
+  await openFilters()
+  assert((await page.getByRole('combobox', { name: 'MCP record scope' }).count()) === 1, 'MCP scope select missing')
   const mcpColumns = await page.locator('[data-usage-column]').evaluateAll((cells) => cells.map((cell) => cell.getAttribute('data-usage-column')))
   for (const column of ['details', 'target', 'provider_kind', 'mcp_method', 'mcp_operation', 'error']) {
     assert(mcpColumns.includes(column), `MCP table is missing the ${column} column`)
@@ -1511,6 +1637,7 @@ async page => {
   await page.waitForTimeout(300)
   await selectOption('MCP record scope', 'Gateway requests')
   await page.waitForTimeout(500)
+  await openFilters()
   await page.getByPlaceholder('Search').fill('resources/read')
   await page.getByPlaceholder('Search').press('Enter')
   await page.waitForTimeout(500)
@@ -1528,6 +1655,7 @@ async page => {
   await go('/request-records/mcp', 'R-USAGE-MCP')
   await mode('Records')
   await page.waitForTimeout(450)
+  await openFilters()
   await selectOption('MCP record scope', 'All records')
   await page.waitForTimeout(400)
   await page.getByRole('combobox', { name: 'Rows per page' }).click()
@@ -1584,6 +1712,7 @@ async page => {
   await signOut()
   await signIn('admin')
   await go('/request-records/ai', 'R-USAGE-AI')
+  await openFilters()
   assert((await page.getByRole('combobox', { name: 'All users' }).count()) === 1, 'admin user filter missing')
 
   stage = 'admin-session-routing'

@@ -373,7 +373,7 @@ describe('redaction rule warnings', () => {
   })
 })
 
-describe('redaction reveal state', () => {
+describe('redaction global reveal state', () => {
   const fiveRules = config([
     { pattern: 'one fixture', match_type: 'contains', scope: 'text' },
     { pattern: 'two fixture', match_type: 'contains', scope: 'text' },
@@ -382,54 +382,78 @@ describe('redaction reveal state', () => {
     { pattern: 'five fixture', match_type: 'contains', scope: 'text' },
   ])
 
-  it('marks the added row and leaves the other rows alone', () => {
+  it('masks every rule by default', () => {
     readyAdmin(fiveRules)
 
-    useRedactionStore.getState().toggleCustomStringReveal(1)
+    expect(useRedactionStore.getState().customStringRevealAll).toBe(false)
+  })
+
+  it('toggles every rule through one global state', () => {
+    readyAdmin(fiveRules)
+
+    useRedactionStore.getState().setCustomStringRevealAll(true)
+    expect(useRedactionStore.getState().customStringRevealAll).toBe(true)
+
+    useRedactionStore.getState().setCustomStringRevealAll(false)
+    expect(useRedactionStore.getState().customStringRevealAll).toBe(false)
+  })
+
+  it('keeps the global state for added and removed rules', () => {
+    readyAdmin(fiveRules)
+
+    useRedactionStore.getState().setCustomStringRevealAll(true)
     useRedactionStore.getState().addCustomStringRule()
+    expect(useRedactionStore.getState().config.custom_strings).toHaveLength(6)
+    expect(useRedactionStore.getState().customStringRevealAll).toBe(true)
 
-    const revealed = useRedactionStore.getState().customStringReveal
-    expect(revealed.has(5)).toBe(true)
-    expect(revealed.has(1)).toBe(true)
-    expect(revealed.has(0)).toBe(false)
+    useRedactionStore.getState().removeCustomStringRule(0)
+    expect(useRedactionStore.getState().config.custom_strings).toHaveLength(5)
+    expect(useRedactionStore.getState().customStringRevealAll).toBe(true)
   })
 
-  it('toggles one row and closes it again', () => {
+  it('resets masking on identity and scope changes', () => {
     readyAdmin(fiveRules)
 
-    useRedactionStore.getState().toggleCustomStringReveal(0)
-    expect(useRedactionStore.getState().customStringReveal.has(0)).toBe(true)
-
-    useRedactionStore.getState().toggleCustomStringReveal(0)
-    expect(useRedactionStore.getState().customStringReveal.has(0)).toBe(false)
-    expect(useRedactionStore.getState().customStringReveal.has(1)).toBe(false)
-  })
-
-  it('drops the removed row and shifts the higher indices down', () => {
-    readyAdmin(fiveRules)
-
-    useRedactionStore.getState().toggleCustomStringReveal(1)
-    useRedactionStore.getState().toggleCustomStringReveal(3)
-    useRedactionStore.getState().toggleCustomStringReveal(5)
-    useRedactionStore.getState().removeCustomStringRule(3)
-
-    const revealed = useRedactionStore.getState().customStringReveal
-    expect(revealed.has(3)).toBe(false)
-    expect(revealed.has(1)).toBe(true)
-    expect(revealed.has(2)).toBe(false)
-    expect(revealed.has(4)).toBe(true)
-  })
-
-  it('resets every revealed row on an identity change', () => {
-    readyAdmin(fiveRules)
-
-    useRedactionStore.getState().toggleCustomStringReveal(0)
-    useRedactionStore.getState().toggleCustomStringReveal(4)
-    expect(useRedactionStore.getState().customStringReveal.size).toBe(2)
-
+    useRedactionStore.getState().setCustomStringRevealAll(true)
     useRedactionStore.getState().resetIdentity(operator)
+    expect(useRedactionStore.getState().customStringRevealAll).toBe(false)
 
-    expect(useRedactionStore.getState().customStringReveal.size).toBe(0)
+    readyAdmin(fiveRules)
+    useRedactionStore.getState().setCustomStringRevealAll(true)
+    useRedactionStore.getState().setTarget('user', 2)
+    expect(useRedactionStore.getState().customStringRevealAll).toBe(false)
+  })
+
+  it('resets masking when the configuration is refreshed', async () => {
+    readyAdmin(fiveRules)
+    api.getRedactionSetting.mockResolvedValueOnce(
+      setting({ config: fiveRules, scope: 'global' }),
+    )
+    useRedactionStore.getState().setCustomStringRevealAll(true)
+
+    await useRedactionStore.getState().refresh()
+
+    expect(useRedactionStore.getState().customStringRevealAll).toBe(false)
+    expect(api.listRedactionCustomStrings).toHaveBeenCalledTimes(1)
+  })
+
+  it('resets masking after a save even when a newer edit kept the response config out', async () => {
+    const pending = deferred<RedactionSettingResponseSchema>()
+    const submittedConfig = config([
+      { pattern: 'submitted fixture', match_type: 'contains', scope: 'text' },
+    ])
+    readyAdmin(submittedConfig)
+    api.setRedactionSetting.mockReturnValueOnce(pending.promise)
+    useRedactionStore.getState().setCustomStringRevealAll(true)
+
+    const save = useRedactionStore.getState().save()
+    useRedactionStore.getState().setEnabled(false)
+    pending.resolve(setting({ config: submittedConfig, scope: 'global' }))
+    const outcome = await save
+
+    expect(outcome.executed).toBe(true)
+    expect(useRedactionStore.getState().config.enabled).toBe(false)
+    expect(useRedactionStore.getState().customStringRevealAll).toBe(false)
   })
 })
 

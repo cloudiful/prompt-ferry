@@ -13,7 +13,11 @@ import { TablePagination } from '@/components/shared/TablePagination'
 import { EndpointMobileCard } from '@/components/endpoints/EndpointMobileCard'
 import { QuotaBadges } from '@/components/endpoints/QuotaBadges'
 import { ProviderIcon } from '@/components/providers/ProviderIcon'
-import { TestResultPopover } from '@/components/shared/TestResultPopover'
+import {
+  TestResultPopover,
+  testResultKey,
+  type TestResultSurface,
+} from '@/components/shared/TestResultPopover'
 import { WorkspacePagerBar } from '@/components/shared/WorkspacePagerBar'
 import { useLocale } from '@/lib/i18n'
 import type { TablePageChange } from '@/models/pagination'
@@ -32,9 +36,11 @@ type EndpointsTableProps = {
   onDelete: (endpointId: string) => void
   onEdit: (endpointId: string) => void
   onPage: (change: TablePageChange) => void
-  onTest: (endpointId: string) => void
+  onResultOpenChange: (key: string, open: boolean) => void
+  onTest: (endpointId: string, surface: TestResultSurface) => void
   onTokenPlanUsage: (endpointId: string) => void
   onToggle: (endpointId: string, enabled: boolean) => void
+  openResultKey: string | null
   pendingActions: Readonly<Record<string, string>>
   rows: number
   total: number
@@ -47,9 +53,11 @@ export function EndpointsTable({
   onDelete,
   onEdit,
   onPage,
+  onResultOpenChange,
   onTest,
   onTokenPlanUsage,
   onToggle,
+  openResultKey,
   pendingActions,
   rows,
   total,
@@ -80,9 +88,11 @@ export function EndpointsTable({
               key={item.endpoint_id}
               onDelete={onDelete}
               onEdit={onEdit}
+              onResultOpenChange={onResultOpenChange}
               onTest={onTest}
               onTokenPlanUsage={onTokenPlanUsage}
               onToggle={onToggle}
+              openResultKey={openResultKey}
               pendingActions={pendingActions}
             />
           ))
@@ -133,15 +143,13 @@ export function EndpointsTable({
                   <col className="w-[42%]" />
                   <col className="w-[12%]" />
                   <col className="w-[24%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[12%]" />
+                  <col className="w-[22%]" />
                 </>
               ) : (
                 <>
                   <col className="w-[56%]" />
                   <col className="w-[14%]" />
-                  <col className="w-[14%]" />
-                  <col className="w-[16%]" />
+                  <col className="w-[30%]" />
                 </>
               )}
             </colgroup>
@@ -152,7 +160,6 @@ export function EndpointsTable({
                 {showQuotaColumn ? (
                   <TableHead>{t('tokenPlanUsageColumn')}</TableHead>
                 ) : null}
-                <TableHead>{t('test')}</TableHead>
                 <TableHead className="text-right">
                   <span className="sr-only">{t('actions')}</span>
                 </TableHead>
@@ -165,6 +172,7 @@ export function EndpointsTable({
                 const rowPending = Object.hasOwn(pendingActions, rowKey)
                 const rowOrigin = pendingActions[rowKey]
                 const probePending = Object.hasOwn(pendingActions, probeKey)
+                const resultKey = testResultKey('desktop', item.endpoint_id)
                 return (
                   <TableRow
                     data-endpoint-row={item.endpoint_id}
@@ -224,32 +232,33 @@ export function EndpointsTable({
                       </TableCell>
                     ) : null}
                     <TableCell>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          aria-label={t('test')}
-                          disabled={probePending}
-                          onClick={() => onTest(item.endpoint_id)}
-                          size="icon-sm"
-                          type="button"
-                          variant="ghost"
-                        >
-                          {probePending ? (
-                            <LoaderCircle
-                              aria-hidden="true"
-                              className="animate-spin"
-                            />
-                          ) : (
-                            <RefreshCw aria-hidden="true" />
-                          )}
-                        </Button>
+                      <div className="flex justify-end gap-1">
                         <TestResultPopover
                           message={item.test_message}
+                          onOpenChange={(open) =>
+                            onResultOpenChange(resultKey, open)
+                          }
+                          open={openResultKey === resultKey}
                           severity={item.test_severity}
-                        />
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex justify-end gap-1">
+                        >
+                          <Button
+                            aria-label={t('test')}
+                            disabled={probePending}
+                            onClick={() => onTest(item.endpoint_id, 'desktop')}
+                            size="icon-sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            {probePending ? (
+                              <LoaderCircle
+                                aria-hidden="true"
+                                className="animate-spin"
+                              />
+                            ) : (
+                              <RefreshCw aria-hidden="true" />
+                            )}
+                          </Button>
+                        </TestResultPopover>
                         {isQuotaEligible(item) ? (
                           <Button
                             aria-label={t('tokenPlanUsage')}

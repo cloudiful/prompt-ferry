@@ -255,6 +255,27 @@ if (existsSync(reportPath)) {
     'the AI search and filter behavior is incomplete',
   )
   assert(
+    checks.advancedFiltersDefault?.collapsed === true &&
+      checks.advancedFiltersDefault?.mounted === true,
+    'the advanced filters are not mounted and collapsed by default',
+  )
+  assert(
+    checks.advancedFilters?.collapsed === true &&
+      checks.advancedFilters?.mounted === true &&
+      checks.advancedFilters?.retainedDraft === true &&
+      checks.advancedFilters?.retainedFilter === true &&
+      checks.advancedFilters?.activeCount >= 2 &&
+      checks.advancedFilters?.noRequest === true,
+    'collapsing the advanced filters did not keep the draft, filter, or active indicator',
+  )
+  assert(
+    checks.navigation?.desktop?.minLinkHeight >= 36 &&
+      checks.navigation?.mobile?.minLinkHeight >= 36 &&
+      checks.navigation?.desktop?.nestedRowGap <= 4 &&
+      checks.navigation?.mobile?.nestedRowGap <= 4,
+    'the navigation is not compact while keeping its touch height',
+  )
+  assert(
     checks.range?.preset === '7d' && checks.range?.custom === 'custom',
     'the AI range presets and custom window are incomplete',
   )
