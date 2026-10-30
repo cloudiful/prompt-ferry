@@ -74,6 +74,73 @@ async fn forwards_stateless_responses_request_to_chat_native_upstream() {
 }
 
 #[tokio::test]
+async fn summary_only_v2_tool_loop_reaches_chat_upstream() {
+    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Chat);
+    let mut worker_handle = tokio::spawn(async move {
+        worker::connect_for_test(worker_config, reqwest::Client::new()).await
+    });
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+    let client = reqwest::Client::new();
+    let url = format!("http://{relay_addr}/v1/responses");
+    let tools = serde_json::json!([{"type":"function","name":"lookup","parameters":{"type":"object","properties":{}}}]);
+    let first = client
+        .post(&url)
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model":"summary-loop", "input":"calculate", "tools":tools, "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first: Value = first.json().await.unwrap();
+    let output = first["output"].as_array().unwrap();
+    let reasoning = output
+        .iter()
+        .find(|item| item["type"] == "reasoning")
+        .unwrap();
+    let call = output
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .unwrap();
+    assert!(reasoning.get("encrypted_content").is_none());
+    let summary = reasoning["summary"].clone();
+    for token in [None, Some(Value::Null)] {
+        let mut replay =
+            serde_json::json!({"type":"reasoning", "id":reasoning["id"], "summary":summary});
+        if let Some(token) = token {
+            replay["encrypted_content"] = token;
+        }
+        let second = client.post(&url).bearer_auth("client-token").json(&serde_json::json!({
+            "model":"summary-loop", "input":[{"role":"user","content":"calculate"}, replay, call, {"type":"function_call_output","call_id":"call_1","output":"42"}], "tools":tools, "stream":false
+        })).send().await.unwrap();
+        assert_eq!(second.status(), StatusCode::OK);
+        let result: Value = second.json().await.unwrap();
+        assert_eq!(result["output"][0]["content"][0]["text"], "42");
+    }
+    let requests = upstream_log.bodies.lock().await;
+    assert_eq!(requests.len(), 3);
+    for request in &requests[1..] {
+        let messages = request["messages"].as_array().unwrap();
+        let assistant = messages
+            .iter()
+            .find(|message| message.get("tool_calls").is_some())
+            .unwrap();
+        assert_eq!(assistant["reasoning_content"], "plan first");
+        assert_eq!(assistant["tool_calls"][0]["id"], "call_1");
+        assert!(
+            messages
+                .iter()
+                .any(|message| message["role"] == "tool" && message["content"] == "42")
+        );
+    }
+    worker_handle.abort();
+}
+
+#[tokio::test]
 async fn forwards_streaming_stateless_responses_request_to_chat_native_upstream() {
     let upstream_addr = spawn_chat_only_upstream(Arc::new(ChatRequestLog::default())).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
@@ -1833,6 +1900,22 @@ fn deepseek_v4_flash_responses_sse() -> String {
 async fn fake_chat_completion(State(log): State<Arc<ChatRequestLog>>, body: Bytes) -> Response {
     let value = serde_json::from_slice::<Value>(&body).unwrap();
     log.bodies.lock().await.push(value.clone());
+
+    if value.get("model").and_then(Value::as_str) == Some("summary-loop") {
+        let continuation = value["messages"]
+            .as_array()
+            .is_some_and(|messages| messages.iter().any(|message| message["role"] == "tool"));
+        let body = if continuation {
+            r#"{"id":"chatcmpl_124","created":123,"model":"summary-loop","choices":[{"message":{"role":"assistant","content":"42"},"finish_reason":"stop"}]}"#
+        } else {
+            r#"{"id":"chatcmpl_123","created":123,"model":"summary-loop","choices":[{"message":{"role":"assistant","content":null,"reasoning_content":"plan first","tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#
+        };
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body))
+            .unwrap();
+    }
 
     if value.get("model").and_then(Value::as_str) == Some("chat-reasoning")
         && value.get("stream").and_then(Value::as_bool) == Some(true)

@@ -180,11 +180,7 @@ data: [DONE]
 }
 
 #[test]
-fn chat_bridge_mints_self_describing_reasoning_echo_token() {
-    // Issue #459: the Chat->Responses bridge must mint a self-describing
-    // `ferry-<reasoning id>` token so reasoning items without upstream
-    // encrypted content survive the echo and can be restored on the request
-    // path.
+fn chat_bridge_reasoning_items_have_no_fabricated_encrypted_content() {
     let mut adapter = ChatResponseStreamAdapter::new();
     let output = adapter
         .push_chunk(br#"data: {"id":"chatcmpl_123","created":123,"model":"deepseek-test","choices":[{"delta":{"reasoning_content":"plan"}}]}
@@ -207,10 +203,16 @@ data: [DONE]
         .unwrap();
     let reasoning_item = &completed["response"]["output"][0];
     assert_eq!(reasoning_item["type"].as_str(), Some("reasoning"));
-    assert_eq!(
-        reasoning_item["encrypted_content"].as_str(),
-        Some(format!("ferry-{reasoning_id}").as_str())
-    );
+    assert_eq!(reasoning_item["id"], reasoning_id);
+    assert!(reasoning_item.get("encrypted_content").is_none());
+    for event in events.iter().filter(|event| {
+        matches!(
+            event["type"].as_str(),
+            Some("response.output_item.added" | "response.output_item.done")
+        ) && event["item"]["type"] == "reasoning"
+    }) {
+        assert!(event["item"].get("encrypted_content").is_none());
+    }
 }
 
 #[test]

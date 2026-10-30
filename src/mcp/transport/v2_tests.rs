@@ -21,6 +21,44 @@ use crate::db::McpServer;
 
 use super::call;
 
+#[test]
+fn structured_http_status_respects_existing_retry_policy() {
+    use rmcp::transport::{
+        DynamicTransportError,
+        streamable_http_client::{HttpStatusError, StreamableHttpError},
+    };
+
+    for (code, expected) in [
+        (429, Some(axum::http::StatusCode::TOO_MANY_REQUESTS)),
+        (503, None),
+        (400, None),
+    ] {
+        let structured =
+            StreamableHttpError::<reqwest::Error>::HttpStatus(HttpStatusError::new(code, None));
+        assert_eq!(
+            super::request_time_status(&structured),
+            axum::http::StatusCode::from_u16(code).ok()
+        );
+        let error = || {
+            DynamicTransportError::from_parts(
+                "test",
+                std::any::TypeId::of::<()>(),
+                Box::new(StreamableHttpError::<reqwest::Error>::HttpStatus(
+                    HttpStatusError::new(code, None),
+                )),
+            )
+        };
+        let request_error = anyhow::Error::new(rmcp::service::ServiceError::TransportSend(error()));
+        let handshake_error =
+            anyhow::Error::new(rmcp::service::ClientInitializeError::TransportError {
+                error: error(),
+                context: "test".into(),
+            });
+        assert_eq!(super::retryable_status(&request_error), expected);
+        assert_eq!(super::retryable_status(&handshake_error), expected);
+    }
+}
+
 const ECHO_SCHEMA: &str = r#"{
   "type": "object",
   "properties": {

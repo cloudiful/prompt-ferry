@@ -223,7 +223,7 @@ pub(super) fn apply_minimax_reasoning_split<'a>(
     Cow::Owned(serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec()))
 }
 
-/// Restore ferry-minted reasoning echoes on the MiniMax request path
+/// Restore legacy reasoning echoes on the MiniMax request path
 /// (issue #459). Only MiniMax Responses routes are eligible; the shared
 /// [`crate::openai_compat::restore_reasoning_echoes`] helper rewrites
 /// `minimax-<id>` tokens back to a provider-plausible `id`/`content[]` pair
@@ -279,11 +279,8 @@ pub(super) fn apply_deepseek_thinking<'a>(
     Cow::Owned(serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec()))
 }
 
-/// Whether an upstream response body on this route should mint
-/// `minimax-<original id>` reasoning echo tokens (issue #459). Reserved for
-/// MiniMax Responses-native routes; all other providers/protocols keep the
-/// upstream `encrypted_content` verbatim.
-pub(super) fn should_mint_minimax_reasoning_echo(
+/// MiniMax Responses streams may need an announcement before reasoning deltas.
+pub(super) fn should_announce_minimax_reasoning(
     provider: crate::db::EndpointProvider,
     native_api: crate::config::NativeApi,
 ) -> bool {
@@ -1506,16 +1503,16 @@ mod tests {
     }
 
     #[test]
-    fn should_mint_minimax_reasoning_echo_is_responses_only() {
-        assert!(should_mint_minimax_reasoning_echo(
+    fn should_announce_minimax_reasoning_is_responses_only() {
+        assert!(should_announce_minimax_reasoning(
             crate::db::EndpointProvider::Minimax,
             NativeApi::Responses
         ));
-        assert!(!should_mint_minimax_reasoning_echo(
+        assert!(!should_announce_minimax_reasoning(
             crate::db::EndpointProvider::Minimax,
             NativeApi::Chat
         ));
-        assert!(!should_mint_minimax_reasoning_echo(
+        assert!(!should_announce_minimax_reasoning(
             crate::db::EndpointProvider::DeepSeek,
             NativeApi::Responses
         ));

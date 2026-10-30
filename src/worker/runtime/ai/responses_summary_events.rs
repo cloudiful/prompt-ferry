@@ -19,21 +19,14 @@ pub(super) fn reasoning_key(value: &Value) -> String {
         })
 }
 
-pub(super) fn reasoning_item_added(
-    output_index: Value,
-    key: &str,
-    token: Option<String>,
-) -> Vec<u8> {
-    let mut item = json!({
+pub(super) fn reasoning_item_added(output_index: Value, key: &str) -> Vec<u8> {
+    let item = json!({
         "id": key,
         "type": "reasoning",
         "status": "in_progress",
         "summary": [],
         "content": [],
     });
-    if let Some(token) = token {
-        item["encrypted_content"] = Value::String(token);
-    }
     sse_event(json!({
         "type": "response.output_item.added",
         "output_index": output_index,
