@@ -55,7 +55,7 @@ function SectionLinks({
         to={route.path}
         className={({ isActive }) =>
           cn(
-            'flex min-h-10 items-center gap-3 rounded-md px-3 text-sm font-medium transition-colors',
+            'flex min-h-10 items-center gap-3 rounded-md px-3 text-sm font-medium transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
             isActive
               ? 'bg-accent text-accent-foreground'
               : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
@@ -69,12 +69,12 @@ function SectionLinks({
   }
 
   return (
-    <div className="grid gap-1">
-      <div className="flex min-h-9 items-center gap-3 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    <div className="grid gap-0.5">
+      <div className="flex min-h-8 items-center gap-3 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         <Icon aria-hidden="true" className="size-4 shrink-0" />
         <span className="truncate">{t(section.labelKey)}</span>
       </div>
-      <div className="grid gap-1 pl-4">
+      <div className="grid gap-0.5 pl-3">
         {section.routes.map((route) => (
           <NavLink
             key={route.id}
@@ -82,7 +82,7 @@ function SectionLinks({
             to={route.path}
             className={({ isActive }) =>
               cn(
-                'flex min-h-9 items-center rounded-md px-3 text-sm transition-colors',
+                'flex min-h-9 items-center rounded-md px-2.5 text-sm transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
                 isActive
                   ? 'bg-accent text-accent-foreground'
                   : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
@@ -106,7 +106,7 @@ function Navigation({
 }) {
   const { t } = useLocale()
   return (
-    <nav aria-label={t('workspaceTitle')} className="grid content-start gap-3">
+    <nav aria-label={t('workspaceTitle')} className="grid content-start gap-2">
       {visibleNavSections(isAdmin).map((section) => (
         <SectionLinks
           key={section.id}

@@ -254,7 +254,11 @@ async page => {
     const disabledTestResponse = waitForResponse('POST', disabledTestPath, 200)
     await page.locator('[data-mcp-server-row="mcp-local-everything"]').getByRole('button', { name: 'Refresh catalog', exact: true }).click()
     const disabledTest = await (await disabledTestResponse).json()
-    await page.locator('[data-mcp-server-row="mcp-local-everything"]').getByRole('button', { name: 'mcp server is disabled', exact: true }).waitFor({ state: 'visible' })
+    const disabledTestPopover = page.locator('[data-slot="popover-content"]').filter({ hasText: 'mcp server is disabled' }).first()
+    await disabledTestPopover.waitFor({ state: 'visible' })
+    const disabledTestText = await disabledTestPopover.innerText()
+    assert(disabledTestText.includes('mcp server is disabled'), `the MCP test result popover did not show the server message: ${disabledTestText}`)
+    await page.keyboard.press('Escape')
     assert(disabledTest.ok === false && disabledTest.tools.length === 0 && disabledTest.resources.length === 0 && disabledTest.prompts.length === 0, 'disabled MCP test did not return a false result with empty arrays')
 
     const denied = await page.evaluate(async () => {
@@ -385,6 +389,9 @@ async page => {
     await page.locator('[data-mcp-server-row="mcp-context7"]').waitFor({ state: 'visible' })
     const correctedIds = await page.locator('[data-mcp-server-row]:visible').evaluateAll(rows => rows.map(row => row.getAttribute('data-mcp-server-row')))
     assert(correctedIds.length === 10 && correctedIds[0] === 'mcp-context7', 'out-of-range MCP page was not corrected to the last valid page')
+    const mcpHeadNames = (await page.locator('th[data-slot="table-head"]').allInnerTexts()).map(text => text.trim())
+    assert(JSON.stringify(mcpHeadNames) === JSON.stringify(['Name', 'Status', 'Edit']), `the MCP list kept a separate test column: ${JSON.stringify(mcpHeadNames)}`)
+    report.checks.listTestAction = { headers: mcpHeadNames, testColumnAbsent: true }
 
     const pageSize20Response = waitForMcpPage(0, 20)
     await page.getByLabel('Rows per page').click()
@@ -498,7 +505,9 @@ async page => {
     const testResponse = waitForResponse('POST', testPath, 200)
     await contextRow.getByRole('button', { name: 'Refresh catalog', exact: true }).click()
     const testResult = await (await testResponse).json()
-    await contextRow.getByRole('button', { name: testResult.message, exact: true }).waitFor({ state: 'visible' })
+    const testResultPopover = page.locator('[data-slot="popover-content"]').filter({ hasText: testResult.message }).first()
+    await testResultPopover.waitFor({ state: 'visible' })
+    await page.keyboard.press('Escape')
     const listCallsAfterTest = mcpRequests.filter(request => request.method === 'GET' && request.path === '/api/v1/admin/mcp-servers').length
     assert(testResult.ok === true && testResult.tool_count === testResult.tools.length && testResult.tools.length === 10, 'MCP test did not return the fixture catalog arrays')
     assert(listCallsAfterTest === listCallsBeforeTest, 'MCP test refreshed the server list')
@@ -533,7 +542,8 @@ async page => {
     const independentTestResponse = waitForResponse('POST', `/api/v1/admin/mcp-servers/${toggleId}/test`, 200)
     await sameRowTest.click()
     await independentTestResponse
-    await toggleRow.getByRole('button', { name: 'fixture MCP handshake succeeded', exact: true }).waitFor({ state: 'visible' })
+    await page.locator('[data-slot="popover-content"]').filter({ hasText: 'fixture MCP handshake succeeded' }).first().waitFor({ state: 'visible' })
+    await page.keyboard.press('Escape')
     await toggleResponse
     await refreshingPage
     await toggleRow.getByRole('switch', { name: 'Status' }).waitFor({ state: 'visible' })

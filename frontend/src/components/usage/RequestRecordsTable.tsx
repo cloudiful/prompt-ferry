@@ -30,8 +30,10 @@ import {
 import {
   createUsageRecordView,
   formatUsageOutputRate,
+  usageOutputRate,
   type UsageRecordView,
 } from '@/lib/usage-records'
+import { cn } from '@/lib/utils'
 import {
   USAGE_PAGE_SIZE_OPTIONS,
   USAGE_SORT_FIELDS,
@@ -175,9 +177,7 @@ export function RequestRecordsTable({
     {
       id: 'model',
       header: t('model'),
-      render: (record) => (
-        <span className="font-semibold">{record.model_display}</span>
-      ),
+      render: (record) => <ModelCell record={record} />,
       sortField: USAGE_SORT_FIELDS.model,
       widthClassName: 'min-w-[14rem]',
     },
@@ -218,9 +218,7 @@ export function RequestRecordsTable({
     {
       id: 'throughput',
       header: `${t('e2eOutputRate')} token/s`,
-      render: (record) => (
-        <span title={t('e2eOutputRate')}>{formatUsageOutputRate(record)}</span>
-      ),
+      render: (record) => <RateCell record={record} />,
     },
     ...tailColumns.slice(2),
   ]
@@ -361,16 +359,66 @@ export function RequestRecordsTable({
   )
 }
 
+const RATE_TONES = {
+  slow: 'border-red-200 bg-red-100 text-red-800 dark:border-red-800 dark:bg-red-950/60 dark:text-red-200',
+  medium: 'border-border bg-muted text-muted-foreground',
+  fast: 'border-emerald-200 bg-emerald-100 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200',
+} as const
+
+function ModelCell({ record }: { record: UsageRecordView }) {
+  const requested = record.requested_model || record.model || '-'
+  const upstream = (record.upstream_model || '').trim()
+  const showsUpstream = upstream !== '' && upstream !== requested
+  return (
+    <span className="font-semibold" title={record.model_display}>
+      {requested}
+      {showsUpstream ? (
+        <span className="font-normal text-muted-foreground">
+          {` (${upstream})`}
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
+function RateCell({ record }: { record: UsageRecordView }) {
+  const { t } = useLocale()
+  const rate = usageOutputRate(record)
+  if (rate === null) return <span>-</span>
+  const text = formatUsageOutputRate(record)
+  const band = rate < 20 ? 'slow' : rate < 50 ? 'medium' : 'fast'
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium tabular-nums',
+        RATE_TONES[band],
+      )}
+      data-usage-rate-band={band}
+      title={`${t('e2eOutputRate')} ${text} token/s`}
+    >
+      {text}
+    </span>
+  )
+}
+
 function UpstreamCell({ record }: { record: UsageRecordView }) {
   const { t } = useLocale()
   return (
     <span className="inline-flex items-center gap-1 whitespace-nowrap">
       <span className="font-semibold">{record.upstream_label}</span>
-      <Badge variant="outline">
+      <Badge
+        className="border-border/70 font-normal text-muted-foreground"
+        variant="outline"
+      >
         {t('session')} {record.session_short_id}
       </Badge>
       {record.conversation_seq ? (
-        <Badge variant="outline">#{record.conversation_seq}</Badge>
+        <Badge
+          className="border-border/70 font-normal text-muted-foreground"
+          variant="outline"
+        >
+          #{record.conversation_seq}
+        </Badge>
       ) : null}
       {record.is_first_turn ? (
         <Badge variant="outline">{t('firstTurn')}</Badge>

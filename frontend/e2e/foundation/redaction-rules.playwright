@@ -303,6 +303,14 @@ async page => {
       .count()) === 10,
     'initial custom patterns are not masked',
   )
+  const revealAllToggle = page.getByRole('button', {
+    name: 'Show all plaintext',
+  })
+  assert(
+    (await revealAllToggle.getAttribute('aria-pressed')) === 'false' &&
+      (await page.getByRole('button', { name: /^(Show|Hide) plaintext \d$/ }).count()) === 0,
+    'global plaintext toggle is not masked by default or per-row toggles remain',
+  )
   report.checks.routeAndInitialReads = true
   report.checks.initialPage = redactionRequests.some(
     (item) =>
@@ -441,6 +449,20 @@ async page => {
   )
 
   stage = 'local-draft-search-and-normalization'
+  await page.getByRole('button', { name: 'Show all plaintext' }).click()
+  const visibleRowCount = await page
+    .locator('tr[data-redaction-array-index]')
+    .count()
+  assert(
+    (await page
+      .getByRole('button', { name: 'Hide all plaintext' })
+      .getAttribute('aria-pressed')) === 'true' &&
+      visibleRowCount > 0 &&
+      (await page
+        .locator('input[name="redaction-custom-pattern"][type="text"]')
+        .count()) === visibleRowCount,
+    'global reveal did not show every visible rule',
+  )
   await page.getByRole('button', { name: 'Add rule' }).click()
   const firstNewIndex = await page
     .locator('tr[data-redaction-array-index]')
@@ -453,7 +475,7 @@ async page => {
     )
   assert(
     (await patternInput(firstNewIndex).getAttribute('type')) === 'text',
-    'new rule did not default to visible editing',
+    'new rule did not follow the revealed global state',
   )
   assert(
     (await page
@@ -498,8 +520,26 @@ async page => {
     'dirty search made a server request',
   )
   await page.getByRole('searchbox', { name: 'Pattern' }).fill('')
+  await page.getByRole('button', { name: 'Hide all plaintext' }).click()
+  assert(
+    (await page
+      .getByRole('button', { name: 'Show all plaintext' })
+      .getAttribute('aria-pressed')) === 'false' &&
+      (await page
+        .locator('input[name="redaction-custom-pattern"][type="text"]')
+        .count()) === 0,
+    'global hide did not mask every visible rule',
+  )
   report.checks.dirtyLocalSearch = true
   report.checks.warningPriority = true
+  report.checks.globalReveal = {
+    defaultMasked: true,
+    revealsAllRows: true,
+    newRowsFollow: true,
+    hidesAllRows: true,
+    resetAfterSave: false,
+    resetOnScopeChange: false,
+  }
 
   await fixture('/__fixtures/faults', 'POST', {
     pathPrefix: '/api/v1/settings/redaction',
@@ -674,14 +714,9 @@ async page => {
     requestCount('PATCH', '/api/v1/settings/redaction') === deleteCountBefore,
     'local delete issued a PATCH before save',
   )
-  assert(
-    (await patternInput(inFlightIndex - 1).getAttribute('type')) === 'text',
-    'revealed rule did not retain reveal state after index shift',
-  )
   report.checks.deleteConfirmation = {
     cancelNoWrite: true,
     confirmedLocalDelete: true,
-    revealIndexShift: true,
     nativeConfirmUsed: false,
   }
 
@@ -722,6 +757,11 @@ async page => {
     (await patternInput(invalidIndex).getAttribute('aria-invalid')) === null,
     'corrected regex remained invalid',
   )
+  await page.getByRole('button', { name: 'Show all plaintext' }).click()
+  assert(
+    (await patternInput(invalidIndex).getAttribute('type')) === 'text',
+    'global reveal did not expose the saved rule before saving',
+  )
   responseWait = waitForResponse('PATCH', '/api/v1/settings/redaction', 200)
   savedPageRead = waitForRedactionRequest('GET', { first: 0, rows: 50 })
   await page.getByRole('button', { name: 'Save' }).click()
@@ -731,6 +771,16 @@ async page => {
     (await page.getByText('Unsaved', { exact: true }).count()) === 0,
     'corrected regex payload did not save',
   )
+  assert(
+    (await page
+      .getByRole('button', { name: 'Show all plaintext' })
+      .getAttribute('aria-pressed')) === 'false' &&
+      (await page
+        .locator('input[name="redaction-custom-pattern"][type="password"]')
+        .count()) > 0,
+    'save success did not re-mask every rule',
+  )
+  report.checks.globalReveal.resetAfterSave = true
   report.checks.invalidRegex = { localErrorNoPatch: true, correctedPatch: true }
 
   stage = 'identity-and-scoped-configs'
@@ -753,6 +803,13 @@ async page => {
       .count()) > 0,
     'browser reopen did not mask rule patterns',
   )
+  await page.getByRole('button', { name: 'Show all plaintext' }).click()
+  assert(
+    (await page
+      .locator('input[name="redaction-custom-pattern"][type="text"]')
+      .count()) > 0,
+    'global reveal did not expose the reopened rules',
+  )
   const scopeWait = waitForResponse('GET', '/api/v1/settings/redaction', 200)
   const scopePageWait = waitForRedactionRequest('GET', {
     path: '/api/v1/settings/redaction/custom-strings',
@@ -762,6 +819,16 @@ async page => {
   await chooseOption('Rule scope', 'User private rules')
   await scopeWait
   await scopePageWait
+  assert(
+    (await page
+      .getByRole('button', { name: 'Show all plaintext' })
+      .getAttribute('aria-pressed')) === 'false' &&
+      (await page
+        .locator('input[name="redaction-custom-pattern"][type="text"]')
+        .count()) === 0,
+    'scope change did not reset the global reveal state',
+  )
+  report.checks.globalReveal.resetOnScopeChange = true
   const userRead = waitForRedactionRequest('GET', {
     path: '/api/v1/settings/redaction',
     scope: 'user',

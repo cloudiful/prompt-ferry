@@ -51,8 +51,8 @@ export function RedactionRulesPanel() {
   const customStringDirty = useRedactionStore(
     (state) => state.customStringDirty,
   )
-  const customStringReveal = useRedactionStore(
-    (state) => state.customStringReveal,
+  const customStringRevealAll = useRedactionStore(
+    (state) => state.customStringRevealAll,
   )
   const validationError = useRedactionStore((state) => state.validationError)
   const pageError = useRedactionStore((state) => state.pageError)
@@ -132,7 +132,6 @@ export function RedactionRulesPanel() {
       conflict: false,
       invalidRegex: false,
     }
-    const revealed = customStringReveal.has(arrayIndex)
     const errorId = `redaction-invalid-regex-${arrayIndex}`
 
     return (
@@ -149,22 +148,9 @@ export function RedactionRulesPanel() {
               onChange={(event) =>
                 updatePattern(arrayIndex, event.currentTarget.value)
               }
-              type={revealed ? 'text' : 'password'}
+              type={customStringRevealAll ? 'text' : 'password'}
               value={row.pattern}
             />
-            <Button
-              aria-label={`${t(revealed ? 'hidePlaintext' : 'showPlaintext')} ${arrayIndex + 1}`}
-              onClick={() => store.toggleCustomStringReveal(arrayIndex)}
-              size="icon-sm"
-              type="button"
-              variant="ghost"
-            >
-              {revealed ? (
-                <EyeOff aria-hidden="true" />
-              ) : (
-                <Eye aria-hidden="true" />
-              )}
-            </Button>
           </div>
           {warning.invalidRegex && (
             <span className="sr-only" id={errorId} role="alert">
@@ -280,6 +266,24 @@ export function RedactionRulesPanel() {
                 {t('ruleDirtyBadge')}
               </span>
             )}
+            <Button
+              aria-label={t(
+                customStringRevealAll ? 'hideAllPlaintext' : 'showAllPlaintext',
+              )}
+              aria-pressed={customStringRevealAll}
+              onClick={() =>
+                store.setCustomStringRevealAll(!customStringRevealAll)
+              }
+              size="icon-sm"
+              type="button"
+              variant="ghost"
+            >
+              {customStringRevealAll ? (
+                <EyeOff aria-hidden="true" />
+              ) : (
+                <Eye aria-hidden="true" />
+              )}
+            </Button>
           </div>
           <div className="flex min-w-0 flex-wrap items-end gap-2">
             <label className="grid min-w-40 gap-1 text-xs text-muted-foreground">
@@ -331,8 +335,10 @@ export function RedactionRulesPanel() {
                 <TableHead>{t('scopeField')}</TableHead>
                 <TableHead>{t('createdAt')}</TableHead>
                 <TableHead>{t('updatedAt')}</TableHead>
-                <TableHead>{t('ruleConflictHint')}</TableHead>
-                <TableHead>{t('deleteRuleConfirmSubmit')}</TableHead>
+                <TableHead>{t('warnings')}</TableHead>
+                <TableHead>
+                  <span className="sr-only">{t('actions')}</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>{rows.map(renderRule)}</TableBody>

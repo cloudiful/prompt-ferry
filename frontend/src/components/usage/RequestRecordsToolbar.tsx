@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Search, Trash2 } from 'lucide-react'
+import { Search } from 'lucide-react'
 import type { RequestRecordFacets } from '@/generated/admin-api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -69,7 +69,6 @@ type RequestRecordsToolbarProps = {
   facets: RequestRecordFacets
   filters: UsageFilters
   isAdmin: boolean
-  onClear: () => void
   onFilters: (patch: Partial<UsageFilters>) => void
   onScope: (scope: UsageScope) => void
   onSearch: (search: string | null) => void
@@ -78,8 +77,7 @@ type RequestRecordsToolbarProps = {
 
 /**
  * The records toolbar: a draft search that commits on Enter, immediate filter
- * selects fed by the current facets, the MCP scope and the clear-history entry
- * point.
+ * selects fed by the current facets and the MCP scope.
  *
  * Every action is a callback; the toolbar issues no read itself and never
  * persists anything. Select values are mapped back to a real `null` filter, so
@@ -90,7 +88,6 @@ export function RequestRecordsToolbar({
   facets,
   filters,
   isAdmin,
-  onClear,
   onFilters,
   onScope,
   onSearch,
@@ -127,9 +124,6 @@ export function RequestRecordsToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <h2 className="mr-auto text-sm font-semibold">
-        {category === 'ai' ? t('recentRequests') : t('mcpCalls')}
-      </h2>
       <div className="relative min-w-64 flex-1">
         <Search
           aria-hidden="true"
@@ -241,10 +235,6 @@ export function RequestRecordsToolbar({
           }
         />
       )}
-      <Button onClick={onClear} size="sm" type="button" variant="outline">
-        <Trash2 aria-hidden="true" />
-        {t('clearHistory')}
-      </Button>
     </div>
   )
 }

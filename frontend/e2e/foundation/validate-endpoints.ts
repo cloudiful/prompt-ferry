@@ -329,11 +329,7 @@ export function evaluateEndpointsReport(
             `an endpoint name is not fully present in the DOM and its title at ${key}`,
           )
         }
-        if (
-          !Number.isFinite(name?.lines) ||
-          name.lines < 1 ||
-          name.lines > 6
-        ) {
+        if (!Number.isFinite(name?.lines) || name.lines < 1 || name.lines > 6) {
           failures.push(
             `an endpoint name wraps beyond its available width at ${key}`,
           )
@@ -360,7 +356,7 @@ export function evaluateEndpointsReport(
         : []
       if (
         JSON.stringify(headNames) !==
-        JSON.stringify(['Endpoint', 'Status', 'Usage', 'Test', 'Actions'])
+        JSON.stringify(['Endpoint', 'Status', 'Usage', 'Actions'])
       ) {
         failures.push(
           `the upstream list header set is not the honest column set at ${key}: ${JSON.stringify(headNames)}`,
@@ -394,7 +390,10 @@ export function evaluateEndpointsReport(
           `the upstream list overflows the document horizontally at ${key}`,
         )
       }
-      if (!Number.isFinite(measurement.visibleRows) || measurement.visibleRows === 0) {
+      if (
+        !Number.isFinite(measurement.visibleRows) ||
+        measurement.visibleRows === 0
+      ) {
         failures.push(`the upstream list rendered no desktop rows at ${key}`)
       }
       if (measurement.visibleCards !== 0) {

@@ -1632,7 +1632,7 @@ const PORTED_LEGACY_MODULES: Array<[string, LegacyEvidenceGroup[]]> = [
     [
       reactTest(
         'src/react-tests/redaction-model.test.ts',
-        'toggles one row and closes it again',
+        'toggles every rule through one global state',
       ),
     ],
   ],

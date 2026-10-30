@@ -834,9 +834,12 @@ describe('upstream building block', () => {
     await waitFor(() =>
       expect(api.runEndpointTest).toHaveBeenCalledWith('endpoint-1'),
     )
-    expect(
-      await screen.findAllByRole('button', { name: /HTTP 200/ }),
-    ).not.toHaveLength(0)
+    const result = await screen.findByText(/HTTP 200 \/ 14ms/)
+    expect(result.textContent).toContain('fixture probe succeeded')
+    // The result is a one-shot popover: no permanent result column keeps it.
+    expect(screen.queryAllByRole('button', { name: /HTTP 200/ })).toHaveLength(
+      0,
+    )
 
     pendingFirstToggle.resolve({ ...endpointRecords[0]!, enabled: false })
     await waitFor(() =>

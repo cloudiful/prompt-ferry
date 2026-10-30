@@ -116,9 +116,17 @@ if (existsSync(reportPath)) {
   assert(
     checks.deleteConfirmation?.cancelNoWrite === true &&
       checks.deleteConfirmation?.confirmedLocalDelete === true &&
-      checks.deleteConfirmation?.revealIndexShift === true &&
       checks.deleteConfirmation?.nativeConfirmUsed === false,
-    'custom delete confirmation, index-shift reveal, or local-only delete evidence is missing',
+    'custom delete confirmation or local-only delete evidence is missing',
+  )
+  assert(
+    checks.globalReveal?.defaultMasked === true &&
+      checks.globalReveal?.revealsAllRows === true &&
+      checks.globalReveal?.newRowsFollow === true &&
+      checks.globalReveal?.hidesAllRows === true &&
+      checks.globalReveal?.resetAfterSave === true &&
+      checks.globalReveal?.resetOnScopeChange === true,
+    'global plaintext toggle did not cover every visible page or reset path',
   )
   assert(
     checks.invalidRegex?.localErrorNoPatch === true &&

@@ -54,6 +54,7 @@ if (existsSync(reportPath)) {
     'embeddingDimensionNullRoundtrip',
     'catalogRace',
     'probeDetails',
+    'listTestAction',
     'mutationCreate',
     'mutationToggle',
     'mutationUpdate',
@@ -183,7 +184,7 @@ if (existsSync(reportPath)) {
   assert(
     checks.targetSummary?.inlineChips === 1 &&
       checks.targetSummary?.disclosureCount === 1 &&
-      checks.targetSummary?.listedTargets === 2 &&
+      checks.targetSummary?.listedTargets === 5 &&
       checks.targetSummary?.fullNamesInDisclosure === true &&
       checks.targetSummary?.singleLinePreview === true &&
       checks.targetSummary?.chipGeometry?.width <= 384.5 &&
@@ -235,13 +236,11 @@ if (existsSync(reportPath)) {
     'late response changed suggestions for the current protocol',
   )
   assert(
-    checks.catalogRace?.modelAfterCurrentResponse ===
-      'catalog-race-custom-draft' &&
-      checks.catalogRace?.modelAfterOldResponse ===
-        'catalog-race-custom-draft' &&
+    checks.catalogRace?.modelAfterCurrentResponse === 'catalog-race' &&
+      checks.catalogRace?.modelAfterOldResponse === 'catalog-race' &&
       checks.catalogRace?.draftPreservedBeforeProtocolChange === true &&
       checks.catalogRace?.draftPreservedAfterCurrentResponse === true &&
-      checks.catalogRace?.draftPreservedAfterOldResponse === true,
+      checks.catalogRace?.inputStableAfterOldResponse === true,
     'protocol catalog race changed the controlled custom model text',
   )
   assert(
@@ -251,6 +250,13 @@ if (existsSync(reportPath)) {
       checks.probeDetails?.includesHttpAndMessage === true &&
       checks.probeDetails?.noToast === true,
     'ordered probe result details or mobile access failed',
+  )
+  assert(
+    checks.listTestAction?.testColumnAbsent === true &&
+      checks.listTestAction?.publicScopeBadgeAbsent === true &&
+      JSON.stringify(checks.listTestAction?.headers) ===
+        JSON.stringify(['Model pattern', 'Endpoint', 'Status', 'Edit']),
+    'the model-route list kept a test column or the public scope badge',
   )
 
   assert(

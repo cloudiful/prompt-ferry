@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { RefreshCw } from 'lucide-react'
+import { ChevronDown, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useLocation } from 'react-router'
 import type { RequestRecordListRow } from '@/generated/admin-api'
 import { RequestRecordsOverviewPanel } from '@/components/usage/RequestRecordsOverviewPanel'
@@ -14,8 +14,10 @@ import {
   UsageRangePicker,
   type UsageRangeApply,
 } from '@/components/usage/UsageRangePicker'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useLocale } from '@/lib/i18n'
+import { cn } from '@/lib/utils'
 import { useNotifier } from '@/lib/notifier'
 import { usePageTitle } from '@/lib/router'
 import { useSessionStore } from '@/lib/session'
@@ -44,6 +46,25 @@ import {
 
 function categoryForPath(pathname: string): UsageCategory {
   return pathname.endsWith('/mcp') ? 'mcp' : 'ai'
+}
+
+function countActiveFilters(
+  filters: UsageFilters,
+  scope: UsageScope,
+  category: UsageCategory,
+): number {
+  let count = 0
+  if (filters.search && filters.search.trim() !== '') count += 1
+  if (filters.client_key_id !== null) count += 1
+  if (filters.user !== null) count += 1
+  if (filters.model !== null) count += 1
+  if (filters.request_state !== null) count += 1
+  if (filters.redaction_applied !== null) count += 1
+  if (filters.endpoint_id !== null) count += 1
+  if (filters.mcp_server_id !== null) count += 1
+  if (filters.mcp_bearer_token_slot !== null) count += 1
+  if (category === 'mcp' && scope !== 'service') count += 1
+  return count
 }
 
 /**
@@ -85,6 +106,8 @@ export function UsagePage() {
   const recordsLoading = useUsageStore((state) => state.recordsLoading)
   const overviewLoading = useUsageStore((state) => state.overviewLoading)
 
+  const activeFilterCount = countActiveFilters(filters, scope, category)
+
   const detail = useUsageDetailStore((state) => state.detail)
   const detailLoading = useUsageDetailStore((state) => state.detailLoading)
   const detailRecordId = useUsageDetailStore((state) => state.recordId)
@@ -102,6 +125,7 @@ export function UsagePage() {
   const override = useUsageDetailStore((state) => state.override)
 
   const [detailOpen, setDetailOpen] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [clearOpen, setClearOpen] = useState(false)
   const [clearForm, setClearForm] = useState(createDefaultUsageClearForm)
   const clearFormRef = useRef(clearForm)
@@ -332,6 +356,41 @@ export function UsagePage() {
         <h1 className="mr-auto text-lg font-semibold">
           {t(category === 'ai' ? 'aiRequests' : 'mcpCalls')}
         </h1>
+        {mode === 'records' && (
+          <Button
+            aria-controls="usage-advanced-filters"
+            aria-expanded={filtersOpen}
+            aria-label={
+              activeFilterCount > 0
+                ? t('advancedFiltersActive', { count: activeFilterCount })
+                : t('advancedFilters')
+            }
+            data-usage-advanced-filters
+            onClick={() => setFiltersOpen((open) => !open)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            <SlidersHorizontal aria-hidden="true" className="size-4" />
+            <span>{t('advancedFilters')}</span>
+            {activeFilterCount > 0 && (
+              <Badge
+                className="h-4 min-w-4 px-1 text-[10px]"
+                data-usage-active-filters={activeFilterCount}
+                variant="secondary"
+              >
+                {activeFilterCount}
+              </Badge>
+            )}
+            <ChevronDown
+              aria-hidden="true"
+              className={cn(
+                'size-4 transition-transform',
+                filtersOpen && 'rotate-180',
+              )}
+            />
+          </Button>
+        )}
         <UsageRangePicker
           end={end}
           onApply={applyRange}
@@ -339,6 +398,17 @@ export function UsagePage() {
           start={start}
         />
         <UsageModeSwitch onChange={changeMode} value={mode} />
+        {mode === 'records' && (
+          <Button
+            onClick={openClearDialog}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            <Trash2 aria-hidden="true" />
+            {t('clearHistory')}
+          </Button>
+        )}
         <Button
           aria-label={t('refresh')}
           disabled={recordsLoading || overviewLoading}
@@ -365,17 +435,22 @@ export function UsagePage() {
         />
       ) : (
         <div className="grid min-w-0 grid-cols-1 gap-3">
-          <RequestRecordsToolbar
-            category={category}
-            facets={facets}
-            filters={filters}
-            isAdmin={isAdmin}
-            onClear={openClearDialog}
-            onFilters={changeFilters}
-            onScope={changeScope}
-            onSearch={changeSearch}
-            scope={scope}
-          />
+          <div
+            data-usage-filter-panel
+            hidden={!filtersOpen}
+            id="usage-advanced-filters"
+          >
+            <RequestRecordsToolbar
+              category={category}
+              facets={facets}
+              filters={filters}
+              isAdmin={isAdmin}
+              onFilters={changeFilters}
+              onScope={changeScope}
+              onSearch={changeSearch}
+              scope={scope}
+            />
+          </div>
           <RequestRecordsTable
             category={category}
             first={first}

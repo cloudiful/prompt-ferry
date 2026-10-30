@@ -11,7 +11,13 @@ import {
   runModelRouteProbe,
   updateModelRouteEnabled,
 } from '@/stores/endpoints-api'
+import {
+  modelRouteFormToRequest,
+  modelRouteToForm,
+} from '@/admin-mappers/forms/model-route'
+import { capturePayload } from '@/stores/record-action-types'
 import { modelRoutePagesQueryKey } from '@/lib/endpoints'
+import { modelRouteTargetIndex } from '@/models/endpoints/model-route-item'
 
 export function modelRoutePageQueryKey(first: number, rows: number) {
   return [...modelRoutePagesQueryKey(), first, rows] as const
@@ -44,6 +50,30 @@ export async function setModelRouteEnabled(
   enabled: boolean,
 ): Promise<ModelEndpointRule> {
   return updateModelRouteEnabled(route, enabled)
+}
+
+/**
+ * Enable or disable one configured target of a route.
+ *
+ * The save API replaces the whole target list, so the request is rebuilt from
+ * the stored route: only the addressed target changes and every other target
+ * keeps its configuration, its order and its omit-when-untouched secrets.
+ */
+export async function setModelRouteTargetEnabled(
+  route: ModelEndpointRule,
+  targetId: string,
+  enabled: boolean,
+): Promise<ModelEndpointRule> {
+  const index = modelRouteTargetIndex(route, targetId)
+  if (index < 0) throw new Error(`model route target ${targetId} not found`)
+  const form = modelRouteToForm(route)
+  const target = form.targets[index]
+  if (!target) throw new Error(`model route target ${targetId} not found`)
+  target.enabled = enabled
+  return persistModelRoute(
+    route.rule_id,
+    capturePayload(modelRouteFormToRequest(form)),
+  )
 }
 
 export async function refreshModelRoutePage(

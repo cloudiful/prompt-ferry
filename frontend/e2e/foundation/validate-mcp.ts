@@ -113,6 +113,12 @@ if (existsSync(reportPath)) {
       owner.updateOwner === 2,
     'ordinary-user create/update did not force the caller owner and user scope',
   )
+  assert(
+    checks.listTestAction?.testColumnAbsent === true &&
+      JSON.stringify(checks.listTestAction?.headers) ===
+        JSON.stringify(['Name', 'Status', 'Edit']),
+    'the MCP list kept a separate test column',
+  )
 
   const pagination = checks.pagination ?? {}
   assert(

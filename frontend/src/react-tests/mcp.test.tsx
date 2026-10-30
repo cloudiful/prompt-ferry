@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -276,6 +277,23 @@ describe('MCP page role and write behavior', () => {
     expect(await screen.findByRole('dialog')).toBeTruthy()
     expect(screen.queryByLabelText('Scope')).toBeNull()
     expect(screen.queryByLabelText('Owner')).toBeNull()
+  })
+
+  it('opens the catalog test result once and keeps the row action reachable', async () => {
+    renderPage(admin)
+    await screen.findByText('Fixture Context7')
+    const row = document.querySelector(
+      '[data-mcp-server-row="mcp-context7"]',
+    ) as HTMLElement
+
+    await act(async () => {
+      fireEvent.click(
+        within(row).getByRole('button', { name: 'Refresh catalog' }),
+      )
+    })
+
+    expect(await screen.findByText('fixture succeeded')).toBeTruthy()
+    expect(api.testMcpServer).toHaveBeenCalledTimes(1)
   })
 
   it('keeps admin scope and owner fields available and forces a non-admin create to its caller', async () => {

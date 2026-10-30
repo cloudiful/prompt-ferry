@@ -21,7 +21,6 @@ export function RuleWarningBadge({
 
   return (
     <span
-      aria-label={message}
       className={`inline-flex w-fit items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs ${
         invalid
           ? 'border-destructive bg-destructive/10 text-destructive'

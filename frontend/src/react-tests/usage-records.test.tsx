@@ -780,7 +780,6 @@ type ToolbarProps = {
   onFilters?: (patch: Partial<UsageFilters>) => void
   onSearch?: (search: string | null) => void
   onScope?: (scope: UsageScope) => void
-  onClear?: () => void
 }
 
 function toolbarFilters(overrides: Partial<UsageFilters> = {}): UsageFilters {
@@ -795,7 +794,6 @@ function ToolbarHarness(props: ToolbarProps) {
       facets={facets}
       filters={filters}
       isAdmin={props.isAdmin ?? true}
-      onClear={props.onClear ?? vi.fn()}
       onFilters={(patch) => {
         setFilters((current) => ({ ...current, ...patch }))
         props.onFilters?.(patch)
@@ -824,15 +822,14 @@ async function choose(triggerName: string, optionName: string) {
 }
 
 describe('request records toolbar', () => {
-  it('titles AI and MCP lists and hides category-only controls', () => {
+  it('renders the search and category-specific filter controls only', () => {
     const view = renderToolbar()
-    expect(
-      screen.getByRole('heading', { name: copy.recentRequests }),
-    ).toBeTruthy()
+    expect(screen.getByPlaceholderText(copy.search)).toBeTruthy()
     expect(
       screen.getByRole('combobox', { name: copy.allRedactionStates }),
     ).toBeTruthy()
     expect(screen.queryByRole('combobox', { name: copy.mcpScope })).toBeNull()
+    expect(screen.queryByRole('heading')).toBeNull()
 
     view.rerender(
       <LocaleProvider>
@@ -841,7 +838,6 @@ describe('request records toolbar', () => {
           facets={facets}
           filters={toolbarFilters()}
           isAdmin={false}
-          onClear={vi.fn()}
           onFilters={vi.fn()}
           onScope={vi.fn()}
           onSearch={vi.fn()}
@@ -849,7 +845,6 @@ describe('request records toolbar', () => {
         />
       </LocaleProvider>,
     )
-    expect(screen.getByRole('heading', { name: copy.mcpCalls })).toBeTruthy()
     expect(
       screen.queryByRole('combobox', { name: copy.allRedactionStates }),
     ).toBeNull()
@@ -884,7 +879,6 @@ describe('request records toolbar', () => {
           facets={facets}
           filters={toolbarFilters({ search })}
           isAdmin
-          onClear={vi.fn()}
           onFilters={vi.fn()}
           onScope={vi.fn()}
           onSearch={vi.fn()}
@@ -932,15 +926,11 @@ describe('request records toolbar', () => {
     expect(onFilters).toHaveBeenLastCalledWith({ redaction_applied: false })
   })
 
-  it('reports the MCP scope and the clear-history intent', async () => {
+  it('reports the MCP scope', async () => {
     const onScope = vi.fn()
-    const onClear = vi.fn()
-    renderToolbar({ category: 'mcp', onClear, onScope })
+    renderToolbar({ category: 'mcp', onScope })
     await choose(copy.mcpScope, copy.mcpScopeGateway)
     expect(onScope).toHaveBeenCalledWith('gateway')
-
-    fireEvent.click(screen.getByRole('button', { name: copy.clearHistory }))
-    expect(onClear).toHaveBeenCalledTimes(1)
   })
 
   it('shows the current filter labels on the triggers', () => {

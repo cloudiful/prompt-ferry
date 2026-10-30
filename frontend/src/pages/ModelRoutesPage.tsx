@@ -17,6 +17,10 @@ import { ModelRouteMobileCard } from '@/components/endpoints/ModelRouteMobileCar
 import { ModelRouteTestResultsDialog } from '@/components/endpoints/ModelRouteTestResultsDialog'
 import { ModelRoutesTable } from '@/components/endpoints/ModelRoutesTable'
 import { TablePagination } from '@/components/shared/TablePagination'
+import {
+  testResultKey,
+  type TestResultSurface,
+} from '@/components/shared/TestResultPopover'
 import { Button } from '@/components/ui/button'
 import {
   endpointRecordsQueryKey,
@@ -32,6 +36,7 @@ import {
   removeModelRoute,
   saveModelRoute,
   setModelRouteEnabled,
+  setModelRouteTargetEnabled,
   testModelRoute,
 } from '@/lib/model-routes'
 import { useAsyncAction } from '@/lib/use-async-action'
@@ -39,7 +44,10 @@ import { useLocale } from '@/lib/i18n'
 import { useNotifier } from '@/lib/notifier'
 import { useSessionStore } from '@/lib/session'
 import { modelRouteActionKey, networkTestKey } from '@/models/endpoints'
-import { createModelRouteListItemView } from '@/models/endpoints/model-route-item'
+import {
+  createModelRouteListItemView,
+  modelRouteTargetToggleOrigin,
+} from '@/models/endpoints/model-route-item'
 import type { ModelRouteForm } from '@/models'
 import type { TablePageChange } from '@/models/pagination'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/models/pagination'
@@ -64,6 +72,9 @@ export function ModelRoutesPage() {
   const [testResults, setTestResults] = useState<
     Record<string, ModelRouteTestResponse>
   >({})
+  const [openTestResultKey, setOpenTestResultKey] = useState<string | null>(
+    null,
+  )
   const [dialogForm, setDialogForm] = useState<ModelRouteForm | null>(null)
   const [detailsRuleId, setDetailsRuleId] = useState<string | null>(null)
   const firstRef = useRef(first)
@@ -137,6 +148,10 @@ export function ModelRoutesPage() {
     }
   }, [first, page, rows, setRows])
 
+  useEffect(() => {
+    setOpenTestResultKey(null)
+  }, [first])
+
   const routes = page?.routes ?? EMPTY_ROUTES
   const endpoints = endpointsQuery.data ?? EMPTY_ENDPOINTS
   const users = usersQuery.data ?? []
@@ -180,6 +195,7 @@ export function ModelRoutesPage() {
     rowsRef.current = nextRows
     setFirst(refreshed.first)
     setRows(nextRows)
+    setOpenTestResultKey(null)
   }
 
   function changePage(change: TablePageChange): void {
@@ -187,6 +203,17 @@ export function ModelRoutesPage() {
     rowsRef.current = change.rows
     setFirst(change.first)
     setRows(change.rows)
+    setOpenTestResultKey(null)
+  }
+
+  function changeTestResultOpen(key: string, open: boolean): void {
+    if (open) return
+    setOpenTestResultKey((current) => (current === key ? null : current))
+  }
+
+  function showModelRouteDetails(ruleId: string): void {
+    setOpenTestResultKey(null)
+    setDetailsRuleId(ruleId)
   }
 
   function openCreateDialog(): void {
@@ -306,15 +333,49 @@ export function ModelRoutesPage() {
     }
   }
 
-  async function probeModelRoute(ruleId: string): Promise<void> {
+  async function toggleModelRouteTarget(
+    ruleId: string,
+    targetId: string,
+    enabled: boolean,
+  ): Promise<void> {
+    const route = routes.find((item) => item.rule_id === ruleId)
+    if (!route) return
+    const capturedRoute = capturePayload(route)
+    const capturedTargetId = targetId
+    try {
+      const outcome = await asyncAction.run(
+        modelRouteActionKey(ruleId),
+        async () => {
+          const saved = await setModelRouteTargetEnabled(
+            capturedRoute,
+            capturedTargetId,
+            enabled,
+          )
+          patchModelRoutePages(queryClient, saved)
+          return saved
+        },
+        modelRouteTargetToggleOrigin(capturedTargetId),
+      )
+      if (outcome.executed) notifySuccess(t('saved'))
+    } catch (cause) {
+      reportApiError(cause)
+    }
+  }
+
+  async function probeModelRoute(
+    ruleId: string,
+    surface: TestResultSurface,
+  ): Promise<void> {
+    const capturedSurface = surface
     try {
       const outcome = await asyncAction.run(
         networkTestKey('modelroute', ruleId),
         () => testModelRoute(ruleId),
         'test',
       )
-      if (outcome.executed)
-        setTestResults((current) => ({ ...current, [ruleId]: outcome.value }))
+      if (!outcome.executed) return
+      setTestResults((current) => ({ ...current, [ruleId]: outcome.value }))
+      setOpenTestResultKey(testResultKey(capturedSurface, ruleId))
     } catch (cause) {
       reportApiError(cause)
     }
@@ -417,9 +478,14 @@ export function ModelRoutesPage() {
             onDelete={(id) => void deleteModelRoute(id)}
             onEdit={openEditDialog}
             onPageChange={changePage}
-            onProbe={(id) => void probeModelRoute(id)}
-            onShowDetails={setDetailsRuleId}
+            onProbe={(id, surface) => void probeModelRoute(id, surface)}
+            onResultOpenChange={changeTestResultOpen}
+            onShowDetails={showModelRouteDetails}
             onToggle={(id, enabled) => void toggleModelRoute(id, enabled)}
+            onToggleTarget={(id, targetId, enabled) =>
+              void toggleModelRouteTarget(id, targetId, enabled)
+            }
+            openResultKey={openTestResultKey}
             pendingActions={pendingActions}
             rows={page?.rows ?? rows}
             total={page?.total ?? 0}
@@ -436,9 +502,14 @@ export function ModelRoutesPage() {
                   key={item.rule_id}
                   onDelete={(id) => void deleteModelRoute(id)}
                   onEdit={openEditDialog}
-                  onProbe={(id) => void probeModelRoute(id)}
-                  onShowDetails={setDetailsRuleId}
+                  onProbe={(id, surface) => void probeModelRoute(id, surface)}
+                  onResultOpenChange={changeTestResultOpen}
+                  onShowDetails={showModelRouteDetails}
                   onToggle={(id, enabled) => void toggleModelRoute(id, enabled)}
+                  onToggleTarget={(id, targetId, enabled) =>
+                    void toggleModelRouteTarget(id, targetId, enabled)
+                  }
+                  openResultKey={openTestResultKey}
                   pendingActions={pendingActions}
                 />
               ))

@@ -112,6 +112,42 @@ export function routeTargetPairLabel(target: ModelRouteTargetItemView): string {
 }
 
 /**
+ * The pending-action origin a target toggle runs under. The route action key
+ * is shared with the route's own writes, so a target toggle and a route save
+ * never overlap.
+ */
+export const MODEL_ROUTE_TARGET_TOGGLE_ORIGIN = 'target-toggle'
+
+export function modelRouteTargetToggleOrigin(targetId: string): string {
+  return `${MODEL_ROUTE_TARGET_TOGGLE_ORIGIN}:${targetId}`
+}
+
+/**
+ * The target a pending action toggles, or null when the pending action is not
+ * a target toggle.
+ */
+export function modelRouteTargetToggleOriginTarget(
+  origin: string | null | undefined,
+): string | null {
+  if (!origin?.startsWith(`${MODEL_ROUTE_TARGET_TOGGLE_ORIGIN}:`)) return null
+  return origin.slice(MODEL_ROUTE_TARGET_TOGGLE_ORIGIN.length + 1)
+}
+
+/**
+ * Where a target sits in the stored route. The server rebuilds every target on
+ * a route update, so a target is only ever located by the identifier the
+ * latest response carried.
+ */
+export function modelRouteTargetIndex(
+  route: ModelEndpointRule,
+  targetId: string,
+): number {
+  return (route.targets ?? []).findIndex(
+    (target) => target.target_id === targetId,
+  )
+}
+
+/**
  * The tone of a model-route test.
  *
  * Every tested target passing is green, some of them passing is amber, and no

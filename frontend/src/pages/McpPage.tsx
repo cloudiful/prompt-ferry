@@ -16,6 +16,10 @@ import type {
 import type { McpForm } from '@/models'
 import { McpDialog } from '@/components/mcp/McpDialog'
 import { McpTable } from '@/components/mcp/McpTable'
+import {
+  testResultKey,
+  type TestResultSurface,
+} from '@/components/shared/TestResultPopover'
 import { Button } from '@/components/ui/button'
 import {
   EMPTY_MCP_CATALOG,
@@ -70,6 +74,9 @@ export function McpPage() {
   const [testResults, setTestResults] = useState<
     Record<string, McpTestResponse>
   >({})
+  const [openTestResultKey, setOpenTestResultKey] = useState<string | null>(
+    null,
+  )
   const [, setCatalogs] = useState<CatalogCache>({})
   const catalogsRef = useRef<CatalogCache>({})
   const catalogRevisionRef = useRef<Record<string, number>>({})
@@ -339,6 +346,12 @@ export function McpPage() {
     rowsRef.current = change.rows
     setFirst(change.first)
     setRows(change.rows)
+    setOpenTestResultKey(null)
+  }
+
+  function changeTestResultOpen(key: string, open: boolean): void {
+    if (open) return
+    setOpenTestResultKey((current) => (current === key ? null : current))
   }
 
   async function submitServer(): Promise<void> {
@@ -449,8 +462,12 @@ export function McpPage() {
     }
   }
 
-  async function testServer(server: McpServer): Promise<void> {
+  async function testServer(
+    server: McpServer,
+    surface: TestResultSurface,
+  ): Promise<void> {
     const serverId = server.server_id
+    const capturedSurface = surface
     try {
       const outcome = await asyncAction.run(
         mcpTestKey(serverId),
@@ -461,6 +478,7 @@ export function McpPage() {
       const result = outcome.value
       const catalog = mcpCatalogFromTest(result)
       setTestResults((current) => ({ ...current, [serverId]: result }))
+      setOpenTestResultKey(testResultKey(capturedSurface, serverId))
       updateCatalogCache(serverId, catalog)
       catalogRevisionRef.current[serverId] =
         (catalogRevisionRef.current[serverId] ?? 0) + 1
@@ -555,8 +573,10 @@ export function McpPage() {
         onDelete={(server) => void deleteServer(server)}
         onEdit={openEditDialog}
         onPageChange={changePage}
-        onTest={(server) => void testServer(server)}
+        onResultOpenChange={changeTestResultOpen}
+        onTest={(server, surface) => void testServer(server, surface)}
         onToggle={(server) => void toggleServer(server)}
+        openResultKey={openTestResultKey}
         pendingActions={pendingActions}
         rows={currentPage?.rows ?? rows}
         total={currentPage?.total ?? 0}

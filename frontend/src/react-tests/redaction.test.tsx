@@ -312,11 +312,88 @@ describe('redaction rules page', () => {
     expect(useRedactionStore.getState()).toMatchObject({
       identityKey: null,
       config: expect.objectContaining({ custom_strings: [] }),
-      customStringReveal: new Set(),
+      customStringRevealAll: false,
       previewText: '',
       previewResult: null,
     })
     expect(screen.queryByLabelText('Pattern 2')).toBeNull()
+  })
+})
+
+describe('redaction global plaintext toggle', () => {
+  const patternInputs = () =>
+    screen
+      .getAllByLabelText(/^Pattern \d+$/)
+      .map((input) => (input as HTMLInputElement).type)
+
+  it('masks every rule by default and reveals or hides all of them together', async () => {
+    useSessionStore.setState({ me: admin })
+    renderPage()
+    await screen.findByLabelText('Pattern 2')
+
+    expect(
+      screen
+        .getByRole('button', { name: 'Show all plaintext' })
+        .getAttribute('aria-pressed'),
+    ).toBe('false')
+    expect(patternInputs()).toEqual(['password', 'password'])
+    expect(
+      screen.queryByRole('button', { name: /^(Show|Hide) plaintext \d$/ }),
+    ).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show all plaintext' }))
+    expect(
+      screen
+        .getByRole('button', { name: 'Hide all plaintext' })
+        .getAttribute('aria-pressed'),
+    ).toBe('true')
+    expect(patternInputs()).toEqual(['text', 'text'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide all plaintext' }))
+    expect(patternInputs()).toEqual(['password', 'password'])
+  })
+
+  it('keeps the global state for rows added after revealing all', async () => {
+    useSessionStore.setState({ me: admin })
+    renderPage()
+    await screen.findByLabelText('Pattern 2')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show all plaintext' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add rule' }))
+
+    expect((screen.getByLabelText('Pattern 3') as HTMLInputElement).type).toBe(
+      'text',
+    )
+    expect(
+      screen.queryByRole('button', { name: /^(Show|Hide) plaintext 3$/ }),
+    ).toBeNull()
+  })
+
+  it('re-masks after a successful save', async () => {
+    useSessionStore.setState({ me: admin })
+    renderPage()
+    await screen.findByLabelText('Pattern 2')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show all plaintext' }))
+    expect((screen.getByLabelText('Pattern 2') as HTMLInputElement).type).toBe(
+      'text',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(api.setRedactionSetting).toHaveBeenCalledTimes(1),
+    )
+
+    expect(
+      screen
+        .getByRole('button', { name: 'Show all plaintext' })
+        .getAttribute('aria-pressed'),
+    ).toBe('false')
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText('Pattern 2') as HTMLInputElement).type,
+      ).toBe('password'),
+    )
   })
 })
 

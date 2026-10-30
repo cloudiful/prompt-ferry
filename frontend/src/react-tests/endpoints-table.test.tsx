@@ -46,9 +46,11 @@ function renderTable(items: EndpointListItemView[]) {
         onDelete={vi.fn()}
         onEdit={vi.fn()}
         onPage={vi.fn()}
+        onResultOpenChange={vi.fn()}
         onTest={vi.fn()}
         onTokenPlanUsage={vi.fn()}
         onToggle={vi.fn()}
+        openResultKey={null}
         pendingActions={{}}
         rows={25}
         total={items.length}
@@ -81,8 +83,9 @@ describe('upstream endpoint list table', () => {
     const headers = screen
       .getAllByRole('columnheader')
       .map((header) => (header.textContent ?? '').trim())
-    expect(headers).toEqual(['Endpoint', 'Status', 'Usage', 'Test', 'Actions'])
+    expect(headers).toEqual(['Endpoint', 'Status', 'Usage', 'Actions'])
     expect(headers).not.toContain('User')
+    expect(headers).not.toContain('Test')
     expect(
       screen.getAllByRole('columnheader').map((header) => header.textContent),
     ).not.toContain('—')
@@ -134,7 +137,7 @@ describe('upstream endpoint list table', () => {
     expect(cellTexts('endpoint-2')[0]).not.toContain('—')
   })
 
-  it('keeps an inapplicable quota cell empty and the test column intact', () => {
+  it('keeps an inapplicable quota cell empty and the test action in the action cell', () => {
     renderTable([
       item({ endpoint_id: 'endpoint-1' }),
       item({
@@ -146,12 +149,12 @@ describe('upstream endpoint list table', () => {
     const cells = Array.from(
       row('endpoint-1').querySelectorAll('td'),
     ) as HTMLTableCellElement[]
-    expect(cells).toHaveLength(5)
+    expect(cells).toHaveLength(4)
     expect(cells[2]?.textContent?.trim()).not.toBe('')
     const inapplicable = Array.from(
       row('endpoint-2').querySelectorAll('td'),
     ) as HTMLTableCellElement[]
-    expect(inapplicable).toHaveLength(5)
+    expect(inapplicable).toHaveLength(4)
     expect(inapplicable[2]?.textContent?.trim()).toBe('')
     expect(
       within(inapplicable[3] as HTMLTableCellElement).getByRole('button', {
