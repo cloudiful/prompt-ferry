@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { X } from 'lucide-react'
 import { formatApiError } from '@/api'
 
 type Notification = {
@@ -23,6 +24,36 @@ type NotifierValue = {
 }
 
 const NotifierContext = createContext<NotifierValue | null>(null)
+
+function NotificationItem({
+  item,
+  dismiss,
+}: {
+  item: Notification
+  dismiss: (id: number) => void
+}) {
+  useEffect(() => {
+    const timer = window.setTimeout(() => dismiss(item.id), 5000)
+    return () => window.clearTimeout(timer)
+  }, [dismiss, item.id])
+
+  return (
+    <div
+      role={item.kind === 'error' ? 'alert' : 'status'}
+      className="pointer-events-auto flex items-start gap-2 rounded-md border bg-card px-4 py-3 text-sm text-card-foreground shadow-lg"
+    >
+      <span className="min-w-0 flex-1 break-words">{item.message}</span>
+      <button
+        aria-label="Close"
+        className="shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => dismiss(item.id)}
+        type="button"
+      >
+        <X aria-hidden="true" className="size-4" />
+      </button>
+    </div>
+  )
+}
 
 export function NotifierProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([])
@@ -49,14 +80,6 @@ export function NotifierProvider({ children }: { children: ReactNode }) {
     setNotifications((current) => current.filter((item) => item.id !== id))
   }, [])
 
-  useEffect(() => {
-    if (typeof window === 'undefined' || notifications.length === 0) return
-    const timers = notifications.map((item) =>
-      window.setTimeout(() => dismiss(item.id), 5000),
-    )
-    return () => timers.forEach((timer) => window.clearTimeout(timer))
-  }, [dismiss, notifications])
-
   const value = useMemo(
     () => ({ notifySuccess, notifyError, notifyApiError }),
     [notifyApiError, notifyError, notifySuccess],
@@ -68,16 +91,10 @@ export function NotifierProvider({ children }: { children: ReactNode }) {
       <div
         aria-live="polite"
         aria-relevant="additions"
-        className="fixed right-4 top-4 z-[70] grid w-[min(24rem,calc(100vw-2rem))] gap-2"
+        className="pointer-events-none fixed right-4 bottom-4 z-[70] grid w-[min(24rem,calc(100vw-2rem))] gap-2"
       >
         {notifications.map((item) => (
-          <div
-            key={item.id}
-            role={item.kind === 'error' ? 'alert' : 'status'}
-            className="rounded-md border bg-card px-4 py-3 text-sm text-card-foreground shadow-lg"
-          >
-            {item.message}
-          </div>
+          <NotificationItem key={item.id} item={item} dismiss={dismiss} />
         ))}
       </div>
     </NotifierContext.Provider>

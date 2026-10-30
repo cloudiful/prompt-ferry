@@ -10,6 +10,8 @@ use crate::db::{
     RequestRecordOverviewResponse,
 };
 
+#[cfg(test)]
+mod minute_tests;
 mod presentation;
 mod queries;
 
@@ -44,6 +46,8 @@ struct OverviewCacheKey {
     bucket: OverviewBucket,
     start_bucket: Option<i64>,
     end_bucket: Option<i64>,
+    exact_start: Option<DateTime<Utc>>,
+    exact_end: Option<DateTime<Utc>>,
     user: Option<String>,
 }
 
@@ -73,6 +77,32 @@ fn store_response(key: OverviewCacheKey, now: Instant, response: &RequestRecordO
     cache.insert(key, (now, response.clone()));
 }
 
+fn overview_cache_key(
+    visible_user_id: Option<i64>,
+    request_category: RequestRecordCategory,
+    window: OverviewWindow,
+    user: Option<&str>,
+    perspective: RequestRecordOverviewPerspective,
+    mcp_scope: RequestRecordMcpScope,
+) -> OverviewCacheKey {
+    let exact = matches!(
+        window.bucket,
+        OverviewBucket::Minute | OverviewBucket::FiveMinute
+    );
+    OverviewCacheKey {
+        visible_user_id,
+        request_category: request_category.as_str(),
+        perspective: perspective.as_str(),
+        mcp_scope: mcp_scope.as_str(),
+        bucket: window.bucket,
+        start_bucket: window_bucket(window.start),
+        end_bucket: window_bucket(window.end),
+        exact_start: exact.then_some(window.start).flatten(),
+        exact_end: exact.then_some(window.end).flatten(),
+        user: user.map(str::to_owned),
+    }
+}
+
 pub async fn request_records_overview(
     pool: &sqlx::PgPool,
     visible_user_id: Option<i64>,
@@ -82,16 +112,14 @@ pub async fn request_records_overview(
     perspective: RequestRecordOverviewPerspective,
     mcp_scope: RequestRecordMcpScope,
 ) -> Result<RequestRecordOverviewResponse> {
-    let key = OverviewCacheKey {
+    let key = overview_cache_key(
         visible_user_id,
-        request_category: request_category.as_str(),
-        perspective: perspective.as_str(),
-        mcp_scope: mcp_scope.as_str(),
-        bucket: window.bucket,
-        start_bucket: window_bucket(window.start),
-        end_bucket: window_bucket(window.end),
-        user: user.map(str::to_owned),
-    };
+        request_category,
+        window,
+        user,
+        perspective,
+        mcp_scope,
+    );
     let now = Instant::now();
     if let Some(cached) = cached_response(&key, now) {
         return Ok(cached);
@@ -176,6 +204,8 @@ mod tests {
             bucket: OverviewBucket::Hour,
             start_bucket: Some(0),
             end_bucket: Some(1),
+            exact_start: None,
+            exact_end: None,
             user: user.map(str::to_owned),
         }
     }
@@ -190,6 +220,37 @@ mod tests {
         assert_eq!(window_bucket(Some(at)), window_bucket(Some(within)));
         assert_ne!(window_bucket(Some(at)), window_bucket(Some(across)));
         assert_eq!(window_bucket(None), None);
+    }
+
+    #[test]
+    fn minute_cache_keys_preserve_exact_bounds_and_older_buckets_remain_rounded() {
+        let start = DateTime::<Utc>::from_timestamp(1_020, 0).unwrap();
+        let end = DateTime::<Utc>::from_timestamp(1_620, 0).unwrap();
+        let key = |bucket, delta| {
+            overview_cache_key(
+                Some(1),
+                RequestRecordCategory::Ai,
+                OverviewWindow {
+                    start: Some(start + chrono::Duration::seconds(delta)),
+                    end: Some(end + chrono::Duration::seconds(delta)),
+                    bucket,
+                },
+                None,
+                RequestRecordOverviewPerspective::Model,
+                RequestRecordMcpScope::All,
+            )
+        };
+        for bucket in [OverviewBucket::Minute, OverviewBucket::FiveMinute] {
+            assert_ne!(key(bucket, 0), key(bucket, 10));
+            assert_eq!(key(bucket, 0), key(bucket, 0));
+        }
+        assert_ne!(
+            key(OverviewBucket::Minute, 0),
+            key(OverviewBucket::FiveMinute, 0)
+        );
+        for bucket in [OverviewBucket::Hour, OverviewBucket::Day] {
+            assert_eq!(key(bucket, 0), key(bucket, 10));
+        }
     }
 
     #[test]

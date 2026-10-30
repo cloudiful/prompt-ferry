@@ -29,7 +29,8 @@ const api = vi.hoisted(() => ({
 
 vi.mock('@/generated/admin-api', () => api)
 
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, Route, Routes } from 'react-router'
+import { AppShell } from '@/layouts/AppShell'
 import { LocaleProvider } from '@/lib/i18n'
 import { NotifierProvider } from '@/lib/notifier'
 import { useRedactionStore, redactionTargetToken } from '@/lib/redaction'
@@ -161,7 +162,11 @@ function renderPage(path = '/redaction/rules') {
     <LocaleProvider>
       <NotifierProvider>
         <MemoryRouter initialEntries={[path]}>
-          <RedactionPage />
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/redaction/:tab" element={<RedactionPage />} />
+            </Route>
+          </Routes>
         </MemoryRouter>
       </NotifierProvider>
     </LocaleProvider>,

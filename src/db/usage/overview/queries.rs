@@ -15,6 +15,8 @@ use super::presentation::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OverviewBucket {
+    Minute,
+    FiveMinute,
     Hour,
     Day,
 }
@@ -24,6 +26,8 @@ impl OverviewBucket {
     /// buckets are instants, `day` buckets are logical UTC calendar dates.
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Minute => "minute",
+            Self::FiveMinute => "five_minutes",
             Self::Hour => "hour",
             Self::Day => "day",
         }
@@ -198,6 +202,34 @@ pub async fn query_trend(
     mcp_scope: RequestRecordMcpScope,
 ) -> Result<Vec<RequestRecordOverviewTrendBucket>> {
     let rows = match window.bucket {
+        OverviewBucket::Minute => {
+            sqlx::query_file_as!(
+                TrendRow,
+                "src/sql/usage/overview/trend_minute.sql",
+                visible_user_id,
+                request_category.as_str(),
+                window.start,
+                window.end,
+                user,
+                mcp_scope.as_str(),
+            )
+            .fetch_all(pool)
+            .await?
+        }
+        OverviewBucket::FiveMinute => {
+            sqlx::query_file_as!(
+                TrendRow,
+                "src/sql/usage/overview/trend_five_minutes.sql",
+                visible_user_id,
+                request_category.as_str(),
+                window.start,
+                window.end,
+                user,
+                mcp_scope.as_str(),
+            )
+            .fetch_all(pool)
+            .await?
+        }
         OverviewBucket::Hour => {
             sqlx::query_file_as!(
                 TrendRow,

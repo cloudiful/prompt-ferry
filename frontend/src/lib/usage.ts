@@ -18,6 +18,7 @@ import { expectData, withData } from '@/api'
 import { readStorage, writeStorage } from '@/storage'
 import { runAsyncAction, type AsyncActionOutcome } from './async-action'
 import { usageClearPayload, type UsageClearForm } from './usage-clear'
+import { slidingUsageWindow, type LocalUsageRange } from './usage-range'
 import { USAGE_MAINTENANCE_KEY, useUsageDetailStore } from './usage-detail'
 import { useSessionStore } from './session'
 import {
@@ -61,7 +62,6 @@ import {
   type UsageOverviewQuery,
   type UsagePerspective,
   type UsageQueryState,
-  type UsageRange,
   type UsageScope,
   type UsageSortOrder,
 } from './usage-model'
@@ -134,7 +134,7 @@ export type UsageState = {
   isAdmin: boolean
   category: UsageCategory
   scope: UsageScope
-  range: UsageRange
+  range: LocalUsageRange
   start: string
   end: string
   filters: UsageFilters
@@ -156,7 +156,7 @@ export type UsageState = {
   initializeIdentity: (identity: UsageIdentity) => void
   resetIdentity: (identity: UsageIdentity | null) => void
   queryState: () => UsageQueryState
-  setMode: (mode: UsageMode) => void
+  setMode: (mode: UsageMode, queryClient?: QueryClient) => Promise<void>
   setCategory: (
     queryClient: QueryClient,
     category: UsageCategory,
@@ -174,7 +174,7 @@ export type UsageState = {
   setSort: (queryClient: QueryClient, field: string) => Promise<void>
   setRange: (
     queryClient: QueryClient,
-    range: UsageRange,
+    range: LocalUsageRange,
     start?: string,
     end?: string,
   ) => Promise<void>
@@ -286,7 +286,8 @@ export const useUsageStore = create<UsageState>((set, get) => ({
     return {
       category: state.category,
       scope: state.scope,
-      range: state.range,
+      range:
+        state.range === '1h' || state.range === '5h' ? 'custom' : state.range,
       start: state.start,
       end: state.end,
       first: state.first,
@@ -297,10 +298,13 @@ export const useUsageStore = create<UsageState>((set, get) => ({
     }
   },
 
-  setMode(mode) {
-    const { category } = get()
+  async setMode(mode, queryClient) {
+    const { category, range } = get()
     saveUsageMode(modeStorage(), category, mode)
     set({ mode })
+    if (queryClient && (range === '1h' || range === '5h')) {
+      await get().refreshAll(queryClient)
+    }
   },
 
   async setCategory(queryClient, category) {
@@ -466,7 +470,7 @@ export const useUsageStore = create<UsageState>((set, get) => ({
   async refreshFacets(queryClient) {
     const state = get()
     if (state.identityKey === null) return
-    const query = usageFacetsQuery(state)
+    const query = usageFacetsQuery({ ...state, ...get().queryState() })
     const identity: UsageIdentity = {
       user_id: state.identityUserId,
       is_admin: state.isAdmin,
@@ -493,11 +497,14 @@ export const useUsageStore = create<UsageState>((set, get) => ({
   async refreshOverview(queryClient) {
     const state = get()
     if (state.identityKey === null) return
-    const query = usageOverviewQuery(state, state.perspective)
+    const query = usageOverviewQuery(
+      { ...state, ...get().queryState() },
+      state.perspective,
+    )
     const signature = usageOverviewSignature({
       category: state.category,
       perspective: state.perspective,
-      range: state.range,
+      range: get().queryState().range,
       start: state.start,
       end: state.end,
     })
@@ -521,7 +528,10 @@ export const useUsageStore = create<UsageState>((set, get) => ({
         usageOverviewSignature({
           category: current.category,
           perspective: current.perspective,
-          range: current.range,
+          range:
+            current.range === '1h' || current.range === '5h'
+              ? 'custom'
+              : current.range,
           start: current.start,
           end: current.end,
         })
@@ -551,6 +561,10 @@ export const useUsageStore = create<UsageState>((set, get) => ({
   },
 
   async refreshAll(queryClient) {
+    const { range } = get()
+    if (range === '1h' || range === '5h') {
+      set(slidingUsageWindow(range, Date.now()))
+    }
     const generation = ++pageGeneration
     set({ pageLoading: true })
     try {

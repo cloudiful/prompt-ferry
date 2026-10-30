@@ -1,6 +1,15 @@
 async page => {
-  const BASE = 'http://127.0.0.1:5171'
-  const FIXTURE = 'http://127.0.0.1:8789'
+  const BASE = 'http://127.0.0.1:5188'
+  const FIXTURE = 'http://127.0.0.1:8798'
+  const context = await page.context().browser().newContext({ serviceWorkers: 'block', timezoneId: 'UTC' })
+  page = await context.newPage()
+  await context.route('**/*', async route => {
+    const url = new URL(route.request().url())
+    if (url.origin !== BASE) return route.abort()
+    if (!url.pathname.startsWith('/api/')) return route.continue()
+    const response = await route.fetch({ url: `${FIXTURE}${url.pathname}${url.search}`, maxRedirects: 0 })
+    await route.fulfill({ response })
+  })
   const screenshots = 'e2e/foundation/screenshots'
   const startedAt = new Date().toISOString()
   const report = {
@@ -165,6 +174,18 @@ async page => {
     await page.getByRole('combobox', { name: triggerName }).click()
     await page.getByRole('option', { name: optionName, exact: true }).click()
     await page.waitForTimeout(200)
+  }
+
+  async function chooseJanuaryRange(endDay) {
+    const popover = page.locator('[data-slot="popover-content"]')
+    for (let i = 0; i < 60; i++) {
+      if ((await popover.locator('.rdp-month_caption').innerText()).includes('January 2026')) break
+      await popover.getByRole('button', { name: 'Go to the Previous Month' }).click()
+    }
+    assert((await popover.locator('.rdp-month_caption').innerText()).includes('January 2026'), 'January 2026 calendar was not reached')
+    await popover.getByRole('button', { name: /January 1st, 2026/ }).click()
+    await popover.getByRole('button', { name: new RegExp(`January ${endDay}, 2026`) }).click()
+    await popover.getByRole('button', { name: 'Apply', exact: true }).click()
   }
 
   async function openFilters() {
@@ -485,7 +506,88 @@ async page => {
   pass('R-USAGE-AI', 'mutation-update', 'the advanced filters collapsed without dropping the draft or applied filter')
 
   stage = 'ai-range'
-  await page.getByRole('button', { name: 'Time range' }).click()
+  const rangeButton = page.getByRole('button', { name: 'Time range' })
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await rangeButton.focus()
+    await page.keyboard.press('Enter')
+    const popup = page.locator('[data-slot="popover-content"]')
+    await popup.waitFor({ state: 'visible' })
+    assert((await popup.locator('.rdp-root').count()) === 1, `expected one calendar at ${width}px`)
+    assert((await popup.locator('input[type="date"]').count()) === 0, `native date fields at ${width}px`)
+    const day = popup.locator('.rdp-day_button:not([disabled])').first()
+    await day.focus()
+    const beforeDay = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'))
+    await page.keyboard.press('ArrowRight')
+    const afterDay = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'))
+    assert(beforeDay && afterDay && beforeDay !== afterDay, `calendar arrow navigation failed at ${width}px`)
+    const geometry = await popup.evaluate(node => {
+      const rect = node.getBoundingClientRect()
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, documentWidth: document.documentElement.scrollWidth }
+    })
+    assert(geometry.left >= 0 && geometry.right <= width && geometry.top >= 0 && geometry.bottom <= 900 && geometry.documentWidth <= width, `range popup escapes viewport: ${JSON.stringify(geometry)}`)
+    await capture(`usage-range-en-light-${width}`)
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Time range')
+  }
+  await page.setViewportSize({ width: 390, height: 600 })
+  await rangeButton.click()
+  let rangePopup = page.locator('[data-slot="popover-content"]')
+  const scrollInfo = await rangePopup.evaluate(node => {
+    node.scrollTop = node.scrollHeight
+    return { height: node.clientHeight, content: node.scrollHeight, top: node.scrollTop }
+  })
+  assert(scrollInfo.content > scrollInfo.height && scrollInfo.top > 0, `range popup did not scroll: ${JSON.stringify(scrollInfo)}`)
+  const firstDay = rangePopup.locator('.rdp-day:not([data-outside]) .rdp-day_button').first()
+  const sameDay = await firstDay.locator('..').getAttribute('data-day')
+  await firstDay.click()
+  await rangePopup.getByLabel('Start time').fill('10:15')
+  await rangePopup.getByLabel('End time').fill('11:45')
+  await rangePopup.getByRole('button', { name: 'Apply', exact: true }).click()
+  await page.waitForTimeout(450)
+  let selectedList = lastRequest('GET', '/api/v1/admin/request-records')
+  assert(selectedList.start === `${sameDay}T10:15:00.000Z` && selectedList.end === `${sameDay}T11:45:00.000Z`, `same-day time bounds incorrect: ${JSON.stringify(selectedList)}`)
+  const committedLabel = await rangeButton.innerText()
+  const beforeCancel = report.requests.length
+  await rangeButton.click()
+  rangePopup = page.locator('[data-slot="popover-content"]')
+  await rangePopup.getByLabel('Start time').fill('09:00')
+  await rangePopup.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Time range')
+  assert(await rangeButton.innerText() === committedLabel && report.requests.length === beforeCancel, 'Cancel changed the committed range or queried')
+  await rangeButton.click()
+  rangePopup = page.locator('[data-slot="popover-content"]')
+  assert(await rangePopup.getByLabel('Start time').inputValue() === '10:15', 'Cancel draft was retained')
+  await rangePopup.getByRole('button', { name: 'Last 24h', exact: true }).click()
+  await page.waitForTimeout(450)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await rangeButton.click()
+  rangePopup = page.locator('[data-slot="popover-content"]')
+  for (let i = 0; i < 60; i++) {
+    if ((await rangePopup.locator('.rdp-month_caption').innerText()).includes('December 2025')) break
+    await rangePopup.getByRole('button', { name: 'Go to the Previous Month' }).click()
+  }
+  assert((await rangePopup.locator('.rdp-month_caption').innerText()).includes('December 2025'), 'December 2025 calendar was not reached')
+  await rangePopup.getByRole('button', { name: /December 31st, 2025/ }).click()
+  await rangePopup.getByRole('button', { name: 'Go to the Next Month' }).click()
+  await rangePopup.getByRole('button', { name: /January 2nd, 2026/ }).click()
+  await rangePopup.getByLabel('Start time').fill('23:15')
+  await rangePopup.getByLabel('End time').fill('02:45')
+  await rangePopup.getByRole('button', { name: 'Apply', exact: true }).click()
+  await page.waitForTimeout(450)
+  selectedList = lastRequest('GET', '/api/v1/admin/request-records')
+  assert(selectedList.start === '2025-12-31T23:15:00.000Z' && selectedList.end === '2026-01-02T02:45:00.000Z', `cross-year time bounds incorrect: ${JSON.stringify(selectedList)}`)
+  report.checks.rangeCalendar = { sameDay: true, crossYear: true, nonDefaultTimes: true, cancelFocus: true, scroll: true }
+  for (const [name, duration] of [['Last 1h', 3600000], ['Last 5h', 18000000]]) {
+    await rangeButton.click()
+    await page.getByRole('button', { name, exact: true }).click()
+    await page.waitForTimeout(450)
+    const list = lastRequest('GET', '/api/v1/admin/request-records')
+    const overview = lastRequest('GET', '/api/v1/admin/request-records/overview')
+    const facets = lastRequest('GET', '/api/v1/admin/request-records/facets')
+    assert(list.range === 'custom' && overview.range === 'custom' && list.start === overview.start && list.end === overview.end && list.start === facets.start && list.end === facets.end && Date.parse(list.end) - Date.parse(list.start) === duration, `${name} window mismatch: ${JSON.stringify({list,overview,facets})}`)
+  }
+  await rangeButton.click()
   await page.getByRole('button', { name: 'Last 7d' }).click()
   await page.waitForTimeout(450)
   const sevenDayList = lastRequest('GET', '/api/v1/admin/request-records')
@@ -495,8 +597,7 @@ async page => {
   assert(sevenDayOverview?.range === '7d' && sevenDayOverview.start !== null, 'the overview did not use the 7d range window')
   assert(sevenDayFacets?.range === null && sevenDayFacets.start !== null && sevenDayFacets.end !== null, 'the facets did not use the resolved 7d window')
   await page.getByRole('button', { name: 'Time range' }).click()
-  await page.getByLabel('Custom 1').fill('2026-01-01')
-  await page.getByLabel('Custom 2').fill('2026-01-03')
+  await chooseJanuaryRange('4th')
   await page.waitForTimeout(500)
   const customList = lastRequest('GET', '/api/v1/admin/request-records')
   assert(customList?.range === 'custom' && customList.start === '2026-01-01T00:00:00.000Z' && customList.end === '2026-01-04T00:00:00.000Z', 'custom range bounds are not the half-open UTC window')
@@ -516,17 +617,53 @@ async page => {
     pathPrefix: '/api/v1/admin/request-records/overview',
     method: 'GET',
     status: 503,
+    message: 'long-error-'.repeat(60),
     delayMs: 350,
     count: 1,
   })
+  const retryEvents = []
+  const observeRetryResponse = response => {
+    if (new URL(response.url()).pathname.startsWith('/api/v1/admin/request-records')) {
+      retryEvents.push({ at: Date.now(), method: response.request().method(), path: new URL(response.url()).pathname, status: response.status() })
+    }
+  }
+  page.on('response', observeRetryResponse)
+  await page.evaluate(() => {
+    window.__retryAlerts = []
+    new MutationObserver(() => {
+      const visible = [...document.querySelectorAll('[role="alert"]')].some(node => node.getClientRects().length > 0)
+      const events = window.__retryAlerts
+      if (!events.length || events.at(-1).visible !== visible) events.push({ at: Date.now(), visible })
+    }).observe(document.body, { childList: true, subtree: true })
+  })
+  retryEvents.push({ at: Date.now(), event: 'failure-refresh' })
   await page.getByRole('button', { name: 'Refresh' }).click()
   await page.getByRole('alert').first().waitFor({ state: 'visible' })
   assert((await page.getByRole('alert').first().innerText()).length > 0, 'the failed overview read reported no error')
+  const hitTargets = []
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    assert(await page.getByRole('alert').count() > 0, `error disappeared before the ${width}px check`)
+    const targets = await page.locator('header button:visible').evaluateAll(nodes => nodes.map(node => {
+      const rect = node.getBoundingClientRect()
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+      return { name: node.getAttribute('aria-label') || node.textContent?.trim(), hit: node === hit || node.contains(hit), blocker: hit?.outerHTML.slice(0, 200) }
+    }))
+    hitTargets.push(...targets.map(target => ({ ...target, width })))
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `notification caused overflow at ${width}px`)
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
   await fixture('/__fixtures/faults', 'DELETE')
+  retryEvents.push({ at: Date.now(), event: 'retry-refresh' })
   await page.getByRole('button', { name: 'Refresh' }).click()
+  assert(await page.getByRole('alert').count() > 0, 'retry click did not complete while the error was visible')
   await page.locator('[data-usage-record-row]').first().waitFor({ state: 'visible' })
-  assert(await page.getByRole('alert').count() >= 1, 'the error notification disappeared before the retry')
-  report.checks.errorRetry = true
+  retryEvents.push({ at: Date.now(), event: 'records-visible' })
+  const retryEvidence = { retryEvents, alerts: await page.evaluate(() => window.__retryAlerts), hitTargets }
+  assert(hitTargets.every(target => target.hit), `notification covered a header control: ${JSON.stringify(retryEvidence)}`)
+  assert(retryEvents.some(event => event.path === '/api/v1/admin/request-records/overview' && event.status === 200 && event.at >= retryEvents.find(item => item.event === 'retry-refresh').at), `successful retry missing: ${JSON.stringify(retryEvidence)}`)
+  assert(retryEvents.find(event => event.event === 'records-visible').at - retryEvents.find(event => event.event === 'retry-refresh').at < 4000, `retry was not immediate: ${JSON.stringify(retryEvidence)}`)
+  report.checks.errorRetry = retryEvidence
   pass('R-USAGE-AI', 'error-state', '503 notification shown and a retry restored the overview')
 
   stage = 'ai-loading-state'
@@ -564,6 +701,10 @@ async page => {
   await page.waitForTimeout(1400)
   assert(lastRequest('GET', '/api/v1/admin/request-records/overview')?.range === '7d', 'the newest range did not win')
   assert((await page.getByRole('alert').count()) === 1, 'the stale delayed read raised a new error')
+  const closeNotification = page.getByRole('alert').getByRole('button', { name: 'Close' })
+  await closeNotification.focus()
+  await page.keyboard.press('Enter')
+  assert((await page.getByRole('alert').count()) === 0, 'notification did not close with the keyboard')
   report.checks.staleRead = true
   pass('R-USAGE-AI', 'stale-response', 'a delayed older overview did not replace the newer range')
   await fixture('/__fixtures/faults', 'DELETE')
@@ -774,7 +915,8 @@ async page => {
   // browser and only one entry's total is replaced with null.
   let unknownProbeArmed = false
   const unknownRoute = async (route) => {
-    const response = await route.fetch()
+    const url = new URL(route.request().url())
+    const response = await route.fetch({ url: `${FIXTURE}${url.pathname}${url.search}`, maxRedirects: 0 })
     const json = await response.json()
     const row = (json?.breakdown ?? []).find((item) => item.label === 'usage-zero-fixture')
     const entry = (row?.upstream_breakdown ?? []).find((item) => item.endpoint_id === 'ep-fixture-3')
@@ -1125,14 +1267,29 @@ async page => {
   await popover.waitFor({ state: 'hidden' }).catch(() => {})
 
   stage = 'ai-locale-and-responsive'
-  await page.getByRole('button', { name: 'Language' }).click()
-  await page.waitForTimeout(500)
+  await go('/settings/general', 'R-SETTINGS-GENERAL')
+  await page.getByRole('combobox', { name: 'Language' }).click()
+  await page.getByRole('option', { name: '中文', exact: true }).click()
+  await page.getByRole('combobox', { name: '主题' }).click()
+  await page.getByRole('option', { name: '暗色', exact: true }).click()
+  await go('/request-records/ai', 'R-USAGE-AI')
   assert(
-    (await page.locator('[data-foundation-route-id="R-USAGE-AI"] h1').innerText()) === 'AI 请求',
+    (await page.locator('header h1').innerText()) === 'AI 请求',
     'the locale switch did not translate the page',
   )
-  await page.getByRole('button', { name: '暗色' }).click()
   await page.waitForTimeout(400)
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    const trigger = page.getByRole('button', { name: '时间范围' })
+    await trigger.click()
+    const popup = page.locator('[data-slot="popover-content"]')
+    await popup.waitFor({ state: 'visible' })
+    assert((await popup.locator('.rdp-root').count()) === 1, `Chinese range calendar missing at ${width}px`)
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Chinese range overflow at ${width}px`)
+    await capture(`usage-range-zh-dark-${width}`)
+    await page.keyboard.press('Escape')
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
   await capture('usage-ai-zh-dark-1440')
   pass('R-USAGE-AI', 'locale-switch', 'the page followed the locale toggle and translated the fold matrix copy')
 
@@ -1438,9 +1595,11 @@ async page => {
   }
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: '语言' }).click()
-  await page.waitForTimeout(400)
-  await page.getByRole('button', { name: 'Light' }).click()
+  await go('/settings/general', 'R-SETTINGS-GENERAL')
+  await page.getByRole('combobox', { name: '语言' }).click()
+  await page.getByRole('option', { name: 'English', exact: true }).click()
+  await page.getByRole('combobox', { name: 'Theme' }).click()
+  await page.getByRole('option', { name: 'Light', exact: true }).click()
   await page.waitForTimeout(250)
 
   stage = 'ai-responsive-records'
@@ -1668,8 +1827,7 @@ async page => {
   assert(mcpPageTwo.length > 0 && mcpPageTwo.every((id) => !mcpPageOne.includes(id)), 'MCP page two did not change rows')
   pass('R-USAGE-MCP', 'pagination', 'MCP page two queried a distinct row set')
   await page.getByRole('button', { name: 'Time range' }).click()
-  await page.getByLabel('Custom 1').fill('2026-01-01')
-  await page.getByLabel('Custom 2').fill('2026-01-02')
+  await chooseJanuaryRange('3rd')
   await page.waitForTimeout(600)
   assert((await page.getByText('No MCP call records').count()) === 1, 'the MCP empty state did not render')
   pass('R-USAGE-MCP', 'empty-state', 'a past custom window rendered the MCP empty state')

@@ -1,6 +1,15 @@
 async page => {
-  const BASE = 'http://127.0.0.1:5171'
-  const FIXTURE = 'http://127.0.0.1:8789'
+  const BASE = 'http://127.0.0.1:5188'
+  const FIXTURE = 'http://127.0.0.1:8798'
+  const context = await page.context().browser().newContext({ serviceWorkers: 'block' })
+  page = await context.newPage()
+  await context.route('**/*', async route => {
+    const url = new URL(route.request().url())
+    if (url.origin !== BASE) return route.abort()
+    if (!url.pathname.startsWith('/api/')) return route.continue()
+    const response = await route.fetch({ url: `${FIXTURE}${url.pathname}${url.search}`, maxRedirects: 0 })
+    await route.fulfill({ response })
+  })
   const screenshots = 'e2e/foundation/screenshots'
   const REQUEST_LOGGING = '/api/v1/settings/request-content-logging'
   const USAGE_RETENTION = '/api/v1/settings/usage-retention'
@@ -243,7 +252,7 @@ async page => {
     `the requests route identity is wrong: ${routeId}/${routeTab}`,
   )
   const heading = await page
-    .locator('[data-foundation-route-id="R-SETTINGS-REQUESTS"] h1')
+    .locator('header h1')
     .innerText()
   assert(heading === 'Requests & routing', `heading is not localized: ${heading}`)
 
@@ -828,10 +837,11 @@ async page => {
   const rawBeforeToggle = await page
     .locator('#settings-raw-retention-days')
     .inputValue()
-  await page.getByRole('button', { name: 'Language', exact: true }).click()
-  await page.waitForTimeout(400)
-  // The theme control is labelled with the mode it switches to.
-  await page.getByRole('button', { name: /^(Dark|暗色)$/ }).click()
+  await page.goto(`${BASE}/settings/general`)
+  await page.getByRole('combobox', { name: 'Language' }).click()
+  await page.getByRole('option', { name: '中文', exact: true }).click()
+  await page.getByRole('combobox', { name: '主题' }).click()
+  await page.getByRole('option', { name: '暗色', exact: true }).click()
   await page.waitForTimeout(600)
   assert(
     (await page.evaluate(() => document.documentElement.lang)) === 'zh-CN' &&
@@ -848,16 +858,15 @@ async page => {
     writesFor('locale-theme-no-refetch').length === writesBeforeToggle,
     'a locale/theme rerender wrote a setting',
   )
-  assert(
-    (await page.locator('#settings-raw-retention-days').inputValue()) ===
-      rawBeforeToggle,
-    'a locale/theme rerender changed a loaded setting',
-  )
   report.checks.localeThemeNoRefetch = {
     reads: readsFor('locale-theme-no-refetch').length - beforeToggle,
     writes: writesFor('locale-theme-no-refetch').length - writesBeforeToggle,
     keptValue: rawBeforeToggle,
   }
+  stage = 'locale-theme-return'
+  await openRequests()
+  await page.waitForFunction((expected) => document.querySelector('#settings-raw-retention-days')?.value === expected, rawBeforeToggle)
+  assert(writesFor('locale-theme-return').length === 0, 'returning to requests wrote settings')
 
   stage = 'locale-zh'
   await page.evaluate(() => {
@@ -866,7 +875,7 @@ async page => {
   })
   await openRequests()
   const zhHeading = await page
-    .locator('[data-foundation-route-id="R-SETTINGS-REQUESTS"] h1')
+    .locator('header h1')
     .innerText()
   assert(zhHeading === '请求与路由', `the Chinese heading is wrong: ${zhHeading}`)
   const zhCopy = {

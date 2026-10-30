@@ -33,6 +33,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { HeaderActions } from '@/components/layout/HeaderActions'
 import {
   Card,
   CardContent,
@@ -446,7 +447,7 @@ export function RelayHostPage() {
 
   return (
     <div className="grid min-w-0 gap-4" data-foundation-route-id="R-RELAY-HOST">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <HeaderActions>
         <div className="flex items-center gap-2">
           {host && <Badge>{host.role}</Badge>}
           {status && (
@@ -484,7 +485,7 @@ export function RelayHostPage() {
             )}
           </Button>
         </div>
-      </div>
+      </HeaderActions>
 
       {errorMessage && (
         <Alert variant="destructive">

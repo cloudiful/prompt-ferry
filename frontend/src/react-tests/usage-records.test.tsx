@@ -3,11 +3,24 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from '@testing-library/react'
 import { useState } from 'react'
 import { act } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { QueryClient } from '@tanstack/react-query'
+import { useUsageStore } from '@/lib/usage'
+
+const rangeApi = vi.hoisted(() => ({
+  listRequestRecords: vi.fn(),
+  requestRecordFacets: vi.fn(),
+  requestRecordOverview: vi.fn(),
+}))
+vi.mock('@/generated/admin-api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/generated/admin-api')>()),
+  ...rangeApi,
+}))
 import type {
   RequestRecordFacets,
   RequestRecordListRow,
@@ -945,6 +958,30 @@ describe('request records toolbar', () => {
 })
 
 describe('usage range picker', () => {
+  function StoreRangePicker({ client }: { client: QueryClient }) {
+    const range = useUsageStore((state) => state.range)
+    const start = useUsageStore((state) => state.start)
+    const end = useUsageStore((state) => state.end)
+    const records = useUsageStore((state) => state.records)
+    return (
+      <>
+        <UsageRangePicker
+          range={range}
+          start={start}
+          end={end}
+          onApply={(input) =>
+            void useUsageStore
+              .getState()
+              .setRange(client, input.range, input.start, input.end)
+          }
+        />
+        <output data-testid="range-record">
+          {records[0]?.request_id ?? ''}
+        </output>
+      </>
+    )
+  }
+
   function openPicker(props: {
     onApply: (input: { range: string; start?: string; end?: string }) => void
     range?: '24h' | '7d' | 'custom'
@@ -976,7 +1013,8 @@ describe('usage range picker', () => {
     expect(onApply).toHaveBeenCalledWith({ range: '7d' })
   })
 
-  it('labels the stored custom window with its selected days', () => {
+  it('labels stored instants in the display time zone', () => {
+    setDisplayTimeZone('Asia/Tokyo')
     render(
       <LocaleProvider>
         <UsageRangePicker
@@ -989,38 +1027,146 @@ describe('usage range picker', () => {
     )
     expect(
       screen.getByRole('button', { name: copy.timeRange }).textContent,
-    ).toBe('2026-10-01 – 2026-10-20')
+    ).toBe('2026-10-01 09:00 – 2026-10-21 09:00')
   })
 
-  it('applies a custom window only once both ends are real days', () => {
+  it('applies the chosen calendar days and times only after Apply', () => {
     const onApply = vi.fn()
-    const popover = openPicker({ onApply })
-    const [start, end] = Array.from(
-      popover.querySelectorAll('input[type="date"]'),
-    ) as HTMLInputElement[]
-    fireEvent.change(start, { target: { value: '2026-10-01' } })
-    expect(onApply).not.toHaveBeenCalled()
-
-    fireEvent.change(end, { target: { value: '2026-10-20' } })
-    expect(onApply).toHaveBeenCalledWith({
-      end: '2026-10-21T00:00:00.000Z',
+    const popover = openPicker({
+      onApply,
       range: 'custom',
       start: '2026-10-01T00:00:00.000Z',
+      end: '2026-10-21T00:00:00.000Z',
+    })
+    fireEvent.click(
+      within(popover).getByRole('button', { name: /October 20th, 2026/ }),
+    )
+    fireEvent.change(within(popover).getByLabelText(copy.startTime), {
+      target: { value: '10:30' },
+    })
+    fireEvent.change(within(popover).getByLabelText(copy.endTime), {
+      target: { value: '15:45' },
+    })
+    expect(onApply).not.toHaveBeenCalled()
+    fireEvent.click(
+      within(popover).getByRole('button', { name: copy.applyTimeRange }),
+    )
+    expect(onApply).toHaveBeenCalledWith({
+      range: 'custom',
+      start: '2026-10-01T10:30:00.000Z',
+      end: '2026-10-20T15:45:00.000Z',
     })
   })
 
-  it('reports nothing when the custom window is unchanged', () => {
+  it('refreshes the records query only after applying a time range', async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    })
+    rangeApi.listRequestRecords
+      .mockReset()
+      .mockResolvedValue({
+        data: {
+          first: 0,
+          rows: 10,
+          total: 1,
+          records: [record({ request_id: 'updated-record' })],
+        },
+      })
+    rangeApi.requestRecordFacets
+      .mockReset()
+      .mockResolvedValue({ data: { dates: [], users: [], models: [] } })
+    rangeApi.requestRecordOverview
+      .mockReset()
+      .mockResolvedValue({
+        data: {
+          breakdown: [],
+          summary: {},
+          trend: [],
+          trend_granularity: 'hour',
+        },
+      })
+    useUsageStore.getState().resetIdentity({ user_id: 2, is_admin: false })
+    useUsageStore.setState({
+      range: 'custom',
+      start: '2026-10-01T00:00:00.000Z',
+      end: '2026-10-21T00:00:00.000Z',
+    })
+    const view = render(
+      <LocaleProvider>
+        <StoreRangePicker client={client} />
+      </LocaleProvider>,
+    )
+    try {
+      fireEvent.click(screen.getByRole('button', { name: copy.timeRange }))
+      const popover = document.querySelector(
+        '[data-slot="popover-content"]',
+      ) as HTMLElement
+      fireEvent.click(
+        within(popover).getByRole('button', { name: /October 20th, 2026/ }),
+      )
+      fireEvent.change(within(popover).getByLabelText(copy.startTime), {
+        target: { value: '10:30' },
+      })
+      fireEvent.change(within(popover).getByLabelText(copy.endTime), {
+        target: { value: '15:45' },
+      })
+      expect(rangeApi.listRequestRecords).not.toHaveBeenCalled()
+      fireEvent.click(
+        within(popover).getByRole('button', { name: copy.applyTimeRange }),
+      )
+      await waitFor(() =>
+        expect(rangeApi.listRequestRecords).toHaveBeenCalledTimes(1),
+      )
+      expect(
+        rangeApi.listRequestRecords.mock.calls[0]?.[0]?.query,
+      ).toMatchObject({
+        range: 'custom',
+        start: '2026-10-01T10:30:00.000Z',
+        end: '2026-10-20T15:45:00.000Z',
+      })
+      await waitFor(() =>
+        expect(screen.getByTestId('range-record').textContent).toBe(
+          'updated-record',
+        ),
+      )
+      expect(
+        screen.getByRole('button', { name: copy.timeRange }).textContent,
+      ).toBe('2026-10-01 10:30 – 2026-10-20 15:45')
+    } finally {
+      view.unmount()
+      useUsageStore.getState().resetIdentity(null)
+      client.clear()
+    }
+  })
+
+  it('does not apply an unchanged window or a cancelled draft', () => {
     const onApply = vi.fn()
-    const popover = openPicker({
+    let popover = openPicker({
       end: '2026-10-21T00:00:00.000Z',
       onApply,
       range: 'custom',
       start: '2026-10-01T00:00:00.000Z',
     })
-    const [, end] = Array.from(
-      popover.querySelectorAll('input[type="date"]'),
-    ) as HTMLInputElement[]
-    fireEvent.change(end, { target: { value: '2026-10-20' } })
+    fireEvent.click(
+      within(popover).getByRole('button', { name: copy.applyTimeRange }),
+    )
     expect(onApply).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: copy.timeRange }))
+    popover = document.querySelector(
+      '[data-slot="popover-content"]',
+    ) as HTMLElement
+    fireEvent.change(within(popover).getByLabelText(copy.startTime), {
+      target: { value: '11:00' },
+    })
+    fireEvent.click(within(popover).getByRole('button', { name: copy.cancel }))
+    expect(onApply).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: copy.timeRange }))
+    popover = document.querySelector(
+      '[data-slot="popover-content"]',
+    ) as HTMLElement
+    expect(
+      (within(popover).getByLabelText(copy.startTime) as HTMLInputElement)
+        .value,
+    ).toBe('00:00')
   })
 })

@@ -8,7 +8,8 @@ import {
   waitFor,
   within,
 } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, Route, Routes } from 'react-router'
+import { AppShell } from '@/layouts/AppShell'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   BillingChargeDetailResponse,
@@ -176,7 +177,11 @@ function renderPage(path = '/billing') {
       <LocaleProvider>
         <NotifierProvider>
           <MemoryRouter initialEntries={[path]}>
-            <BillingPage />
+            <Routes>
+              <Route element={<AppShell />}>
+                <Route path="/billing" element={<BillingPage />} />
+              </Route>
+            </Routes>
           </MemoryRouter>
         </NotifierProvider>
       </LocaleProvider>
@@ -264,6 +269,9 @@ describe('billing page', () => {
   it('renders the authenticated route with the summary, the charges, and the admin price rules', async () => {
     useSessionStore.setState({ me: admin })
     renderPage()
+    expect(
+      screen.getByRole('button', { name: 'Refresh billing' }).closest('header'),
+    ).toBeTruthy()
 
     expect(
       document.querySelector('[data-foundation-route-id="R-BILLING"]'),

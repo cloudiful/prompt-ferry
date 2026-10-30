@@ -153,6 +153,18 @@ pub(in crate::worker_admin::handlers) fn parse_overview_window(
         RequestRecordOverviewRange::CurrentMonth => db::OverviewBucket::Day,
         _ if end
             .zip(start)
+            .is_some_and(|(end, start)| end - start <= chrono::Duration::hours(1)) =>
+        {
+            db::OverviewBucket::Minute
+        }
+        _ if end
+            .zip(start)
+            .is_some_and(|(end, start)| end - start <= chrono::Duration::hours(5)) =>
+        {
+            db::OverviewBucket::FiveMinute
+        }
+        _ if end
+            .zip(start)
             .map(|(end, start)| end - start <= chrono::Duration::days(3))
             .unwrap_or(true) =>
         {
@@ -390,6 +402,39 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn overview_granularity_follows_exact_duration_thresholds() {
+        use crate::db::OverviewBucket;
+        let start = chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        for (duration, expected) in [
+            (chrono::Duration::hours(1), OverviewBucket::Minute),
+            (
+                chrono::Duration::hours(1) + chrono::Duration::nanoseconds(1),
+                OverviewBucket::FiveMinute,
+            ),
+            (chrono::Duration::hours(5), OverviewBucket::FiveMinute),
+            (
+                chrono::Duration::hours(5) + chrono::Duration::nanoseconds(1),
+                OverviewBucket::Hour,
+            ),
+            (chrono::Duration::days(3), OverviewBucket::Hour),
+            (
+                chrono::Duration::days(3) + chrono::Duration::nanoseconds(1),
+                OverviewBucket::Day,
+            ),
+        ] {
+            let window = parse_overview_window(
+                Some(RequestRecordOverviewRange::Custom),
+                Some(start),
+                Some(start + duration),
+            )
+            .unwrap();
+            assert_eq!(window.bucket, expected);
+        }
     }
 
     #[test]

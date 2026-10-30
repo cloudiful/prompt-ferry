@@ -659,7 +659,7 @@ async page => {
       signalNewCatalogResponse()
       return
     }
-    await interceptedRoute.continue()
+    await interceptedRoute.fallback()
   }
   await page.route(catalogRaceRoute, catalogRaceHandler)
   await route8.getByRole('button', { name: `Edit ${pattern}` }).click()

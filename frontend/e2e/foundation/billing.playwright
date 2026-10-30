@@ -1,6 +1,15 @@
 async page => {
-  const BASE = 'http://127.0.0.1:5171'
-  const FIXTURE = 'http://127.0.0.1:8789'
+  const BASE = 'http://127.0.0.1:5188'
+  const FIXTURE = 'http://127.0.0.1:8798'
+  const context = await page.context().browser().newContext({ serviceWorkers: 'block' })
+  page = await context.newPage()
+  await context.route('**/*', async route => {
+    const url = new URL(route.request().url())
+    if (url.origin !== BASE) return route.abort()
+    if (!url.pathname.startsWith('/api/')) return route.continue()
+    const response = await route.fetch({ url: `${FIXTURE}${url.pathname}${url.search}`, maxRedirects: 0 })
+    await route.fulfill({ response })
+  })
   const screenshots = 'e2e/foundation/screenshots'
   const startedAt = new Date().toISOString()
   const report = {
@@ -865,7 +874,8 @@ async page => {
     const pathname = new URL(route.request().url()).pathname
     if (pathname.endsWith('/1') && !delayedDetail) {
       delayedDetail = true
-      const response = await route.fetch()
+      const requestUrl = new URL(route.request().url())
+      const response = await route.fetch({ url: `${FIXTURE}${requestUrl.pathname}${requestUrl.search}`, maxRedirects: 0 })
       await sleep(1500)
       await route.fulfill({ response }).catch(() => {})
       return
@@ -884,7 +894,7 @@ async page => {
       })
       return
     }
-    await route.continue()
+    await route.fallback()
   })
   const detailLabels = await page
     .locator(
@@ -950,7 +960,8 @@ async page => {
     const model = url.searchParams.get('requested_model')
     if (model === 'minimax-m2' && !delayedList) {
       delayedList = true
-      const response = await route.fetch()
+      const requestUrl = new URL(route.request().url())
+      const response = await route.fetch({ url: `${FIXTURE}${requestUrl.pathname}${requestUrl.search}`, maxRedirects: 0 })
       await sleep(1500)
       await route.fulfill({ response }).catch(() => {})
       return
@@ -969,7 +980,7 @@ async page => {
       })
       return
     }
-    await route.continue()
+    await route.fallback()
   })
   await page.getByLabel('Public model', { exact: true }).fill('minimax-m2')
   await page.getByRole('button', { name: 'Apply filters' }).click()
@@ -1397,7 +1408,7 @@ async page => {
       })
       return
     }
-    await route.continue()
+    await route.fallback()
   })
   const chargePager = section('Request charges')
   await chargePager.getByRole('combobox', { name: 'Rows per page' }).click()
@@ -1459,7 +1470,7 @@ async page => {
       })
       return
     }
-    await route.continue()
+    await route.fallback()
   })
   const chargeReadsBeforeRuleTail = requestCount(
     'GET',
@@ -1690,9 +1701,7 @@ async page => {
         const scroll = containers.some(
           (container) => container.scrollWidth > container.clientWidth,
         )
-        const header = document.querySelector(
-          '[data-foundation-route-id="R-BILLING"] > div',
-        )
+        const header = document.querySelector('header h1')
         const actions = document.querySelector(
           '[data-foundation-route-id="R-BILLING"] button[aria-label*="req-charge-"]',
         )
@@ -1728,14 +1737,23 @@ async page => {
   await checkWidths('en-US', 'light')
   await page.setViewportSize({ width: 1440, height: 1000 })
   await capture('billing-responsive-en-light-1440')
-  await page.getByRole('button', { name: 'Language' }).click()
-  await page.getByRole('button', { name: '语言' }).waitFor({ state: 'visible' })
-  await page.getByRole('button', { name: '暗色' }).click()
+  await page.goto(`${BASE}/settings/general`)
+  await page.getByRole('combobox', { name: 'Language' }).click()
+  await page.getByRole('option', { name: '中文', exact: true }).click()
+  await page.getByRole('combobox', { name: '主题' }).click()
+  await page.getByRole('option', { name: '暗色', exact: true }).click()
+  await page.goto(`${BASE}/billing`)
+  await page.locator('[data-foundation-route-id="R-BILLING"]').waitFor()
   await checkWidths('zh-CN', 'dark')
   await page.setViewportSize({ width: 390, height: 1000 })
   await capture('billing-zh-dark-390')
-  await page.getByRole('button', { name: '语言' }).click()
-  await page.getByRole('button', { name: 'Light' }).click()
+  await page.goto(`${BASE}/settings/general`)
+  await page.getByRole('combobox', { name: '语言' }).click()
+  await page.getByRole('option', { name: 'English', exact: true }).click()
+  await page.getByRole('combobox', { name: 'Theme' }).click()
+  await page.getByRole('option', { name: 'Light', exact: true }).click()
+  await page.goto(`${BASE}/billing`)
+  await page.locator('[data-foundation-route-id="R-BILLING"]').waitFor()
   report.checks.responsive = responsive
 
   stage = 'anonymous-scope'

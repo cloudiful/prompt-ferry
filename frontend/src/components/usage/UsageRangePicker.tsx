@@ -1,4 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState, type CSSProperties } from 'react'
+import { DayPicker, TZDate, type DateRange } from '@daypicker/react'
+import { enUS, zhCN } from '@daypicker/react/locale'
+import '@daypicker/react/style.css'
 import { Calendar } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,7 +11,12 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { useLocale } from '@/lib/i18n'
-import type { UsageRange } from '@/lib/usage-model'
+import {
+  usageInstantToWallTime,
+  usageWallTimeToInstant,
+  type LocalUsageRange as UsageRange,
+} from '@/lib/usage-range'
+import { useDisplayTimeZone } from '@/lib/display-timezone'
 
 export type UsageRangeApply = {
   range: UsageRange
@@ -17,106 +25,14 @@ export type UsageRangeApply = {
 }
 
 export const USAGE_RANGE_PRESETS: readonly UsageRange[] = [
-  'month',
+  '1h',
+  '5h',
   '24h',
   '7d',
   '30d',
+  'month',
   'custom',
 ]
-
-const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/
-
-function dayParts(day: string): [number, number, number] | null {
-  if (!ISO_DAY.test(day)) return null
-  const [year, month, date] = day.split('-').map(Number)
-  const utc = new Date(Date.UTC(year, month - 1, date))
-  // Reject a day the calendar would normalize, such as 2026-02-30.
-  if (
-    utc.getUTCFullYear() !== year ||
-    utc.getUTCMonth() !== month - 1 ||
-    utc.getUTCDate() !== date
-  ) {
-    return null
-  }
-  return [year, month, date]
-}
-
-export function isUsageDay(value: string | null | undefined): boolean {
-  return typeof value === 'string' && dayParts(value) !== null
-}
-
-function formatUtcDay(date: Date): string {
-  const year = String(date.getUTCFullYear()).padStart(4, '0')
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
-  const day = String(date.getUTCDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function shiftDay(day: string, days: number): string {
-  const parts = dayParts(day)
-  if (!parts) return day
-  const [year, month, date] = parts
-  return formatUtcDay(new Date(Date.UTC(year, month - 1, date + days)))
-}
-
-/** The stored calendar day of a UTC range bound. */
-export function usageRangeDay(value: string | null | undefined): string | null {
-  if (!value) return null
-  const day = value.slice(0, 10)
-  return isUsageDay(day) ? day : null
-}
-
-/** The visible last day: the stored end is the exclusive next-day bound. */
-export function usageRangeVisibleEnd(
-  value: string | null | undefined,
-): string | null {
-  const day = usageRangeDay(value)
-  return day ? shiftDay(day, -1) : null
-}
-
-/**
- * The half-open UTC window a pair of selected days stands for.
- *
- * Only two real calendar days produce a window; `parseDay` rejects a normalized
- * impossible date and the arithmetic stays in UTC, so a DST transition or a
- * leap February never moves a bound.
- */
-export function usageCustomRangeInput(
-  startDay: string | null | undefined,
-  endDay: string | null | undefined,
-): UsageRangeApply | null {
-  if (!startDay || !endDay) return null
-  if (!isUsageDay(startDay) || !isUsageDay(endDay)) return null
-  if (startDay > endDay) return null
-  return {
-    range: 'custom',
-    start: `${startDay}T00:00:00.000Z`,
-    end: `${shiftDay(endDay, 1)}T00:00:00.000Z`,
-  }
-}
-
-/** True when two custom windows cover the same half-open interval. */
-export function usageRangeEquals(
-  a: Pick<UsageRangeApply, 'start' | 'end'>,
-  b: Pick<UsageRangeApply, 'start' | 'end'>,
-): boolean {
-  return (a.start ?? '') === (b.start ?? '') && (a.end ?? '') === (b.end ?? '')
-}
-
-/** The label of a preset range, or the stored custom window. */
-export function usageRangeLabel(
-  range: UsageRange,
-  start: string,
-  end: string,
-  labels: Record<UsageRange, string>,
-): string {
-  if (range === 'custom') {
-    const first = usageRangeDay(start)
-    const last = usageRangeVisibleEnd(end)
-    if (first && last) return `${first} – ${last}`
-  }
-  return labels[range]
-}
 
 type UsageRangePickerProps = {
   range: UsageRange
@@ -125,40 +41,55 @@ type UsageRangePickerProps = {
   onApply: (input: UsageRangeApply) => void
 }
 
-/**
- * The time-range control: five presets plus a native date window.
- *
- * A preset applies immediately and carries no bounds. The custom window applies
- * only when both ends are real calendar days; an unchanged window reports
- * nothing. The arithmetic stays in plain UTC dates, so the control never needs
- * the transitive calendar dependency the Vue picker uses.
- */
 export function UsageRangePicker({
   range,
   start,
   end,
   onApply,
 }: UsageRangePickerProps) {
-  const { t } = useLocale()
+  const { t, locale } = useLocale()
+  const { effective: timeZone } = useDisplayTimeZone()
   const [open, setOpen] = useState(false)
-  const [draftStart, setDraftStart] = useState(() => usageRangeDay(start) ?? '')
-  const [draftEnd, setDraftEnd] = useState(
-    () => usageRangeVisibleEnd(end) ?? '',
-  )
+  const [selected, setSelected] = useState<DateRange | undefined>()
+  const [startTime, setStartTime] = useState('00:00')
+  const [endTime, setEndTime] = useState('00:00')
+  const [invalid, setInvalid] = useState(false)
 
-  useEffect(() => {
-    setDraftStart(usageRangeDay(start) ?? '')
-    setDraftEnd(usageRangeVisibleEnd(end) ?? '')
-  }, [start, end, range])
+  function openChange(next: boolean): void {
+    if (next) {
+      const from =
+        range === 'custom' ? usageInstantToWallTime(start, timeZone) : null
+      const to =
+        range === 'custom' ? usageInstantToWallTime(end, timeZone) : null
+      const toDate = (day: string) => {
+        const [year, month, date] = day.split('-').map(Number)
+        return TZDate.tz(timeZone, year!, month! - 1, date!, 12)
+      }
+      setSelected(
+        from && to ? { from: toDate(from.day), to: toDate(to.day) } : undefined,
+      )
+      setStartTime(from?.time ?? '00:00')
+      setEndTime(to?.time ?? '00:00')
+      setInvalid(false)
+    }
+    setOpen(next)
+  }
 
   const labels: Record<UsageRange, string> = {
+    '1h': t('last1Hour'),
+    '5h': t('last5Hours'),
     '24h': t('last24Hours'),
     '30d': t('last30Days'),
     '7d': t('last7Days'),
     custom: t('customRange'),
     month: t('thisMonth'),
   }
-  const triggerLabel = usageRangeLabel(range, start, end, labels)
+  const displayedStart = usageInstantToWallTime(start, timeZone)
+  const displayedEnd = usageInstantToWallTime(end, timeZone)
+  const triggerLabel =
+    range === 'custom' && displayedStart && displayedEnd
+      ? `${displayedStart.day} ${displayedStart.time} – ${displayedEnd.day} ${displayedEnd.time}`
+      : labels[range]
 
   function choosePreset(next: UsageRange): void {
     if (next === 'custom') return
@@ -166,19 +97,36 @@ export function UsageRangePicker({
     onApply({ range: next })
   }
 
-  function changeDraft(nextStart: string, nextEnd: string): void {
-    setDraftStart(nextStart)
-    setDraftEnd(nextEnd)
-    const pending = usageCustomRangeInput(nextStart, nextEnd)
-    // A half-filled or reversed window has no meaning and reports nothing.
-    if (!pending) return
+  function applyCustom(): void {
+    const day = (date: Date | undefined) =>
+      date
+        ? usageInstantToWallTime(date.toISOString(), timeZone)?.day
+        : undefined
+    const first = day(selected?.from)
+    const last = day(selected?.to)
+    const firstInstant = first
+      ? usageWallTimeToInstant(first, startTime, timeZone)
+      : null
+    const lastInstant = last
+      ? usageWallTimeToInstant(last, endTime, timeZone)
+      : null
+    if (
+      !firstInstant ||
+      !lastInstant ||
+      Date.parse(firstInstant) >= Date.parse(lastInstant)
+    ) {
+      setInvalid(true)
+      return
+    }
+    setInvalid(false)
     setOpen(false)
-    if (range === 'custom' && usageRangeEquals(pending, { start, end })) return
-    onApply(pending)
+    if (range === 'custom' && firstInstant === start && lastInstant === end)
+      return
+    onApply({ range: 'custom', start: firstInstant, end: lastInstant })
   }
 
   return (
-    <Popover onOpenChange={setOpen} open={open}>
+    <Popover onOpenChange={openChange} open={open}>
       <PopoverTrigger asChild>
         <Button
           aria-label={t('timeRange')}
@@ -190,7 +138,10 @@ export function UsageRangePicker({
           <span className="max-w-40 truncate">{triggerLabel}</span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="grid gap-3">
+      <PopoverContent
+        align="end"
+        className="grid max-h-[min(85vh,50rem)] w-[min(24rem,calc(100vw-2rem))] gap-3 overflow-y-auto"
+      >
         <div className="grid gap-1">
           {USAGE_RANGE_PRESETS.map((preset) => (
             <Button
@@ -211,24 +162,67 @@ export function UsageRangePicker({
           className="grid gap-2 border-t pt-3"
           role="group"
         >
-          <div className="flex items-center gap-2">
-            <Input
-              aria-label={`${t('customRange')} 1`}
-              className="w-36"
-              onChange={(event) => changeDraft(event.target.value, draftEnd)}
-              type="date"
-              value={draftStart}
-            />
-            <span aria-hidden="true" className="text-muted-foreground">
-              –
-            </span>
-            <Input
-              aria-label={`${t('customRange')} 2`}
-              className="w-36"
-              onChange={(event) => changeDraft(draftStart, event.target.value)}
-              type="date"
-              value={draftEnd}
-            />
+          <div className="text-sm text-muted-foreground">
+            {t('rangeTimeZone', { zone: timeZone })}
+          </div>
+          <DayPicker
+            mode="range"
+            locale={locale === 'zh-CN' ? zhCN : enUS}
+            timeZone={timeZone}
+            selected={selected}
+            defaultMonth={selected?.from}
+            onSelect={(value) => {
+              setSelected(value)
+              setInvalid(false)
+            }}
+            style={
+              {
+                '--rdp-accent-color': 'var(--primary)',
+                '--rdp-accent-background-color': 'var(--accent)',
+              } as CSSProperties
+            }
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <label className="grid min-w-0 gap-1 text-sm">
+              {t('startTime')}
+              <Input
+                type="time"
+                value={startTime}
+                onChange={(event) => {
+                  setStartTime(event.target.value)
+                  setInvalid(false)
+                }}
+              />
+            </label>
+            <label className="grid min-w-0 gap-1 text-sm">
+              {t('endTime')}
+              <Input
+                type="time"
+                value={endTime}
+                onChange={(event) => {
+                  setEndTime(event.target.value)
+                  setInvalid(false)
+                }}
+              />
+            </label>
+          </div>
+          {invalid && (
+            <div role="alert" className="text-sm text-destructive">
+              {t('invalidTimeRange')}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setOpen(false)}
+            >
+              {t('cancel')}
+            </Button>
+            <Button type="button" size="sm" onClick={applyCustom}>
+              {t('applyTimeRange')}
+            </Button>
           </div>
         </div>
       </PopoverContent>

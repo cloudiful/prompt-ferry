@@ -17,6 +17,8 @@ import type {
 import { LocaleProvider } from '@/lib/i18n'
 import { NotifierProvider } from '@/lib/notifier'
 import { RelaysPage } from '@/pages/RelaysPage'
+import { AppShell } from '@/layouts/AppShell'
+import { MemoryRouter, Route, Routes } from 'react-router'
 
 const api = vi.hoisted(() => ({
   createRelay: vi.fn(),
@@ -99,7 +101,13 @@ function renderPage() {
     <QueryClientProvider client={queryClient}>
       <LocaleProvider>
         <NotifierProvider>
-          <RelaysPage />
+          <MemoryRouter initialEntries={['/relays']}>
+            <Routes>
+              <Route element={<AppShell />}>
+                <Route path="/relays" element={<RelaysPage />} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
         </NotifierProvider>
       </LocaleProvider>
     </QueryClientProvider>,
@@ -218,7 +226,13 @@ describe('React Relay management page', () => {
     renderPage()
 
     expect(await screen.findByText('Relay 1')).toBeTruthy()
-    expect(screen.getByText('1/11')).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'New relay' }).closest('header'),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'Refresh' }).closest('header'),
+    ).toBeTruthy()
+    expect(screen.getByText('1/11').closest('header')).toBeTruthy()
     expect(screen.getByText('mtls')).toBeTruthy()
     expect(screen.getAllByText('required').length).toBeGreaterThan(0)
     expect(screen.getByText('Snapshot 12')).toBeTruthy()

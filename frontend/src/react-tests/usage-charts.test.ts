@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { RequestRecordOverviewTrendBucket } from '@/generated/admin-api'
 import { createUsageTrendOption } from '@/request-overview-charts-core'
+import { usageTrendBucketLabel } from '@/lib/usage-overview'
 import type { AppChartTheme } from '@/theme/chart-tokens'
 
 const theme: AppChartTheme = {
@@ -94,6 +95,31 @@ type AnyOption = {
     itemStyle: { color: string }
   }>
 }
+
+describe('short usage trend labels', () => {
+  it.each(['minute', 'five_minutes'])(
+    'formats %s buckets as display-zone instants',
+    (granularity) => {
+      const formatInstant = (value: string) =>
+        new Intl.DateTimeFormat('en-GB', {
+          timeZone: 'Asia/Tokyo',
+          hour: '2-digit',
+          minute: '2-digit',
+          hourCycle: 'h23',
+        }).format(new Date(value))
+      const labels = ['2026-09-01T00:00:00Z', '2026-09-01T00:05:00Z'].map(
+        (value) =>
+          usageTrendBucketLabel(
+            granularity,
+            value,
+            formatInstant,
+            () => 'date-only',
+          ),
+      )
+      expect(labels).toEqual(['09:00', '09:05'])
+    },
+  )
+})
 
 describe('usage trend option: AI', () => {
   const trend = option('ai', [

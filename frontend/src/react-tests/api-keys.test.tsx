@@ -229,6 +229,31 @@ afterEach(() => {
 })
 
 describe('API key route', () => {
+  it('returns focus to the generate action on escape and cancel', async () => {
+    renderPage(operator)
+    const trigger = screen.getByRole('button', { name: 'Generate key' })
+    trigger.focus()
+    fireEvent.click(trigger)
+    await screen.findByRole('dialog')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
+    fireEvent.click(trigger)
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
+  })
+
+  it('does not focus a detached generate button after unmount', async () => {
+    const view = renderPage(operator)
+    const trigger = screen.getByRole('button', { name: 'Generate key' })
+    fireEvent.click(trigger)
+    await screen.findByRole('dialog')
+    const focus = vi.spyOn(trigger, 'focus')
+    view.unmount()
+    await waitFor(() => expect(trigger.isConnected).toBe(false))
+    expect(focus).not.toHaveBeenCalled()
+  })
+
   it('loads admin options and uses self or selected-owner SDK routes', async () => {
     renderPage(admin)
     await screen.findAllByDisplayValue('primary')

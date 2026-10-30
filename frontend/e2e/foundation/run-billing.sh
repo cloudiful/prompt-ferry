@@ -2,9 +2,9 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
-BASE="http://127.0.0.1:5171"
-FIXTURE="http://127.0.0.1:8789"
-SESSION="${PLAYWRIGHT_CLI_SESSION:-pf-billing}"
+BASE="http://127.0.0.1:5188"
+FIXTURE="http://127.0.0.1:8798"
+SESSION="pf-1148-billing-$$"
 FIXTURE_PID=""
 VITE_PID=""
 
@@ -25,29 +25,18 @@ port_open() {
   ss -ltn 2>/dev/null | rg -q "127.0.0.1:$1 "
 }
 
-if port_open 8789; then
-  if ! curl -fsS "$FIXTURE/__fixtures/summary" | jq -e '.requests | type == "number"' >/dev/null; then
-    echo "127.0.0.1:8789 is occupied by a non-fixture service; refusing to use or stop it" >&2
-    exit 1
-  fi
-else
-  bun e2e/fixtures/server.ts >/dev/null 2>&1 &
-  FIXTURE_PID=$!
+if port_open 8798 || port_open 5188; then
+  echo "Isolated fixture or Vite port is occupied; refusing reuse" >&2
+  exit 1
 fi
-
-if port_open 5171; then
-  if ! curl -fsS "$BASE/src/main.tsx" | rg -q 'createRoot'; then
-    echo "127.0.0.1:5171 is occupied by a non-React frontend; refusing to use or stop it" >&2
-    exit 1
-  fi
-else
-  bun run dev -- --host 127.0.0.1 >/dev/null 2>&1 &
-  VITE_PID=$!
-fi
+FIXTURE_PORT=8798 bun e2e/fixtures/server.ts >/dev/null 2>&1 &
+FIXTURE_PID=$!
+bun run dev -- --host 127.0.0.1 --port 5188 --strictPort >/dev/null 2>&1 &
+VITE_PID=$!
 
 ready=false
 for _ in $(seq 1 80); do
-  if port_open 8789 && port_open 5171; then
+  if kill -0 "$FIXTURE_PID" "$VITE_PID" 2>/dev/null && port_open 8798 && port_open 5188; then
     ready=true
     break
   fi

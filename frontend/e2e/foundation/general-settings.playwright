@@ -1,6 +1,15 @@
 async page => {
-  const BASE = 'http://127.0.0.1:5171'
-  const FIXTURE = 'http://127.0.0.1:8789'
+  const BASE = 'http://127.0.0.1:5188'
+  const FIXTURE = 'http://127.0.0.1:8798'
+  const context = await page.context().browser().newContext({ serviceWorkers: 'block' })
+  page = await context.newPage()
+  await context.route('**/*', async route => {
+    const url = new URL(route.request().url())
+    if (url.origin !== BASE) return route.abort()
+    if (!url.pathname.startsWith('/api/')) return route.continue()
+    const response = await route.fetch({ url: `${FIXTURE}${url.pathname}${url.search}`, maxRedirects: 0 })
+    await route.fulfill({ response })
+  })
   const screenshots = 'e2e/foundation/screenshots'
   const startedAt = new Date().toISOString()
   const report = {
@@ -135,6 +144,49 @@ async page => {
   await page.reload()
   await page.waitForTimeout(400)
 
+  stage = 'header-actions'
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`${BASE}/request-records/ai`)
+    await page.waitForSelector('[data-foundation-route-id="R-USAGE-AI"]')
+    const header = page.locator('header').first()
+    await header.getByRole('button', { name: 'Time range' }).waitFor()
+    assert((await page.locator('h1').count()) === 1, `AI heading count at ${width}`)
+    assert(await header.getByRole('button', { name: 'Records', exact: true }).isVisible(), `records action missing at ${width}`)
+    const range = header.getByRole('button', { name: 'Time range' })
+    await range.focus()
+    await page.keyboard.press('Enter')
+    assert(await page.getByRole('button', { name: 'Last 7d' }).isVisible(), `range keyboard action at ${width}`)
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Time range')
+    const bounds = await header.locator('button:visible').evaluateAll(nodes => nodes.map(node => {
+      const rect = node.getBoundingClientRect()
+      return { left: rect.left, right: rect.right }
+    }))
+    assert(bounds.every(rect => rect.left >= 0 && rect.right <= width), `header clipping at ${width}: ${JSON.stringify(bounds)}`)
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `page overflow at ${width}`)
+    await page.goto(`${BASE}/api-keys`)
+    await page.waitForSelector('[data-foundation-route-id="R-API-KEYS"]')
+    const generate = header.getByRole('button', { name: 'Generate key' })
+    await generate.focus()
+    await page.keyboard.press('Enter')
+    await page.getByRole('dialog').waitFor({ state: 'visible' })
+    await page.keyboard.press('Escape')
+    await page.getByRole('dialog').waitFor({ state: 'hidden' })
+    await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Generate key').catch(() => {
+      throw new Error(`generate key dialog did not restore trigger focus at ${width}px`)
+    })
+    await page.goto(`${BASE}/settings/general`)
+    await page.waitForSelector('[data-foundation-route-id="R-SETTINGS-GENERAL"]')
+    assert((await page.locator('h1').count()) === 1, `settings heading count at ${width}`)
+    assert(await header.getByRole('button', { name: 'Time range' }).count() === 0, `stale action at ${width}`)
+    assert(await header.getByRole('button', { name: 'Language' }).count() === 0, `language action in header at ${width}`)
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${BASE}/api-keys`)
+  await page.waitForSelector('[data-foundation-route-id="R-API-KEYS"]')
+  report.checks.headerActions = { widths: [1440, 390], keyboard: true, focusReturn: true, navigationCleanup: true }
+
   stage = 'nav-visibility'
   const settingsSection = await page.evaluate(() => {
     const sections = [...document.querySelectorAll('nav > div')]
@@ -202,7 +254,7 @@ async page => {
     (await page.getByText(/Affects how times are displayed only/).count()) === 1,
     'the display time zone effect copy is missing',
   )
-  const heading = await page.locator('[data-foundation-route-id="R-SETTINGS-GENERAL"] h1').innerText()
+  const heading = await page.locator('header h1').innerText()
   assert(heading === 'General', `the general tab heading is not localized: ${heading}`)
   await settle()
   report.checks.zeroRequests = { settings: 0, during: 'operator preferences page' }
@@ -221,7 +273,7 @@ async page => {
     `the page title did not follow the locale: ${await page.title()}`,
   )
   assert(
-    (await page.locator('[data-foundation-route-id="R-SETTINGS-GENERAL"] h1').innerText()) === '常规',
+    (await page.locator('header h1').innerText()) === '常规',
     'the page heading did not follow the locale',
   )
   await page.getByRole('link', { name: 'AI 请求' }).click()
@@ -486,6 +538,57 @@ async page => {
   await settle()
   report.checks.admin = { cards: 3, adminNavVisible: true }
   await capture('settings-general-admin-en-light-1440')
+
+  stage = 'admin-header-actions'
+  collecting = false
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`${BASE}/endpoints/upstreams`)
+    await page.waitForSelector('[data-foundation-route-id="R-ENDPOINTS-UPSTREAMS"]')
+    const header = page.locator('header').first()
+    assert((await page.locator('h1').count()) === 1, `upstream heading count at ${width}`)
+    assert(await header.getByRole('button', { name: 'Refresh' }).isVisible(), `upstream refresh missing at ${width}`)
+    const create = header.getByRole('button', { name: 'New endpoint' })
+    await create.focus()
+    await page.keyboard.press('Enter')
+    await page.getByRole('dialog').waitFor({ state: 'visible' })
+    await page.keyboard.press('Escape')
+    await page.getByRole('dialog').waitFor({ state: 'hidden' })
+    await page.waitForFunction(() => document.activeElement?.textContent?.includes('New endpoint'))
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `upstream overflow at ${width}`)
+    await page.goto(`${BASE}/settings/requests`)
+    await page.waitForSelector('[data-foundation-route-id="R-SETTINGS-REQUESTS"]')
+    assert((await page.locator('h1').count()) === 1, `settings subpage heading count at ${width}`)
+    assert(await header.locator('#settings-requests-refresh').isVisible(), `settings refresh missing at ${width}`)
+    assert((await header.getByRole('button', { name: 'New endpoint' }).count()) === 0, `stale upstream action at ${width}`)
+    await page.goto(`${BASE}/relays`)
+    await page.waitForSelector('[data-foundation-route-id="R-RELAYS"]')
+    const relayCreate = header.getByRole('button', { name: 'New relay' })
+    await relayCreate.focus()
+    await page.keyboard.press('Enter')
+    await page.getByRole('dialog').waitFor({ state: 'visible' })
+    await page.keyboard.press('Escape')
+    await page.getByRole('dialog').waitFor({ state: 'hidden' })
+    await page.waitForFunction(() => document.activeElement?.textContent?.includes('New relay')).catch(() => {
+      throw new Error(`relay dialog did not restore trigger focus at ${width}px`)
+    })
+    await header.getByRole('button', { name: 'Refresh', exact: true }).click()
+    for (const [path, route, refresh] of [
+      ['/billing', 'R-BILLING', 'Refresh billing'],
+      ['/approvals', 'R-APPROVALS', 'Refresh'],
+      ['/available-models', 'R-AVAILABLE-MODELS', 'Refresh'],
+    ]) {
+      await page.goto(`${BASE}${path}`)
+      await page.waitForSelector(`[data-foundation-route-id="${route}"]`)
+      const action = header.getByRole('button', { name: refresh, exact: true })
+      await action.waitFor({ state: 'visible' })
+      await action.click()
+      assert((await page.locator('h1').count()) === 1, `${route} heading count at ${width}`)
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${route} overflow at ${width}`)
+      assert((await header.getByRole('button', { name: 'New relay' }).count()) === 0, `stale relay action on ${route}`)
+    }
+  }
+  report.checks.adminHeaderActions = { widths: [1440, 390], createKeyboard: true, focusReturn: true, navigationCleanup: true, relayCreateAndRefresh: true, billingApprovalsModelsRefresh: true }
 
   stage = 'finish'
   assert(

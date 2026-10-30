@@ -1,7 +1,7 @@
 {
-  "runId": "settings-cache-alert-1793011070786",
-  "startedAt": "2026-10-26T10:37:50.786Z",
-  "finishedAt": "2026-10-26T10:38:42.328Z",
+  "runId": "settings-cache-alert-1793383499995",
+  "startedAt": "2026-10-30T18:04:59.995Z",
+  "finishedAt": "2026-10-30T18:05:56.074Z",
   "checks": {
     "routeRender": {
       "routeId": "R-SETTINGS-CACHE-ALERT",
@@ -236,7 +236,18 @@
           "cooldown_minutes": 30,
           "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
           "dingtalk_secret": "",
-          "has_dingtalk_secret": true
+          "has_dingtalk_secret": true,
+          "smtp": {
+            "enabled": false,
+            "host": "",
+            "port": 465,
+            "tls": "implicit_tls",
+            "from": "",
+            "to": [],
+            "username": "",
+            "password": "",
+            "has_smtp_password": false
+          }
         }
       },
       "thresholdOne": {
@@ -249,7 +260,18 @@
           "cooldown_minutes": 30,
           "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
           "dingtalk_secret": "",
-          "has_dingtalk_secret": true
+          "has_dingtalk_secret": true,
+          "smtp": {
+            "enabled": false,
+            "host": "",
+            "port": 465,
+            "tls": "implicit_tls",
+            "from": "",
+            "to": [],
+            "username": "",
+            "password": "",
+            "has_smtp_password": false
+          }
         }
       },
       "partialDefaults": {
@@ -262,7 +284,18 @@
           "cooldown_minutes": 60,
           "dingtalk_webhook_url": "",
           "dingtalk_secret": "",
-          "has_dingtalk_secret": true
+          "has_dingtalk_secret": true,
+          "smtp": {
+            "enabled": false,
+            "host": "",
+            "port": 465,
+            "tls": "implicit_tls",
+            "from": "",
+            "to": [],
+            "username": "",
+            "password": "",
+            "has_smtp_password": false
+          }
         }
       },
       "replaceSecret": {
@@ -275,7 +308,18 @@
           "cooldown_minutes": 30,
           "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
           "dingtalk_secret": "",
-          "has_dingtalk_secret": true
+          "has_dingtalk_secret": true,
+          "smtp": {
+            "enabled": false,
+            "host": "",
+            "port": 465,
+            "tls": "implicit_tls",
+            "from": "",
+            "to": [],
+            "username": "",
+            "password": "",
+            "has_smtp_password": false
+          }
         }
       },
       "blankKeepsSecret": {
@@ -288,7 +332,18 @@
           "cooldown_minutes": 30,
           "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
           "dingtalk_secret": "",
-          "has_dingtalk_secret": true
+          "has_dingtalk_secret": true,
+          "smtp": {
+            "enabled": false,
+            "host": "",
+            "port": 465,
+            "tls": "implicit_tls",
+            "from": "",
+            "to": [],
+            "username": "",
+            "password": "",
+            "has_smtp_password": false
+          }
         }
       },
       "restore": {
@@ -301,7 +356,18 @@
           "cooldown_minutes": 30,
           "dingtalk_webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=updated",
           "dingtalk_secret": "",
-          "has_dingtalk_secret": true
+          "has_dingtalk_secret": true,
+          "smtp": {
+            "enabled": false,
+            "host": "",
+            "port": 465,
+            "tls": "implicit_tls",
+            "from": "",
+            "to": [],
+            "username": "",
+            "password": "",
+            "has_smtp_password": false
+          }
         }
       }
     },
@@ -969,6 +1035,12 @@
     },
     {
       "stage": "scoped-refresh",
+      "method": "GET",
+      "path": "/api/v1/settings/cache-alert",
+      "body": null
+    },
+    {
+      "stage": "locale-theme-return",
       "method": "GET",
       "path": "/api/v1/settings/cache-alert",
       "body": null

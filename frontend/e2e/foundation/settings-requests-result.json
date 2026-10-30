@@ -1,7 +1,7 @@
 {
-  "runId": "settings-requests-1793011168930",
-  "startedAt": "2026-10-26T10:39:28.930Z",
-  "finishedAt": "2026-10-26T10:39:54.773Z",
+  "runId": "settings-requests-1793383302192",
+  "startedAt": "2026-10-30T18:01:42.192Z",
+  "finishedAt": "2026-10-30T18:02:10.971Z",
   "checks": {
     "routeRender": {
       "routeId": "R-SETTINGS-REQUESTS",
@@ -442,6 +442,30 @@
     },
     {
       "stage": "responsive-en",
+      "method": "GET",
+      "path": "/api/v1/settings/model-route-whitelist",
+      "body": null
+    },
+    {
+      "stage": "locale-theme-return",
+      "method": "GET",
+      "path": "/api/v1/settings/request-content-logging",
+      "body": null
+    },
+    {
+      "stage": "locale-theme-return",
+      "method": "GET",
+      "path": "/api/v1/settings/usage-retention",
+      "body": null
+    },
+    {
+      "stage": "locale-theme-return",
+      "method": "GET",
+      "path": "/api/v1/settings/stream-delta-batching",
+      "body": null
+    },
+    {
+      "stage": "locale-theme-return",
       "method": "GET",
       "path": "/api/v1/settings/model-route-whitelist",
       "body": null

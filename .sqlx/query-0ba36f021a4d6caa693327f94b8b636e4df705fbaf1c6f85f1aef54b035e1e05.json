@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO users (login_name, password_hash, display_name)\nVALUES ($1, 'fixture-not-a-password', $1)\nRETURNING user_id AS \"user_id!\"\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "user_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0ba36f021a4d6caa693327f94b8b636e4df705fbaf1c6f85f1aef54b035e1e05"
+}

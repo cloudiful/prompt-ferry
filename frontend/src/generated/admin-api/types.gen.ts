@@ -2061,9 +2061,10 @@ export type RequestRecordOverviewResponse = {
     summary: RequestRecordOverviewSummary;
     trend: Array<RequestRecordOverviewTrendBucket>;
     /**
-     * Trend bucket granularity the server selected for this window: `hour`
-     * for short windows and `day` for longer ones. The client uses it to
-     * label the buckets without re-deriving the server's window logic.
+     * Trend bucket granularity: `minute` for windows up to one hour,
+     * `five_minutes` up to five hours, `hour` up to three days, and `day`
+     * otherwise. Current-month windows always use `day`. The client uses
+     * this value to label buckets without re-deriving the window logic.
      */
     trend_granularity: string;
 };

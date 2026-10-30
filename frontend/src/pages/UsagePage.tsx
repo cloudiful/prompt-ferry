@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { HeaderActions } from '@/components/layout/HeaderActions'
 import { useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useLocation } from 'react-router'
@@ -180,7 +181,10 @@ export function UsagePage() {
   }
 
   function changeMode(next: UsageMode): void {
-    useUsageStore.getState().setMode(next)
+    void useUsageStore
+      .getState()
+      .setMode(next, queryClient)
+      .catch((cause: unknown) => notifyApiError(cause))
   }
 
   function changeFilters(patch: Partial<UsageFilters>): void {
@@ -352,10 +356,7 @@ export function UsagePage() {
       }
       data-usage-category={category}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="mr-auto text-lg font-semibold">
-          {t(category === 'ai' ? 'aiRequests' : 'mcpCalls')}
-        </h1>
+      <HeaderActions>
         {mode === 'records' && (
           <Button
             aria-controls="usage-advanced-filters"
@@ -419,7 +420,7 @@ export function UsagePage() {
         >
           <RefreshCw aria-hidden="true" className="size-4" />
         </Button>
-      </div>
+      </HeaderActions>
 
       {mode === 'overview' ? (
         <RequestRecordsOverviewPanel

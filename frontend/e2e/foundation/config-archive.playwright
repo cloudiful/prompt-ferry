@@ -1,6 +1,15 @@
 async page => {
-  const BASE = 'http://127.0.0.1:5171'
-  const FIXTURE = 'http://127.0.0.1:8789'
+  const BASE = 'http://127.0.0.1:5188'
+  const FIXTURE = 'http://127.0.0.1:8798'
+  const context = await page.context().browser().newContext({ serviceWorkers: 'block' })
+  page = await context.newPage()
+  await context.route('**/*', async route => {
+    const url = new URL(route.request().url())
+    if (url.origin !== BASE) return route.abort()
+    if (!url.pathname.startsWith('/api/')) return route.continue()
+    const response = await route.fetch({ url: `${FIXTURE}${url.pathname}${url.search}`, maxRedirects: 0 })
+    await route.fulfill({ response })
+  })
   const screenshots = 'e2e/foundation/screenshots'
   const DOWNLOAD = 'e2e/foundation/config-archive-download.pfce'
   const EXPORT = '/api/v1/admin/config-export'
@@ -263,7 +272,7 @@ async page => {
   )
   assert(
     (await page
-      .locator('[data-foundation-route-id="R-SETTINGS-CONFIG-ARCHIVE"] h1')
+      .locator('header h1')
       .innerText()) === 'Config archive',
     'the archive heading is not localized',
   )
@@ -402,7 +411,8 @@ async page => {
   stage = 'file-export'
   // A malicious server filename must not reach the saved file name.
   await page.route(`**${EXPORT}`, async route => {
-    const response = await route.fetch()
+    const url = new URL(route.request().url())
+    const response = await route.fetch({ url: `${FIXTURE}${url.pathname}${url.search}`, maxRedirects: 0 })
     const body = await response.body()
     const headers = { ...response.headers() }
     // Only a successful archive answer describes the bytes; a faulted export
@@ -1029,7 +1039,7 @@ async page => {
   const zh = await page.evaluate(() => ({
     heading: (
       document.querySelector(
-        '[data-foundation-route-id="R-SETTINGS-CONFIG-ARCHIVE"] h1',
+        'header h1',
       )?.textContent ?? ''
     ).trim(),
     body: document.body.innerText,

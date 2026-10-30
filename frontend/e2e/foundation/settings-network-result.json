@@ -1,7 +1,7 @@
 {
-  "runId": "settings-network-1793011124851",
-  "startedAt": "2026-10-26T10:38:44.851Z",
-  "finishedAt": "2026-10-26T10:39:26.255Z",
+  "runId": "settings-network-1793383333654",
+  "startedAt": "2026-10-30T18:02:13.654Z",
+  "finishedAt": "2026-10-30T18:02:49.706Z",
   "checks": {
     "routeRender": {
       "routeId": "R-SETTINGS-NETWORK",
@@ -349,6 +349,12 @@
       "method": "PATCH",
       "path": "/api/v1/settings/relay-ip-whitelist",
       "body": "{\"allowed_cidrs\":[\"172.16.0.0/12\"],\"trusted_proxy_cidrs\":[\"10.0.0.0/8\"]}"
+    },
+    {
+      "stage": "locale-theme-return",
+      "method": "GET",
+      "path": "/api/v1/settings/relay-ip-whitelist",
+      "body": null
     },
     {
       "stage": "probes",

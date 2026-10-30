@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
+import { HeaderActions } from '@/components/layout/HeaderActions'
 import { EndpointDialog } from '@/components/endpoints/EndpointDialog'
 import { EndpointsTable } from '@/components/endpoints/EndpointsTable'
 import { TokenPlanUsageDialog } from '@/components/endpoints/TokenPlanUsageDialog'
@@ -439,7 +440,7 @@ export function EndpointsPage() {
       data-endpoint-building-block="upstreams"
       data-foundation-route-id="R-ENDPOINTS-UPSTREAMS"
     >
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <HeaderActions>
         <Button
           aria-label={t('refresh')}
           onClick={() => void refresh()}
@@ -463,7 +464,7 @@ export function EndpointsPage() {
         >
           {t('newEndpoint')}
         </Button>
-      </div>
+      </HeaderActions>
       <EndpointsTable
         first={endpointPageQuery.data?.first ?? first}
         items={items}
