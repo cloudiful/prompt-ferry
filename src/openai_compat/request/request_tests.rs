@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use serde_json::Value;
+    use serde_json::{Value, json};
 
     use super::super::{
         chat_request_to_responses, conversation_key, previous_response_id,
@@ -546,6 +546,50 @@ mod tests {
     }
 
     #[test]
+    fn summary_only_reasoning_replays_without_a_token() {
+        for content in [
+            None,
+            Some(serde_json::Value::Null),
+            Some(json!([])),
+            Some(json!([{"type":"reasoning_text","text":"  "}])),
+        ] {
+            let mut reasoning = json!({"type":"reasoning", "summary":[{"type":"summary_text","text":"first "},{"type":"summary_text","text":"second"}]});
+            if let Some(content) = content {
+                reasoning["content"] = content;
+            }
+            let request = json!({"model":"test", "input":[reasoning, {"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}, {"type":"function_call_output","call_id":"call_1","output":"ok"}]});
+            let result = responses_request_to_chat(&serde_json::to_vec(&request).unwrap()).unwrap();
+            let value: Value = serde_json::from_slice(&result).unwrap();
+            assert_eq!(value["messages"][0]["reasoning_content"], "first second");
+            assert_eq!(value["messages"][0]["tool_calls"][0]["id"], "call_1");
+            assert_eq!(value["messages"][1]["role"], "tool");
+        }
+    }
+
+    #[test]
+    fn reasoning_content_precedes_summary_and_opaque_values_are_not_text() {
+        for (item, expected) in [
+            (
+                json!({"type":"reasoning", "content":[{"type":"reasoning_text","text":"content"}], "summary":[{"type":"summary_text","text":"summary"}]}),
+                Some("content"),
+            ),
+            (
+                json!({"type":"reasoning", "encrypted_content":"opaque", "summary":[{"type":"summary_text","text":"summary"}]}),
+                Some("summary"),
+            ),
+            (
+                json!({"type":"reasoning", "encrypted_content":"opaque", "summary":[]}),
+                None,
+            ),
+        ] {
+            let request = json!({"model":"test", "input":[item, {"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}]});
+            let result = responses_request_to_chat(&serde_json::to_vec(&request).unwrap()).unwrap();
+            let value: Value = serde_json::from_slice(&result).unwrap();
+            assert_eq!(value["messages"][0]["reasoning_content"].as_str(), expected);
+        }
+    }
+
+    #[test]
     fn keeps_bare_reasoning_with_their_tool_call_round() {
         let value = serde_json::from_slice::<Value>(
             &responses_request_to_chat(
@@ -1006,7 +1050,7 @@ mod tests {
     }
 
     #[test]
-    fn stateless_leaves_opaque_encrypted_reasoning_untouched() {
+    fn stateless_replays_summary_even_with_opaque_encrypted_content() {
         let value = serde_json::from_slice::<Value>(
             &responses_stateless_request_to_chat(
                 br#"{
@@ -1027,11 +1071,7 @@ mod tests {
             .iter()
             .find(|message| message.get("tool_calls").is_some())
             .unwrap();
-        assert!(
-            assistant.get("reasoning_content").is_none()
-                || assistant["reasoning_content"].as_str() == Some(""),
-            "foreign opaque encrypted_content must not be treated as a ferry echo"
-        );
+        assert_eq!(assistant["reasoning_content"].as_str(), Some("opaque"));
     }
 
     #[test]

@@ -67,7 +67,7 @@ fn does_not_duplicate_an_upstream_summary_delta() {
             .to_vec(),
         )
         .unwrap();
-    // Upstream summary already announced the item once with the minted token.
+    // The summary event is preceded by one synthesized announcement.
     let summary_events = parse_events(&summary);
     assert_eq!(
         summary_events
@@ -76,7 +76,7 @@ fn does_not_duplicate_an_upstream_summary_delta() {
             .count(),
         1
     );
-    assert_eq!(summary_events[0]["item"]["encrypted_content"], "minimax-r1");
+    assert!(summary_events[0]["item"].get("encrypted_content").is_none());
 
     let reasoning = filter
         .push_chunk(
@@ -126,7 +126,7 @@ fn does_not_repeat_full_reasoning_when_output_item_completes() {
 }
 
 #[test]
-fn mints_minimax_echo_token_on_added_and_done_items() {
+fn preserves_missing_encrypted_content_on_added_and_done_items() {
     let mut filter = ResponsesReasoningSummarySseFilter::new(true);
     let added = filter
         .push_chunk(
@@ -137,7 +137,7 @@ fn mints_minimax_echo_token_on_added_and_done_items() {
         )
         .unwrap();
     let events = parse_events(&added);
-    assert_eq!(events[0]["item"]["encrypted_content"], "minimax-resp_1_rs");
+    assert!(events[0]["item"].get("encrypted_content").is_none());
 
     let done = filter
         .push_chunk(
@@ -148,11 +148,11 @@ fn mints_minimax_echo_token_on_added_and_done_items() {
         )
         .unwrap();
     let events = parse_events(&done);
-    assert_eq!(events[0]["item"]["encrypted_content"], "minimax-resp_1_rs");
+    assert!(events[0]["item"].get("encrypted_content").is_none());
 }
 
 #[test]
-fn does_not_mint_when_disabled_or_token_already_present() {
+fn preserves_upstream_encrypted_content_and_unchanged_events() {
     let mut disabled = ResponsesReasoningSummarySseFilter::new(false);
     let output = disabled
         .push_chunk(
@@ -183,7 +183,7 @@ fn does_not_mint_when_disabled_or_token_already_present() {
 }
 
 #[test]
-fn mints_minimax_echo_token_on_completed_output() {
+fn completed_output_has_summary_without_fabricated_content() {
     let mut filter = ResponsesReasoningSummarySseFilter::new(true);
     let output = filter
         .push_chunk(
@@ -195,12 +195,43 @@ fn mints_minimax_echo_token_on_completed_output() {
         .unwrap();
     let events = parse_events(&output);
     let item = &events[0]["response"]["output"][0];
-    assert_eq!(item["encrypted_content"], "minimax-resp_2_rs");
+    assert!(item.get("encrypted_content").is_none());
     assert_eq!(item["summary"][0]["text"], "think");
 }
 
 #[test]
-fn does_not_mint_on_failed_or_incomplete_completed_payload() {
+fn completed_and_done_keep_opaque_or_blank_upstream_values() {
+    for encrypted in [
+        Value::Null,
+        serde_json::json!(""),
+        serde_json::json!("  "),
+        serde_json::json!("opaque-value"),
+    ] {
+        let item = serde_json::json!({"id":"r1","type":"reasoning","encrypted_content":encrypted,"content":[{"type":"reasoning_text","text":"think"}]});
+        let mut filter = ResponsesReasoningSummarySseFilter::new(true);
+        for event in [
+            serde_json::json!({"type":"response.output_item.done","item":item}),
+            serde_json::json!({"type":"response.completed","response":{"output":[item]}}),
+        ] {
+            let chunk = format!("data: {event}\n\n").into_bytes();
+            let output = parse_events(&filter.push_chunk(chunk).unwrap());
+            let result = output
+                .iter()
+                .find(|candidate| candidate["type"] == event["type"])
+                .unwrap();
+            let result_item = if event["type"] == "response.completed" {
+                &result["response"]["output"][0]
+            } else {
+                &result["item"]
+            };
+            assert_eq!(result_item["encrypted_content"], encrypted);
+            assert_eq!(result_item["summary"][0]["text"], "think");
+        }
+    }
+}
+
+#[test]
+fn preserves_unchanged_completed_payload() {
     // A non-reasoning item or an already-tokenized item in the completed
     // payload must not be rewritten.
     let mut filter = ResponsesReasoningSummarySseFilter::new(true);
@@ -228,7 +259,7 @@ fn synthesizes_missing_output_item_added_before_reasoning_delta() {
     // added, summary_part.added, original reasoning_text.delta, summary delta
     assert_eq!(events[0]["type"], "response.output_item.added");
     assert_eq!(events[0]["item"]["id"], "resp_1_rs");
-    assert_eq!(events[0]["item"]["encrypted_content"], "minimax-resp_1_rs");
+    assert!(events[0]["item"].get("encrypted_content").is_none());
     assert_eq!(events[1]["type"], "response.reasoning_summary_part.added");
     assert_eq!(events[2]["type"], "response.reasoning_text.delta");
     assert_eq!(events[3]["type"], "response.reasoning_summary_text.delta");
@@ -306,7 +337,7 @@ fn synthesizes_output_item_added_when_upstream_omits_it_before_done() {
     assert_eq!(events[0]["type"], "response.output_item.added");
     assert_eq!(events[0]["output_index"], 3);
     assert_eq!(events[0]["item"]["id"], "r7");
-    assert_eq!(events[0]["item"]["encrypted_content"], "minimax-r7");
+    assert!(events[0]["item"].get("encrypted_content").is_none());
     assert_eq!(events[1]["type"], "response.reasoning_text.done");
 }
 

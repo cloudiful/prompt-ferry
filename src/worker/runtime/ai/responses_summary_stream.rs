@@ -7,12 +7,10 @@ use super::responses_summary_events::{
     reasoning_item_added, reasoning_key, summary_delta, summary_part_added, summary_part_done,
     summary_text_done,
 };
-use crate::openai_compat::{
-    ensure_reasoning_summary, minimax_reasoning_encrypted_token, mint_reasoning_encrypted_content,
-};
+use crate::openai_compat::ensure_reasoning_summary;
 
 pub(super) struct ResponsesReasoningSummarySseFilter {
-    mint_encrypted_content: bool,
+    synthesize_reasoning_item_added: bool,
     reasoning_text: HashMap<String, String>,
     item_added: HashSet<String>,
     summary_started: HashSet<String>,
@@ -21,15 +19,10 @@ pub(super) struct ResponsesReasoningSummarySseFilter {
 }
 
 impl ResponsesReasoningSummarySseFilter {
-    /// `mint_encrypted_content` enables the MiniMax issue #459 echo fix on a
-    /// Responses passthrough stream: reasoning items that arrive without
-    /// `encrypted_content` gain a self-describing `minimax-<original id>`
-    /// token, and a missing `response.output_item.added` is synthesized before
-    /// the first reasoning/summary event (MiniMax can start reasoning at the
-    /// text-delta stage).
-    pub(super) fn new(mint_encrypted_content: bool) -> Self {
+    /// Synthesize missing reasoning announcements for MiniMax delta-first streams.
+    pub(super) fn new(synthesize_reasoning_item_added: bool) -> Self {
         Self {
-            mint_encrypted_content,
+            synthesize_reasoning_item_added,
             reasoning_text: HashMap::new(),
             item_added: HashSet::new(),
             summary_started: HashSet::new(),
@@ -57,7 +50,6 @@ impl ResponsesReasoningSummarySseFilter {
                 let mut changed = false;
                 if item.get("type").and_then(Value::as_str) == Some("reasoning") {
                     let key = reasoning_key(item);
-                    let minted = self.mint_item(item);
                     self.item_added.insert(key.clone());
                     let has_summary = item.get("summary").is_some_and(|summary| {
                         !crate::openai_compat::extract_text(summary)
@@ -96,7 +88,7 @@ impl ResponsesReasoningSummarySseFilter {
                         self.summary_completed.insert(key.clone());
                     }
                     let summary_filled = ensure_reasoning_summary(item, fallback.as_deref());
-                    changed = summary_filled || minted;
+                    changed = summary_filled;
                     if summary_filled && event_type == "response.output_item.added" {
                         self.summary_seen.insert(key);
                     }
@@ -181,46 +173,17 @@ impl ResponsesReasoningSummarySseFilter {
         Ok(output)
     }
 
-    /// Emit a synthesized `response.output_item.added` the first time a
-    /// reasoning item is referenced by summary/reasoning events but no
-    /// upstream `added` was observed. MiniMax can start a reasoning stream at
-    /// the text-delta stage, and clients need the item announcement (with the
-    /// minted token) before summary parts can be attached. Only the MiniMax
-    /// echo path synthesizes, so other Responses-native upstreams stay
-    /// byte-for-byte untouched.
+    /// Announce MiniMax reasoning items before their first summary event.
     fn ensure_item_announced(
         &mut self,
         output: &mut Vec<Vec<u8>>,
         output_index: &Value,
         key: &str,
     ) {
-        if !self.mint_encrypted_content || !self.item_added.insert(key.to_string()) {
+        if !self.synthesize_reasoning_item_added || !self.item_added.insert(key.to_string()) {
             return;
         }
-        output.push(reasoning_item_added(
-            output_index.clone(),
-            key,
-            self.reasoning_token(key),
-        ));
-    }
-
-    fn reasoning_token(&self, key: &str) -> Option<String> {
-        self.mint_encrypted_content
-            .then(|| minimax_reasoning_encrypted_token(key))
-    }
-
-    fn mint_item(&self, item: &mut Value) -> bool {
-        if !self.mint_encrypted_content {
-            return false;
-        }
-        // Prefer the item's own id so the embedded original round-trips; fall
-        // back to the event key when the item itself is anonymous.
-        let token = item
-            .get("id")
-            .and_then(Value::as_str)
-            .map(minimax_reasoning_encrypted_token)
-            .unwrap_or_else(|| minimax_reasoning_encrypted_token(&reasoning_key(item)));
-        mint_reasoning_encrypted_content(item, &token)
+        output.push(reasoning_item_added(output_index.clone(), key));
     }
 
     fn normalize_completed_response(&self, value: &mut Value) -> bool {
@@ -241,8 +204,7 @@ impl ResponsesReasoningSummarySseFilter {
             }
             let key = reasoning_key(item);
             let fallback = self.reasoning_text.get(&key).cloned();
-            let minted = self.mint_item(item);
-            ensure_reasoning_summary(item, fallback.as_deref()) || minted || changed
+            ensure_reasoning_summary(item, fallback.as_deref()) || changed
         })
     }
 }

@@ -38,7 +38,6 @@ use tracing::warn;
 pub(super) const DISABLE_ENV: &str = "PROMPT_FERRY_DISABLE_THINKING_DOWNGRADE";
 
 const CHAT_DISABLED_THINKING: &str = "disabled";
-const FERRY_REASONING_ECHO_PREFIXES: [&str; 2] = ["minimax-", "ferry-"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ThinkingDisposition {
@@ -109,10 +108,7 @@ pub(super) fn decide_thinking(
 pub(super) struct BodyThinkingSignals {
     pub(super) thinking_requested: bool,
     pub(super) has_tools: bool,
-    /// The upstream can consume reasoning already present in the body:
-    /// plaintext reasoning content, or a ferry-minted echo ferry restores
-    /// before forwarding. Opaque provider blobs and summary-only reasoning
-    /// items are not restorable.
+    /// The body contains plaintext reasoning content or summary.
     pub(super) reasoning_passable: bool,
 }
 
@@ -136,7 +132,7 @@ pub(super) fn body_thinking_signals(
         NativeApi::Responses => BodyThinkingSignals {
             thinking_requested: responses_requests_thinking(object),
             has_tools: has_tools(object),
-            reasoning_passable: responses_reasoning_passable(provider, object),
+            reasoning_passable: responses_reasoning_passable(object),
         },
         NativeApi::Auto | NativeApi::AnthropicMessages | NativeApi::Realtime => {
             BodyThinkingSignals::default()
@@ -314,37 +310,20 @@ fn chat_reasoning_passable(object: &Map<String, Value>) -> bool {
         })
 }
 
-fn responses_reasoning_passable(
-    provider: db::EndpointProvider,
-    object: &Map<String, Value>,
-) -> bool {
-    // `restore_reasoning_echoes` only runs on the outbound Responses body for
-    // MiniMax targets; every other Responses target forwards the encrypted
-    // blob verbatim, and a blob ferry cannot restore is not proof that the
-    // upstream can consume the parent reasoning.
-    let ferry_echo_restorable = provider == db::EndpointProvider::Minimax;
+fn responses_reasoning_passable(object: &Map<String, Value>) -> bool {
     object
         .get("input")
         .and_then(Value::as_array)
-        .is_some_and(|input| {
-            input
-                .iter()
-                .any(|item| reasoning_item_passable(item, ferry_echo_restorable))
-        })
+        .is_some_and(|input| input.iter().any(reasoning_item_passable))
 }
 
-fn reasoning_item_passable(item: &Value, ferry_echo_restorable: bool) -> bool {
-    if item.get("type").and_then(Value::as_str) != Some("reasoning") {
-        return false;
-    }
-    if has_reasoning_text(item) {
-        return true;
-    }
-    ferry_echo_restorable
-        && item
-            .get("encrypted_content")
-            .and_then(Value::as_str)
-            .is_some_and(is_ferry_reasoning_echo)
+fn reasoning_item_passable(item: &Value) -> bool {
+    item.get("type").and_then(Value::as_str) == Some("reasoning")
+        && (has_reasoning_text(item)
+            || item
+                .get("summary")
+                .map(crate::openai_compat::extract_text)
+                .is_some_and(|text| !text.trim().is_empty()))
 }
 
 fn has_reasoning_text(item: &Value) -> bool {
@@ -356,12 +335,6 @@ fn has_reasoning_text(item: &Value) -> bool {
                     && !crate::openai_compat::extract_text(part).trim().is_empty()
             })
         })
-}
-
-fn is_ferry_reasoning_echo(token: &str) -> bool {
-    FERRY_REASONING_ECHO_PREFIXES
-        .iter()
-        .any(|prefix| token.strip_prefix(prefix).is_some_and(|id| !id.is_empty()))
 }
 
 #[cfg(test)]
@@ -512,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_reasoning_text_and_ferry_echo_are_passable() {
+    fn responses_plaintext_is_passable_but_legacy_echo_alone_is_not() {
         let text = json!({
             "model": "m",
             "input": [
@@ -530,11 +503,9 @@ mod tests {
             "input": [{"type": "reasoning", "encrypted_content": "minimax-rs_1", "summary": []}],
         });
         assert!(
-            read_signals(db::EndpointProvider::Minimax, NativeApi::Responses, &echo)
+            !read_signals(db::EndpointProvider::Minimax, NativeApi::Responses, &echo)
                 .reasoning_passable
         );
-
-        // The ferry echo is only restored for MiniMax Responses targets.
         assert!(
             !read_signals(db::EndpointProvider::Generic, NativeApi::Responses, &echo)
                 .reasoning_passable
@@ -542,7 +513,7 @@ mod tests {
     }
 
     #[test]
-    fn opaque_echo_and_summary_only_items_are_not_restorable() {
+    fn opaque_only_is_not_passable_but_summary_is() {
         let opaque = json!({
             "model": "m",
             "input": [
@@ -571,7 +542,7 @@ mod tests {
             ],
         });
         assert!(
-            !read_signals(
+            read_signals(
                 db::EndpointProvider::Minimax,
                 NativeApi::Responses,
                 &summary_only

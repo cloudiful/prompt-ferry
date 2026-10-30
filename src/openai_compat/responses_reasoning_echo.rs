@@ -4,35 +4,8 @@ use serde_json::{Map, Value, json};
 
 use super::extract_text;
 
-/// Self-describing token prefix minted onto MiniMax Responses-passthrough
-/// reasoning items that arrive without `encrypted_content` (issue #459).
-pub(crate) const MINIMAX_REASONING_ENCRYPTED_PREFIX: &str = "minimax-";
-/// Self-describing token prefix minted onto reasoning items produced by the
-/// Chat->Responses bridge (`ChatResponseStreamAdapter`) when the upstream
-/// chat provider returns no encrypted content.
-pub(crate) const BRIDGE_REASONING_ENCRYPTED_PREFIX: &str = "ferry-";
-
-pub(crate) fn minimax_reasoning_encrypted_token(id: &str) -> String {
-    format!("{MINIMAX_REASONING_ENCRYPTED_PREFIX}{id}")
-}
-
-pub(crate) fn bridge_reasoning_encrypted_token(id: &str) -> String {
-    format!("{BRIDGE_REASONING_ENCRYPTED_PREFIX}{id}")
-}
-
-/// Mint `token` as `encrypted_content` on a reasoning item that lacks a
-/// usable value. Items of other types, items that already carry a non-empty
-/// value, and empty tokens are left untouched.
-pub(crate) fn mint_reasoning_encrypted_content(item: &mut Value, token: &str) -> bool {
-    if item.get("type").and_then(Value::as_str) != Some("reasoning") || token.is_empty() {
-        return false;
-    }
-    if is_present_encrypted_content(item.get("encrypted_content")) {
-        return false;
-    }
-    item["encrypted_content"] = Value::String(token.to_string());
-    true
-}
+const MINIMAX_REASONING_ENCRYPTED_PREFIX: &str = "minimax-";
+const BRIDGE_REASONING_ENCRYPTED_PREFIX: &str = "ferry-";
 
 fn is_present_encrypted_content(value: Option<&Value>) -> bool {
     match value {
@@ -42,10 +15,8 @@ fn is_present_encrypted_content(value: Option<&Value>) -> bool {
     }
 }
 
-/// Issue #502 Task 4: strip one item's `encrypted_content` for the
-/// self-summarize path. Both ferry-minted echoes (`minimax-`/`ferry-`) and
-/// opaque upstream blobs are dropped and never forwarded; ferry never
-/// fabricates `encrypted_content`. Returns true when a blob was present.
+/// Strip legacy echoes and opaque upstream blobs for self-summarization.
+/// Returns true when a nonblank blob was present.
 pub(crate) fn strip_encrypted_content_for_compact(item: &mut Value) -> bool {
     let Some(object) = item.as_object_mut() else {
         return false;
@@ -57,10 +28,7 @@ pub(crate) fn strip_encrypted_content_for_compact(item: &mut Value) -> bool {
     present
 }
 
-/// Original id embedded in one of ferry's self-describing reasoning tokens,
-/// or `None` when `value` is an opaque/absent upstream token. Both mint
-/// prefixes are ferry-defined and never collide with a provider's own opaque
-/// `encrypted_content`, so recognizing either is safe.
+/// Recover an original id from a reserved legacy echo prefix.
 fn ferry_reasoning_echo_source(value: &Value) -> Option<&str> {
     let token = value.as_str()?;
     for prefix in [
@@ -76,13 +44,11 @@ fn ferry_reasoning_echo_source(value: &Value) -> Option<&str> {
     None
 }
 
-/// Request-path counterpart to the response mint (issue #459).
-///
-/// Ferry-minted reasoning echoes (`minimax-<id>` / `ferry-<id>`) are rewritten
+/// Legacy reasoning echoes (`minimax-<id>` / `ferry-<id>`) are rewritten
 /// back into provider-plausible reasoning items before a Responses request is
 /// translated: the original `id` is restored, the ferry token is stripped, and
 /// `content[].reasoning_text` is backfilled from the plaintext `summary` when
-/// the echo omitted it. Bodies without a ferry-minted token are borrowed
+/// the echo omitted it. Bodies without a reserved legacy token are borrowed
 /// byte-for-byte, so prefix caches are never disturbed for untouched requests.
 pub(crate) fn restore_reasoning_echoes(body: &[u8]) -> Cow<'_, [u8]> {
     let Ok(mut value) = serde_json::from_slice::<Value>(body) else {
@@ -154,39 +120,8 @@ fn has_reasoning_text_content(object: &Map<String, Value>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        bridge_reasoning_encrypted_token, minimax_reasoning_encrypted_token,
-        mint_reasoning_encrypted_content, restore_reasoning_echoes,
-        strip_encrypted_content_for_compact,
-    };
+    use super::{restore_reasoning_echoes, strip_encrypted_content_for_compact};
     use serde_json::{Value, json};
-
-    #[test]
-    fn builds_self_describing_tokens() {
-        assert_eq!(
-            minimax_reasoning_encrypted_token("resp_1_rs"),
-            "minimax-resp_1_rs"
-        );
-        assert_eq!(bridge_reasoning_encrypted_token("rs_9"), "ferry-rs_9");
-    }
-
-    #[test]
-    fn mint_skips_non_reasoning_and_existing_values() {
-        let mut message = json!({"type": "message"});
-        assert!(!mint_reasoning_encrypted_content(&mut message, "minimax-x"));
-        assert!(message.get("encrypted_content").is_none());
-
-        let mut existing = json!({"type": "reasoning", "encrypted_content": "opaque"});
-        assert!(!mint_reasoning_encrypted_content(
-            &mut existing,
-            "minimax-x"
-        ));
-        assert_eq!(existing["encrypted_content"], "opaque");
-
-        let mut blank = json!({"type": "reasoning", "encrypted_content": ""});
-        assert!(mint_reasoning_encrypted_content(&mut blank, "minimax-x"));
-        assert_eq!(blank["encrypted_content"], "minimax-x");
-    }
 
     #[test]
     fn restore_rewrites_own_token_and_backfills_content() {

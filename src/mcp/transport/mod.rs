@@ -273,6 +273,7 @@ fn is_retryable_status(status: &StatusCode) -> bool {
 fn request_time_status(stream_err: &StreamableHttpError<reqwest::Error>) -> Option<StatusCode> {
     match stream_err {
         StreamableHttpError::Client(reqwest_err) => reqwest_err.status(),
+        StreamableHttpError::HttpStatus(error) => StatusCode::from_u16(error.status).ok(),
         StreamableHttpError::AuthRequired(_) => Some(StatusCode::UNAUTHORIZED),
         StreamableHttpError::InsufficientScope(_) => Some(StatusCode::FORBIDDEN),
         StreamableHttpError::UnexpectedServerResponse(message) => {
@@ -294,17 +295,7 @@ fn handshake_status(err: &anyhow::Error) -> Option<StatusCode> {
             let stream_err = error
                 .error
                 .downcast_ref::<StreamableHttpError<reqwest::Error>>()?;
-            match stream_err {
-                StreamableHttpError::Client(reqwest_err) => {
-                    reqwest_err.status().filter(is_retryable_status)
-                }
-                StreamableHttpError::AuthRequired(_) => Some(StatusCode::UNAUTHORIZED),
-                StreamableHttpError::InsufficientScope(_) => Some(StatusCode::FORBIDDEN),
-                StreamableHttpError::UnexpectedServerResponse(message) => {
-                    parse_status_from_message(message.as_ref()).filter(is_retryable_status)
-                }
-                _ => None,
-            }
+            request_time_status(stream_err).filter(is_retryable_status)
         }
         rmcp::service::ClientInitializeError::JsonRpcError(error_data) => {
             parse_status_from_message(&error_data.message).filter(is_retryable_status)

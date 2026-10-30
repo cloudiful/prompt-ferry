@@ -8,7 +8,7 @@ fn estimated_tokens(text: &str) -> usize {
 
 /// Strip every `encrypted_content` blob from one history item.
 ///
-/// Both ferry-minted echoes (`ferry-`/`minimax-`) and opaque upstream blobs
+/// Both legacy echoes (`ferry-`/`minimax-`) and opaque upstream blobs
 /// are dropped; ferry never forwards or fabricates encrypted bytes in the
 /// self-summarize path. Reasoning items keep only their plaintext `summary`
 /// (truncated); `compaction`/`item_reference` items are not replayable and

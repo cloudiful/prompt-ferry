@@ -83,10 +83,17 @@ fn translate_reasoning_item(item: &Value) -> Result<Option<String>, CompatError>
     let Some(object) = item.as_object() else {
         return Ok(None);
     };
-    if object.get("content").is_none() {
-        return Ok(None);
-    }
-    Ok(translate_assistant_content(item)?.reasoning_content)
+    let content = if object.get("content").is_some_and(|value| !value.is_null()) {
+        translate_assistant_content(item)?.reasoning_content
+    } else {
+        None
+    };
+    Ok(content.filter(|text| !text.trim().is_empty()).or_else(|| {
+        object
+            .get("summary")
+            .map(super::extract_text)
+            .filter(|text| !text.trim().is_empty())
+    }))
 }
 
 fn translate_role_message(

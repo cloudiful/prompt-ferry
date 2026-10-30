@@ -219,7 +219,7 @@ impl ChatResponseStreamAdapter {
                 json!({
                     "type": "response.output_item.added",
                     "output_index": output_index,
-                    "item": self.reasoning_item_with_echo("", "in_progress"),
+                    "item": self.reasoning_item("", "in_progress"),
                 }),
             )?;
             self.push_event(
@@ -240,16 +240,8 @@ impl ChatResponseStreamAdapter {
         Ok(())
     }
 
-    pub(super) fn reasoning_item_with_echo(&self, text: &str, status: &str) -> Value {
-        let mut item = reasoning_item_with_status(&self.reasoning_id, text, status);
-        // Issue #459: a chat upstream that returned no `encrypted_content`
-        // still needs a self-describing echo token so downstream clients can
-        // replay the reasoning item; the `ferry-<reasoning id>` token is
-        // stripped and restored on the request path.
-        item["encrypted_content"] = Value::String(
-            crate::openai_compat::bridge_reasoning_encrypted_token(&self.reasoning_id),
-        );
-        item
+    pub(super) fn reasoning_item(&self, text: &str, status: &str) -> Value {
+        reasoning_item_with_status(&self.reasoning_id, text, status)
     }
 
     fn ensure_text_stream_started(&mut self, output: &mut Vec<Vec<u8>>) -> Result<(), CompatError> {
@@ -326,7 +318,7 @@ impl ChatResponseStreamAdapter {
                 json!({
                     "type": "response.output_item.done",
                     "output_index": output_index,
-                    "item": self.reasoning_item_with_echo(&self.full_reasoning_text, "completed"),
+                    "item": self.reasoning_item(&self.full_reasoning_text, "completed"),
                 }),
             )?;
         }
