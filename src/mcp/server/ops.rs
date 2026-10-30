@@ -15,8 +15,9 @@ use crate::db::McpServer;
 use super::{
     McpRuntimeStorage, ProxyService, RequestScope, filtering,
     value::{
-        json_request, optional_params, parse_call_tool_response, parse_get_prompt_response,
-        parse_read_resource_response, parse_result, parse_result_field, required_params, with_meta,
+        json_request, optional_params, parse_call_tool_response, parse_complete_result,
+        parse_get_prompt_response, parse_read_resource_response, parse_result_field,
+        required_params, with_meta,
     },
 };
 use crate::mcp::output_schema::normalize_tools_list_result;
@@ -262,7 +263,7 @@ impl ProxyService {
                     request_id,
                     "completion/complete",
                     with_meta(params, meta),
-                    parse_result,
+                    parse_complete_result,
                 )
                 .await;
         }
@@ -289,7 +290,7 @@ impl ProxyService {
                     target,
                     |params, upstream_name| params.r#ref = Reference::for_prompt(upstream_name),
                     |_, _| Ok(()),
-                    parse_result,
+                    parse_complete_result,
                 )
                 .await
             }
@@ -310,7 +311,7 @@ impl ProxyService {
                         params.r#ref = Reference::for_resource(upstream_name);
                     },
                     |_, _| Ok(()),
-                    parse_result,
+                    parse_complete_result,
                 )
                 .await
             }
@@ -452,7 +453,7 @@ impl ProxyService {
             context.selected_credential.as_ref(),
         )
         .await
-        .map_err(super::internal_error)?;
+        .map_err(super::value::dispatch_error)?;
         parse(response)
     }
 }
@@ -474,28 +475,35 @@ where
     result
 }
 
-/// Patch a `resources/read` response so a single-service upstream that
-/// predates SEP-2549 still satisfies a downstream peer on `2026-07-28`. If
-/// the upstream already supplied `ttlMs`/`cacheScope`, they are preserved
-/// untouched.
+/// Align a `resources/read` response with the downstream peer's protocol
+/// version. A modern peer (`2026-07-28`+) needs the SEP-2549 cache metadata and
+/// the SEP-2322 `resultType` even when the upstream predates them, so missing
+/// fields are filled in and supplied values are preserved. A legacy peer must
+/// not receive either field on the wire, so they are removed instead.
 fn apply_cache_metadata_to_read_response(
     response: ReadResourceResponse,
     protocol_version: Option<&ProtocolVersion>,
 ) -> ReadResourceResponse {
-    if !peer_expects_cache_metadata(protocol_version) {
-        return response;
-    }
+    let modern = peer_expects_cache_metadata(protocol_version);
     match response {
         ReadResourceResponse::Complete(mut result) => {
-            if result.ttl_ms.is_none() {
-                result.ttl_ms = Some(0);
-            }
-            if result.cache_scope.is_none() {
-                result.cache_scope = Some(CacheScope::Private);
+            if modern {
+                if result.result_type.is_none() {
+                    result.result_type = Some(rmcp::model::ResultType::COMPLETE);
+                }
+                if result.ttl_ms.is_none() {
+                    result.ttl_ms = Some(0);
+                }
+                if result.cache_scope.is_none() {
+                    result.cache_scope = Some(CacheScope::Private);
+                }
+            } else {
+                result.ttl_ms = None;
+                result.cache_scope = None;
             }
             ReadResourceResponse::Complete(result)
         }
-        // MRTR intermediates are not cached; nothing to patch.
+        // MRTR intermediates are not cached; nothing to patch or strip.
         other => other,
     }
 }
@@ -576,7 +584,7 @@ impl CacheMetadataSettable for ListPromptsResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rmcp::model::{ReadResourceResult, ResourceContents};
+    use rmcp::model::{ReadResourceResult, ResourceContents, ResultType};
 
     use crate::{
         db::{ConfigRepository, McpServerInput},
@@ -738,19 +746,34 @@ mod tests {
     }
 
     #[test]
-    fn apply_cache_metadata_to_read_response_skips_for_legacy_or_none() {
-        let legacy_input = complete_read_response(None, None);
-        match apply_cache_metadata_to_read_response(
-            legacy_input,
-            Some(&ProtocolVersion::V_2025_11_25),
-        ) {
+    fn apply_cache_metadata_to_read_response_stamps_missing_result_type_for_modern() {
+        let mut result = ReadResourceResult::new(vec![ResourceContents::text("hi", "mcp://x/y")]);
+        result.result_type = None;
+        let response = ReadResourceResponse::Complete(result);
+        match apply_cache_metadata_to_read_response(response, Some(&ProtocolVersion::V_2026_07_28))
+        {
+            ReadResourceResponse::Complete(result) => {
+                assert_eq!(result.result_type, Some(ResultType::COMPLETE));
+            }
+            other => panic!("expected Complete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_cache_metadata_to_read_response_strips_modern_fields_for_legacy() {
+        let response = complete_read_response(Some(60), Some(CacheScope::Public));
+        match apply_cache_metadata_to_read_response(response, Some(&ProtocolVersion::V_2025_11_25))
+        {
             ReadResourceResponse::Complete(result) => {
                 assert_eq!(result.ttl_ms, None);
                 assert_eq!(result.cache_scope, None);
             }
             other => panic!("expected Complete, got {other:?}"),
         }
+    }
 
+    #[test]
+    fn apply_cache_metadata_to_read_response_skips_for_none_peer() {
         let none_input = complete_read_response(None, None);
         match apply_cache_metadata_to_read_response(none_input, None) {
             ReadResourceResponse::Complete(result) => {

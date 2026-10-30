@@ -685,6 +685,65 @@ async fn input_responses_and_request_state_reach_upstream() {
 }
 
 #[tokio::test]
+async fn continuation_to_legacy_upstream_is_rejected_instead_of_dropped() {
+    let url = spawn_legacy_v2_upstream().await;
+    let server = v2_server(&url);
+    let err = call(
+        &server,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "tools/call",
+            "params": {
+                "name": "echo",
+                "arguments": {},
+                "inputResponses": {"q1": {"action": "accept", "content": {"x": 1}}},
+                "requestState": "round-1-state"
+            }
+        }),
+        None,
+        None,
+    )
+    .await
+    .unwrap_err();
+
+    let message = err.to_string();
+    assert!(
+        message.contains("MRTR continuation") && message.contains("2025-11-25"),
+        "legacy upstream continuation must fail explicitly: {message}"
+    );
+}
+
+#[tokio::test]
+async fn continuation_to_modern_upstream_is_forwarded_untouched() {
+    let url = spawn_v2_upstream().await;
+    let server = v2_server(&url);
+    let response = call(
+        &server,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 13,
+            "method": "tools/call",
+            "params": {
+                "name": "mrtr",
+                "arguments": {},
+                "inputResponses": {"q1": {"action": "accept", "content": {"x": 1}}},
+                "requestState": "round-1-state"
+            }
+        }),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        response["result"]["content"][0]["text"].as_str(),
+        Some("mrtr-complete")
+    );
+}
+
+#[tokio::test]
 async fn legacy_2025_11_25_upstream_does_not_require_standard_headers() {
     let url = spawn_legacy_v2_upstream().await;
     let server = v2_server(&url);
