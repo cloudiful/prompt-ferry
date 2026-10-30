@@ -432,6 +432,312 @@ async fn rejects_endpoint_and_key_override_conflicts() {
 }
 
 #[tokio::test]
+async fn credential_lifecycle_emits_only_genuine_stale_rebind() {
+    use crate::response_affinity::{
+        ResponseAffinityBinding, ResponseAffinityStore, api_key_fingerprint,
+    };
+    use std::sync::{Arc, Mutex};
+    use tracing::{
+        Event, Subscriber,
+        field::{Field, Visit},
+    };
+    use tracing_subscriber::{
+        Layer,
+        layer::{Context, SubscriberExt},
+    };
+
+    #[derive(Default)]
+    struct Fields {
+        event: Option<String>,
+        state: Option<String>,
+    }
+    impl Visit for Fields {
+        fn record_str(&mut self, field: &Field, value: &str) {
+            if field.name() == "event" {
+                self.event = Some(value.to_owned());
+            }
+        }
+        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+            if field.name() == "binding_state" {
+                self.state = Some(format!("{value:?}"));
+            }
+        }
+    }
+    struct Capture(Arc<Mutex<Vec<String>>>);
+    impl<S: Subscriber> Layer<S> for Capture {
+        fn register_callsite(
+            &self,
+            _: &'static tracing::Metadata<'static>,
+        ) -> tracing::subscriber::Interest {
+            tracing::subscriber::Interest::sometimes()
+        }
+        fn on_event(&self, event: &Event<'_>, _: Context<'_, S>) {
+            let mut fields = Fields::default();
+            event.record(&mut fields);
+            if fields.event.as_deref() == Some("session_affinity_auto_rebind") {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(fields.state.unwrap_or_default());
+            }
+        }
+    }
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::registry().with(Capture(events.clone()));
+    let _guard = tracing::subscriber::set_default(subscriber);
+    tracing::callsite::rebuild_interest_cache();
+    {
+        let replay = ReplayCache::for_tests();
+        let runtime = WorkerRuntimeState::default();
+        let services = querying_test_services(runtime.clone(), replay.clone()).await;
+        let store = replay.response_affinity();
+        let mut candidate = session_affinity_candidate();
+        candidate.targets.truncate(1);
+        candidate.targets[0].has_oauth_token = true;
+        let conversation = uuid::Uuid::new_v4();
+        let key = ResponseAffinityStore::cache_key(
+            1,
+            candidate.rule_id,
+            &format!("conversation:{conversation}"),
+        );
+        let ordinary = request_context(
+            runtime.worker_instance_id(),
+            RequestPromptLog {
+                conversation_id: Some(conversation),
+                ..Default::default()
+            },
+        );
+        let chained = request_context(
+            runtime.worker_instance_id(),
+            RequestPromptLog {
+                conversation_id: Some(conversation),
+                request_previous_response_id: Some("resp_previous".into()),
+                ..Default::default()
+            },
+        );
+        select_route_for_candidate(
+            &services,
+            &ordinary,
+            &candidate,
+            &sample_request(),
+            1,
+            Some("key-a"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let original = store.get(&key).await.unwrap().unwrap();
+        let mut refreshed = candidate.clone();
+        refreshed.targets[0].api_key = "different-unused-endpoint".into();
+        refreshed.targets[0].api_keys[0].api_key = "different-unused-row".into();
+        refreshed.targets[0].api_keys[0].key_id = uuid::Uuid::new_v4();
+        let chosen = select_route_for_candidate(
+            &services,
+            &chained,
+            &refreshed,
+            &sample_request(),
+            1,
+            Some("key-a"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(chosen.route.endpoint_key_id, None);
+        assert!(chosen.route.api_key.is_empty());
+        assert_eq!(store.get(&key).await.unwrap(), Some(original));
+        assert!(events.lock().unwrap().is_empty());
+
+        let mut api = session_affinity_candidate();
+        api.targets.truncate(1);
+        let conversation = uuid::Uuid::new_v4();
+        let key = ResponseAffinityStore::cache_key(
+            1,
+            api.rule_id,
+            &format!("conversation:{conversation}"),
+        );
+        let ctx = request_context(
+            runtime.worker_instance_id(),
+            RequestPromptLog {
+                conversation_id: Some(conversation),
+                ..Default::default()
+            },
+        );
+        select_route_for_candidate(&services, &ctx, &api, &sample_request(), 1, Some("key-a"))
+            .await
+            .unwrap()
+            .unwrap();
+        let initial = store.get(&key).await.unwrap().unwrap();
+        api.targets[0].api_key = "rotated-secret".into();
+        api.targets[0].api_keys[0].api_key = "rotated-secret".into();
+        select_route_for_candidate(&services, &ctx, &api, &sample_request(), 1, Some("key-a"))
+            .await
+            .unwrap()
+            .unwrap();
+        let rotated = store.get(&key).await.unwrap().unwrap();
+        assert_eq!(rotated.endpoint_key_id, initial.endpoint_key_id);
+        assert_eq!(
+            rotated.endpoint_key_fingerprint,
+            api_key_fingerprint("rotated-secret")
+        );
+        let replacement_id = uuid::Uuid::new_v4();
+        api.targets[0].api_keys[0].key_id = replacement_id;
+        select_route_for_candidate(&services, &ctx, &api, &sample_request(), 1, Some("key-a"))
+            .await
+            .unwrap()
+            .unwrap();
+        let healed = store.get(&key).await.unwrap().unwrap();
+        assert_eq!(healed.endpoint_key_id, Some(replacement_id));
+        assert_eq!(
+            healed.endpoint_key_fingerprint,
+            rotated.endpoint_key_fingerprint
+        );
+        assert!(events.lock().unwrap().is_empty());
+
+        let conversation = uuid::Uuid::new_v4();
+        let key = ResponseAffinityStore::cache_key(
+            1,
+            candidate.rule_id,
+            &format!("conversation:{conversation}"),
+        );
+        let stale = ResponseAffinityBinding {
+            endpoint_id: candidate.targets[0].endpoint_id,
+            endpoint_key_id: None,
+            endpoint_key_fingerprint: api_key_fingerprint("foreign"),
+        };
+        store.get_or_create(&key, &stale).await.unwrap();
+        let ctx = request_context(
+            runtime.worker_instance_id(),
+            RequestPromptLog {
+                conversation_id: Some(conversation),
+                ..Default::default()
+            },
+        );
+        tracing::callsite::rebuild_interest_cache();
+        for _ in 0..2 {
+            select_route_for_candidate(
+                &services,
+                &ctx,
+                &candidate,
+                &sample_request(),
+                1,
+                Some("key-a"),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        }
+        assert_eq!(
+            store
+                .get(&key)
+                .await
+                .unwrap()
+                .unwrap()
+                .endpoint_key_fingerprint,
+            api_key_fingerprint("")
+        );
+        assert_eq!(*events.lock().unwrap(), vec!["StaleKey"]);
+    }
+}
+
+#[tokio::test]
+async fn subscription_requested_platform_key_conflicts_without_using_the_key() {
+    let replay_cache = ReplayCache::for_tests();
+    let runtime = WorkerRuntimeState::default();
+    let services = querying_test_services(runtime.clone(), replay_cache).await;
+    let mut candidate = session_affinity_candidate();
+    candidate.targets.truncate(1);
+    candidate.targets[0].has_oauth_token = true;
+    let ctx = request_context(
+        runtime.worker_instance_id(),
+        RequestPromptLog {
+            conversation_id: Some(uuid::Uuid::new_v4()),
+            conversation_override_endpoint_id: Some(candidate.targets[0].endpoint_id),
+            conversation_override_endpoint_key_id: Some(candidate.targets[0].api_keys[0].key_id),
+            ..Default::default()
+        },
+    );
+    let error = match select_route_for_candidate(
+        &services,
+        &ctx,
+        &candidate,
+        &sample_request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    {
+        Ok(_) => panic!("subscription must not accept a platform key override"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error.downcast_ref::<RouteAffinityError>().unwrap().code,
+        "responses_session_affinity_conflict"
+    );
+}
+
+#[tokio::test]
+async fn subscription_binding_reused_for_chained_request_with_unused_keys() {
+    use crate::response_affinity::ResponseAffinityStore;
+    let replay_cache = ReplayCache::for_tests();
+    let runtime = WorkerRuntimeState::default();
+    let services = querying_test_services(runtime.clone(), replay_cache.clone()).await;
+    let mut candidate = session_affinity_candidate();
+    candidate.targets.truncate(1);
+    candidate.targets[0].has_oauth_token = true;
+    let conversation_id = uuid::Uuid::new_v4();
+    let cache_key = ResponseAffinityStore::cache_key(
+        1,
+        candidate.rule_id,
+        &format!("conversation:{conversation_id}"),
+    );
+    let first_ctx = request_context(
+        runtime.worker_instance_id(),
+        RequestPromptLog {
+            conversation_id: Some(conversation_id),
+            conversation_seq: Some(1),
+            ..Default::default()
+        },
+    );
+    let chained_ctx = request_context(
+        runtime.worker_instance_id(),
+        RequestPromptLog {
+            conversation_id: Some(conversation_id),
+            conversation_seq: Some(2),
+            request_previous_response_id: Some("resp_previous".to_string()),
+            ..Default::default()
+        },
+    );
+    let store = replay_cache.response_affinity();
+    let first = select_route_for_candidate(
+        &services,
+        &first_ctx,
+        &candidate,
+        &sample_request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let binding = store.get(&cache_key).await.unwrap().unwrap();
+    let second = select_route_for_candidate(
+        &services,
+        &chained_ctx,
+        &candidate,
+        &sample_request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(first.route.route_id, second.route.route_id);
+    assert_eq!(second.route.endpoint_key_id, None);
+    assert!(second.route.api_key.is_empty());
+    assert_eq!(store.get(&cache_key).await.unwrap(), Some(binding));
+}
+
+#[tokio::test]
 async fn heals_stale_key_id_when_secret_fingerprint_matches() {
     use crate::response_affinity::{ResponseAffinityStore, api_key_fingerprint};
 

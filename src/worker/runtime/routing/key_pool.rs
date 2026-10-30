@@ -53,6 +53,9 @@ pub(super) fn override_key(
     target: &db::ModelRouteCandidateTarget,
     id: uuid::Uuid,
 ) -> Option<db::EndpointApiKeySelection> {
+    if target.has_oauth_token {
+        return None;
+    }
     eligible_keys(target)
         .into_iter()
         .find(|key| key.key_id == id)
@@ -76,14 +79,10 @@ pub(super) fn target_units<'a>(
     // subscription quota is tracked per endpoint).
     if target.has_oauth_token {
         pool.consider(
-            subscription_eligibility(cache, target.endpoint_id),
+            assess_target_credential(cache, target, None, context),
             |weight| PoolUnit {
                 target,
-                key: db::EndpointApiKeySelection {
-                    key_id: None,
-                    key_label: None,
-                    secret: String::new(),
-                },
+                key: crate::routing::subscription_selection(),
                 unit_id: target.target_id,
                 weight,
             },
@@ -94,8 +93,9 @@ pub(super) fn target_units<'a>(
     if keys.is_empty() {
         let secret = target.api_key.trim();
         if !secret.is_empty() {
-            pool.consider(assess(cache, target.endpoint_id, None, context), |weight| {
-                PoolUnit {
+            pool.consider(
+                assess_target_credential(cache, target, None, context),
+                |weight| PoolUnit {
                     target,
                     key: db::EndpointApiKeySelection {
                         key_id: None,
@@ -104,8 +104,8 @@ pub(super) fn target_units<'a>(
                     },
                     unit_id: target.target_id,
                     weight,
-                }
-            });
+                },
+            );
         }
         return pool;
     }
@@ -115,9 +115,9 @@ pub(super) fn target_units<'a>(
         1
     }) {
         pool.consider(
-            assess(
+            assess_target_credential(
                 cache,
-                target.endpoint_id,
+                target,
                 (!key.key_id.is_nil()).then_some(key.key_id),
                 context,
             ),
@@ -138,6 +138,19 @@ pub(super) fn target_units<'a>(
 /// quota scopes (the per-key remaining and weight budgets) do not apply to
 /// it. The endpoint-level feedback backoff and the subscription quota still
 /// do, so an exhausted subscription keeps its target out of the pool.
+pub(super) fn assess_target_credential(
+    cache: Option<&TokenPlanQuotaCache>,
+    target: &db::ModelRouteCandidateTarget,
+    key_id: Option<Uuid>,
+    context: QuotaContext<'_>,
+) -> Eligibility {
+    if target.has_oauth_token {
+        subscription_eligibility(cache, target.endpoint_id)
+    } else {
+        assess(cache, target.endpoint_id, key_id, context)
+    }
+}
+
 pub(super) fn subscription_eligibility(
     cache: Option<&TokenPlanQuotaCache>,
     endpoint: Uuid,
@@ -276,6 +289,27 @@ mod tests {
             "a subscription unit never carries a bearer secret"
         );
         assert_eq!(unit.unit_id, target.target_id);
+    }
+
+    #[test]
+    fn subscription_binding_ignores_unused_platform_material_and_rejects_invalid_shapes() {
+        let key = endpoint_key(uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+        let target = target(true, vec![key.clone()]);
+        let unit = target_units(&target, None, context(), false)
+            .units
+            .pop()
+            .unwrap();
+        let binding = crate::routing::credential_binding(&target, &unit.key);
+        let resolved = crate::routing::select_bound_credential(&target, &binding).unwrap();
+        assert_eq!(resolved.key_id, None);
+        assert!(resolved.secret.is_empty());
+        assert!(override_key(&target, key.key_id).is_none());
+        let mut invalid = binding.clone();
+        invalid.endpoint_key_id = Some(key.key_id);
+        assert!(crate::routing::select_bound_credential(&target, &invalid).is_none());
+        invalid.endpoint_key_id = None;
+        invalid.endpoint_key_fingerprint = crate::response_affinity::api_key_fingerprint("foreign");
+        assert!(crate::routing::select_bound_credential(&target, &invalid).is_none());
     }
 
     #[test]

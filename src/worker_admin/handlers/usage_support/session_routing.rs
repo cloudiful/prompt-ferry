@@ -208,7 +208,7 @@ fn affinity_status_for_binding(
             key_label: None,
         };
     };
-    let key_selection = crate::routing::select_bound_api_key(target, binding);
+    let key_selection = crate::routing::select_bound_credential(target, binding);
     SessionAffinityStatus {
         state,
         rule_id,
@@ -221,6 +221,73 @@ fn affinity_status_for_binding(
         key_label: key_selection
             .as_ref()
             .and_then(|selection| selection.key_label.clone()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subscription_affinity_preview_uses_shared_credential() {
+        let endpoint_id = uuid::Uuid::new_v4();
+        let target = db::ModelRouteCandidateTarget {
+            embedding_dimensions_override: None,
+            target_id: uuid::Uuid::new_v4(),
+            endpoint_id,
+            endpoint_name: "subscription".into(),
+            base_url: "https://example.invalid".into(),
+            api_key: "unused".into(),
+            api_keys: vec![db::EndpointApiKey {
+                key_id: uuid::Uuid::new_v4(),
+                endpoint_id,
+                key_label: "unused".into(),
+                api_key: "unused-row".into(),
+                position: 0,
+                enabled: true,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            }],
+            key_lb_enabled: false,
+            native_api: crate::config::NativeApi::Responses,
+            target_native_api: crate::config::NativeApi::Responses,
+            position: 0,
+            enabled: true,
+            upstream_model: None,
+            provider: db::EndpointProvider::OpenAi,
+            service_tier: None,
+            proxy_url: None,
+            proxy_url_override: None,
+            active_windows: None,
+            endpoint_active_windows: None,
+            dev_system_normalize: false,
+            thinking_downgrade_enabled: false,
+            thinking_effort_override: None,
+            compact_mode: db::CompactMode::Passthrough,
+            has_oauth_token: true,
+        };
+        let binding =
+            crate::routing::credential_binding(&target, &crate::routing::subscription_selection());
+        let candidate = db::ModelRouteCandidate {
+            rule_id: uuid::Uuid::new_v4(),
+            scope: "admin".into(),
+            owner_user_id: None,
+            model_pattern: "*".into(),
+            routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
+            updated_at: chrono::Utc::now(),
+            targets: vec![target],
+        };
+        let status =
+            affinity_status_for_binding(Some(&candidate), Some(candidate.rule_id), &binding);
+        assert!(matches!(status.state, SessionAffinityState::Active));
+        assert_eq!(status.key_id, None);
+        assert_eq!(status.key_label, None);
+        let mut disabled = candidate.clone();
+        disabled.targets[0].enabled = false;
+        assert!(matches!(
+            affinity_status_for_binding(Some(&disabled), None, &binding).state,
+            SessionAffinityState::StaleEndpoint
+        ));
     }
 }
 

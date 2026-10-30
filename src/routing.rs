@@ -39,16 +39,45 @@ pub fn bound_binding_state(
     ) {
         return BoundBindingState::StaleEndpoint;
     }
-    match select_bound_api_key(target, binding) {
+    match select_bound_credential(target, binding) {
         Some(_) => BoundBindingState::Active,
         None => BoundBindingState::StaleKey,
     }
 }
 
-pub fn select_bound_api_key(
+pub(crate) fn subscription_selection() -> EndpointApiKeySelection {
+    EndpointApiKeySelection {
+        key_id: None,
+        key_label: None,
+        secret: String::new(),
+    }
+}
+
+pub(crate) fn credential_binding(
+    target: &ModelRouteCandidateTarget,
+    selection: &EndpointApiKeySelection,
+) -> ResponseAffinityBinding {
+    let (key_id, secret) = if target.has_oauth_token {
+        (None, "")
+    } else {
+        (selection.key_id, selection.secret.as_str())
+    };
+    ResponseAffinityBinding {
+        endpoint_id: target.endpoint_id,
+        endpoint_key_id: key_id,
+        endpoint_key_fingerprint: api_key_fingerprint(secret),
+    }
+}
+
+pub fn select_bound_credential(
     target: &ModelRouteCandidateTarget,
     binding: &ResponseAffinityBinding,
 ) -> Option<EndpointApiKeySelection> {
+    if target.has_oauth_token {
+        return (binding.endpoint_key_id.is_none()
+            && binding.endpoint_key_fingerprint == api_key_fingerprint(""))
+        .then(subscription_selection);
+    }
     let by_key_id = binding.endpoint_key_id.and_then(|key_id| {
         target.api_keys.iter().find(|key| {
             key.endpoint_id == target.endpoint_id

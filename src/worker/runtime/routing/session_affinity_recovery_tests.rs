@@ -14,6 +14,86 @@ use crate::{
 };
 
 #[tokio::test]
+async fn subscription_invalid_bindings_fail_strict_chain_then_rebind_once() {
+    for with_id in [true, false] {
+        let replay_cache = ReplayCache::for_tests();
+        let runtime = WorkerRuntimeState::default();
+        let services = querying_test_services(runtime.clone(), replay_cache.clone()).await;
+        let mut candidate = session_affinity_candidate();
+        candidate.targets.truncate(1);
+        let target = &mut candidate.targets[0];
+        target.has_oauth_token = true;
+        let stale = ResponseAffinityBinding {
+            endpoint_id: target.endpoint_id,
+            endpoint_key_id: with_id.then_some(target.api_keys[0].key_id),
+            endpoint_key_fingerprint: api_key_fingerprint(if with_id { "" } else { "foreign" }),
+        };
+        let conversation_id = uuid::Uuid::new_v4();
+        let cache_key = ResponseAffinityStore::cache_key(
+            1,
+            candidate.rule_id,
+            &format!("conversation:{conversation_id}"),
+        );
+        let store = replay_cache.response_affinity();
+        store.get_or_create(&cache_key, &stale).await.unwrap();
+        let chained = request_context(
+            runtime.worker_instance_id(),
+            RequestPromptLog {
+                conversation_id: Some(conversation_id),
+                request_previous_response_id: Some("resp_old".into()),
+                ..Default::default()
+            },
+        );
+        let error = match select_route_for_candidate(
+            &services,
+            &chained,
+            &candidate,
+            &sample_request(),
+            1,
+            Some("key-a"),
+        )
+        .await
+        {
+            Ok(_) => panic!("invalid binding must fail strict chain"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error
+                .downcast_ref::<super::RouteAffinityError>()
+                .unwrap()
+                .code,
+            "responses_session_affinity_target_unavailable"
+        );
+        assert_eq!(store.get(&cache_key).await.unwrap(), Some(stale));
+        let ordinary = request_context(
+            runtime.worker_instance_id(),
+            RequestPromptLog {
+                conversation_id: Some(conversation_id),
+                ..Default::default()
+            },
+        );
+        for _ in 0..2 {
+            let selected = select_route_for_candidate(
+                &services,
+                &ordinary,
+                &candidate,
+                &sample_request(),
+                1,
+                Some("key-a"),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(selected.route.endpoint_key_id, None);
+            assert!(selected.route.api_key.is_empty());
+            let binding = store.get(&cache_key).await.unwrap().unwrap();
+            assert_eq!(binding.endpoint_key_id, None);
+            assert_eq!(binding.endpoint_key_fingerprint, api_key_fingerprint(""));
+        }
+    }
+}
+
+#[tokio::test]
 async fn ignores_preferred_endpoint_from_another_model_route() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = WorkerRuntimeState::default();

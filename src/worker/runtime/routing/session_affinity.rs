@@ -5,9 +5,8 @@ use http::StatusCode;
 
 use crate::{
     db,
-    response_affinity::{
-        ResponseAffinityBinding, ResponseAffinityStore, api_key_fingerprint, log_unavailable,
-    },
+    response_affinity::{ResponseAffinityBinding, ResponseAffinityStore, log_unavailable},
+    routing::credential_binding,
     worker::runtime::context::AffinityFailureAudit,
     worker_admin::token_plan_cache::{TokenPlanQuotaCache, estimate_input_tokens},
 };
@@ -20,8 +19,7 @@ use super::quota_selection::{refresh_candidate_quota, request_model};
 use super::quota_unavailable::QuotaUnavailableError;
 use super::selection::endpoint_key_stickiness_value;
 use super::session_affinity_quota::{
-    BindingSelection, binding_for_selection, log_quota_failover, quota_failover_selection,
-    selection_for_binding,
+    BindingSelection, log_quota_failover, quota_failover_selection, selection_for_binding,
 };
 use super::{
     quota_eligibility::{QuotaContext, reserve},
@@ -218,16 +216,16 @@ pub(super) async fn select<'a>(
                         )));
                     }
                     // 仅 StaleEndpoint/StaleKey 走自动重绑；QuotaExhausted 已在上一个分支处理，conflict 已提前 return。
-                    if !matches!(
-                        crate::routing::bound_binding_state(candidate, &current_binding),
-                        crate::routing::BoundBindingState::Active
-                    ) {
+                    let binding_state =
+                        crate::routing::bound_binding_state(candidate, &current_binding);
+                    if !matches!(binding_state, crate::routing::BoundBindingState::Active) {
                         match store.delete(&cache_key).await {
                             Ok(_) => {
                                 tracing::warn!(
                                     event = "session_affinity_auto_rebind",
                                     model_route_rule_id = %candidate.rule_id,
                                     stale_endpoint_id = %current_binding.endpoint_id,
+                                    ?binding_state,
                                     "stale session binding cleared, rebuilding",
                                 );
                                 binding = None;
@@ -348,11 +346,7 @@ async fn heal_stale_binding(
     binding: &ResponseAffinityBinding,
     selection: &SessionAffinitySelection<'_>,
 ) {
-    let replacement = ResponseAffinityBinding {
-        endpoint_id: selection.target.endpoint_id,
-        endpoint_key_id: selection.key_selection.key_id,
-        endpoint_key_fingerprint: api_key_fingerprint(&selection.key_selection.secret),
-    };
+    let replacement = credential_binding(selection.target, &selection.key_selection);
     if replacement == *binding {
         return;
     }
@@ -395,7 +389,7 @@ fn select_new_binding<'a>(
         if !claim_selection_probe(quota_cache, &mut selection) {
             continue;
         }
-        let binding = binding_for_selection(selection.target, &selection.key_selection);
+        let binding = credential_binding(selection.target, &selection.key_selection);
         return Ok((selection, binding));
     }
     Err(anyhow::Error::new(QuotaUnavailableError))

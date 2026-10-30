@@ -11,6 +11,9 @@ use crate::{
 };
 
 pub(super) fn eligible_route_keys(route: &db::RouteConfig) -> Vec<&db::EndpointApiKey> {
+    if route.has_oauth_token {
+        return Vec::new();
+    }
     let mut keys = route
         .api_keys
         .iter()
@@ -37,11 +40,7 @@ fn route_units(
     // contributes exactly one key-id-less unit so the request can be routed,
     // and the unit bypasses the platform-key quota eligibility.
     if route.has_oauth_token {
-        let key = db::EndpointApiKeySelection {
-            key_id: None,
-            key_label: None,
-            secret: String::new(),
-        };
+        let key = crate::routing::subscription_selection();
         pool.consider(
             key_pool::subscription_eligibility(cache, route.route_id),
             |weight| RouteKeyUnit {

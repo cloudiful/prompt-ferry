@@ -1,7 +1,7 @@
 use crate::{
     db,
-    response_affinity::{ResponseAffinityBinding, api_key_fingerprint},
-    routing::{candidate_target_by_endpoint, select_bound_api_key},
+    response_affinity::ResponseAffinityBinding,
+    routing::{candidate_target_by_endpoint, credential_binding, select_bound_credential},
     worker::runtime::prompt_log::RequestPromptLog,
     worker::runtime::request_assembly::BufferedBridgeRequest,
     worker_admin::token_plan_cache::TokenPlanQuotaCache,
@@ -39,7 +39,7 @@ pub(super) fn selection_for_binding<'a>(
     else {
         return BindingSelection::Unavailable;
     };
-    let Some(key_selection) = select_bound_api_key(target, binding) else {
+    let Some(key_selection) = select_bound_credential(target, binding) else {
         return BindingSelection::Unavailable;
     };
     let model = request_model(request);
@@ -48,14 +48,9 @@ pub(super) fn selection_for_binding<'a>(
         path: &request.path,
     }
     .effective(target.upstream_model.as_deref());
-    if super::quota_eligibility::assess(
-        quota_cache,
-        target.endpoint_id,
-        key_selection.key_id,
-        context,
-    )
-    .weight()
-    .is_none()
+    if key_pool::assess_target_credential(quota_cache, target, key_selection.key_id, context)
+        .weight()
+        .is_none()
     {
         return BindingSelection::QuotaExhausted;
     }
@@ -65,17 +60,6 @@ pub(super) fn selection_for_binding<'a>(
         route_selection_reason: db::RouteSelectionReason::SessionAffinity,
         quota_probe: None,
     })
-}
-
-pub(super) fn binding_for_selection(
-    target: &db::ModelRouteCandidateTarget,
-    key_selection: &db::EndpointApiKeySelection,
-) -> ResponseAffinityBinding {
-    ResponseAffinityBinding {
-        endpoint_id: target.endpoint_id,
-        endpoint_key_id: key_selection.key_id,
-        endpoint_key_fingerprint: api_key_fingerprint(&key_selection.secret),
-    }
 }
 
 fn previous_response_chain(request_prompt_log: &RequestPromptLog) -> bool {
@@ -100,11 +84,8 @@ fn bound_unit_id(
     if let Some(key_id) = binding.endpoint_key_id {
         return Some(key_id);
     }
-    candidate
-        .targets
-        .iter()
-        .find(|target| target.endpoint_id == binding.endpoint_id)
-        .and_then(|target| select_bound_api_key(target, binding))
+    candidate_target_by_endpoint(candidate, binding.endpoint_id)
+        .and_then(|target| select_bound_credential(target, binding))
         .and_then(|selection| selection.key_id)
 }
 
@@ -142,7 +123,7 @@ pub(super) fn quota_failover_selection<'a>(
             route_selection_reason: db::RouteSelectionReason::QuotaFailover,
             quota_probe: None,
         },
-        binding_for_selection(unit.target, &unit.key),
+        credential_binding(unit.target, &unit.key),
     ))
 }
 
