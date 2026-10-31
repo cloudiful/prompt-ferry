@@ -20,6 +20,73 @@ use crate::{
 use chrono::Utc;
 
 #[tokio::test]
+async fn subscription_initial_and_bound_selection_share_endpoint_quota() {
+    use super::{
+        key_pool,
+        quota_eligibility::QuotaContext,
+        session_affinity_quota::{BindingSelection, selection_for_binding},
+    };
+    use crate::worker_admin::chatgpt_quota_service::ChatGptQuotaRoutingSnapshot;
+    let mut candidate = session_affinity_candidate();
+    candidate.targets.truncate(1);
+    candidate.targets[0].has_oauth_token = true;
+    let target = &candidate.targets[0];
+    let cache = TokenPlanQuotaCache::default();
+    cache
+        .store_for_test(
+            target.endpoint_id,
+            usage_with_keys(&[(uuid::Uuid::nil(), "nil", 0.0)]),
+        )
+        .await;
+    let context = QuotaContext {
+        model: Some("gpt-5.4"),
+        path: "/v1/responses",
+    };
+    let binding =
+        crate::routing::credential_binding(target, &crate::routing::subscription_selection());
+    assert_eq!(
+        key_pool::target_units(target, Some(&cache), context, true)
+            .units
+            .len(),
+        1
+    );
+    assert!(matches!(
+        selection_for_binding(&candidate, &binding, &request(), Some(&cache)),
+        BindingSelection::Selected(_)
+    ));
+    cache.store_chatgpt_subscription_snapshot(
+        target.endpoint_id,
+        Some(ChatGptQuotaRoutingSnapshot {
+            observed_at: Utc::now(),
+            limit_reached: Some(true),
+            windows: vec![],
+            stale: false,
+        }),
+    );
+    assert!(
+        key_pool::target_units(target, Some(&cache), context, true)
+            .units
+            .is_empty()
+    );
+    assert!(matches!(
+        selection_for_binding(&candidate, &binding, &request(), Some(&cache)),
+        BindingSelection::QuotaExhausted
+    ));
+    assert!(
+        quota_failover_selection(
+            &candidate,
+            &binding,
+            &request(),
+            &RequestPromptLog::default(),
+            &cache,
+            "stable",
+            1
+        )
+        .is_none()
+    );
+}
+
+#[tokio::test]
 async fn exhausted_bound_key_migrates_to_alternate_key_on_same_endpoint() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();

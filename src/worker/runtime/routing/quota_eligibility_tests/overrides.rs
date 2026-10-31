@@ -1,10 +1,9 @@
 use super::super::{
-    candidate_quota_selection, key_pool,
-    session_affinity_quota::{binding_for_selection, quota_failover_selection},
+    candidate_quota_selection, key_pool, session_affinity_quota::quota_failover_selection,
     session_quota_selection,
 };
 use super::*;
-use crate::worker::runtime::prompt_log::RequestPromptLog;
+use crate::{routing::credential_binding, worker::runtime::prompt_log::RequestPromptLog};
 
 #[tokio::test]
 async fn blocked_override_and_preference_use_alternate_without_secret_bypass() {
@@ -83,7 +82,7 @@ async fn primary_policy_and_independent_explicit_override_are_preserved() {
     .unwrap()
     .unwrap();
     assert_eq!(selected.key.key_id, Some(b));
-    let binding = binding_for_selection(
+    let binding = credential_binding(
         &candidate.targets[0],
         &key_pool::selection_from_key(&candidate.targets[0].api_keys[0]),
     );
