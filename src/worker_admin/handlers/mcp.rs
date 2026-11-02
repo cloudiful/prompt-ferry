@@ -245,12 +245,10 @@ pub(super) async fn test_mcp_server(
             .into_response();
         }
     };
-    let catalog = match crate::mcp::catalog_for_server(
-        &state.mcp_catalog_cache,
-        std::slice::from_ref(&server),
-        &server.name,
-    )
-    .await
+    let catalog = match state
+        .mcp_catalog_service
+        .catalog_for_server(std::slice::from_ref(&server), &server.name)
+        .await
     {
         Ok(catalog) => catalog,
         Err(err) => return internal(&state, err),
@@ -326,7 +324,9 @@ pub(super) async fn get_mcp_catalog(
         Ok(servers) => servers,
         Err(err) => return internal(&state, err),
     };
-    match crate::mcp::catalog_for_server(&state.mcp_catalog_cache, &visible_servers, &server.name)
+    match state
+        .mcp_catalog_service
+        .catalog_for_server(&visible_servers, &server.name)
         .await
     {
         Ok(catalog) => Json(catalog).into_response(),

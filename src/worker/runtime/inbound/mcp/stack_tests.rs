@@ -173,10 +173,14 @@ async fn sqlite_services(
         standalone_database_path: path.to_string_lossy().to_string(),
         ..WorkerConfig::default()
     };
+    let catalog_cache =
+        crate::mcp::McpCatalogCache::from_config_with_sqlite(&config, Some(store.pool().clone()))
+            .await;
     let mcp_runtime = McpRuntimeState::sqlite(
         &config,
         McpRuntimeStorage::from_repository(repository),
         store.pool().clone(),
+        catalog_cache,
     )
     .await;
     let standalone = StandaloneRuntimeState::new(store, manager, StandaloneConfig::default())

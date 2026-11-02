@@ -119,7 +119,11 @@ impl StandaloneCoordinatorStore {
         Ok(result.rows_affected() == 1)
     }
 
-    #[cfg(test)]
+    /// Take a lease for one key.
+    ///
+    /// The lease is taken over when it expired or when the same owner holds
+    /// it. The owner token makes the release safe: a lease that already
+    /// expired and was taken over is left alone.
     pub(crate) async fn acquire_lease(
         &self,
         key: &str,
@@ -159,7 +163,6 @@ impl StandaloneCoordinatorStore {
         Ok(result.rows_affected() == 1)
     }
 
-    #[cfg(test)]
     pub(crate) async fn release_lease(&self, key: &str, owner: &str) -> anyhow::Result<()> {
         standalone_query!("src/sql/standalone/coordinator_release_lease.sql")
             .bind(key)

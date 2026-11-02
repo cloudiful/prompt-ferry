@@ -3,6 +3,7 @@ mod builtin;
 mod cache;
 mod entry;
 mod filtering;
+mod freshness;
 mod output_schema;
 mod protocol;
 mod provider_usage;
@@ -19,6 +20,7 @@ pub use entry::{
     McpRequestContext, McpTransportResponse, handle, handle_stream,
     handle_stream_with_session_store, inspect_server,
 };
+pub use freshness::{CatalogFreshness, CatalogFreshnessPolicy};
 pub use provider_usage::{FirecrawlBalanceClient, ProviderBalance, ProviderBalanceError};
 // MCP provider preset contract (issue #296 Phase 1): re-exported here so
 // transport/runtime code resolves provider metadata from the mcp module.
@@ -27,7 +29,9 @@ pub use crate::db::{
     MCP_PROVIDER_REGISTRY, McpProviderAuth, McpProviderInfo, McpProviderUnit,
     effective_provider_kind, is_known_mcp_provider, mcp_provider_info,
 };
-pub use service::{McpCatalogService, catalog_for_server};
+pub use service::{
+    AcquiredCatalog, CATALOG_REFRESH_DRAIN_TIMEOUT, CatalogRefreshPolicy, McpCatalogService,
+};
 pub use session_store::McpSessionStore;
 pub(crate) use transport::with_tracked_credits;
 
@@ -81,14 +85,11 @@ impl McpRuntimeState {
         config: &crate::config::WorkerConfig,
         storage: McpRuntimeStorage,
         sqlite_pool: sqlx::SqlitePool,
+        catalog_cache: McpCatalogCache,
     ) -> Self {
         Self {
             storage,
-            catalog_cache: McpCatalogCache::from_config_with_sqlite(
-                config,
-                Some(sqlite_pool.clone()),
-            )
-            .await,
+            catalog_cache,
             session_store: McpSessionStore::from_config_with_sqlite(config, Some(sqlite_pool))
                 .await,
             allowed_origins: config.mcp_allowed_origins.clone(),

@@ -118,6 +118,7 @@ pub(super) fn validate_config(config: &WorkerConfig) -> anyhow::Result<()> {
 pub(super) async fn build_standalone_state(
     config: &WorkerConfig,
     secrets_dir: Option<&Path>,
+    catalog_cache: Option<crate::mcp::McpCatalogCache>,
 ) -> anyhow::Result<crate::worker::runtime::standalone::StandaloneRuntimeState> {
     if !config.storage_backend().is_sqlite() {
         return Err(anyhow!(
@@ -179,21 +180,23 @@ pub(super) async fn build_standalone_state(
         );
     }
     let mcp_repository = db::ConfigRepository::sqlite(store.clone(), manager.clone());
+    // The request path must share the catalog cache (and therefore its refresh
+    // coordinator) with the admin state and the managed refresh task; only a
+    // caller without one builds it here.
+    let catalog_cache = match catalog_cache {
+        Some(cache) => cache,
+        None => {
+            crate::mcp::McpCatalogCache::from_config_with_sqlite(config, Some(store.pool().clone()))
+                .await
+        }
+    };
     let mcp_runtime = crate::mcp::McpRuntimeState::sqlite(
         config,
-        crate::mcp::McpRuntimeStorage::from_repository(mcp_repository.clone()),
+        crate::mcp::McpRuntimeStorage::from_repository(mcp_repository),
         store.pool().clone(),
+        catalog_cache,
     )
     .await;
-    let mcp_catalog_service = crate::mcp::McpCatalogService::new_with_repository(
-        mcp_repository,
-        mcp_runtime.catalog_cache.clone(),
-    );
-    spawn_mcp_warmup(
-        config.mcp_warmup,
-        mcp_runtime.catalog_cache.clone(),
-        mcp_catalog_service,
-    );
     let state =
         crate::worker::runtime::standalone::StandaloneRuntimeState::new(store, manager, snapshot)
             .with_mcp_runtime(mcp_runtime);
@@ -236,35 +239,6 @@ fn optional_file_pem(path: &str) -> anyhow::Result<Option<String>> {
         Ok(None)
     } else {
         Ok(Some(tls::read_pem_file(path)?))
-    }
-}
-
-/// Schedule the MCP startup warmup according to [`crate::config::McpWarmupMode`]:
-/// * `All` (default) — warm every enabled server in the background, like
-///   the historical behaviour.
-/// * `Lazy` — skip the bulk warmup; the first cold request pays the
-///   per-server connect cost.
-/// * `Off` — disable startup warmup entirely.
-fn spawn_mcp_warmup(
-    mode: crate::config::McpWarmupMode,
-    _cache: crate::mcp::McpCatalogCache,
-    service: crate::mcp::McpCatalogService,
-) {
-    match mode {
-        crate::config::McpWarmupMode::All => {
-            tokio::spawn(async move {
-                service.warm_enabled_servers().await;
-            });
-        }
-        crate::config::McpWarmupMode::Lazy => {
-            tracing::info!(
-                mode = "lazy",
-                "MCP startup warmup skipped; first request per server will lazy-load"
-            );
-        }
-        crate::config::McpWarmupMode::Off => {
-            tracing::info!(mode = "off", "MCP startup warmup disabled by configuration");
-        }
     }
 }
 
@@ -506,13 +480,6 @@ pub(super) async fn build_admin_state(
     if spawn_admin_server {
         start_admin_server(state.clone(), config, admin_listener, worker_shutdown);
 
-        let mcp_catalog_service = state.mcp_catalog_service.clone();
-        spawn_mcp_warmup(
-            config.mcp_warmup,
-            state.mcp_catalog_cache.clone(),
-            mcp_catalog_service,
-        );
-
         let _ = &state.pool;
     }
     Ok(Some(state))
@@ -624,7 +591,7 @@ mod tests {
             ..WorkerConfig::default()
         };
 
-        let state = build_standalone_state(&config, Some(&secrets_dir))
+        let state = build_standalone_state(&config, Some(&secrets_dir), None)
             .await
             .expect("standalone state");
         let snapshot = state.snapshot().await;
@@ -652,7 +619,7 @@ mod tests {
             ..WorkerConfig::default()
         };
 
-        let state = build_standalone_state(&config, Some(&secrets_dir))
+        let state = build_standalone_state(&config, Some(&secrets_dir), None)
             .await
             .expect("standalone state without endpoint or upstream API key");
         let snapshot = state.snapshot().await;

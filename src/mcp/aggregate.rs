@@ -1,10 +1,9 @@
 use serde_json::{Value, json};
 
 use super::{
-    McpCatalogCache, McpRuntimeStorage,
+    McpCatalogCache, McpCatalogService, McpRuntimeStorage,
     protocol::{aggregate_initialize_result, json_response},
     routing::{route_completion, route_prefixed, route_resource},
-    service,
 };
 
 pub(super) async fn aggregate(
@@ -68,7 +67,9 @@ async fn aggregate_tools(
         .repository()
         .list_visible_mcp_servers(user_id)
         .await?;
-    let values = service::aggregate_tools(cache, &servers).await?;
+    let values = McpCatalogService::from_storage(storage, cache)
+        .aggregate_tools(&servers)
+        .await?;
     Ok(json_response(id, json!({ "tools": values })))
 }
 
@@ -82,7 +83,9 @@ async fn aggregate_resources(
         .repository()
         .list_visible_mcp_servers(user_id)
         .await?;
-    let resources = service::aggregate_resources(cache, &servers).await?;
+    let resources = McpCatalogService::from_storage(storage, cache)
+        .aggregate_resources(&servers)
+        .await?;
     Ok(json_response(id, json!({ "resources": resources })))
 }
 
@@ -96,7 +99,9 @@ async fn aggregate_templates(
         .repository()
         .list_visible_mcp_servers(user_id)
         .await?;
-    let templates = service::aggregate_resource_templates(cache, &servers).await?;
+    let templates = McpCatalogService::from_storage(storage, cache)
+        .aggregate_resource_templates(&servers)
+        .await?;
     Ok(json_response(id, json!({ "resourceTemplates": templates })))
 }
 
@@ -110,6 +115,8 @@ async fn aggregate_prompts(
         .repository()
         .list_visible_mcp_servers(user_id)
         .await?;
-    let prompts = service::aggregate_prompts(cache, &servers).await?;
+    let prompts = McpCatalogService::from_storage(storage, cache)
+        .aggregate_prompts(&servers)
+        .await?;
     Ok(json_response(id, json!({ "prompts": prompts })))
 }
