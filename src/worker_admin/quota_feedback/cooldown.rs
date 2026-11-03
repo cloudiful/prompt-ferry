@@ -24,13 +24,20 @@ impl Feedback {
         }
     }
 
-    pub fn eligibility(&self, now: Instant) -> QuotaFeedbackEligibility {
+    /// The scope's state.
+    ///
+    /// `live_probe` reports a guard that still owns the probe: it keeps the
+    /// scope busy for its whole in-flight lifetime, so a long upstream attempt
+    /// never lets a second caller claim the same probe. Without a guard the
+    /// legacy time-based recovery applies.
+    pub fn eligibility(&self, now: Instant, live_probe: bool) -> QuotaFeedbackEligibility {
         if now < self.until {
             return QuotaFeedbackEligibility::Cooling;
         }
-        if self
-            .probe
-            .is_some_and(|start| now.saturating_duration_since(start) < PROBE_TTL)
+        if live_probe
+            || self
+                .probe
+                .is_some_and(|start| now.saturating_duration_since(start) < PROBE_TTL)
         {
             QuotaFeedbackEligibility::ProbeBusy
         } else {

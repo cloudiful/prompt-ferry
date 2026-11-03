@@ -51,6 +51,7 @@ impl McpExecution {
             upstream_redacted_request_json: self.upstream_redacted_request_json.clone(),
             upstream_restore_session: self.upstream_restore_session.clone(),
             selected_token_slot: None,
+            tracker: None,
             server: self.server.as_ref(),
             services,
         }

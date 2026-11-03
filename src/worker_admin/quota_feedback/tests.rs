@@ -142,11 +142,101 @@ fn retry_after_cap_and_bounded_retention() {
             now,
         );
     }
-    assert_eq!(store.0.lock().unwrap().len(), 4107);
+    assert_eq!(store.0.lock().unwrap().feedback.len(), 4107);
     assert_eq!(
         store.eligibility(scope, now),
         QuotaFeedbackEligibility::Cooling
     );
     store.eligibility(scope, now + RETENTION);
-    assert!(store.0.lock().unwrap().is_empty());
+    assert!(store.0.lock().unwrap().feedback.is_empty());
+}
+
+#[test]
+fn a_live_guarded_probe_is_never_expired_by_the_legacy_ttl() {
+    // Issue #1179 P2 repair: the builtin MCP guard owns the probe for its
+    // whole in-flight lifetime, however long the attempt runs.
+    let store = QuotaFeedbackStore::default();
+    let scope = QuotaFeedbackScope::new(Uuid::new_v4(), None);
+    let start = Instant::now();
+    store.record_429(scope, Some(Duration::ZERO), start, start);
+    let claim = store.claim_probe(scope, start);
+    let QuotaProbeClaim::Reserved(guard) = claim else {
+        panic!("the scope needs a probe");
+    };
+    assert_eq!(
+        store.eligibility(scope, start),
+        QuotaFeedbackEligibility::ProbeBusy
+    );
+
+    let far_later = start + PROBE_TTL + Duration::from_secs(600);
+    assert_eq!(
+        store.eligibility(scope, far_later),
+        QuotaFeedbackEligibility::ProbeBusy,
+        "a live guard is never expired by an eligibility read"
+    );
+    assert!(matches!(
+        store.claim_probe(scope, far_later),
+        QuotaProbeClaim::Busy
+    ));
+    assert!(
+        !store.reserve_probe(scope, far_later),
+        "the legacy reservation is also refused while a guard is live"
+    );
+
+    drop(guard);
+    assert!(
+        matches!(
+            store.claim_probe(scope, far_later),
+            QuotaProbeClaim::Reserved(_)
+        ),
+        "dropping the guard releases only its own claim"
+    );
+}
+
+#[test]
+fn a_stale_release_never_removes_a_newer_claim() {
+    let store = QuotaFeedbackStore::default();
+    let scope = QuotaFeedbackScope::new(Uuid::new_v4(), None);
+    let start = Instant::now();
+    store.record_429(scope, Some(Duration::ZERO), start, start);
+    let claim = store.claim_probe(scope, start);
+    let QuotaProbeClaim::Reserved(guard) = claim else {
+        panic!("the scope needs a probe");
+    };
+
+    // A newer failure and an unrelated (older) release must not steal the
+    // live guard's claim.
+    let later = start + Duration::from_secs(5);
+    store.record_failure(
+        scope,
+        QuotaFeedbackCause::Exhausted,
+        Some(Duration::ZERO),
+        later,
+        later,
+    );
+    store.release_probe(scope, start - Duration::from_secs(1), later);
+
+    assert_eq!(
+        store.eligibility(scope, later),
+        QuotaFeedbackEligibility::ProbeBusy,
+        "the live guard still owns the probe"
+    );
+    drop(guard);
+}
+
+#[test]
+fn the_unguarded_legacy_reservation_keeps_its_ttl_recovery() {
+    let store = QuotaFeedbackStore::default();
+    let scope = QuotaFeedbackScope::new(Uuid::new_v4(), None);
+    let start = Instant::now();
+    store.record_429(scope, Some(Duration::ZERO), start, start);
+    assert!(store.reserve_probe(scope, start));
+    assert!(
+        !store.reserve_probe(scope, start),
+        "an unguarded reservation still holds the slot inside the TTL"
+    );
+    assert!(
+        store.reserve_probe(scope, start + PROBE_TTL),
+        "an abandoned unguarded reservation expires after the TTL"
+    );
 }

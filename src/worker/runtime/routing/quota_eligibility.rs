@@ -1,9 +1,5 @@
 use super::quota_unavailable::QuotaUnavailableError;
-use crate::worker_admin::{
-    quota_feedback::{QuotaFeedbackEligibility, QuotaFeedbackScope},
-    token_plan_cache::TokenPlanQuotaCache,
-};
-use std::time::Instant;
+use crate::worker_admin::token_plan_cache::{QuotaAssessment, QuotaScope, TokenPlanQuotaCache};
 use uuid::Uuid;
 
 #[derive(Clone, Copy)]
@@ -52,29 +48,19 @@ pub(super) fn assess(
     let Some(cache) = cache else {
         return Eligibility::Eligible(1.0);
     };
-    match cache
-        .feedback
-        .eligibility(QuotaFeedbackScope::new(endpoint, key), Instant::now())
-    {
-        QuotaFeedbackEligibility::Cooling => return Eligibility::Cooling,
-        QuotaFeedbackEligibility::ProbeBusy => return Eligibility::ProbeBusy,
-        QuotaFeedbackEligibility::Eligible | QuotaFeedbackEligibility::ProbeRequired => {}
-    }
-    if cache.chatgpt_subscription_exhausted_now(endpoint) {
-        return Eligibility::Exhausted;
-    }
-    let key = key.unwrap_or(Uuid::nil());
-    if cache
-        .key_remaining_percent_scoped_now(endpoint, key, context.model, context.allow_general())
-        .is_some_and(|remaining| remaining.is_finite() && remaining <= 0.0)
-    {
-        return Eligibility::Exhausted;
-    }
-    match cache.key_weight_percent_scoped_now(endpoint, key, context.model, context.allow_general())
-    {
-        Some(weight) if weight.is_finite() && weight <= 0.0 => Eligibility::Exhausted,
-        Some(weight) if weight.is_finite() => Eligibility::Eligible(weight.min(100.0)),
-        _ => Eligibility::Eligible(1.0),
+    // Issue #1179 P1: the assessment core is shared with the builtin MCP
+    // providers; this mapping keeps the worker-specific verdicts.
+    let assessment = cache.assess_scope(QuotaScope::new(
+        endpoint,
+        key,
+        context.model,
+        context.allow_general(),
+    ));
+    match assessment {
+        QuotaAssessment::Eligible(weight) => Eligibility::Eligible(weight),
+        QuotaAssessment::Exhausted => Eligibility::Exhausted,
+        QuotaAssessment::Cooling => Eligibility::Cooling,
+        QuotaAssessment::ProbeBusy => Eligibility::ProbeBusy,
     }
 }
 

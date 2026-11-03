@@ -1,33 +1,88 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::time::Duration;
+//! The builtin MiniMax MCP tools (issue #1179 P1).
+//!
+//! `web_search` and `understand_image` are read-only tools, so a quota or
+//! rate rejection may switch to another endpoint key. The candidate
+//! selection reuses the shared quota cache and the shared weighted pool
+//! draw, the response feedback reuses the shared per-key feedback store, and
+//! the whole call shares one deadline: the first attempt plus at most two
+//! switches to another key.
 
-use anyhow::{Context, anyhow, bail};
-use base64::Engine;
-use ipnet::IpNet;
-use reqwest::{Client, StatusCode, redirect};
+mod classify;
+mod diagnostic;
+mod image;
+mod selection;
+pub(crate) mod transport;
+
+#[cfg(test)]
+mod tests;
+
+use anyhow::anyhow;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
+use std::time::Duration;
+use uuid::Uuid;
 
-use crate::{db, mcp::ServerCatalogSnapshot};
+use crate::db;
+use crate::mcp::ServerCatalogSnapshot;
+use crate::mcp::call_record::McpCallFailure;
+use crate::worker_admin::{
+    quota_feedback::{QuotaFeedbackCause, QuotaFeedbackScope, QuotaProbeClaim},
+    token_plan_cache::{QuotaScope, TokenPlanQuotaCache},
+};
 
-const SOURCE_HEADER: &str = "prompt-ferry-MiniMax-MCP";
-const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
+use diagnostic::Diagnostic;
+use selection::{Candidate, PoolState, ToolScope};
 
-const BLOCKED_NETS: &[IpNet] = &[
-    IpNet::new_assert(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 8),
-    IpNet::new_assert(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)), 8),
-    IpNet::new_assert(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 0)), 8),
-    IpNet::new_assert(IpAddr::V4(Ipv4Addr::new(169, 254, 0, 0)), 16),
-    IpNet::new_assert(IpAddr::V4(Ipv4Addr::new(172, 16, 0, 0)), 12),
-    IpNet::new_assert(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 0)), 16),
-    IpNet::new_assert(IpAddr::V4(Ipv4Addr::new(224, 0, 0, 0)), 4),
-    IpNet::new_assert(IpAddr::V4(Ipv4Addr::new(240, 0, 0, 0)), 4),
-    IpNet::new_assert(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 128),
-    IpNet::new_assert(IpAddr::V6(Ipv6Addr::LOCALHOST), 128),
-    IpNet::new_assert(IpAddr::V6(Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 0)), 7),
-    IpNet::new_assert(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0)), 10),
-    IpNet::new_assert(IpAddr::V6(Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 0)), 8),
-];
+pub(super) const SOURCE_HEADER: &str = "prompt-ferry-MiniMax-MCP";
+
+/// The upstream attempts one tool call may spend: the first attempt plus two
+/// switches to another key.
+const MAX_ATTEMPTS: usize = 3;
+
+/// The read-only tools the builtin provider exposes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Tool {
+    WebSearch,
+    UnderstandImage,
+}
+
+impl Tool {
+    fn scope(self) -> ToolScope {
+        match self {
+            Self::WebSearch => selection::WEB_SEARCH_SCOPE,
+            Self::UnderstandImage => selection::UNDERSTAND_IMAGE_SCOPE,
+        }
+    }
+
+    /// The tool name, for a bounded diagnostic.
+    fn name(self) -> &'static str {
+        match self {
+            Self::WebSearch => "web_search",
+            Self::UnderstandImage => "understand_image",
+        }
+    }
+}
+
+/// One prepared tool call.
+struct Plan {
+    endpoint_id: Uuid,
+    tool: Tool,
+    path: &'static str,
+    body: Value,
+    id: Value,
+    candidates: Vec<Candidate>,
+    /// Whether the operator enabled the key balancing for this endpoint.
+    lb_enabled: bool,
+    scope: ToolScope,
+    deadline: tokio::time::Instant,
+}
+
+/// The probe claim of one attempt.
+enum ProbeOutcome {
+    NotRequired,
+    Reserved(crate::worker_admin::quota_feedback::QuotaProbeGuard),
+    Busy,
+}
 
 pub(crate) fn catalog() -> ServerCatalogSnapshot {
     ServerCatalogSnapshot {
@@ -66,54 +121,34 @@ pub(crate) async fn call(
     request: &Value,
     conversation_id: Option<&str>,
 ) -> anyhow::Result<Value> {
+    // One deadline covers the payload preparation, the selection, the
+    // feedback and every upstream attempt. It never restarts per key.
+    let deadline =
+        tokio::time::Instant::now() + Duration::from_millis(server.timeout_ms.max(1) as u64);
     let endpoint_id = server
         .source_endpoint_id
-        .ok_or_else(|| anyhow!("MiniMax MCP server has no source endpoint"))?;
-    let endpoint = storage
-        .repository()
-        .get_endpoint_for_mcp(endpoint_id)
-        .await?
-        .ok_or_else(|| anyhow!("MiniMax MCP source endpoint not found"))?;
+        .ok_or_else(|| Diagnostic::SourceEndpointMissing.into_error())?;
+    // The lookup error may carry database detail, so only a fixed diagnostic
+    // reaches the client; the detail stays in the log.
+    let endpoint = match storage.repository().get_endpoint_for_mcp(endpoint_id).await {
+        Ok(endpoint) => {
+            endpoint.ok_or_else(|| Diagnostic::SourceEndpointUnavailable.into_error())?
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "MiniMax MCP source endpoint lookup failed");
+            return Err(Diagnostic::SourceEndpointUnavailable.into_error());
+        }
+    };
     if endpoint.provider != db::EndpointProvider::Minimax {
-        bail!("MiniMax MCP source endpoint is not a MiniMax endpoint")
+        return Err(Diagnostic::SourceEndpointNotMinimax.into_error());
     }
     if !endpoint.enabled {
-        bail!("MiniMax MCP source endpoint is disabled")
+        return Err(Diagnostic::SourceEndpointDisabled.into_error());
     }
-    let available_keys = endpoint
-        .api_keys
-        .iter()
-        .filter(|key| key.enabled && !key.api_key.trim().is_empty())
-        .collect::<Vec<_>>();
-    let selected_key = if endpoint.key_lb_enabled && available_keys.len() > 1 {
-        let mut hasher = Sha256::new();
-        hasher.update(conversation_id.unwrap_or("mcp-request").as_bytes());
-        hasher.update(endpoint.endpoint_id.as_bytes());
-        let index = (u64::from_be_bytes(
-            hasher.finalize()[..8]
-                .try_into()
-                .expect("sha256 digest has eight bytes"),
-        ) % available_keys.len() as u64) as usize;
-        available_keys.get(index).copied()
-    } else {
-        available_keys.first().copied()
-    };
-    let (key, key_position) = selected_key
-        .map(|key| (key.api_key.as_str(), key.position))
-        .or_else(|| (!endpoint.api_key.trim().is_empty()).then_some((endpoint.api_key.as_str(), 0)))
-        .filter(|(key, _)| !key.is_empty())
-        .ok_or_else(|| anyhow!("MiniMax MCP source endpoint has no enabled API key"))?;
-    crate::mcp::transport::record_builtin_token_slot(key_position.max(0) as usize);
-    let name = request.pointer("/params/name").and_then(Value::as_str);
-    let arguments = request
-        .pointer("/params/arguments")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
     let host = match endpoint.provider_region {
         Some(db::EndpointRegion::Cn) => "https://api.minimaxi.com",
         Some(db::EndpointRegion::Global) => "https://api.minimax.io",
-        None => bail!("MiniMax MCP source endpoint has no region"),
+        None => return Err(Diagnostic::SourceEndpointRegionMissing.into_error()),
     };
     // Issue #375 Phase F+G: builtin inherits its source endpoint proxy
     // (endpoint → env → direct) for the MiniMax API request via the endpoint
@@ -121,7 +156,7 @@ pub(crate) async fn call(
     // endpoint proxy fails closed with userinfo scrubbed; empty falls
     // through to env/direct. The row's own proxy_url is ignored by design
     // (managed rows carry none). Image-URL fetches stay direct (pinned DNS,
-    // see `client_with_pinned_dns`).
+    // see `image::normalize_image_source`).
     let client = crate::mcp::transport::proxy::client_for_builtin(
         endpoint.proxy_url.as_deref(),
         host,
@@ -129,303 +164,425 @@ pub(crate) async fn call(
     )
     .map_err(|message| {
         tracing::warn!(server_name = %server.name, "{message}");
-        anyhow!("{message}")
+        Diagnostic::ProxyRejected.into_error()
     })?;
-    let (path, body) = match name {
+    let name = request.pointer("/params/name").and_then(Value::as_str);
+    let arguments = request
+        .pointer("/params/arguments")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let tool = prepare_tool(name, &arguments, deadline).await?;
+    let candidates = selection::candidates(&endpoint);
+    if candidates.is_empty() {
+        return Err(Diagnostic::NoEndpointKey.into_error());
+    }
+    let plan = Plan {
+        endpoint_id,
+        tool: tool.tool,
+        path: tool.path,
+        body: tool.body,
+        id: request.get("id").cloned().unwrap_or(Value::Null),
+        candidates,
+        lb_enabled: endpoint.key_lb_enabled,
+        scope: tool.tool.scope(),
+        deadline,
+    };
+    // Issue #1179 P2: the in-process tests install a stub transport, so the
+    // builtin selection and its failover can run without an upstream call.
+    let transport: std::sync::Arc<dyn transport::MiniMaxTransport> =
+        match storage.builtin_transport() {
+            Some(transport) => transport.clone(),
+            None => std::sync::Arc::new(transport::HttpTransport::new(client, host.to_string())),
+        };
+    execute(
+        &plan,
+        transport.as_ref(),
+        storage.quota(),
+        conversation_id,
+        storage.tracker(),
+    )
+    .await
+}
+
+/// The prepared payload of one tool.
+struct PreparedTool {
+    tool: Tool,
+    path: &'static str,
+    body: Value,
+}
+
+/// Prepare the validated tool payload once, before any upstream attempt.
+async fn prepare_tool(
+    name: Option<&str>,
+    arguments: &serde_json::Map<String, Value>,
+    deadline: tokio::time::Instant,
+) -> anyhow::Result<PreparedTool> {
+    match name {
         Some("web_search") => {
             let query = arguments
                 .get("query")
                 .and_then(Value::as_str)
                 .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| anyhow!("web_search requires a non-empty query"))?;
-            ("/v1/coding_plan/search", json!({ "q": query }))
+                .ok_or_else(|| Diagnostic::QueryRequired.into_error())?;
+            Ok(PreparedTool {
+                tool: Tool::WebSearch,
+                path: "/v1/coding_plan/search",
+                body: json!({ "q": query }),
+            })
         }
         Some("understand_image") => {
             let prompt = arguments
                 .get("prompt")
                 .and_then(Value::as_str)
                 .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| anyhow!("understand_image requires a non-empty prompt"))?;
+                .ok_or_else(|| Diagnostic::PromptRequired.into_error())?;
             let image_source = arguments
                 .get("image_source")
                 .and_then(Value::as_str)
-                .ok_or_else(|| anyhow!("understand_image requires image_source"))?;
-            let image_url = normalize_image_source(image_source, server.timeout_ms).await?;
-            (
-                "/v1/coding_plan/vlm",
-                json!({ "prompt": prompt, "image_url": image_url }),
-            )
+                .ok_or_else(|| Diagnostic::ImageSourceRequired.into_error())?;
+            let budget = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let image_url = image::normalize_image_source(image_source, budget)
+                .await
+                .map_err(|_| Diagnostic::ImageSourceRejected.into_error())?;
+            Ok(PreparedTool {
+                tool: Tool::UnderstandImage,
+                path: "/v1/coding_plan/vlm",
+                body: image::image_body(prompt, &image_url),
+            })
         }
-        Some(name) => bail!("unknown MiniMax MCP tool `{name}`"),
-        None => bail!("MCP tools/call is missing params.name"),
-    };
-    let response = client
-        .post(format!("{host}{path}"))
-        .bearer_auth(key)
-        .header("MM-API-Source", SOURCE_HEADER)
-        .json(&body)
-        .send()
-        .await
-        .with_context(|| format!("MiniMax MCP request failed for {path}"))?;
-    let status = response.status();
-    let trace_id = response
-        .headers()
-        .get("Trace-Id")
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
-    let payload: Value = response.json().await.unwrap_or_else(|_| json!({}));
-    if !status.is_success() {
-        return Err(http_error(status, &payload, trace_id.as_deref()));
+        Some(_) => Err(Diagnostic::UnsupportedTool.into_error()),
+        None => Err(Diagnostic::MissingToolName.into_error()),
     }
-    let business_status = payload.pointer("/base_resp/status_code").and_then(as_i64);
-    if business_status.unwrap_or(0) != 0 {
-        let message = payload
-            .pointer("/base_resp/status_msg")
-            .and_then(Value::as_str)
-            .unwrap_or("MiniMax API returned an error");
-        bail!(
-            "MiniMax API error {}: {}{}",
-            business_status.unwrap_or(-1),
-            message,
-            trace_id
-                .as_deref()
-                .map(|id| format!(" (Trace-Id: {id})"))
-                .unwrap_or_default()
+}
+
+/// Run the tool call.
+///
+/// The candidates are reassessed before every attempt, so a key that became
+/// unusable while the call was running drops out of the pool. A quota or rate
+/// rejection switches to the next eligible key; every other failure returns
+/// to the caller without an automatic replay. Every failure the client sees is
+/// a fixed diagnostic: no provider message, transport exception, trace header,
+/// query, image source or credential is ever part of it.
+async fn execute(
+    plan: &Plan,
+    transport: &dyn transport::MiniMaxTransport,
+    cache: Option<&TokenPlanQuotaCache>,
+    conversation_id: Option<&str>,
+    tracker: &crate::mcp::call_record::McpCallTracker,
+) -> anyhow::Result<Value> {
+    if plan.candidates.is_empty() {
+        // No usable credential was selected: no upstream request is allowed.
+        tracker.record_failure(McpCallFailure::CallFailed { status: None });
+        return Err(Diagnostic::NoEndpointKey.into_error());
+    }
+    let mut attempted: BTreeSet<usize> = BTreeSet::new();
+    let mut attempts = 0usize;
+    let mut last_diagnostic: Option<Diagnostic> = None;
+    let mut last_failure: Option<McpCallFailure> = None;
+    let stable_key = selection::draw_key(conversation_id, selection::nonce());
+    let max_attempts = if plan.lb_enabled { MAX_ATTEMPTS } else { 1 };
+
+    while attempts < max_attempts {
+        let index = if plan.lb_enabled {
+            match selection::draw(
+                cache,
+                plan.endpoint_id,
+                &plan.candidates,
+                plan.scope,
+                &attempted,
+                &stable_key,
+            ) {
+                selection::Selection::Drawn(drawn) => drawn.index,
+                selection::Selection::Unavailable(state) => {
+                    let diagnostic = last_diagnostic.unwrap_or_else(|| pool_diagnostic(state));
+                    tracker.record_failure(
+                        last_failure.unwrap_or(McpCallFailure::CallFailed { status: None }),
+                    );
+                    return Err(diagnostic.into_error());
+                }
+            }
+        } else {
+            // The operator pinned one key: the legacy single-key selection is
+            // preserved, so no other key is ever substituted for it.
+            0
+        };
+        let candidate = &plan.candidates[index];
+        let mut probe = match claim_probe(cache, plan, candidate, plan.lb_enabled) {
+            ProbeOutcome::Busy => {
+                // Another caller probes this key: skip it for this call
+                // without spending an attempt.
+                attempted.insert(index);
+                continue;
+            }
+            ProbeOutcome::Reserved(guard) => Some(guard),
+            ProbeOutcome::NotRequired => None,
+        };
+        attempts += 1;
+        // The tracker records the key that served this attempt, so the
+        // settlement of the request knows which credential was used even
+        // though the attempt runs in the rmcp session task.
+        tracker.record_endpoint_key(candidate.key_id, Some(candidate.label.clone()));
+        tracker.record_token_slot(i16::try_from(candidate.position.max(0) as usize + 1).ok());
+        let attempt_start = std::time::Instant::now();
+        let remaining = plan
+            .deadline
+            .saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            tracker.record_failure(McpCallFailure::CallFailed { status: None });
+            return Err(Diagnostic::Deadline.into_error());
+        }
+        let response = match tokio::time::timeout(
+            remaining,
+            transport.send(transport::MiniMaxRequest {
+                path: plan.path,
+                body: &plan.body,
+                secret: &candidate.secret,
+            }),
         )
+        .await
+        {
+            Ok(Ok(response)) => response,
+            // A transport failure is not a quota signal, so the call returns
+            // without an automatic replay. The original error is dropped: its
+            // text may repeat the credential, the query or an image payload.
+            Ok(Err(_error)) => {
+                tracker.record_failure(McpCallFailure::CallFailed { status: None });
+                return Err(Diagnostic::TransportFailed { status: None }.into_error());
+            }
+            Err(_elapsed) => {
+                tracker.record_failure(McpCallFailure::CallFailed { status: None });
+                return Err(Diagnostic::RequestTimedOut.into_error());
+            }
+        };
+
+        match classify::classify(&response, plan.tool) {
+            classify::Outcome::Success => {
+                record_success(cache, plan, candidate, attempt_start);
+                drop(probe.take());
+                tracker.record_success();
+                return success_result(plan, &response.payload);
+            }
+            classify::Outcome::Exhausted { code } => {
+                // The plan quota of the tried key is spent. The general quota
+                // group is the one the search tool bills, so only that tool
+                // feeds the shared exhaustion signal: the image tool bills a
+                // group the provider does not document and must not claim
+                // the general quota is exhausted.
+                record_failure(
+                    cache,
+                    plan,
+                    candidate,
+                    QuotaFeedbackCause::Exhausted,
+                    None,
+                    attempt_start,
+                );
+                drop(probe.take());
+                tracing::warn!(
+                    endpoint_id = %plan.endpoint_id,
+                    key_label = %candidate.label,
+                    attempt = attempts,
+                    reason = "quota_exhausted",
+                    "MiniMax MCP key reported an exhausted quota"
+                );
+                last_diagnostic = Some(Diagnostic::QuotaExhausted {
+                    provider_code: code,
+                });
+                last_failure = Some(McpCallFailure::QuotaExhausted {
+                    provider_code: code,
+                });
+                attempted.insert(index);
+                tracker.record_attempt_failure();
+                if !plan.lb_enabled {
+                    tracker.record_failure(
+                        last_failure.unwrap_or(McpCallFailure::CallFailed { status: None }),
+                    );
+                    return Err(last_diagnostic
+                        .unwrap_or(Diagnostic::Superseded)
+                        .into_error());
+                }
+            }
+            classify::Outcome::RateLimited { retry_after } => {
+                // The rate limit feeds the shared cooldown, which honours the
+                // bounded `Retry-After`. The call switches to another key
+                // instead of sleeping through the caller budget.
+                record_failure(
+                    cache,
+                    plan,
+                    candidate,
+                    QuotaFeedbackCause::RateLimited,
+                    retry_after,
+                    attempt_start,
+                );
+                drop(probe.take());
+                tracing::warn!(
+                    endpoint_id = %plan.endpoint_id,
+                    key_label = %candidate.label,
+                    attempt = attempts,
+                    reason = "rate_limited",
+                    "MiniMax MCP key was rate limited"
+                );
+                let status = reqwest::StatusCode::TOO_MANY_REQUESTS.as_u16();
+                last_diagnostic = Some(Diagnostic::RateLimited { status });
+                last_failure = Some(McpCallFailure::CallFailed {
+                    status: Some(status),
+                });
+                attempted.insert(index);
+                tracker.record_attempt_failure();
+                if !plan.lb_enabled {
+                    tracker.record_failure(
+                        last_failure.unwrap_or(McpCallFailure::CallFailed { status: None }),
+                    );
+                    return Err(last_diagnostic
+                        .unwrap_or(Diagnostic::Superseded)
+                        .into_error());
+                }
+            }
+            classify::Outcome::Failed { status } => {
+                drop(probe.take());
+                tracker.record_failure(McpCallFailure::CallFailed {
+                    status: Some(status),
+                });
+                return Err(Diagnostic::UpstreamStatus { status }.into_error());
+            }
+            classify::Outcome::ProviderFailed { code } => {
+                drop(probe.take());
+                tracker.record_failure(McpCallFailure::CallFailed { status: None });
+                return Err(Diagnostic::ProviderError {
+                    provider_code: code,
+                }
+                .into_error());
+            }
+            classify::Outcome::Malformed => {
+                // An unreadable or unexpected body never counts as a
+                // completed call and never feeds a success observation.
+                drop(probe.take());
+                tracker.record_failure(McpCallFailure::CallFailed { status: None });
+                return Err(Diagnostic::MalformedResponse {
+                    tool: plan.tool.name(),
+                }
+                .into_error());
+            }
+        }
     }
-    let text = if name == Some("understand_image") {
+
+    tracker.record_failure(last_failure.unwrap_or(McpCallFailure::CallFailed { status: None }));
+    Err(last_diagnostic
+        .unwrap_or(Diagnostic::Superseded)
+        .into_error())
+}
+
+/// The fixed diagnostic of a pool that cannot serve the call.
+fn pool_diagnostic(state: PoolState) -> Diagnostic {
+    match state {
+        PoolState::Empty => Diagnostic::NoEndpointKey,
+        PoolState::Exhausted => Diagnostic::PoolExhausted,
+        PoolState::Cooling => Diagnostic::PoolCooling,
+        PoolState::ProbeBusy => Diagnostic::PoolProbeBusy,
+        PoolState::Blocked => Diagnostic::PoolBlocked,
+    }
+}
+
+/// Claim the probe slot of the drawn candidate.
+///
+/// The image tool never claims a shared probe: the quota group it bills is not
+/// documented, so a guarded claim would let an image call block the search
+/// path on a signal the provider never confirmed.
+fn claim_probe(
+    cache: Option<&TokenPlanQuotaCache>,
+    plan: &Plan,
+    candidate: &Candidate,
+    lb_enabled: bool,
+) -> ProbeOutcome {
+    if !lb_enabled || plan.tool != Tool::WebSearch {
+        return ProbeOutcome::NotRequired;
+    }
+    let Some(cache) = cache else {
+        return ProbeOutcome::NotRequired;
+    };
+    let scope = QuotaScope::new(
+        plan.endpoint_id,
+        candidate.key_id,
+        plan.scope.model,
+        plan.scope.allow_general,
+    );
+    match cache.claim_scope_probe(scope) {
+        QuotaProbeClaim::NotRequired => ProbeOutcome::NotRequired,
+        QuotaProbeClaim::Reserved(guard) => ProbeOutcome::Reserved(guard),
+        QuotaProbeClaim::Busy => ProbeOutcome::Busy,
+    }
+}
+
+/// The feedback scope of one candidate.
+fn feedback_scope(plan: &Plan, candidate: &Candidate) -> QuotaFeedbackScope {
+    QuotaFeedbackScope::new(plan.endpoint_id, candidate.key_id)
+}
+
+/// Record the success of one attempt for the tried key.
+///
+/// Only the search tool feeds the shared feedback store: an image success says
+/// nothing about the general quota group, so it must never clear an exhaustion
+/// the search path recorded.
+fn record_success(
+    cache: Option<&TokenPlanQuotaCache>,
+    plan: &Plan,
+    candidate: &Candidate,
+    attempt_start: std::time::Instant,
+) {
+    if plan.tool != Tool::WebSearch {
+        return;
+    }
+    let Some(cache) = cache else {
+        return;
+    };
+    cache.feedback.record_success(
+        feedback_scope(plan, candidate),
+        attempt_start,
+        std::time::Instant::now(),
+    );
+}
+
+/// Record a failure of one attempt for the tried key.
+///
+/// Only the search tool feeds the shared feedback store; an image rejection
+/// neither claims nor clears the general quota signal.
+fn record_failure(
+    cache: Option<&TokenPlanQuotaCache>,
+    plan: &Plan,
+    candidate: &Candidate,
+    cause: QuotaFeedbackCause,
+    retry_after: Option<Duration>,
+    attempt_start: std::time::Instant,
+) {
+    if plan.tool != Tool::WebSearch {
+        return;
+    }
+    let Some(cache) = cache else {
+        return;
+    };
+    cache.feedback.record_failure(
+        feedback_scope(plan, candidate),
+        cause,
+        retry_after,
+        std::time::Instant::now(),
+        attempt_start,
+    );
+}
+
+/// The tool result of a successful response.
+fn success_result(plan: &Plan, payload: &Value) -> anyhow::Result<Value> {
+    let text = if plan.tool == Tool::UnderstandImage {
         payload
             .get("content")
             .and_then(Value::as_str)
             .ok_or_else(|| anyhow!("MiniMax VLM returned no content"))?
             .to_string()
     } else {
-        serde_json::to_string_pretty(&payload)?
+        serde_json::to_string_pretty(payload)?
     };
     Ok(json!({
         "jsonrpc": "2.0",
-        "id": request.get("id").cloned().unwrap_or(Value::Null),
+        "id": plan.id,
         "result": { "content": [{ "type": "text", "text": text }] }
     }))
-}
-
-fn as_i64(value: &Value) -> Option<i64> {
-    value.as_i64().or_else(|| value.as_str()?.parse().ok())
-}
-
-fn http_error(status: StatusCode, payload: &Value, trace_id: Option<&str>) -> anyhow::Error {
-    let message = payload
-        .pointer("/base_resp/status_msg")
-        .and_then(Value::as_str)
-        .unwrap_or("MiniMax API request failed");
-    anyhow!(
-        "HTTP {}: MiniMax API error: {}{}",
-        status.as_u16(),
-        message,
-        trace_id
-            .map(|id| format!(" (Trace-Id: {id})"))
-            .unwrap_or_default()
-    )
-}
-
-async fn normalize_image_source(source: &str, timeout_ms: i32) -> anyhow::Result<String> {
-    let source = source.strip_prefix('@').unwrap_or(source);
-    if source.starts_with("data:image/") {
-        return Ok(source.to_string());
-    }
-    let url =
-        reqwest::Url::parse(source).context("image_source must be an HTTPS URL or data URL")?;
-    if url.scheme() != "https" {
-        bail!("image_source URL must use HTTPS")
-    }
-    let host = url
-        .host_str()
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow!("image_source URL must include a host"))?;
-    let port = url.port_or_known_default().unwrap_or(443);
-    let resolved: Vec<std::net::SocketAddr> = match host.parse::<IpAddr>() {
-        Ok(ip) => vec![std::net::SocketAddr::new(ip, port)],
-        Err(_) => tokio::net::lookup_host((host, port))
-            .await
-            .with_context(|| format!("failed to resolve image_source host `{host}`"))?
-            .collect(),
-    };
-    if resolved.is_empty() {
-        bail!("image_source host `{host}` did not resolve")
-    }
-    let mut any_blocked = None;
-    for addr in &resolved {
-        if is_blocked_ip(addr.ip()) {
-            any_blocked = Some(addr.ip());
-            break;
-        }
-    }
-    if let Some(ip) = any_blocked {
-        bail!("image_source host `{host}` resolves to a blocked address ({ip})")
-    }
-    let client = client_with_pinned_dns(host, &resolved, timeout_ms)?;
-    let response = client.get(url).send().await?.error_for_status()?;
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("image/jpeg")
-        .split(';')
-        .next()
-        .unwrap_or("image/jpeg")
-        .to_string();
-    let bytes = response.bytes().await?;
-    if bytes.len() > MAX_IMAGE_BYTES {
-        bail!("image_source exceeds the 20 MiB limit")
-    }
-    let format = match content_type.as_str() {
-        "image/png" | "image/webp" | "image/jpeg" => content_type,
-        _ => bail!("image_source must be JPEG, PNG, or WebP"),
-    };
-    Ok(format!(
-        "data:{format};base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(bytes)
-    ))
-}
-
-fn is_blocked_ip(ip: IpAddr) -> bool {
-    BLOCKED_NETS.iter().any(|net| net.contains(&ip))
-}
-
-fn client_with_pinned_dns(
-    host: &str,
-    resolved: &[std::net::SocketAddr],
-    timeout_ms: i32,
-) -> anyhow::Result<Client> {
-    // Issue #375 Phase G: image-URL fetches stay direct by design (no
-    // endpoint proxy context). The URL is user-supplied and SSRF-pinned via
-    // `resolve_to_addrs` after blocklist validation; routing it through the
-    // endpoint proxy would move DNS to the proxy and defeat the pinning.
-    // Preserve the caller-configured timeout while removing redirect-following
-    // and pinning the host to the addresses we just validated.
-    let timeout = Duration::from_millis(timeout_ms.max(100) as u64);
-    let builder = Client::builder()
-        .timeout(timeout)
-        .connect_timeout(timeout)
-        .redirect(redirect::Policy::none())
-        .resolve_to_addrs(host, resolved);
-    Ok(builder.build()?)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-
-    use super::{BLOCKED_NETS, catalog, is_blocked_ip};
-
-    #[test]
-    fn catalog_exposes_only_supported_minimax_tools() {
-        let catalog = catalog();
-        let names = catalog
-            .tools
-            .iter()
-            .filter_map(|tool| tool.get("name").and_then(serde_json::Value::as_str))
-            .collect::<Vec<_>>();
-        assert_eq!(names, ["web_search", "understand_image"]);
-        assert!(catalog.resources.is_empty());
-        assert!(catalog.prompts.is_empty());
-    }
-
-    #[test]
-    fn blocks_ipv4_loopback_and_private_ranges() {
-        let cases = [
-            ("127.0.0.1", true),
-            ("127.255.255.254", true),
-            ("10.0.0.1", true),
-            ("10.255.255.254", true),
-            ("172.16.0.1", true),
-            ("172.31.255.254", true),
-            ("192.168.0.1", true),
-            ("192.168.255.254", true),
-            ("0.0.0.0", true),
-            ("169.254.169.254", true),
-            ("224.0.0.1", true),
-            ("239.255.255.255", true),
-            ("240.0.0.1", true),
-            ("255.255.255.255", true),
-            ("1.1.1.1", false),
-            ("8.8.8.8", false),
-            ("172.15.255.254", false),
-            ("172.32.0.1", false),
-            ("192.169.0.1", false),
-        ];
-        for (text, expected) in cases {
-            let ip: IpAddr = text.parse().unwrap();
-            assert_eq!(
-                is_blocked_ip(ip),
-                expected,
-                "is_blocked_ip({ip}) should be {expected}",
-            );
-        }
-    }
-
-    #[test]
-    fn blocks_ipv6_loopback_private_and_link_local_ranges() {
-        let cases = [
-            ("::1", true),
-            ("::", true),
-            ("fc00::1", true),
-            ("fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", true),
-            ("fe80::1", true),
-            ("febf:ffff::", true),
-            ("ff00::1", true),
-            ("ff02::1", true),
-            ("2001:db8::1", false),
-            ("2606:4700:4700::1111", false),
-        ];
-        for (text, expected) in cases {
-            let ip: IpAddr = text.parse().unwrap();
-            assert_eq!(
-                is_blocked_ip(ip),
-                expected,
-                "is_blocked_ip({ip}) should be {expected}",
-            );
-        }
-    }
-
-    #[test]
-    fn blocked_nets_cover_every_documented_category() {
-        // Belt-and-braces: every category present in the production ranges must
-        // be represented in the const list so that future edits cannot silently
-        // drop a range.
-        let categories: &[(IpAddr, u8, &str)] = &[
-            (IpAddr::V4(Ipv4Addr::UNSPECIFIED), 8, "unspecified"),
-            (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)), 8, "private-10"),
-            (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 0)), 8, "loopback"),
-            (IpAddr::V4(Ipv4Addr::new(169, 254, 0, 0)), 16, "link-local"),
-            (IpAddr::V4(Ipv4Addr::new(172, 16, 0, 0)), 12, "private-172"),
-            (IpAddr::V4(Ipv4Addr::new(192, 168, 0, 0)), 16, "private-192"),
-            (IpAddr::V4(Ipv4Addr::new(224, 0, 0, 0)), 4, "multicast"),
-            (IpAddr::V4(Ipv4Addr::new(240, 0, 0, 0)), 4, "reserved"),
-            (IpAddr::V6(Ipv6Addr::UNSPECIFIED), 128, "v6-unspecified"),
-            (IpAddr::V6(Ipv6Addr::LOCALHOST), 128, "v6-loopback"),
-            (
-                IpAddr::V6(Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 0)),
-                7,
-                "v6-ula",
-            ),
-            (
-                IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0)),
-                10,
-                "v6-link-local",
-            ),
-            (
-                IpAddr::V6(Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 0)),
-                8,
-                "v6-multicast",
-            ),
-        ];
-        for (ip, prefix, label) in categories {
-            let net = ipnet::IpNet::new_assert(*ip, *prefix);
-            assert!(
-                BLOCKED_NETS.iter().any(|existing| existing == &net),
-                "missing blocked range {label} ({ip}/{prefix})",
-            );
-        }
-    }
 }

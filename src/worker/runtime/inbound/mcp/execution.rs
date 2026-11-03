@@ -35,9 +35,10 @@ async fn invoke_mcp_transport(
     request: &BufferedMcpRequest,
     effective_body: &[u8],
     selected_credential: Option<&db::McpCredential>,
+    tracker: &mcp::McpCallTracker,
 ) -> anyhow::Result<mcp::McpTransportResponse> {
     mcp::handle_stream_with_storage(
-        &state.storage,
+        &state.storage.with_tracker(tracker.clone()),
         &state.catalog_cache,
         mcp::McpRequestContext {
             user_id: request.user_id,
@@ -151,11 +152,16 @@ async fn run_transport(mut execution: McpExecution, services: &RuntimeServices) 
         return;
     };
     let effective_body = execution.effective_body.take().unwrap_or_default();
+    // Issue #1179 P2: the tracker belongs to this request. The rmcp session
+    // task that serves the request writes the selected key and the actual
+    // tool outcome into it, and the settlement below reads the snapshot.
+    let tracker = mcp::McpCallTracker::new();
     let transport = Box::pin(invoke_mcp_transport(
         state,
         &execution.request,
         &effective_body,
         execution.selected_credential.as_ref(),
+        &tracker,
     ))
     .await;
     drop(effective_body);
@@ -169,6 +175,10 @@ async fn run_transport(mut execution: McpExecution, services: &RuntimeServices) 
         upstream_redacted_request_json: execution.upstream_redacted_request_json.take(),
         upstream_restore_session: execution.upstream_restore_session.take(),
         selected_token_slot: None,
+        // The tracker stays alive for the whole settlement: the response
+        // stream is consumed there, and a delayed tool outcome must reach the
+        // record.
+        tracker: Some(&tracker),
         server: execution.server.as_ref(),
         services,
     };
