@@ -81,8 +81,13 @@ impl ProxyService {
         scope: &RequestScope,
         request: serde_json::Value,
     ) -> Result<serde_json::Value, ErrorData> {
-        if scope.server_name.is_none() {
-            return aggregate::aggregate(
+        // Issue #1179 P2: the handler is the boundary that sees every tool
+        // call, including the ones rejected before they reach a server. It
+        // records the outcome in the tracker of this request.
+        let is_tool_call =
+            request.get("method").and_then(serde_json::Value::as_str) == Some("tools/call");
+        let outcome = if scope.server_name.is_none() {
+            aggregate::aggregate(
                 &scope.storage,
                 &scope.cache,
                 scope.user_id,
@@ -90,19 +95,39 @@ impl ProxyService {
                 request,
             )
             .await
-            .map_err(dispatch_error);
+            .map_err(dispatch_error)
+        } else {
+            match self.load_server(scope).await {
+                Ok(server) => filtering::call_server_filtered(
+                    &scope.storage,
+                    &server,
+                    request,
+                    scope.conversation_id.as_deref(),
+                    scope.selected_credential.as_ref(),
+                )
+                .await
+                .map_err(dispatch_error),
+                Err(err) => Err(err),
+            }
+        };
+        match outcome {
+            Ok(value) => {
+                if is_tool_call {
+                    super::call_record::record_response_outcome(scope.storage.tracker(), &value);
+                }
+                Ok(value)
+            }
+            Err(err) => {
+                if is_tool_call {
+                    // The handler error text may carry request input; the
+                    // record keeps a fixed diagnostic only.
+                    scope.storage.tracker().record_failure(
+                        super::call_record::McpCallFailure::CallFailed { status: None },
+                    );
+                }
+                Err(err)
+            }
         }
-
-        let server = self.load_server(scope).await?;
-        filtering::call_server_filtered(
-            &scope.storage,
-            &server,
-            request,
-            scope.conversation_id.as_deref(),
-            scope.selected_credential.as_ref(),
-        )
-        .await
-        .map_err(dispatch_error)
     }
 
     async fn load_server(&self, scope: &RequestScope) -> Result<McpServer, ErrorData> {

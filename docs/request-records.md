@@ -35,3 +35,46 @@ GET /api/v1/admin/request-records/overview?request_category=mcp&mcp_scope=servic
 An omitted `mcp_scope` means `all`, which keeps the historical behaviour of an MCP query. An invalid value is rejected. The parameter is additive: an existing client keeps working unchanged.
 
 The MCP distribution opens the records it describes. Every distribution row carries the scope its records were grouped by, so the drilldown never guesses from a display label or from a missing server id: a gateway row opens the gateway scope, a service row with a server id opens that server, and a name-only service row opens the service scope filtered by its stored server name.
+
+## MCP tool calls: the selected key and the actual outcome
+
+An MCP tool call runs inside the session task that serves the request, so the
+record is settled from a tracker that the request, that task and the
+settlement share. The record therefore carries the endpoint key that served
+the call and the one-based MCP token slot, and its outcome follows the tool
+call rather than the HTTP status alone:
+
+- a tool call that failed inside a successful HTTP response is recorded as a
+  failed request, with a stable internal error code (`mcp_tool_error`,
+  `mcp_upstream_error`, `mcp_call_failed` or `mcp_quota_exhausted`) and a
+  fixed diagnostic;
+- a completed tool call is recorded as completed;
+- a call that succeeded on another key after a quota rejection is recorded as
+  completed, and the record carries the key that served it, not the key that
+  failed first.
+
+The recorded diagnostic is built from the failure kind only: a fixed sentence
+plus a bounded numeric JSON-RPC, HTTP or provider code. The provider's error
+text, a transport exception, the query and an image payload never reach the
+record, whatever the content logging mode is, so an upstream that echoes a
+credential or the request input cannot leak it into request metadata. The MCP
+client receives that same fixed diagnostic, so the protocol error body never
+carries the provider message, a transport exception, the query, the image
+source or any configured credential either.
+
+The snapshot is taken at the actual settlement, after the response stream has
+been consumed, so a tool outcome that happens after the response headers still
+reaches the record.
+
+A later success never hides an error that already happened in the same
+request. A JSON-RPC batch that carries several tool calls is aggregated the
+same way: the first failure wins, and a later success does not clear it.
+
+The tracker observes tool calls. A request that never reaches one — a
+non-tool method, or a request the MCP protocol rejects before the handler
+sees it — records no selected key and no tool outcome, and keeps the outcome
+its transport status describes. The token slot is the tracker's slot at settlement, so the record keeps the
+slot of the key that served the settled attempt, and a call that never
+selected a key records no slot instead of inheriting one captured with the
+response. The tracker belongs to one request, so two sessions that use the
+same JSON-RPC id never see each other's key or outcome.

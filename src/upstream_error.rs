@@ -119,12 +119,25 @@ fn classify_upstream_body(body: &str) -> Option<UpstreamFailureCause> {
     // fields only. Scanning the serialized text for a key-shaped marker would
     // let `{"zipcode":2056}` reach the fallback, so the fallback is reserved
     // for a body that never parsed at all.
-    let structured = serde_json::from_str::<Value>(body)
-        .ok()
-        .map(|value| structured_codes(&value));
+    let parsed = serde_json::from_str::<Value>(body).ok();
+    let structured = parsed.as_ref().map(|value| structured_codes(value));
     let mentions = |wanted: u32| match &structured {
         Some(codes) => mentions_structured_code(codes, wanted),
         None => mentions_free_text_code(&folded, wanted),
+    };
+    // Issue #1179 P2 repair: the message fallback needs the verified MiniMax
+    // exhaustion phrase together with a closed 2056/2067 code, and an explicit
+    // structured code that names another failure wins over the body text.
+    let explicit_conflict = structured.as_ref().is_some_and(|codes| {
+        codes
+            .iter()
+            .any(|code| !is_generic_or_exhaustion_code(code))
+    });
+    let message_exhaustion = || {
+        parsed
+            .as_ref()
+            .and_then(message_exhaustion_signature)
+            .is_some()
     };
     // Transient and unavailable signals win over every exhaustion name: an
     // in-flight reservation or an explicit outage that happens to mention
@@ -143,9 +156,11 @@ fn classify_upstream_body(body: &str) -> Option<UpstreamFailureCause> {
         return Some(UpstreamFailureCause::UpstreamUnavailable);
     }
     if EXHAUSTED_PROVIDER_CODES.iter().copied().any(mentions)
-        || EXHAUSTED_PHRASES
-            .iter()
-            .any(|phrase| folded.contains(phrase))
+        || (!explicit_conflict
+            && (message_exhaustion()
+                || EXHAUSTED_PHRASES
+                    .iter()
+                    .any(|phrase| folded.contains(phrase))))
     {
         return Some(UpstreamFailureCause::Exhausted);
     }
@@ -193,10 +208,13 @@ fn code_value_after_key(rest: &str) -> Option<String> {
 }
 
 /// The known plain-text parenthesized form, closed on both sides.
+///
+/// The provider writes the code with ASCII or full-width parentheses.
 fn parenthesized_code(folded: &str, wanted: &str) -> bool {
-    folded.match_indices('(').any(|(start, open)| {
+    folded.match_indices(['(', '（']).any(|(start, open)| {
         let value = &folded[start + open.len()..];
-        value.starts_with(wanted) && value[wanted.len()..].starts_with(')')
+        value.starts_with(wanted)
+            && (value[wanted.len()..].starts_with(')') || value[wanted.len()..].starts_with('）'))
     })
 }
 
@@ -243,6 +261,100 @@ fn structured_codes(value: &Value) -> Vec<String> {
     let mut codes = Vec::new();
     collect_codes(value, &mut codes);
     codes
+}
+
+/// The verified MiniMax Token Plan exhaustion wording.
+///
+/// The message fallback only fires on one of these phrases together with a
+/// closed 2056/2067 code, so an unrelated number, a quoted example or a
+/// different failure never claims exhaustion. The phrases are the Chinese
+/// usage-limit wording already documented for this provider and its narrow
+/// English equivalents.
+const MESSAGE_EXHAUSTION_PHRASES: &[&str] = &[
+    // The wording the provider currently sends for a spent Token Plan
+    // allowance, case-folded: `已达到 Token Plan 用量上限：...`.
+    "已达到 token plan 用量上限",
+    "用量已达上限",
+    "用量上限已用尽",
+    "用量上限已耗尽",
+    "额度已用尽",
+    "额度耗尽",
+    "usage limit reached",
+    "usage limit exceeded",
+    "usage limit exhausted",
+];
+
+/// The generic code values a provider message may refine: `server_error`
+/// states no cause, so the verified message signature still decides. Codes are
+/// compared after separator folding, so the entry is the folded form.
+const GENERIC_PROVIDER_CODES: &[&str] = &["server error"];
+
+/// Whether an explicit code names the known generic failure or an exhausted
+/// quota.
+///
+/// The exhaustion names are the existing phrase table itself, compared exactly
+/// after separator folding, so a provider that writes its code as
+/// `quota_exceeded` or `insufficient_credits` reaches the same statement as the
+/// sentence form — without a second hand-maintained name list. A code that only
+/// extends a recognized phrase (`quota_exceeded_validation_error`) is a
+/// different, conflicting cause.
+fn is_generic_or_exhaustion_code(code: &str) -> bool {
+    let folded = fold(code);
+    let code = folded.trim();
+    GENERIC_PROVIDER_CODES.contains(&code)
+        || EXHAUSTED_PHRASES.contains(&code)
+        || EXHAUSTED_PROVIDER_CODES
+            .iter()
+            .any(|wanted| code == wanted.to_string())
+}
+
+/// The exhaustion code of a provider message that carries the verified phrase
+/// and a closed 2056/2067 code.
+fn message_exhaustion_signature(value: &Value) -> Option<u32> {
+    structured_messages(value).into_iter().find_map(|message| {
+        let folded = fold(&message);
+        if !MESSAGE_EXHAUSTION_PHRASES
+            .iter()
+            .any(|phrase| folded.contains(phrase))
+        {
+            return None;
+        }
+        EXHAUSTED_PROVIDER_CODES
+            .iter()
+            .copied()
+            .find(|code| parenthesized_code(&folded, &code.to_string()))
+    })
+}
+
+/// The field names that carry a provider message.
+const MESSAGE_KEYS: &[&str] = &["message", "error message"];
+
+/// Every provider message in an upstream payload, at any nesting depth.
+fn structured_messages(value: &Value) -> Vec<String> {
+    let mut messages = Vec::new();
+    collect_messages(value, &mut messages);
+    messages
+}
+
+fn collect_messages(value: &Value, messages: &mut Vec<String>) {
+    match value {
+        Value::Object(fields) => {
+            for (key, field) in fields {
+                if MESSAGE_KEYS.contains(&fold(key).trim())
+                    && let Some(text) = field.as_str()
+                {
+                    messages.push(text.to_string());
+                }
+                collect_messages(field, messages);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                collect_messages(value, messages);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn collect_codes(value: &Value, codes: &mut Vec<String>) {
@@ -594,6 +706,174 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_provider_message_with_the_verified_phrase_and_a_closed_quota_code_is_exhausted() {
+        // Issue #1179 P2 repair: the MiniMax AI route answers a spent plan
+        // quota with a generic error code and the provider code inside its
+        // message. The fallback needs the verified exhaustion phrase together
+        // with a closed 2056/2067 code.
+        for body in [
+            r#"{"error":{"code":"server_error","message":"用量已达上限 (2056)"}}"#,
+            r#"{"error":{"code":"server_error","message":"用量已达上限（2067）"}}"#,
+            r#"{"error":{"message":"usage limit reached (2056)"}}"#,
+            r#"{"error":{"code":"server_error","message":"Token Plan usage limit exhausted (2056)"}}"#,
+        ] {
+            assert_eq!(classify_upstream_failure(500, body), EXHAUSTED, "{body}");
+        }
+    }
+
+    #[test]
+    fn a_message_code_without_the_verified_phrase_is_not_exhaustion() {
+        // The numeric fallback alone never claims exhaustion: the closed code
+        // must sit beside the verified phrase.
+        for body in [
+            r#"{"error":{"code":"server_error","message":"record (2056) invalid"}}"#,
+            r#"{"error":{"code":"server_error","message":"request failed (2056)"}}"#,
+            r#"{"error":{"code":"server_error","message":"see the example \"(2056)\" in the guide"}}"#,
+            r#"{"error":{"code":"server_error","message":"failed (20560)"}}"#,
+            r#"{"error":{"code":"server_error","message":"failed (2056 items)"}}"#,
+            r#"{"error":{"code":"server_error","message":"failed 2056"}}"#,
+            r#"{"error":{"code":"invalid_request_error","message":"用量已达上限 (2056)"}}"#,
+        ] {
+            assert_ne!(classify_upstream_failure(500, body), EXHAUSTED, "{body}");
+        }
+    }
+
+    #[test]
+    fn every_recognized_exhaustion_phrase_is_accepted_as_its_structured_code() {
+        // The structured code names are the phrase table itself: a provider
+        // that writes any recognized statement as `error.code` must classify
+        // the same way the sentence form does, at a rejecting status.
+        for phrase in super::EXHAUSTED_PHRASES {
+            for status in [400_u16, 429] {
+                let body = format!(r#"{{"error":{{"code":"{phrase}","message":"{phrase}"}}}}"#);
+                assert_eq!(
+                    classify_upstream_failure(status, &body),
+                    EXHAUSTED,
+                    "{status} {body}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_structured_code_must_match_a_recognized_phrase_exactly() {
+        // Extending a known phrase with another cause is a different code and
+        // still blocks the message fallback.
+        for code in [
+            "quota_exceeded_validation_error",
+            "insufficient_credits_deprecated",
+            "usage_limit_reached_retry",
+            "invalid_api_key",
+        ] {
+            let body =
+                format!(r#"{{"error":{{"code":"{code}","message":"用量已达上限 (2056)"}}}}"#);
+            assert_ne!(classify_upstream_failure(400, &body), EXHAUSTED, "{body}");
+        }
+    }
+
+    #[test]
+    fn the_observed_token_plan_wording_is_an_exhaustion_signature() {
+        // The exact body observed in production: a generic code, the Chinese
+        // Token Plan wording and the closed 2056 code.
+        let body = r#"{"error":{"code":"server_error","message":"已达到 Token Plan 用量上限：请升级 Token Plan 套餐或购买积分补充用量。 (2056)"}}"#;
+        for status in [400_u16, 429, 500] {
+            assert_eq!(
+                classify_upstream_failure(status, body),
+                EXHAUSTED,
+                "{status}"
+            );
+        }
+        // A bare mention of Token Plan, or an incidental 2056 without the
+        // verified phrase, never claims exhaustion.
+        for body in [
+            r#"{"error":{"code":"server_error","message":"Token Plan 套餐信息已更新"}}"#,
+            r#"{"error":{"code":"server_error","message":"Token Plan 请求失败 (2056)"}}"#,
+        ] {
+            assert_ne!(classify_upstream_failure(400, body), EXHAUSTED, "{body}");
+        }
+    }
+
+    #[test]
+    fn a_known_exhaustion_code_is_not_a_conflict() {
+        // The OpenAI-compatible `insufficient_quota` code names the spent
+        // balance itself, so an explicit rejection carrying it is exhaustion
+        // without a 2056/2067 number; a 400 status does not change that.
+        for (status, body) in [
+            (
+                400,
+                r#"{"error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}"#,
+            ),
+            (429, r#"{"error":{"code":"insufficient_quota"}}"#),
+            (402, r#"{"error":{"code":"insufficient_balance"}}"#),
+        ] {
+            assert_eq!(
+                classify_upstream_failure(status, body),
+                EXHAUSTED,
+                "{status} {body}"
+            );
+        }
+        // The pre-existing recognized equivalents keep their classification
+        // when the provider writes them as the structured code: the frozen
+        // baseline read these bodies as exhaustion through the phrase table.
+        for code in [
+            "quota_exceeded",
+            "insufficient_credits",
+            "insufficient_funds",
+            "usage_limit_reached",
+            "credit_limit_exhausted",
+        ] {
+            let body = format!(
+                r#"{{"error":{{"code":"{code}","message":"{}"}}}}"#,
+                code.replace('_', " ")
+            );
+            assert_eq!(classify_upstream_failure(400, &body), EXHAUSTED, "{body}");
+        }
+        // Every other explicit code still blocks the message fallback.
+        for body in [
+            r#"{"error":{"code":"invalid_api_key","message":"用量已达上限 (2056)"}}"#,
+            r#"{"error":{"code":"insufficient_quota_deprecated","message":"用量已达上限 (2056)"}}"#,
+        ] {
+            assert_ne!(classify_upstream_failure(400, body), EXHAUSTED, "{body}");
+        }
+    }
+
+    #[test]
+    fn a_conflicting_explicit_code_wins_over_the_message() {
+        for body in [
+            r#"{"error":{"code":"invalid_request_error","message":"用量已达上限 (2056)"}}"#,
+            r#"{"error":{"code":1000,"message":"用量已达上限 (2056)"}}"#,
+            r#"{"error":{"code":"authentication_error","message":"quota exceeded (2056)"}}"#,
+        ] {
+            assert_ne!(classify_upstream_failure(500, body), EXHAUSTED, "{body}");
+        }
+        // The generic code and the absent code do not conflict.
+        for body in [
+            r#"{"error":{"code":"server_error","message":"用量已达上限 (2056)"}}"#,
+            r#"{"error":{"message":"用量已达上限 (2056)"}}"#,
+        ] {
+            assert_eq!(classify_upstream_failure(500, body), EXHAUSTED, "{body}");
+        }
+    }
+
+    #[test]
+    fn the_direct_structured_code_keeps_its_precedence() {
+        for body in [
+            r#"{"error":{"code":2056,"message":"unrelated"}}"#,
+            r#"{"error":{"provider_code":2067,"message":"unrelated"}}"#,
+        ] {
+            assert_eq!(classify_upstream_failure(500, body), EXHAUSTED, "{body}");
+        }
+        // A success body keeps its meaning whatever it carries.
+        assert_eq!(
+            classify_upstream_failure(
+                200,
+                r#"{"error":{"code":"server_error","message":"用量已达上限 (2056)"}}"#
+            ),
+            None
+        );
     }
 
     #[test]

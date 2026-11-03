@@ -160,88 +160,89 @@ pub(crate) async fn handle_stream_with_storage(
         body,
         selected_credential,
     } = request;
-    super::transport::with_tracked_token_slot(async {
-        if !matches!(
-            method.to_ascii_uppercase().as_str(),
-            "GET" | "POST" | "DELETE"
-        ) {
-            return Err(anyhow!("unsupported MCP HTTP method: {method}"));
-        }
+    // Issue #1179 P2: the storage of this request carries its tracker, so
+    // the selection and the tool outcome that happen inside the rmcp session
+    // task reach the settlement of the same request.
+    let tracker = storage.tracker().clone();
+    if !matches!(
+        method.to_ascii_uppercase().as_str(),
+        "GET" | "POST" | "DELETE"
+    ) {
+        return Err(anyhow!("unsupported MCP HTTP method: {method}"));
+    }
 
-        if method.eq_ignore_ascii_case("GET") && !has_mcp_session_id(headers) {
-            return Ok(McpTransportResponse::Buffered {
-                status: 405,
-                content_type: "application/json".to_string(),
-                headers: Vec::new(),
-                body: serde_json::to_vec(&json!({
-                    "error": {
-                        "code": "unsupported_transport",
-                        "message": "Legacy SSE transport is not supported; initialize with streamable HTTP first"
-                    }
-                }))?,
-                selected_token_slot: None,
-            });
-        }
+    if method.eq_ignore_ascii_case("GET") && !has_mcp_session_id(headers) {
+        return Ok(McpTransportResponse::Buffered {
+            status: 405,
+            content_type: "application/json".to_string(),
+            headers: Vec::new(),
+            body: serde_json::to_vec(&json!({
+                "error": {
+                    "code": "unsupported_transport",
+                    "message": "Legacy SSE transport is not supported; initialize with streamable HTTP first"
+                }
+            }))?,
+            selected_token_slot: None,
+        });
+    }
 
-        let request = build_rmcp_request(
-            method,
+    let request = build_rmcp_request(
+        method,
+        path,
+        headers,
+        body,
+        RequestScope {
+            user_id,
+            server_name: server_name.map(str::to_string),
+            conversation_id: None,
+            storage: storage.clone(),
+            cache: cache.clone(),
+            selected_credential,
+        },
+    )?;
+
+    let http_service = reusable_http_service(session_store.clone(), allowed_origins);
+
+    let response = normalize_response(http_service.handle(request).await).await?;
+    if session_store.is_none() && response_status(&response) == 404 {
+        // Without a shared session store each worker only knows its own
+        // sessions; a 404 here may mean the session lives on another
+        // worker (session drift), not that it was deleted.
+        tracing::warn!(
+            category = "mcp_session_drift",
             path,
+            "MCP session not found locally and no shared session store is configured; the session may live on another worker"
+        );
+    }
+    let selected_token_slot = tracker.snapshot().mcp_bearer_token_slot;
+    Ok(match response {
+        McpTransportResponse::Buffered {
+            status,
+            content_type,
             headers,
             body,
-            RequestScope {
-                user_id,
-                server_name: server_name.map(str::to_string),
-                conversation_id: None,
-                storage: storage.clone(),
-                cache: cache.clone(),
-                selected_credential,
-            },
-        )?;
-
-        let http_service = reusable_http_service(session_store.clone(), allowed_origins);
-
-        let response = normalize_response(http_service.handle(request).await).await?;
-        if session_store.is_none() && response_status(&response) == 404 {
-            // Without a shared session store each worker only knows its own
-            // sessions; a 404 here may mean the session lives on another
-            // worker (session drift), not that it was deleted.
-            tracing::warn!(
-                category = "mcp_session_drift",
-                path,
-                "MCP session not found locally and no shared session store is configured; the session may live on another worker"
-            );
-        }
-        let selected_token_slot = super::transport::tracked_token_slot();
-        Ok(match response {
-            McpTransportResponse::Buffered {
-                status,
-                content_type,
-                headers,
-                body,
-                ..
-            } => McpTransportResponse::Buffered {
-                status,
-                content_type,
-                headers,
-                body,
-                selected_token_slot,
-            },
-            McpTransportResponse::Streaming {
-                status,
-                content_type,
-                headers,
-                stream,
-                ..
-            } => McpTransportResponse::Streaming {
-                status,
-                content_type,
-                headers,
-                stream,
-                selected_token_slot,
-            },
-        })
+            ..
+        } => McpTransportResponse::Buffered {
+            status,
+            content_type,
+            headers,
+            body,
+            selected_token_slot,
+        },
+        McpTransportResponse::Streaming {
+            status,
+            content_type,
+            headers,
+            stream,
+            ..
+        } => McpTransportResponse::Streaming {
+            status,
+            content_type,
+            headers,
+            stream,
+            selected_token_slot,
+        },
     })
-    .await
 }
 
 /// Get (or lazily build) the shared `StreamableHttpService` for a session

@@ -13,29 +13,30 @@ use tracing::warn;
 use crate::db::McpServer;
 
 use self::token_selection::{McpBearerTokenBalancer, SelectedToken};
+use super::call_record::{self, McpCallTracker};
 
 static TOKEN_BALANCER: LazyLock<McpBearerTokenBalancer> =
     LazyLock::new(McpBearerTokenBalancer::new);
 tokio::task_local! {
-    static TOKEN_SLOT_TRACKER: RefCell<Option<i16>>;
     static CREDITS_USED_TRACKER: RefCell<Option<f64>>;
     static UPSTREAM_FAILURE_TRACKER: RefCell<Option<(i16, u16)>>;
 }
 
-/// Run `future` inside the token slot and credits-used tracking scopes. The
-/// worker reads the tracked values after the MCP request completes.
+/// Run `future` inside the credits-used tracking scopes. The worker reads the
+/// tracked values after the MCP request completes.
+///
+/// The token slot is not tracked here: it belongs to the request tracker that
+/// the request, the rmcp session task and the settlement share (issue #1179
+/// P2), so it survives the task boundary.
 pub(crate) async fn with_tracked_credits<F, T>(future: F) -> T
 where
     F: std::future::Future<Output = T>,
 {
-    with_tracked_token_slot(async {
-        UPSTREAM_FAILURE_TRACKER
-            .scope(RefCell::new(None), async {
-                CREDITS_USED_TRACKER.scope(RefCell::new(None), future).await
-            })
-            .await
-    })
-    .await
+    UPSTREAM_FAILURE_TRACKER
+        .scope(RefCell::new(None), async {
+            CREDITS_USED_TRACKER.scope(RefCell::new(None), future).await
+        })
+        .await
 }
 
 #[cfg(test)]
@@ -117,6 +118,11 @@ pub(super) async fn call_with_storage(
     forced: Option<&crate::db::McpCredential>,
 ) -> anyhow::Result<Value> {
     let timeout = Duration::from_millis(server.timeout_ms.max(100) as u64);
+    // Issue #1179 P2: the tracker of this request records the credential and
+    // the actual tool outcome, so the settlement knows what happened inside
+    // the rmcp session task.
+    let tracker = storage.map(|storage| storage.tracker().clone());
+    let is_tool_call = is_tool_call_request(&request);
     tokio::time::timeout(timeout, async {
         // Basic and none transports use a single credential; bearer uses token
         // balancing with retry on 401/403/429.
@@ -125,10 +131,14 @@ pub(super) async fn call_with_storage(
                 value: None,
                 index: None,
             };
-            record_token_slot(&selected);
+            record_token_slot(tracker.as_ref(), &selected);
             let result =
                 client::call_once(storage, server, selected, request.clone(), conversation_id)
                     .await;
+            match &result {
+                Ok(value) => record_tool_response(tracker.as_ref(), is_tool_call, value),
+                Err(error) => record_tool_failure(tracker.as_ref(), is_tool_call, error),
+            }
             if let Ok(value) = &result
                 && let Some(credits) = scan_credits_used(value)
             {
@@ -154,7 +164,7 @@ pub(super) async fn call_with_storage(
                         .await
                 }
             };
-            record_token_slot(&selected);
+            record_token_slot(tracker.as_ref(), &selected);
             attempts += 1;
             let result = client::call_once(
                 storage,
@@ -166,6 +176,7 @@ pub(super) async fn call_with_storage(
             .await;
             match result {
                 Ok(value) => {
+                    record_tool_response(tracker.as_ref(), is_tool_call, &value);
                     if let Some(credits) = scan_credits_used(&value) {
                         record_credits_used(credits);
                     }
@@ -183,6 +194,9 @@ pub(super) async fn call_with_storage(
                         attempted.push(index);
                     }
                     if retry_status.is_some() && attempted.len() < enabled_token_count {
+                        // Issue #1179 P2: an attempt that another credential
+                        // may still serve is not the outcome of the call.
+                        record_attempt_failure(tracker.as_ref(), is_tool_call);
                         warn!(
                             server_name = %server.name,
                             attempts,
@@ -191,6 +205,7 @@ pub(super) async fn call_with_storage(
                         );
                         continue;
                     }
+                    record_tool_failure(tracker.as_ref(), is_tool_call, &err);
                     if let Some(status) = retry_status {
                         warn!(
                             server_name = %server.name,
@@ -217,29 +232,15 @@ pub(super) async fn connect(
             value: None,
             index: None,
         };
-        record_token_slot(&selected);
+        record_token_slot(storage.map(|storage| storage.tracker()), &selected);
         return client::connect_with_selected(storage, server, selected).await;
     }
     let tokens = server.bearer_tokens();
     let selected = TOKEN_BALANCER
         .select_token(server.server_id, &tokens, &[], conversation_id)
         .await;
-    record_token_slot(&selected);
+    record_token_slot(storage.map(|storage| storage.tracker()), &selected);
     client::connect_with_selected(storage, server, selected).await
-}
-
-pub(super) async fn with_tracked_token_slot<F, T>(future: F) -> T
-where
-    F: std::future::Future<Output = T>,
-{
-    TOKEN_SLOT_TRACKER.scope(RefCell::new(None), future).await
-}
-
-pub(super) fn tracked_token_slot() -> Option<i16> {
-    TOKEN_SLOT_TRACKER
-        .try_with(|slot| *slot.borrow())
-        .ok()
-        .flatten()
 }
 
 pub(super) fn peer_list_or_empty<T: serde::Serialize>(
@@ -250,13 +251,17 @@ pub(super) fn peer_list_or_empty<T: serde::Serialize>(
 }
 
 fn retryable_status(err: &anyhow::Error) -> Option<StatusCode> {
+    transport_status(err).filter(is_retryable_status)
+}
+
+/// The upstream HTTP status a transport error names, when it names one.
+fn transport_status(err: &anyhow::Error) -> Option<StatusCode> {
     if let Some(service_err) = err.downcast_ref::<rmcp::service::ServiceError>() {
         return match service_err {
             rmcp::service::ServiceError::TransportSend(transport_err) => transport_err
                 .error
                 .downcast_ref::<StreamableHttpError<reqwest::Error>>()
-                .and_then(request_time_status)
-                .filter(is_retryable_status),
+                .and_then(request_time_status),
             _ => None,
         };
     }
@@ -295,10 +300,10 @@ fn handshake_status(err: &anyhow::Error) -> Option<StatusCode> {
             let stream_err = error
                 .error
                 .downcast_ref::<StreamableHttpError<reqwest::Error>>()?;
-            request_time_status(stream_err).filter(is_retryable_status)
+            request_time_status(stream_err)
         }
         rmcp::service::ClientInitializeError::JsonRpcError(error_data) => {
-            parse_status_from_message(&error_data.message).filter(is_retryable_status)
+            parse_status_from_message(&error_data.message)
         }
         _ => None,
     }
@@ -320,38 +325,100 @@ fn parse_status_from_message(message: &str) -> Option<StatusCode> {
         })
 }
 
-fn record_token_slot(selected: &SelectedToken) {
+/// Record the one-based MCP token slot of the selected credential in the
+/// request tracker.
+fn record_token_slot(tracker: Option<&McpCallTracker>, selected: &SelectedToken) {
+    let Some(tracker) = tracker else {
+        return;
+    };
     let slot = selected
         .index
         .and_then(|index| i16::try_from(index + 1).ok());
-    let _ = TOKEN_SLOT_TRACKER.try_with(|tracker| {
-        *tracker.borrow_mut() = slot;
-    });
+    tracker.record_token_slot(slot);
 }
 
-pub(crate) fn record_builtin_token_slot(index: usize) {
-    record_token_slot(&SelectedToken {
-        value: None,
-        index: Some(index),
-    });
+/// Whether the request is a tool call, the only request shape whose outcome
+/// the tracker records.
+fn is_tool_call_request(request: &Value) -> bool {
+    request.get("method").and_then(Value::as_str) == Some("tools/call")
+}
+
+/// Record the actual outcome of a tool call.
+///
+/// An upstream error and a tool result that reports `isError` are failures
+/// even when the transport answered with HTTP 200.
+fn record_tool_response(tracker: Option<&McpCallTracker>, is_tool_call: bool, value: &Value) {
+    if !is_tool_call {
+        return;
+    }
+    let Some(tracker) = tracker else {
+        return;
+    };
+    call_record::record_response_outcome(tracker, value);
+}
+
+/// Record a tool call that never produced a result.
+///
+/// Only a safe HTTP status is kept: the transport error text may repeat the
+/// request input and never reaches the record.
+fn record_tool_failure(
+    tracker: Option<&McpCallTracker>,
+    is_tool_call: bool,
+    error: &anyhow::Error,
+) {
+    if !is_tool_call {
+        return;
+    }
+    let Some(tracker) = tracker else {
+        return;
+    };
+    tracker.record_failure(call_failure(error));
+}
+
+/// The safe failure kind of a tool call that returned no value.
+fn call_failure(error: &anyhow::Error) -> call_record::McpCallFailure {
+    // A JSON-RPC error keeps only its numeric code; the transport failure
+    // keeps only its HTTP status.
+    if let Some(rmcp::service::ServiceError::McpError(data)) =
+        error.downcast_ref::<rmcp::service::ServiceError>()
+    {
+        return call_record::McpCallFailure::UpstreamError {
+            code: Some(i64::from(data.code.0)),
+        };
+    }
+    call_record::McpCallFailure::CallFailed {
+        status: transport_status(error).map(|status| status.as_u16()),
+    }
+}
+
+/// Record an attempt that failed while another credential may still serve the
+/// call. It never settles the call on its own.
+fn record_attempt_failure(tracker: Option<&McpCallTracker>, is_tool_call: bool) {
+    if !is_tool_call {
+        return;
+    }
+    let Some(tracker) = tracker else {
+        return;
+    };
+    tracker.record_attempt_failure();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn tracked_token_slot_records_one_based_index() {
-        let slot = with_tracked_token_slot(async {
-            record_token_slot(&SelectedToken {
+    #[test]
+    fn the_token_slot_is_recorded_in_the_request_tracker() {
+        let tracker = McpCallTracker::new();
+        record_token_slot(
+            Some(&tracker),
+            &SelectedToken {
                 value: Some("b".to_string()),
                 index: Some(1),
-            });
-            tracked_token_slot()
-        })
-        .await;
+            },
+        );
 
-        assert_eq!(slot, Some(2));
+        assert_eq!(tracker.snapshot().mcp_bearer_token_slot, Some(2));
     }
 
     #[test]

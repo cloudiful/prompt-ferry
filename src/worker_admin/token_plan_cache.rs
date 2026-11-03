@@ -9,6 +9,7 @@ use std::{
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
+mod eligibility;
 mod observation;
 mod refresh;
 #[cfg(test)]
@@ -16,6 +17,8 @@ mod refresh_tests;
 mod subscription;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use eligibility::{QuotaAssessment, QuotaScope};
 
 const REFRESH_AFTER: Duration = Duration::from_secs(60);
 const MIN_ATTEMPT: Duration = Duration::from_secs(10);

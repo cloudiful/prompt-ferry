@@ -1011,9 +1011,54 @@ mod legacy_shape {
         });
         format!("http://{addr}/mcp")
     }
+
+    /// An upstream that answers one bearer token with HTTP 429 and serves
+    /// the other one, so a request can fail on the first credential and
+    /// succeed on the second.
+    pub(super) async fn spawn_bearer_gate(rejected_token: &'static str) -> String {
+        let service = StreamableHttpService::new(
+            || Ok(LegacyShapeUpstream),
+            LocalSessionManager::default().into(),
+            StreamableHttpServerConfig::default().disable_allowed_hosts(),
+        );
+        let router = axum::Router::new().nest_service("/mcp", service).layer(
+            axum::middleware::from_fn(
+                move |request: axum::extract::Request, next: axum::middleware::Next| async move {
+                    let rejected = request
+                        .headers()
+                        .get("authorization")
+                        .and_then(|value| value.to_str().ok())
+                        .is_some_and(|value| value.contains(rejected_token));
+                    if rejected {
+                        return axum::response::IntoResponse::into_response(
+                            axum::http::StatusCode::TOO_MANY_REQUESTS,
+                        );
+                    }
+                    next.run(request).await
+                },
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        format!("http://{addr}/mcp")
+    }
 }
 
 async fn sqlite_storage_with_http_server(url: &str) -> (McpRuntimeStorage, McpCatalogCache) {
+    sqlite_storage_with_server(url, "legacy-shape", "none", serde_json::json!([])).await
+}
+
+/// The storage of one request against an MCP server with the given
+/// authentication.
+async fn sqlite_storage_with_server(
+    url: &str,
+    name: &str,
+    auth_mode: &str,
+    bearer_tokens_json: serde_json::Value,
+) -> (McpRuntimeStorage, McpCatalogCache) {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
 
     use crate::{
@@ -1036,7 +1081,7 @@ async fn sqlite_storage_with_http_server(url: &str) -> (McpRuntimeStorage, McpCa
                 scope: "admin".to_string(),
                 owner_user_id: None,
                 source_endpoint_id: None,
-                name: "legacy-shape".to_string(),
+                name: name.to_string(),
                 aggregate_naming_mode: "qualified_only".to_string(),
                 transport: "http".to_string(),
                 provider_kind: None,
@@ -1044,9 +1089,9 @@ async fn sqlite_storage_with_http_server(url: &str) -> (McpRuntimeStorage, McpCa
                 command: None,
                 args: serde_json::json!([]),
                 env_json: serde_json::json!({}),
-                bearer_tokens_json: serde_json::json!([]),
+                bearer_tokens_json,
                 http_headers_json: serde_json::json!({}),
-                auth_mode: "none".to_string(),
+                auth_mode: auth_mode.to_string(),
                 basic_username: None,
                 basic_password: None,
                 proxy_url: None,
@@ -1962,4 +2007,352 @@ async fn entry_2025_aggregate_peer_preserves_upstream_jsonrpc_error_object() {
         String::from_utf8_lossy(&body)
     );
     assert_preserved_upstream_error(&entry_response_json(&content_type, &body), 24);
+}
+
+// ---------------------------------------------------------------------------
+// Issue #1179 P2: the per-request tracker.
+//
+// The tracker belongs to one inbound request. The rmcp session task that
+// serves the request writes the selected key and the actual tool outcome into
+// it, and the settlement of the same request reads the snapshot. These tests
+// drive the real in-process HTTP/SSE path, so they cross the task boundary.
+// ---------------------------------------------------------------------------
+
+/// The storage of one request, carrying that request's tracker.
+fn tracked_storage(
+    storage: &McpRuntimeStorage,
+    tracker: &crate::mcp::McpCallTracker,
+) -> McpRuntimeStorage {
+    storage.with_tracker(tracker.clone())
+}
+
+#[tokio::test]
+async fn a_tool_error_result_is_tracked_as_a_failed_call() {
+    let url = legacy_shape::spawn().await;
+    let (storage, cache) = sqlite_storage_with_http_server(&url).await;
+    let tracker = crate::mcp::McpCallTracker::new();
+    let tracked = tracked_storage(&storage, &tracker);
+
+    let (status, _, _, _) = collect_response(
+        handle_stream_with_storage(
+            &tracked,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &v2_headers_with("tools/call", &[("mcp-name", "legacy_structured")]),
+                &v2_request_body(
+                    "tools/call",
+                    30,
+                    serde_json::json!({"name": "legacy_structured", "arguments": {}}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, 200, "the transport still answered with HTTP 200");
+    let record = tracker.snapshot();
+    assert_eq!(
+        record.outcome,
+        crate::mcp::call_record::McpCallOutcome::Failed {
+            code: crate::mcp::call_record::TOOL_ERROR_CODE.to_string(),
+            message: "the tool reported an error result".to_string(),
+        },
+        "a tool result that reports isError is a failed call"
+    );
+}
+
+#[tokio::test]
+async fn an_upstream_jsonrpc_error_is_tracked_as_a_failed_call() {
+    let url = legacy_shape::spawn().await;
+    let (storage, cache) = sqlite_storage_with_http_server(&url).await;
+    let tracker = crate::mcp::McpCallTracker::new();
+    let tracked = tracked_storage(&storage, &tracker);
+
+    let (status, _, _, _) = collect_response(
+        handle_stream_with_storage(
+            &tracked,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &v2_headers_with("tools/call", &[("mcp-name", "legacy_error")]),
+                &v2_request_body(
+                    "tools/call",
+                    31,
+                    serde_json::json!({"name": "legacy_error", "arguments": {}}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, 200, "the transport still answered with HTTP 200");
+    let record = tracker.snapshot();
+    assert!(
+        matches!(
+            record.outcome,
+            crate::mcp::call_record::McpCallOutcome::Failed { .. }
+        ),
+        "an upstream error is a failed call: {:?}",
+        record.outcome
+    );
+    let (code, message) = record.failure().expect("a failure");
+    assert_eq!(code, "mcp_upstream_error");
+    assert!(
+        !message.contains("legacy tool failed") && !message.contains("boom"),
+        "the upstream message never reaches the record: {message}"
+    );
+}
+
+#[tokio::test]
+async fn a_completed_tool_call_is_tracked_as_a_success() {
+    let url = legacy_shape::spawn().await;
+    let (storage, cache) = sqlite_storage_with_http_server(&url).await;
+    let tracker = crate::mcp::McpCallTracker::new();
+    let tracked = tracked_storage(&storage, &tracker);
+
+    let (status, _, _, _) = collect_response(
+        handle_stream_with_storage(
+            &tracked,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &v2_headers_with("tools/call", &[("mcp-name", "legacy_echo")]),
+                &v2_request_body(
+                    "tools/call",
+                    32,
+                    serde_json::json!({"name": "legacy_echo", "arguments": {}}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, 200);
+    assert_eq!(
+        tracker.snapshot().outcome,
+        crate::mcp::call_record::McpCallOutcome::Completed
+    );
+}
+
+#[tokio::test]
+async fn two_concurrent_requests_with_the_same_rpc_id_keep_separate_trackers() {
+    let url = legacy_shape::spawn().await;
+    let (storage, cache) = sqlite_storage_with_http_server(&url).await;
+    let failed_tracker = crate::mcp::McpCallTracker::new();
+    let completed_tracker = crate::mcp::McpCallTracker::new();
+    let failed_storage = tracked_storage(&storage, &failed_tracker);
+    let completed_storage = tracked_storage(&storage, &completed_tracker);
+    let failed_headers = v2_headers_with("tools/call", &[("mcp-name", "legacy_structured")]);
+    let failed_body = v2_request_body(
+        "tools/call",
+        33,
+        serde_json::json!({"name": "legacy_structured", "arguments": {}}),
+    );
+    let completed_headers = v2_headers_with("tools/call", &[("mcp-name", "legacy_echo")]);
+    let completed_body = v2_request_body(
+        "tools/call",
+        33,
+        serde_json::json!({"name": "legacy_echo", "arguments": {}}),
+    );
+
+    let (failed, completed) = tokio::join!(
+        handle_stream_with_storage(
+            &failed_storage,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &failed_headers,
+                &failed_body,
+            ),
+            None,
+            &[],
+        ),
+        handle_stream_with_storage(
+            &completed_storage,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &completed_headers,
+                &completed_body,
+            ),
+            None,
+            &[],
+        ),
+    );
+    failed.expect("the failed request answers");
+    completed.expect("the completed request answers");
+
+    assert!(
+        matches!(
+            failed_tracker.snapshot().outcome,
+            crate::mcp::call_record::McpCallOutcome::Failed { .. }
+        ),
+        "the failing request must not see the other request's outcome"
+    );
+    assert_eq!(
+        completed_tracker.snapshot().outcome,
+        crate::mcp::call_record::McpCallOutcome::Completed,
+        "the completed request must not see the other request's outcome"
+    );
+}
+
+#[tokio::test]
+async fn a_request_without_a_tool_call_records_no_outcome() {
+    // The tracker only observes tool calls. A request that never reaches one
+    // keeps the documented limitation: no key and no tool outcome.
+    let url = legacy_shape::spawn().await;
+    let (storage, cache) = sqlite_storage_with_http_server(&url).await;
+    let tracker = crate::mcp::McpCallTracker::new();
+    let tracked = tracked_storage(&storage, &tracker);
+
+    let (status, _, _, _) = collect_response(
+        handle_stream_with_storage(
+            &tracked,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &v2_headers_with("tools/list", &[]),
+                &v2_request_body("tools/list", 34, serde_json::json!({})),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, 200);
+    let record = tracker.snapshot();
+    assert_eq!(
+        record.outcome,
+        crate::mcp::call_record::McpCallOutcome::NotObserved
+    );
+    assert!(record.endpoint_key_id.is_none());
+}
+
+#[tokio::test]
+async fn a_bearer_failover_is_tracked_as_a_completed_call() {
+    // The first credential is rejected with HTTP 429, the second one serves
+    // the call. The rejected attempt is not the outcome of the call.
+    let url = legacy_shape::spawn_bearer_gate("reject-token").await;
+    let (storage, cache) = sqlite_storage_with_server(
+        &url,
+        "legacy-shape",
+        "bearer",
+        serde_json::json!([
+            { "token": "reject-token", "enabled": true },
+            { "token": "accept-token", "enabled": true },
+        ]),
+    )
+    .await;
+    let tracker = crate::mcp::McpCallTracker::new();
+    let tracked = storage.with_tracker(tracker.clone());
+
+    let (status, _, _, _) = collect_response(
+        handle_stream_with_storage(
+            &tracked,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &v2_headers_with("tools/call", &[("mcp-name", "legacy_echo")]),
+                &v2_request_body(
+                    "tools/call",
+                    35,
+                    serde_json::json!({"name": "legacy_echo", "arguments": {}}),
+                ),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, 200, "the second credential served the call");
+    let record = tracker.snapshot();
+    assert_eq!(
+        record.outcome,
+        crate::mcp::call_record::McpCallOutcome::Completed,
+        "{record:?}"
+    );
+    assert_eq!(record.attempt_failures, 1, "the first attempt failed");
+    assert_eq!(
+        record.mcp_bearer_token_slot,
+        Some(2),
+        "the second credential served the call"
+    );
+}
+
+#[tokio::test]
+async fn a_tool_call_the_protocol_rejects_records_no_outcome() {
+    // A tool call the MCP protocol rejects before the handler sees it (here a
+    // call without a tool name) never reaches the tracker: it records no
+    // selected key and no tool outcome, so the record keeps the outcome its
+    // transport status describes.
+    let url = legacy_shape::spawn().await;
+    let (storage, cache) = sqlite_storage_with_http_server(&url).await;
+    let tracker = crate::mcp::McpCallTracker::new();
+    let tracked = storage.with_tracker(tracker.clone());
+
+    let (status, _, _, body) = collect_response(
+        handle_stream_with_storage(
+            &tracked,
+            &cache,
+            named_request(
+                "POST",
+                "/mcp",
+                "legacy-shape",
+                &v2_headers_with("tools/call", &[("mcp-name", "legacy_echo")]),
+                &v2_request_body("tools/call", 36, serde_json::json!({"arguments": {}})),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, 404, "the protocol rejected the request");
+    assert!(
+        String::from_utf8_lossy(&body).contains("session_not_found"),
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    let record = tracker.snapshot();
+    assert_eq!(
+        record.outcome,
+        crate::mcp::call_record::McpCallOutcome::NotObserved,
+        "the protocol rejected the call before the handler saw it"
+    );
+    assert!(record.endpoint_key_id.is_none());
 }

@@ -67,6 +67,11 @@ pub(super) struct RuntimeServices {
     pub(super) client: Client,
     pub(super) runtime_state: WorkerRuntimeState,
     pub(super) response_limits: ResponseLimits,
+    /// Test-only observer of the log submitted to the recorder (issue #1179
+    /// P2 repair). It witnesses the actual settlement boundary without adding
+    /// a second production sink or any public API.
+    #[cfg(test)]
+    pub(super) submitted_logs: Option<std::sync::Arc<dyn Fn(&UsageLog) + Send + Sync>>,
 }
 
 impl RuntimeServices {
@@ -87,7 +92,21 @@ impl RuntimeServices {
             client,
             runtime_state,
             response_limits,
+            #[cfg(test)]
+            submitted_logs: None,
         }
+    }
+
+    /// Observe every log this service submits to the recorder.
+    ///
+    /// Evidence instrumentation for the streaming-settlement regression: it
+    /// sees the `UsageLog` exactly as submitted, per service instance.
+    #[cfg(test)]
+    pub(super) fn observe_submitted_usage_log(
+        &mut self,
+        observer: impl Fn(&UsageLog) + Send + Sync + 'static,
+    ) {
+        self.submitted_logs = Some(std::sync::Arc::new(observer));
     }
 
     pub(super) fn admin_state(&self) -> Option<&AdminState> {
@@ -111,6 +130,10 @@ impl RuntimeServices {
     }
 
     pub(super) async fn record_usage_event(&self, log: UsageLog) -> Option<i64> {
+        #[cfg(test)]
+        if let Some(observer) = &self.submitted_logs {
+            observer(&log);
+        }
         match usage_recording_mode(self.admin_state.is_some(), self.standalone_state.is_some()) {
             UsageRecordingMode::SharedManaged => {
                 record_managed_usage(self.admin_state(), log).await
