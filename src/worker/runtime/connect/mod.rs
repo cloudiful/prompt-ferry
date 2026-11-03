@@ -111,7 +111,16 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
     let standalone_state = if contract.backend.is_postgres() {
         None
     } else {
-        Some(build_standalone_state(&config, None).await?)
+        Some(
+            build_standalone_state(
+                &config,
+                None,
+                admin_state
+                    .as_ref()
+                    .map(|state| state.mcp_catalog_cache.clone()),
+            )
+            .await?,
+        )
     };
     let runtime_state = WorkerRuntimeState::default();
     super::abort_stale_requests_once(runtime_admin_state.as_ref()).await;
@@ -156,6 +165,15 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
             &config,
             state.pool.clone(),
             state.token_plan_quota.clone(),
+            runtime_state.control.clone(),
+        )
+    });
+    // The catalog refresh lifecycle has exactly one owner: this task replaces
+    // the former startup warmup and adds the bounded periodic pass.
+    let mcp_catalog_refresh_task = admin_state.as_ref().map(|state| {
+        super::mcp_catalog_refresh::spawn(
+            &config,
+            state.mcp_catalog_service.clone(),
             runtime_state.control.clone(),
         )
     });
@@ -258,6 +276,15 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
                     ),
                 }
             }
+            if let Some(task) = mcp_catalog_refresh_task {
+                match task.await {
+                    Ok(()) => {}
+                    Err(join_error) => warn!(
+                        error = %join_error,
+                        "MCP catalog refresh task join failed during shutdown",
+                    ),
+                }
+            }
         };
         if tokio::time::timeout(SESSION_TEARDOWN_ALLOWANCE, join_background)
             .await
@@ -348,7 +375,16 @@ pub(super) async fn connect_for_test_with_admin(
     let standalone_state = if config.storage_backend().is_postgres() {
         None
     } else {
-        Some(build_standalone_state(&config, None).await?)
+        Some(
+            build_standalone_state(
+                &config,
+                None,
+                admin_state
+                    .as_ref()
+                    .map(|state| state.mcp_catalog_cache.clone()),
+            )
+            .await?,
+        )
     };
     let relay = first_simple_relay_connection_config(&config)?;
     connect_once(

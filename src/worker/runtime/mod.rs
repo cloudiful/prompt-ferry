@@ -19,6 +19,7 @@ mod lifecycle;
 mod lifecycle_standalone;
 #[cfg(test)]
 mod lifecycle_standalone_tests;
+mod mcp_catalog_refresh;
 mod mcp_support;
 mod prompt_log;
 mod quota_observation_collector;

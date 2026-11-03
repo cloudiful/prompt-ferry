@@ -161,17 +161,34 @@ case "$mode" in
     printf 'psql: error: password %s rejected for user\n' "$PGPASSWORD" >&2
     exit 2 ;;
 esac
+parents='request_records request_record_content request_record_block_refs usage_prompt_blocks request_record_assistant_artifacts request_record_tool_calls request_record_replay_snapshots'
 if printf '%s' "$*" | grep -q 'pg-partition-guard: db-day'; then
   printf '2026-10-14\n'
-elif printf '%s' "$*" | grep -q 'pg-partition-guard: parent'; then
-  printf 'p|r|RANGE (created_at)|timestamp with time zone\n'
+elif printf '%s' "$*" | grep -q 'pg-partition-guard: parents'; then
+  for parent in $parents; do
+    default_children=0
+    if [ "$mode" = "parent_default" ] && [ "$parent" = "request_record_content" ]; then
+      default_children=1
+    fi
+    printf '%s|p|r|RANGE (created_at)|timestamp with time zone|%s\n' \
+      "$parent" "$default_children"
+  done
 elif printf '%s' "$*" | grep -q 'pg-partition-guard: children'; then
-  printf 'request_records_20261013|t|FOR VALUES FROM ('"'"'2026-10-13 00:00:00+00'"'"') TO ('"'"'2026-10-14 00:00:00+00'"'"')\n'
-  printf 'request_records_20261014|t|FOR VALUES FROM ('"'"'2026-10-14 00:00:00+00'"'"') TO ('"'"'2026-10-15 00:00:00+00'"'"')\n'
-  if [ "$mode" != "missing_tomorrow" ] || [ -f "$sandbox/capture/partition-created" ]; then
-    printf 'request_records_20261015|t|FOR VALUES FROM ('"'"'2026-10-15 00:00:00+00'"'"') TO ('"'"'2026-10-16 00:00:00+00'"'"')\n'
-  fi
-elif printf '%s' "$*" | grep -q 'PARTITION OF public.request_records'; then
+  for parent in $parents; do
+    printf '%s|%s_20261013|t|FOR VALUES FROM ('"'"'2026-10-13 00:00:00+00'"'"') TO ('"'"'2026-10-14 00:00:00+00'"'"')\n' "$parent" "$parent"
+    printf '%s|%s_20261014|t|FOR VALUES FROM ('"'"'2026-10-14 00:00:00+00'"'"') TO ('"'"'2026-10-15 00:00:00+00'"'"')\n' "$parent" "$parent"
+    missing=0
+    if [ "$mode" = "missing_tomorrow" ] || [ "$mode" = "parent_default" ]; then
+      missing=1
+    elif [ "$mode" = "missing_content_tomorrow" ] && [ "$parent" = "request_record_content" ]; then
+      missing=1
+    fi
+    if [ "$missing" = "1" ] && [ ! -f "$sandbox/capture/partition-created" ]; then
+      continue
+    fi
+    printf '%s|%s_20261015|t|FOR VALUES FROM ('"'"'2026-10-15 00:00:00+00'"'"') TO ('"'"'2026-10-16 00:00:00+00'"'"')\n' "$parent" "$parent"
+  done
+elif printf '%s' "$*" | grep -q 'PARTITION OF public.'; then
   # The bounded opt-in backfill: record that the guarded script ran. The next
   # children query then reports the created child, mirroring a converged DDL.
   touch "$sandbox/capture/partition-created"

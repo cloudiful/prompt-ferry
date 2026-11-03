@@ -8,13 +8,16 @@ the same symbols with the same messages. This module is only the connecting
 half: it never decides policy, and it never migrates, seeds, or provisions
 anything else. It connects, confirms the connected database's own identity,
 runs `SELECT 1`, confirms the test-required tables exist, and verifies the
-`request_records` date-partition coverage.
+daily-partition coverage of every managed request-record parent.
 
 Coverage checks are read-only by default: a missing UTC yesterday/today/
-tomorrow child fails before cargo with a safe date diagnostic and no DDL. The
-single bounded exception is `PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS`
-set to exactly `true`, which authorizes creating only those missing daily
-children in one guarded transaction — never drops, never other tables.
+tomorrow child fails before cargo with a safe parent/date diagnostic and no
+DDL. The single bounded exception is
+`PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS` set to exactly `true`, which
+authorizes creating only those missing daily children in one guarded
+transaction — never drops, never other tables, never a parent that already has
+a DEFAULT child. `request_record_raw_payloads` is deliberately not managed
+here: it owns a DEFAULT child and moving its rows is out of scope.
 
 It never prints the URL or its password. The connection goes through the
 existing `psql` client with the credentials in `PG*` environment variables,
@@ -76,10 +79,22 @@ SCHEMA_SQL = (
 # stays read-only; any other non-`true` value fails closed.
 AUTO_CREATE_PARTITIONS_KEY = "PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS"
 
-# The only parent this guard ever creates children for. Daily UTC children are
-# named `<parent>_<YYYYMMDD>` with exact `[day 00:00+00, day+1 00:00+00)` bounds.
-PARTITION_PARENT = "request_records"
+# The managed parents, metadata first, then the product content family minus
+# `request_record_raw_payloads`. Raw payloads have a DEFAULT child and their
+# rows would need moving, so the guard never creates daily ranges for them.
+# Daily UTC children are named `<parent>_<YYYYMMDD>` with exact
+# `[day 00:00+00, day+1 00:00+00)` bounds.
+PARTITION_PARENTS = (
+    "request_records",
+    "request_record_content",
+    "request_record_block_refs",
+    "usage_prompt_blocks",
+    "request_record_assistant_artifacts",
+    "request_record_tool_calls",
+    "request_record_replay_snapshots",
+)
 PARTITION_SCHEMA = "public"
+DEFAULT_CHILD_BOUND = "DEFAULT"
 
 # Advisory-lock namespace for the backfill transaction: the first 8 bytes of
 # sha256("prompt-ferry/test-partition-guard/v1") as two signed int32s. The
@@ -199,8 +214,8 @@ def coverage_days(db_day: datetime.date) -> list[datetime.date]:
     return [db_day + datetime.timedelta(days=offset) for offset in (-1, 0, 1)]
 
 
-def partition_name(day: datetime.date) -> str:
-    return f"{PARTITION_PARENT}_{day.strftime('%Y%m%d')}"
+def partition_name(parent: str, day: datetime.date) -> str:
+    return f"{parent}_{day.strftime('%Y%m%d')}"
 
 
 def day_bounds(day: datetime.date) -> tuple[str, str]:
@@ -267,213 +282,272 @@ def fetch_db_utc_day(target: Target, connect_timeout: int) -> datetime.date:
 
 
 # The exact parent shape this guard understands: RANGE-partitioned on the
-# `created_at` timestamptz column. The read-only check and the under-lock
-# recheck both require all four facts, so a same-named daily layout on a
-# different key or strategy is refused instead of accepted or built upon.
+# `created_at` timestamptz column with no DEFAULT child. The read-only check
+# and the under-lock recheck both require every fact, so a same-named daily
+# layout on a different key or strategy is refused instead of accepted.
 EXPECTED_PARTITION_STRATEGY = "r"
 EXPECTED_PARTITION_KEY = "created_at"
 EXPECTED_PARTITION_KEY_TYPE = "timestamp with time zone"
 
 
 def expected_partkeydef() -> str:
-    """The canonical `pg_get_partkeydef` text for our parent, whitespace removed."""
+    """The canonical `pg_get_partkeydef` text for our parents, whitespace removed."""
     return re.sub(r"\s+", "", f"RANGE ({EXPECTED_PARTITION_KEY})")
 
 
-def require_partition_parent(target: Target, connect_timeout: int) -> None:
-    """Fails closed unless public.request_records is RANGE(created_at timestamptz)."""
-    raw = run_psql(target,
-                   "SELECT c.relkind, COALESCE(t.partstrat::text, ''), "
-                   "COALESCE(pg_get_partkeydef(c.oid), ''), "
-                   "COALESCE(format_type(a.atttypid, a.atttypmod), '') "
-                   "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
-                   "LEFT JOIN pg_partitioned_table t ON t.partrelid = c.oid "
-                   "LEFT JOIN pg_attribute a ON a.attrelid = c.oid "
-                   f"AND a.attname = '{EXPECTED_PARTITION_KEY}' AND NOT a.attisdropped "
-                   "WHERE n.nspname = 'public' AND c.relname = 'request_records' "
-                   "-- pg-partition-guard: parent",
-                   connect_timeout)
-    fields = [field.strip() for field in raw.strip().split("|")]
-    if len(fields) != 4:
-        raise PreflightError("the test database returned an unreadable partition parent")
-    relkind, strategy, keydef, keytype = fields
-    shape_ok = (
-        relkind == "p"
-        and strategy == EXPECTED_PARTITION_STRATEGY
-        and re.sub(r"\s+", "", keydef).lower() == expected_partkeydef().lower()
-        and keytype == EXPECTED_PARTITION_KEY_TYPE
+def require_partition_parents(target: Target, connect_timeout: int) -> None:
+    """Fails closed unless every managed parent is RANGE(created_at timestamptz).
+
+    A managed parent that unexpectedly owns a DEFAULT child is refused as well:
+    daily ranges cannot be created under it without moving rows, which this
+    guard must never do.
+    """
+    values = ", ".join(f"('{parent}')" for parent in PARTITION_PARENTS)
+    raw = run_psql(
+        target,
+        "SELECT v.name, COALESCE(c.relkind::text, ''), "
+        "COALESCE(t.partstrat::text, ''), COALESCE(pg_get_partkeydef(c.oid), ''), "
+        "COALESCE(format_type(a.atttypid, a.atttypmod), ''), "
+        "COALESCE((SELECT count(*) FROM pg_inherits i JOIN pg_class ch "
+        "ON ch.oid = i.inhrelid WHERE i.inhparent = c.oid "
+        f"AND pg_get_expr(ch.relpartbound, ch.oid) = '{DEFAULT_CHILD_BOUND}'), 0) "
+        f"FROM (VALUES {values}) AS v(name) "
+        "LEFT JOIN pg_class c ON c.relname = v.name "
+        f"AND c.relnamespace = '{PARTITION_SCHEMA}'::regnamespace "
+        "LEFT JOIN pg_partitioned_table t ON t.partrelid = c.oid "
+        f"LEFT JOIN pg_attribute a ON a.attrelid = c.oid "
+        f"AND a.attname = '{EXPECTED_PARTITION_KEY}' AND NOT a.attisdropped "
+        "ORDER BY v.name -- pg-partition-guard: parents",
+        connect_timeout,
     )
-    if not shape_ok:
-        raise PreflightError(f"public.request_records at {target.label()} is not the expected "
-                             f"RANGE({EXPECTED_PARTITION_KEY} {EXPECTED_PARTITION_KEY_TYPE}) "
-                             "parent; refusing to check coverage or create children under an "
-                             "unexpected shape")
-
-
-def fetch_children(target: Target, connect_timeout: int) -> dict[str, tuple[bool, str]]:
-    """Maps each `request_records_YYYYMMDD` relation to (attached, bound text)."""
-    raw = run_psql(target,
-                   "SELECT c.relname, EXISTS (SELECT i.inhrelid FROM pg_inherits i JOIN pg_class p "
-                   "ON p.oid = i.inhparent JOIN pg_namespace pn ON pn.oid = p.relnamespace "
-                   "WHERE i.inhrelid = c.oid AND pn.nspname = 'public' "
-                   f"AND p.relname = '{PARTITION_PARENT}'), "
-                   "COALESCE(pg_get_expr(c.relpartbound, c.oid), '') "
-                   "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
-                   "WHERE n.nspname = 'public' AND c.relname ~ '^request_records_[0-9]{8}$' "
-                   "ORDER BY c.relname -- pg-partition-guard: children",
-                   connect_timeout)
-    children: dict[str, tuple[bool, str]] = {}
+    seen: dict[str, tuple[str, str, str, str, int]] = {}
     for line in raw.splitlines():
         if not line.strip():
             continue
-        parts = line.split("|", 2)
-        if len(parts) != 3:
+        fields = [field.strip() for field in line.split("|")]
+        if len(fields) != 6:
+            raise PreflightError("the test database returned an unreadable partition parent")
+        name, relkind, strategy, keydef, keytype, default_children = fields
+        seen[name] = (relkind, strategy, keydef, keytype, int(default_children or 0))
+    missing = [parent for parent in PARTITION_PARENTS if parent not in seen]
+    if missing:
+        raise PreflightError(f"the test database at {target.label()} is missing partition "
+                             f"parents: {', '.join(missing)}. Apply the repository migrations "
+                             f"to {target.database} yourself; this preflight never migrates.")
+    for parent in PARTITION_PARENTS:
+        relkind, strategy, keydef, keytype, default_children = seen[parent]
+        shape_ok = (
+            relkind == "p"
+            and strategy == EXPECTED_PARTITION_STRATEGY
+            and re.sub(r"\s+", "", keydef).lower() == expected_partkeydef().lower()
+            and keytype == EXPECTED_PARTITION_KEY_TYPE
+        )
+        if not shape_ok:
+            raise PreflightError(
+                f"public.{parent} at {target.label()} is not the expected "
+                f"RANGE({EXPECTED_PARTITION_KEY} {EXPECTED_PARTITION_KEY_TYPE}) parent; "
+                "refusing to check coverage or create children under an unexpected shape")
+        if default_children:
+            raise PreflightError(
+                f"public.{parent} at {target.label()} already has a DEFAULT child; daily "
+                "ranges cannot be added without moving rows, which this preflight never does")
+
+
+def fetch_children(target: Target, connect_timeout: int) -> dict[str, dict[str, tuple[bool, str]]]:
+    """Maps each managed parent to its daily children: {child: (attached, bound)}."""
+    values = ", ".join(f"('{parent}')" for parent in PARTITION_PARENTS)
+    raw = run_psql(
+        target,
+        "SELECT p.relname, c.relname, (i.inhrelid IS NOT NULL), "
+        "COALESCE(pg_get_expr(c.relpartbound, c.oid), '') "
+        f"FROM (VALUES {values}) AS v(name) "
+        "JOIN pg_class p ON p.relname = v.name "
+        f"AND p.relnamespace = '{PARTITION_SCHEMA}'::regnamespace "
+        "JOIN pg_class c ON c.relnamespace = p.relnamespace "
+        "AND c.relname ~ ('^' || v.name || '_[0-9]{8}$') "
+        "LEFT JOIN pg_inherits i ON i.inhrelid = c.oid AND i.inhparent = p.oid "
+        "ORDER BY p.relname, c.relname -- pg-partition-guard: children",
+        connect_timeout,
+    )
+    children: dict[str, dict[str, tuple[bool, str]]] = {
+        parent: {} for parent in PARTITION_PARENTS
+    }
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("|", 3)
+        if len(parts) != 4:
             raise PreflightError("the test database returned an unreadable partition catalog")
-        name, attached, bound = parts[0].strip(), parts[1].strip(), parts[2].strip()
-        children[name] = (attached == "t", bound)
+        parent, name, attached, bound = (part.strip() for part in parts)
+        children.setdefault(parent, {})[name] = (attached == "t", bound)
     return children
 
 
-def check_coverage(children: dict[str, tuple[bool, str]],
-                   days: list[datetime.date]) -> tuple[list[datetime.date], list[str]]:
-    """Splits the wanted days into missing children and conflicting relations."""
-    missing: list[datetime.date] = []
+def check_coverage(children: dict[str, dict[str, tuple[bool, str]]],
+                   days: list[datetime.date]) -> tuple[list[tuple[str, datetime.date]], list[str]]:
+    """Splits the wanted parent+day pairs into missing children and conflicts."""
+    missing: list[tuple[str, datetime.date]] = []
     conflicts: list[str] = []
-    for day in days:
-        name = partition_name(day)
-        start, end = day_bounds(day)
-        want = canonical_bound(start, end)
-        entry = children.get(name)
-        if entry is None:
-            missing.append(day)
-            continue
-        attached, bound = entry
-        if not attached or re.sub(r"\s+", "", bound) != want:
-            conflicts.append(name)
+    for parent in PARTITION_PARENTS:
+        for day in days:
+            name = partition_name(parent, day)
+            start, end = day_bounds(day)
+            want = canonical_bound(start, end)
+            entry = children.get(parent, {}).get(name)
+            if entry is None:
+                missing.append((parent, day))
+                continue
+            attached, bound = entry
+            if not attached or re.sub(r"\s+", "", bound) != want:
+                conflicts.append(name)
     return missing, conflicts
 
 
-def build_backfill_script(days: list[datetime.date]) -> str:
+def build_backfill_script(missing: list[tuple[str, datetime.date]]) -> str:
     """One bounded transaction: lock, recheck, create only the missing, verify."""
-    blocks = []
-    for day in days:
-        name = partition_name(day)
-        start, end = day_bounds(day)
-        want = canonical_bound(start, end).replace("'", "''")
-        blocks.append(
-            f"  -- {day.isoformat()}\n"
-            f"  SELECT c.oid INTO child_oid FROM pg_class c "
-            f"JOIN pg_namespace n ON n.oid = c.relnamespace "
-            f"WHERE n.nspname = '{PARTITION_SCHEMA}' AND c.relname = '{name}';\n"
-            "  IF FOUND THEN\n"
-            "    IF NOT EXISTS (SELECT 1 FROM pg_inherits "
-            "WHERE inhrelid = child_oid AND inhparent = parent_oid) THEN\n"
-            f"      RAISE EXCEPTION 'conflicting relation % is not a partition of "
-            f"public.{PARTITION_PARENT}', '{name}';\n"
-            "    END IF;\n"
-            "    SELECT pg_get_expr(c.relpartbound, c.oid) INTO bound_text "
-            "FROM pg_class c WHERE c.oid = child_oid;\n"
-            f"    IF regexp_replace(bound_text, '\\s+', '', 'g') <> '{want}' THEN\n"
-            f"      RAISE EXCEPTION 'partition % has unexpected bounds', '{name}';\n"
-            "    END IF;\n"
-            "  ELSE\n"
-            "    EXECUTE format('CREATE TABLE %I PARTITION OF "
-            f"public.{PARTITION_PARENT} FOR VALUES FROM (%L) TO (%L)', "
-            f"'{name}', '{start}'::timestamptz, '{end}'::timestamptz);\n"
-            "  END IF;"
-        )
-    verify_parts = []
-    for day in days:
-        name = partition_name(day)
-        want = canonical_bound(*day_bounds(day)).replace("'", "''")
-        verify_parts.append(
-            f"  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n "
-            f"ON n.oid = c.relnamespace JOIN pg_inherits i ON i.inhrelid = c.oid "
-            f"AND i.inhparent = parent_oid WHERE n.nspname = '{PARTITION_SCHEMA}' "
-            f"AND c.relname = '{name}' AND "
-            f"regexp_replace(pg_get_expr(c.relpartbound, c.oid), '\\s+', '', 'g') = "
-            f"'{want}') THEN\n"
-            f"    RAISE EXCEPTION 'partition backfill verification failed for "
-            f"{name}';\n"
-            "  END IF;"
-        )
-    verify = "\n".join(verify_parts)
-    return (
-        "BEGIN;\n"
-        "SET LOCAL TIME ZONE 'UTC';\n"
-        "SET LOCAL lock_timeout = '5s';\n"
-        "SET LOCAL statement_timeout = '30s';\n"
-        f"SELECT pg_advisory_xact_lock({ADVISORY_LOCK_KEY_1}, {ADVISORY_LOCK_KEY_2});\n"
-        "DO $request_records_partition_guard$\n"
-        "DECLARE\n"
-        "  parent_oid oid;\n"
-        "  parent_strategy text;\n"
-        "  parent_keydef text;\n"
-        "  parent_keytype text;\n"
-        "  child_oid oid;\n"
-        "  bound_text text;\n"
-        "BEGIN\n"
-        f"  SELECT c.oid INTO parent_oid FROM pg_class c "
-        f"JOIN pg_namespace n ON n.oid = c.relnamespace "
-        f"WHERE n.nspname = '{PARTITION_SCHEMA}' AND c.relname = '{PARTITION_PARENT}' "
-        "AND c.relkind = 'p';\n"
-        "  IF NOT FOUND THEN\n"
-        f"    RAISE EXCEPTION 'public.{PARTITION_PARENT} is not a partitioned parent';\n"
-        "  END IF;\n"
-        "  SELECT t.partstrat::text INTO parent_strategy FROM pg_partitioned_table t "
-        "WHERE t.partrelid = parent_oid;\n"
-        f"  IF NOT FOUND OR parent_strategy <> '{EXPECTED_PARTITION_STRATEGY}' THEN\n"
-        f"    RAISE EXCEPTION 'public.{PARTITION_PARENT} is not RANGE-partitioned';\n"
-        "  END IF;\n"
-        "  SELECT pg_get_partkeydef(parent_oid) INTO parent_keydef;\n"
-        f"  IF lower(regexp_replace(parent_keydef, '\\s+', '', 'g')) <> "
-        f"'{expected_partkeydef().lower()}' THEN\n"
-        f"    RAISE EXCEPTION 'public.{PARTITION_PARENT} is not partitioned on "
-        f"{EXPECTED_PARTITION_KEY}';\n"
-        "  END IF;\n"
-        "  SELECT format_type(a.atttypid, a.atttypmod) INTO parent_keytype "
-        "FROM pg_attribute a WHERE a.attrelid = parent_oid "
-        f"AND a.attname = '{EXPECTED_PARTITION_KEY}' AND NOT a.attisdropped;\n"
-        f"  IF NOT FOUND OR parent_keytype <> '{EXPECTED_PARTITION_KEY_TYPE}' THEN\n"
-        f"    RAISE EXCEPTION 'public.{PARTITION_PARENT}.{EXPECTED_PARTITION_KEY} has "
-        "an unexpected type';\n"
-        "  END IF;\n"
-        + "\n".join(blocks) + "\n"
-        + verify + "\n"
-        "END $request_records_partition_guard$;\n"
-        "COMMIT;"
-    )
+    rows = []
+    for parent, day in missing:
+        name = partition_name(parent, day)
+        start_text, end_text = day_bounds(day)
+        rows.append(f"('{parent}', '{name}', '{start_text}', '{end_text}')")
+    values = ("SELECT * FROM (VALUES\n      " + ",\n      ".join(rows)
+              + "\n    ) AS v(parent_name, child_name, start_text, end_text)")
+    return "\n".join([
+        "BEGIN;",
+        "SET LOCAL TIME ZONE 'UTC';",
+        "SET LOCAL lock_timeout = '5s';",
+        "SET LOCAL statement_timeout = '60s';",
+        f"SELECT pg_advisory_xact_lock({ADVISORY_LOCK_KEY_1}, {ADVISORY_LOCK_KEY_2});",
+        "DO $request_records_partition_guard$",
+        "DECLARE",
+        "  entry record;",
+        "  parent_oid oid;",
+        "  parent_strategy text;",
+        "  parent_keydef text;",
+        "  parent_keytype text;",
+        "  default_children int;",
+        "  child_oid oid;",
+        "  bound_text text;",
+        "  want_bound text;",
+        "BEGIN",
+        "  FOR entry IN",
+        f"    {values}",
+        "  LOOP",
+        "    SELECT c.oid INTO parent_oid FROM pg_class c",
+        "    JOIN pg_namespace n ON n.oid = c.relnamespace",
+        f"    WHERE n.nspname = '{PARTITION_SCHEMA}'",
+        "      AND c.relname = entry.parent_name AND c.relkind = 'p';",
+        "    IF NOT FOUND THEN",
+        "      RAISE EXCEPTION 'public.% is not a partitioned parent', entry.parent_name;",
+        "    END IF;",
+        "    SELECT t.partstrat::text INTO parent_strategy FROM pg_partitioned_table t",
+        "    WHERE t.partrelid = parent_oid;",
+        f"    IF NOT FOUND OR parent_strategy <> '{EXPECTED_PARTITION_STRATEGY}' THEN",
+        "      RAISE EXCEPTION 'public.% is not RANGE-partitioned', entry.parent_name;",
+        "    END IF;",
+        "    SELECT pg_get_partkeydef(parent_oid) INTO parent_keydef;",
+        "    IF lower(regexp_replace(parent_keydef, '\\s+', '', 'g')) <>",
+        f"      '{expected_partkeydef().lower()}' THEN",
+        f"      RAISE EXCEPTION 'public.% is not partitioned on {EXPECTED_PARTITION_KEY}',",
+        "        entry.parent_name;",
+        "    END IF;",
+        "    SELECT format_type(a.atttypid, a.atttypmod) INTO parent_keytype",
+        "    FROM pg_attribute a WHERE a.attrelid = parent_oid",
+        f"      AND a.attname = '{EXPECTED_PARTITION_KEY}' AND NOT a.attisdropped;",
+        f"    IF NOT FOUND OR parent_keytype <> '{EXPECTED_PARTITION_KEY_TYPE}' THEN",
+        "      RAISE EXCEPTION 'public.% has an unexpected partition key type',",
+        "        entry.parent_name;",
+        "    END IF;",
+        "    SELECT count(*) INTO default_children FROM pg_inherits i",
+        "    JOIN pg_class ch ON ch.oid = i.inhrelid WHERE i.inhparent = parent_oid",
+        f"      AND pg_get_expr(ch.relpartbound, ch.oid) = '{DEFAULT_CHILD_BOUND}';",
+        "    IF default_children > 0 THEN",
+        "      RAISE EXCEPTION 'public.% has a DEFAULT child; refusing to create daily ranges',",
+        "        entry.parent_name;",
+        "    END IF;",
+        "    SELECT c.oid INTO child_oid FROM pg_class c",
+        "    JOIN pg_namespace n ON n.oid = c.relnamespace",
+        f"    WHERE n.nspname = '{PARTITION_SCHEMA}'",
+        "      AND c.relname = entry.child_name;",
+        "    IF FOUND THEN",
+        "      IF NOT EXISTS (SELECT 1 FROM pg_inherits",
+        "        WHERE inhrelid = child_oid AND inhparent = parent_oid) THEN",
+        "        RAISE EXCEPTION 'conflicting relation % is not a partition of public.%',",
+        "          entry.child_name, entry.parent_name;",
+        "      END IF;",
+        "      SELECT pg_get_expr(c.relpartbound, c.oid) INTO bound_text",
+        "      FROM pg_class c WHERE c.oid = child_oid;",
+        "      SELECT format('FOR VALUES FROM (%L) TO (%L)',",
+        "        entry.start_text::timestamptz, entry.end_text::timestamptz)",
+        "      INTO want_bound;",
+        "      IF regexp_replace(bound_text, '\\s+', '', 'g') <>",
+        "        regexp_replace(want_bound, '\\s+', '', 'g') THEN",
+        "        RAISE EXCEPTION 'partition % has unexpected bounds', entry.child_name;",
+        "      END IF;",
+        "    ELSE",
+        "      EXECUTE format('CREATE TABLE %I PARTITION OF public.%I",
+        "        FOR VALUES FROM (%L) TO (%L)',",
+        "        entry.child_name, entry.parent_name,",
+        "        entry.start_text::timestamptz, entry.end_text::timestamptz);",
+        "    END IF;",
+        "  END LOOP;",
+        "  FOR entry IN",
+        f"    {values}",
+        "  LOOP",
+        "    SELECT format('FOR VALUES FROM (%L) TO (%L)',",
+        "      entry.start_text::timestamptz, entry.end_text::timestamptz)",
+        "    INTO want_bound;",
+        "    IF NOT EXISTS (SELECT 1 FROM pg_class c",
+        "      JOIN pg_namespace n ON n.oid = c.relnamespace",
+        "      JOIN pg_inherits i ON i.inhrelid = c.oid",
+        "      JOIN pg_class p ON p.oid = i.inhparent",
+        f"      WHERE n.nspname = '{PARTITION_SCHEMA}'",
+        "        AND c.relname = entry.child_name",
+        "        AND p.relname = entry.parent_name",
+        "        AND regexp_replace(pg_get_expr(c.relpartbound, c.oid), '\\s+', '', 'g') =",
+        "          regexp_replace(want_bound, '\\s+', '', 'g')) THEN",
+        "      RAISE EXCEPTION 'partition backfill verification failed for %',",
+        "        entry.child_name;",
+        "    END IF;",
+        "  END LOOP;",
+        "END $request_records_partition_guard$;",
+        "COMMIT;",
+    ]) + "\n"
 
 
 def require_partition_coverage(target: Target, connect_timeout: int) -> None:
-    """Ensures UTC yesterday/today/tomorrow children exist, or creates them opt-in."""
+    """Ensures every managed parent covers UTC yesterday/today/tomorrow."""
     auto_create = parse_auto_create_flag(os.environ.get(AUTO_CREATE_PARTITIONS_KEY))
     db_day = fetch_db_utc_day(target, connect_timeout)
     days = coverage_days(db_day)
-    require_partition_parent(target, connect_timeout)
+    require_partition_parents(target, connect_timeout)
     missing, conflicts = check_coverage(fetch_children(target, connect_timeout), days)
     if conflicts:
-        raise PreflightError(f"unexpected relations block the test partitions at {target.label()}: "
-                             f"{', '.join(conflicts)}. Rename or remove them yourself; this "
-                             "preflight never drops or recreates partitions")
+        raise PreflightError(f"unexpected relations block the test partitions at "
+                             f"{target.label()}: {', '.join(conflicts)}. Rename or remove them "
+                             "yourself; this preflight never drops or recreates partitions")
+    span = f"{days[0].isoformat()}..{days[-1].isoformat()}"
     if not missing:
-        span = f"{days[0].isoformat()}..{days[-1].isoformat()}"
-        print(f"request_records partitions cover UTC {span}")
+        print(f"request-record partitions cover UTC {span} for "
+              f"{len(PARTITION_PARENTS)} managed parents")
         return
-    wanted = ", ".join(day.isoformat() for day in missing)
+    wanted = ", ".join(partition_name(parent, day) for parent, day in missing)
+    wanted_days = ", ".join(sorted({day.isoformat() for _, day in missing}))
     if not auto_create:
-        raise PreflightError(f"the test database at {target.label()} is missing request_records "
-                             f"partitions for UTC dates: {wanted}. Rerun with "
-                             f"{AUTO_CREATE_PARTITIONS_KEY}=true to create exactly those bounded "
-                             "daily children, then rerun the suite")
-    run_psql_script(target, build_backfill_script(missing), timeout=90)
-    missing_after, conflicts_after = check_coverage(fetch_children(target, connect_timeout), days)
+        raise PreflightError(
+            f"the test database at {target.label()} is missing request-record partitions for "
+            f"UTC dates: {wanted_days} ({wanted}). Rerun with "
+            f"{AUTO_CREATE_PARTITIONS_KEY}=true to create exactly those bounded daily "
+            "children, then rerun the suite")
+    run_psql_script(target, build_backfill_script(missing), timeout=120)
+    missing_after, conflicts_after = check_coverage(
+        fetch_children(target, connect_timeout), days)
     if conflicts_after or missing_after:
-        left = ", ".join(day.isoformat() for day in missing_after) or ", ".join(conflicts_after)
+        left = ", ".join(partition_name(parent, day) for parent, day in missing_after) or \
+            ", ".join(conflicts_after)
         raise PreflightError(f"the partition backfill did not converge at {target.label()}; "
                              f"still unresolved: {left}")
-    created = ", ".join(partition_name(day) for day in missing)
-    print(f"request_records partitions created for UTC {wanted}: {created}")
+    print(f"request-record partitions created for UTC {span}: {wanted}")
 
 
 def main() -> int:

@@ -268,11 +268,12 @@ test_missing_s3_parser_module_fails_closed() {
   assert_not_run 'nothing runs without the S3 parser' 'cargo test'
 }
 
-# --- request_records partition coverage ---------------------------------------
-# The stub reports the fixed UTC day 2026-10-14. `missing_tomorrow` withholds
-# the last child until the guarded backfill script runs, so the default
-# read-only refusal and the bounded opt-in creation are observable with no
-# real database.
+# --- request-record partition coverage ----------------------------------------
+# The stub reports the fixed UTC day 2026-10-14 and the seven managed parents.
+# `missing_tomorrow` withholds every parent's last child until the guarded
+# backfill script runs, so the default read-only refusal and the bounded opt-in
+# creation are observable with no real database. `parent_default` reports a
+# DEFAULT child on a managed parent, which must fail closed even with the flag.
 
 test_missing_partition_coverage_fails_before_cargo() {
   fresh
@@ -280,11 +281,22 @@ test_missing_partition_coverage_fails_before_cargo() {
   set_psql_mode missing_tomorrow
   run_tests
   assert_nonzero 'missing coverage fails' "$STATUS"
+  assert_has 'the failure names a content-family child' "$OUT" 'request_record_content_20261015'
   assert_has 'the failure names the missing UTC date' "$OUT" '2026-10-15'
   assert_has 'the failure names the opt-in flag' "$OUT" 'PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS'
   assert_not_run 'nothing runs without coverage' 'cargo test'
   assert_absent 'no DDL runs without the opt-in' \
-    "$(cat "$CAPTURE/calls")" 'PARTITION OF public.request_records'
+    "$(cat "$CAPTURE/calls")" 'PARTITION OF public.'
+
+  # Same sandbox, second scenario: a managed parent with a DEFAULT child.
+  set_psql_mode parent_default
+  AMBIENT='PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS=true'
+  run_tests
+  assert_nonzero 'a DEFAULT child fails closed' "$STATUS"
+  assert_has 'the failure names the DEFAULT child' "$OUT" 'DEFAULT child'
+  assert_not_run 'nothing runs under a DEFAULT child' 'cargo test'
+  assert_absent 'no DDL runs under a DEFAULT child' \
+    "$(cat "$CAPTURE/calls")" 'PARTITION OF public.'
 }
 
 test_partition_opt_in_creates_only_the_missing_child() {
@@ -294,11 +306,15 @@ test_partition_opt_in_creates_only_the_missing_child() {
   AMBIENT='PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS=true'
   run_tests
   assert_status 'the opt-in run succeeds' 0 "$STATUS"
-  assert_ran_once 'exactly one bounded child is created' 'PARTITION OF public.request_records'
-  assert_has 'the missing child is created' "$(cat "$CAPTURE/calls")" 'request_records_20261015'
+  assert_ran_once 'one bounded script is created' 'PARTITION OF public.'
+  assert_ran_once 'one bounded transaction' 'BEGIN;'
+  assert_has 'the missing metadata child is created' "$(cat "$CAPTURE/calls")" 'request_records_20261015'
+  assert_has 'the missing content child is created' "$(cat "$CAPTURE/calls")" 'request_record_content_20261015'
   assert_absent 'no already-covered child is recreated' \
     "$(cat "$CAPTURE/calls")" 'request_records_20261013'
   assert_absent 'no partition is dropped' "$(cat "$CAPTURE/calls")" 'DROP'
+  assert_absent 'raw payload ranges are never created' \
+    "$(cat "$CAPTURE/calls")" 'request_record_raw_payloads'
   assert_ran 'cargo runs after the backfill' 'cargo test'
 }
 

@@ -20,6 +20,7 @@ use super::{
         required_params, with_meta,
     },
 };
+use crate::mcp::McpCatalogService;
 use crate::mcp::output_schema::normalize_tools_list_result;
 use crate::mcp::targeting::{
     PrefixedTarget, parse_prefixed_name, parse_resource_target, parse_resource_template_target,
@@ -352,11 +353,21 @@ impl ProxyService {
         field: &str,
     ) -> Result<Value, ErrorData> {
         let server = self.load_server(scope).await?;
-        let snapshot = scope
-            .cache
-            .get(&server)
+        // The named catalog is acquired through the coordinated service, so a
+        // cold or old catalog is recovered instead of reported as missing.
+        let snapshot = McpCatalogService::from_storage(&scope.storage, &scope.cache)
+            .acquire(&server)
             .await
-            .ok_or_else(|| ErrorData::internal_error("mcp catalog is not ready", None))?;
+            .map_err(|err| {
+                tracing::warn!(
+                    category = "mcp_catalog_cache",
+                    server_name = %server.name,
+                    error = %err,
+                    "MCP catalog is not ready for the named server"
+                );
+                ErrorData::internal_error("mcp catalog is not ready", None)
+            })?
+            .snapshot;
         let items = match field {
             "tools" => snapshot
                 .tools
@@ -683,7 +694,7 @@ mod tests {
         assert_eq!(tool["outputSchema"]["oneOf"].as_array().unwrap().len(), 2);
 
         // The catalog snapshot keeps the raw upstream schema for admin/diagnostics.
-        let cached = cache.get(&server).await.expect("cached snapshot");
+        let cached = cache.raw_snapshot(&server).await.expect("cached snapshot");
         assert!(cached.tools[0]["outputSchema"].get("type").is_none());
         assert_eq!(
             cached.tools[0]["outputSchema"]["oneOf"]

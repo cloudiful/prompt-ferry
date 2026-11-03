@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use crate::db::McpServer;
 
-use super::ServerCatalogSnapshot;
+use crate::mcp::ServerCatalogSnapshot;
 use crate::mcp::transport;
 
 pub async fn fetch_server_snapshot(
