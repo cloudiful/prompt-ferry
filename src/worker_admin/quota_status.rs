@@ -252,6 +252,51 @@ fn provider_state(
     }
 }
 
+/// Whether a freshly fetched key genuinely restores usable default-text
+/// capacity. `ok` alone is not enough: the provider-specific signal must be
+/// currently Available under the existing reset and freshness rules, so an
+/// exhausted, unknown or reset-passed key keeps its cooldown.
+pub(crate) fn restored_available(
+    provider: EndpointProvider,
+    key: &TokenPlanKeyUsage,
+    now: DateTime<Utc>,
+) -> bool {
+    if !key.ok {
+        return false;
+    }
+    match provider {
+        EndpointProvider::OpenAi => subscription_windows_available(key, now),
+        _ => provider_state(provider, key, now) == TokenPlanQuotaState::Available,
+    }
+}
+
+/// A fresh, error-free ChatGPT observation whose windows are actually
+/// available. A stale, failed, unknown or reset-passed window never restores a
+/// key on its own.
+pub(crate) fn subscription_windows_available(key: &TokenPlanKeyUsage, now: DateTime<Utc>) -> bool {
+    let Some(observation) = subscription_observation(key) else {
+        return false;
+    };
+    let Some(observed_at) = observation.observed_at else {
+        return false;
+    };
+    if observation.stale
+        || observation.last_error_code.is_some()
+        || now < observed_at
+        || now.signed_duration_since(observed_at) > SUBSCRIPTION_FRESHNESS
+    {
+        return false;
+    }
+    let windows = key
+        .model_remains
+        .iter()
+        .filter_map(|model| model.windows.as_deref())
+        .flatten()
+        .collect::<Vec<_>>();
+    quota_reset::subscription_windows_state(&windows, observed_at, now)
+        == TokenPlanQuotaState::Available
+}
+
 fn window_state(windows: impl Iterator<Item = (Option<f64>, ResetState)>) -> TokenPlanQuotaState {
     let windows = windows.collect::<Vec<_>>();
     if windows.is_empty() {

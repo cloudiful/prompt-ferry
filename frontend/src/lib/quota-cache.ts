@@ -356,6 +356,48 @@ export async function prefetchTokenPlanUsage(
   return (await requestTokenPlanUsage(endpointId)).usage
 }
 
+export type TokenPlanUsageRefreshOutcome = {
+  endpointId: string
+  requested: boolean
+  failed: boolean
+  cause: unknown
+}
+
+export async function refreshTokenPlanUsageBatch(
+  endpointIds: Iterable<string>,
+  concurrency = 4,
+  isEligible: (endpointId: string) => boolean = () => true,
+): Promise<TokenPlanUsageRefreshOutcome[]> {
+  const ids = Array.from(new Set(endpointIds)).filter(Boolean)
+  if (ids.length === 0) return []
+  const outcomes = new Map<string, TokenPlanUsageRefreshOutcome>()
+  const limit = Math.max(1, concurrency)
+  let index = 0
+  const workers = Array.from({ length: limit }, async () => {
+    while (index < ids.length) {
+      const endpointId = ids[index++]
+      if (endpointId === undefined) break
+      if (!isEligible(endpointId)) continue
+      const request = await requestTokenPlanUsageWithPolicy(
+        endpointId,
+        { refresh: true },
+        true,
+      )
+      outcomes.set(endpointId, {
+        endpointId,
+        requested: request.requested,
+        failed: request.failed,
+        cause: request.cause,
+      })
+    }
+  })
+  await Promise.all(workers)
+  return ids.flatMap((endpointId) => {
+    const outcome = outcomes.get(endpointId)
+    return outcome ? [outcome] : []
+  })
+}
+
 export async function prefetchTokenPlanBatch(
   endpointIds: Iterable<string>,
   concurrency = 4,

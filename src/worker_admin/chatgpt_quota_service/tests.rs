@@ -10,6 +10,7 @@ use super::{ChatGptQuotaError, ChatGptQuotaFetcher};
 
 mod concurrency;
 mod failure;
+mod manual_feedback;
 mod manual_waiting_diagnostics;
 mod manual_waiting_failure;
 mod policy;
@@ -65,12 +66,24 @@ impl FakeFetcher {
     }
 
     pub(crate) fn gated(quota: ChatgptQuota) -> (Self, Arc<Notify>, Arc<FetchRelease>) {
+        Self::gated_result(Ok(quota))
+    }
+
+    pub(crate) fn gated_failure(
+        error: ChatGptQuotaError,
+    ) -> (Self, Arc<Notify>, Arc<FetchRelease>) {
+        Self::gated_result(Err(error))
+    }
+
+    fn gated_result(
+        result: Result<ChatgptQuota, ChatGptQuotaError>,
+    ) -> (Self, Arc<Notify>, Arc<FetchRelease>) {
         let started = Arc::new(Notify::new());
         let release = Arc::new(FetchRelease {
             opened: std::sync::atomic::AtomicBool::new(false),
             notify: Notify::new(),
         });
-        let mut fetcher = Self::success(quota);
+        let mut fetcher = Self::new(result);
         fetcher.started = Some(started.clone());
         fetcher.release = Some(release.clone());
         (fetcher, started, release)

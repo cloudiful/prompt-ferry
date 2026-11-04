@@ -20,6 +20,7 @@ export const ENDPOINT_KEY_PREFIX = 'endpoint'
 export const MODEL_ROUTE_KEY_PREFIX = 'modelroute'
 export const NETWORK_TEST_KEY_PREFIX = 'networktest'
 export const MODEL_ROUTE_CACHE_NAMESPACE = 'model-routes-page'
+export const ENDPOINTS_REFRESH_KEY = 'endpoints:refresh'
 
 export type EndpointActionKeyDomain = 'endpoint' | 'modelroute'
 

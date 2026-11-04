@@ -1,6 +1,7 @@
 use super::*;
 use crate::db;
 use crate::db::QuotaObservationSource;
+use crate::worker_admin::{quota_feedback::QuotaFeedbackScope, quota_status};
 use chrono::Utc;
 use std::future::Future;
 
@@ -103,7 +104,9 @@ impl TokenPlanQuotaCache {
         F: FnOnce() -> Fut,
         Fut: Future<Output = anyhow::Result<Option<TokenPlanUsageResponse>>>,
     {
+        let clear_restored = force && matches!(source, QuotaObservationSource::Manual);
         self.refresh_with(endpoint_id, force, Instant::now(), || async {
+            let attempt_start = Instant::now();
             match fetch().await {
                 Ok(Some(mut response)) => {
                     let observed_at = Utc::now();
@@ -111,6 +114,9 @@ impl TokenPlanQuotaCache {
                         response.provider,
                         &mut response,
                     );
+                    if clear_restored {
+                        self.clear_restored_feedback(endpoint_id, &response, attempt_start);
+                    }
                     crate::worker_admin::quota_observation_service::persist_response(
                         pool,
                         endpoint_id,
@@ -149,6 +155,30 @@ impl TokenPlanQuotaCache {
             }
         })
         .await
+    }
+
+    /// A confirmed manual force refresh only clears the cooldown of keys that
+    /// are actually Available again. Concurrent failures recorded after
+    /// `attempt_start` stay newer, so they survive this success.
+    pub(super) fn clear_restored_feedback(
+        &self,
+        endpoint_id: Uuid,
+        response: &TokenPlanUsageResponse,
+        attempt_start: Instant,
+    ) {
+        let now = Utc::now();
+        let completed_at = Instant::now();
+        for key in &response.keys {
+            if !quota_status::restored_available(response.provider, key, now) {
+                continue;
+            }
+            let key_id = (response.provider != db::EndpointProvider::OpenAi).then_some(key.key_id);
+            self.feedback.record_success(
+                QuotaFeedbackScope::new(endpoint_id, key_id),
+                attempt_start,
+                completed_at,
+            );
+        }
     }
 
     pub(crate) fn refresh_in_background(&self, pool: PgPool, endpoint_id: Uuid) {

@@ -471,9 +471,10 @@ pub(super) async fn build_admin_state(
     .with_user_store(user_store)
     .with_cache_alert(cache_alert);
     let quota_service = Arc::new(
-        worker_admin::chatgpt_quota_service::ChatGptQuotaService::new(
+        worker_admin::chatgpt_quota_service::ChatGptQuotaService::new_with_feedback(
             state.pool.clone(),
             state.config_repository.clone(),
+            state.token_plan_quota.feedback.clone(),
         ),
     );
     let state = state.with_chatgpt_quota_service(quota_service);

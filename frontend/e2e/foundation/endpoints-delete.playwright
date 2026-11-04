@@ -36,14 +36,22 @@ async page => {
   const probeResponse = waitForResponse('POST', `/api/v1/admin/endpoints/${createdId}/test`, 200)
   await row.getByRole('button', { name: 'Test', exact: true }).click()
   await probeResponse
-  const probeResult = row.locator('button[aria-label*="fixture upstream accepted the probe"]')
-  await probeResult.waitFor({ state: 'visible' })
-  const probeAccessibleName = await probeResult.getAttribute('aria-label')
-  assert(probeAccessibleName.includes('HTTP 200'), 'probe response was not exposed through its accessible result')
+  const probePopover = page
+    .locator('[data-slot="popover-content"]')
+    .filter({ hasText: 'fixture upstream accepted the probe' })
+    .first()
+  await probePopover.waitFor({ state: 'visible' })
+  const probePopoverText = await probePopover.innerText()
+  assert(
+    probePopoverText.includes('HTTP 200') && probePopoverText.includes('fixture upstream accepted the probe'),
+    `probe response was not exposed through its result popover: ${probePopoverText}`,
+  )
+  await page.keyboard.press('Escape')
+  await probePopover.waitFor({ state: 'hidden' })
   const onResponse = waitForResponse('PATCH', `/api/v1/admin/endpoints/${createdId}`, 200)
   await toggle.click()
   await onResponse
-  report.checks.toggleAndIndependentProbe = { toggledOff: true, probePath: `/api/v1/admin/endpoints/${createdId}/test`, probeResultRendered: true, accessibleName: probeAccessibleName, restored: true }
+  report.checks.toggleAndIndependentProbe = { toggledOff: true, probePath: `/api/v1/admin/endpoints/${createdId}/test`, probeResultRendered: true, popoverText: probePopoverText, restored: true }
   await page.evaluate(() => console.log('delete-slice-before-confirm'))
 
   await page.evaluate(() => { window.confirm = () => false })

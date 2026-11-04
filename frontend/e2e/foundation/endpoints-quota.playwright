@@ -450,6 +450,59 @@ async page => {
   await capture('endpoints-subscription-history-en-light-1440')
   await dialog.getByRole('button', { name: 'Close', exact: true }).click()
 
+  // Manual header Refresh forces fresh quota for the current page; the
+  // restored upstream value then renders in the shared cache and detail view.
+  const beforeRefreshCalls = (
+    await fixture('/__fixtures/log?limit=500')
+  ).requests.filter(
+    (request) =>
+      request.method === 'GET' && request.path === minimaxQuotaPath,
+  ).length
+  await fixture('/__fixtures/quota', 'POST', { restored: true })
+  const forcedQuota = waitForResponse(
+    'GET',
+    minimaxQuotaPath,
+    200,
+    (url) => url.searchParams.get('force') === 'true',
+  )
+  await page
+    .getByRole('button', { name: 'Refresh', exact: true })
+    .click()
+  await forcedQuota
+  await page.waitForTimeout(200)
+  const forcedQuery = (
+    await fixture('/__fixtures/log?limit=500')
+  ).requests.findLast(
+    (request) =>
+      request.method === 'GET' && request.path === minimaxQuotaPath,
+  )?.query
+  dialog = await openQuota('ep-minimax-cn')
+  const restoredWindowText = await dialog
+    .locator('[data-quota-row="minimax:primary"]')
+    .innerText()
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+  const afterRefreshCalls = (
+    await fixture('/__fixtures/log?limit=500')
+  ).requests.filter(
+    (request) =>
+      request.method === 'GET' && request.path === minimaxQuotaPath,
+  ).length
+  assert(
+    forcedQuery?.force === 'true' &&
+      restoredWindowText.includes('0.00 / 100.00') &&
+      !restoredWindowText.includes('38.00 / 100.00'),
+    `manual refresh did not restore the quota: query=${JSON.stringify(forcedQuery)} row=${restoredWindowText}`,
+  )
+  assert(
+    afterRefreshCalls === beforeRefreshCalls + 1,
+    `opening the refreshed dialog issued another quota request: before=${beforeRefreshCalls} after=${afterRefreshCalls}`,
+  )
+  report.checks.manualQuotaRefresh = {
+    query: forcedQuery,
+    restoredWindowText,
+    extraRequests: afterRefreshCalls - beforeRefreshCalls,
+  }
+
   report.checks.consoleErrors = consoleErrors
   report.checks.pageErrors = pageErrors
   assert(

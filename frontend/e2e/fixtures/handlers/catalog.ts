@@ -412,6 +412,17 @@ export async function handleCatalog(
 
   const tokenPlanId = ENDPOINT_TOKEN_PLAN.exec(pathname)?.[1]
   if (tokenPlanId && method === 'GET') {
+    if (
+      queryString(ctx.url, 'force') === 'true' &&
+      ctx.state.quotaRestored === true
+    ) {
+      ctx.state.quotaRestoredApplied = true
+    }
+    const restored = ctx.state.quotaRestoredApplied === true
+    const remaining = restored ? 100 : 62
+    const used = 100 - remaining
+    const weeklyRemaining = restored ? 100 : 81
+    const weeklyUsed = 100 - weeklyRemaining
     return ok({
       keys: [
         {
@@ -421,10 +432,10 @@ export async function handleCatalog(
           error_message: null,
           five_hour: {
             cap: 100,
-            remaining_percent: 62,
+            remaining_percent: remaining,
             reset_at: '2026-10-23T17:00:00.000Z',
-            used: 38,
-            used_percent: 38,
+            used,
+            used_percent: used,
           },
           glm_five_hour: null,
           glm_weekly: null,
@@ -434,11 +445,11 @@ export async function handleCatalog(
             {
               interval: {
                 end_at: '2026-10-23T17:00:00.000Z',
-                remaining_percent: 62,
+                remaining_percent: remaining,
                 start_at: '2026-10-23T12:00:00.000Z',
                 status: 1,
                 total_count: 100,
-                usage_count: 38,
+                usage_count: used,
               },
               model_name: 'minimax-m2',
               observation: {
@@ -457,11 +468,11 @@ export async function handleCatalog(
               windows: [
                 {
                   availability: 'known',
-                  remaining_percent: 62,
+                  remaining_percent: remaining,
                   reset_after_seconds: 18000,
                   reset_at: '2026-10-23T17:00:00.000Z',
                   source_window: 'primary',
-                  used_percent: 38,
+                  used_percent: used,
                   window_seconds: 18000,
                 },
                 {
@@ -492,13 +503,13 @@ export async function handleCatalog(
           quota_windows: [
             {
               availability: 'known',
-              current: 38,
+              current: used,
               duration_seconds: 18000,
               is_default_scope: true,
               kind: 'five_hour',
               limit: 100,
-              remaining: 62,
-              remaining_percent: 62,
+              remaining,
+              remaining_percent: remaining,
               reset_at: '2026-10-23T17:00:00.000Z',
               source_id: 'minimax:primary',
               source_model: 'minimax-m2',
@@ -522,10 +533,10 @@ export async function handleCatalog(
           status: 200,
           weekly: {
             cap: 700,
-            remaining_percent: 81,
+            remaining_percent: weeklyRemaining,
             reset_at: '2026-10-27T00:00:00.000Z',
-            used: 133,
-            used_percent: 19,
+            used: weeklyUsed,
+            used_percent: weeklyUsed,
           },
         },
       ],

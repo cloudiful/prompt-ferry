@@ -6,10 +6,14 @@ use uuid::Uuid;
 
 use crate::{
     db::{
-        ChatgptQuotaSnapshotCreate, ChatgptQuotaSnapshotSource, QuotaObservationSource,
-        quota_snapshots,
+        ChatgptQuotaRefreshState, ChatgptQuotaSnapshot, ChatgptQuotaSnapshotCreate,
+        ChatgptQuotaSnapshotSource, QuotaObservationSource, quota_snapshots,
     },
-    worker_admin::{chatgpt_quota_normalize, quota_observation_service},
+    worker_admin::{
+        chatgpt_quota_normalize, quota_feedback::QuotaFeedbackScope, quota_observation_service,
+        quota_reset,
+    },
+    worker_admin_types::{SubscriptionWindowUsage, TokenPlanQuotaState},
 };
 
 use super::{
@@ -138,6 +142,7 @@ impl ChatGptQuotaService {
             .as_ref()
             .map(|state| state.consecutive_failures)
             .unwrap_or_default();
+        let attempt_start = std::time::Instant::now();
         let fetched = timeout(
             FETCH_TIMEOUT,
             self.inner
@@ -185,7 +190,19 @@ impl ChatGptQuotaService {
                         )
                         .await;
                         match self.load(endpoint_id).await {
-                            Ok((snapshot, state)) => completion(snapshot, state, None),
+                            Ok((snapshot, state)) => {
+                                if trigger.is_manual() {
+                                    self.recover_manual_feedback(
+                                        endpoint_id,
+                                        attempt_start,
+                                        observed_at,
+                                        trigger.source(),
+                                        snapshot.as_ref(),
+                                        state.as_ref(),
+                                    );
+                                }
+                                completion(snapshot, state, None)
+                            }
                             Err(error) => completion(None, None, Some(error)),
                         }
                     }
@@ -211,6 +228,55 @@ impl ChatGptQuotaService {
             }
         };
         RefreshAttempt::Completed(completed)
+    }
+
+    /// A manual force success only clears the endpoint-level cooldown when the
+    /// fresh observation is non-stale, error-free and reports Available windows.
+    /// A concurrent failure recorded after `attempt_start` stays newer and is kept.
+    fn recover_manual_feedback(
+        &self,
+        endpoint_id: Uuid,
+        attempt_start: std::time::Instant,
+        observed_at: DateTime<Utc>,
+        source: ChatgptQuotaSnapshotSource,
+        snapshot: Option<&ChatgptQuotaSnapshot>,
+        state: Option<&ChatgptQuotaRefreshState>,
+    ) {
+        let Some(feedback) = self.inner.feedback.as_ref() else {
+            return;
+        };
+        let Some(snapshot) = snapshot else {
+            return;
+        };
+        let now = Utc::now();
+        if snapshot.source != source
+            || snapshot.observed_at.timestamp_micros() != observed_at.timestamp_micros()
+            || stale(snapshot.observed_at, now)
+        {
+            return;
+        }
+        if state
+            .and_then(|state| state.last_error_code.as_ref())
+            .is_some()
+        {
+            return;
+        }
+        let Ok(windows) =
+            serde_json::from_value::<Vec<SubscriptionWindowUsage>>(snapshot.windows.clone())
+        else {
+            return;
+        };
+        let windows = windows.iter().collect::<Vec<_>>();
+        if quota_reset::subscription_windows_state(&windows, snapshot.observed_at, now)
+            != TokenPlanQuotaState::Available
+        {
+            return;
+        }
+        feedback.record_success(
+            QuotaFeedbackScope::new(endpoint_id, None),
+            attempt_start,
+            std::time::Instant::now(),
+        );
     }
 
     async fn mirror_quota_observation(

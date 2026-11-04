@@ -11,6 +11,7 @@ use tokio::sync::{Mutex, Semaphore, mpsc};
 use uuid::Uuid;
 
 use crate::db::{self, ChatgptQuotaRefreshState, ChatgptQuotaSnapshot, ConfigRepository};
+use crate::worker_admin::quota_feedback::QuotaFeedbackStore;
 
 mod fetch;
 mod policy;
@@ -111,6 +112,7 @@ pub(super) struct ServiceInner {
     pub fetcher: Arc<dyn ChatGptQuotaFetcher>,
     pub endpoint_locks: Mutex<HashMap<Uuid, Weak<Mutex<()>>>>,
     pub quota_slots: Arc<Semaphore>,
+    pub feedback: Option<QuotaFeedbackStore>,
     request_wake_tx: mpsc::Sender<RequestWake>,
     request_wake_rx: StdMutex<Option<mpsc::Receiver<RequestWake>>>,
     last_request_wake: StdMutex<HashMap<Uuid, Instant>>,
@@ -122,10 +124,41 @@ impl ChatGptQuotaService {
         Self::with_fetcher(pool, repository, Arc::new(StoredOAuthQuotaFetcher))
     }
 
+    pub(crate) fn new_with_feedback(
+        pool: PgPool,
+        repository: ConfigRepository,
+        feedback: QuotaFeedbackStore,
+    ) -> Self {
+        Self::with_fetcher_and_feedback(
+            pool,
+            repository,
+            Arc::new(StoredOAuthQuotaFetcher),
+            feedback,
+        )
+    }
+
     pub(crate) fn with_fetcher(
         pool: PgPool,
         repository: ConfigRepository,
         fetcher: Arc<dyn ChatGptQuotaFetcher>,
+    ) -> Self {
+        Self::build(pool, repository, fetcher, None)
+    }
+
+    pub(crate) fn with_fetcher_and_feedback(
+        pool: PgPool,
+        repository: ConfigRepository,
+        fetcher: Arc<dyn ChatGptQuotaFetcher>,
+        feedback: QuotaFeedbackStore,
+    ) -> Self {
+        Self::build(pool, repository, fetcher, Some(feedback))
+    }
+
+    fn build(
+        pool: PgPool,
+        repository: ConfigRepository,
+        fetcher: Arc<dyn ChatGptQuotaFetcher>,
+        feedback: Option<QuotaFeedbackStore>,
     ) -> Self {
         let (request_wake_tx, request_wake_rx) = mpsc::channel(REQUEST_WAKE_QUEUE_CAPACITY);
         Self {
@@ -135,6 +168,7 @@ impl ChatGptQuotaService {
                 fetcher,
                 endpoint_locks: Mutex::new(HashMap::new()),
                 quota_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_QUOTA_READS)),
+                feedback,
                 request_wake_tx,
                 request_wake_rx: StdMutex::new(Some(request_wake_rx)),
                 last_request_wake: StdMutex::new(HashMap::new()),
