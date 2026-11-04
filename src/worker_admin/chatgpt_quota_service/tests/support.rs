@@ -11,6 +11,7 @@ use crate::{
     worker_admin::{
         chatgpt_quota_service::{ChatGptQuotaFetcher, ChatGptQuotaService},
         handlers::chatgpt_backend::{ChatgptQuota, ChatgptQuotaWindow},
+        quota_feedback::QuotaFeedbackStore,
     },
 };
 
@@ -381,6 +382,19 @@ where
 
 pub(crate) fn service(pool: &PgPool, fetcher: Arc<dyn ChatGptQuotaFetcher>) -> ChatGptQuotaService {
     ChatGptQuotaService::with_fetcher(pool.clone(), ConfigRepository::postgres(pool), fetcher)
+}
+
+pub(crate) fn service_with_feedback(
+    pool: &PgPool,
+    fetcher: Arc<dyn ChatGptQuotaFetcher>,
+    feedback: QuotaFeedbackStore,
+) -> ChatGptQuotaService {
+    ChatGptQuotaService::with_fetcher_and_feedback(
+        pool.clone(),
+        ConfigRepository::postgres(pool),
+        fetcher,
+        feedback,
+    )
 }
 
 pub(crate) fn quota(used_percent: Option<f64>) -> ChatgptQuota {

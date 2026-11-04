@@ -33,7 +33,10 @@ import {
   setEndpointEnabled,
   testEndpointRecord,
 } from '@/lib/endpoints'
-import { prefetchTokenPlanBatch } from '@/lib/quota-cache'
+import {
+  prefetchTokenPlanBatch,
+  refreshTokenPlanUsageBatch,
+} from '@/lib/quota-cache'
 import { registerTokenPlanForegroundIds } from '@/lib/quota-foreground'
 import { useAsyncAction } from '@/lib/use-async-action'
 import { useLocale } from '@/lib/i18n'
@@ -42,6 +45,7 @@ import { useSessionStore } from '@/lib/session'
 import { isQuotaEligible } from '@/models/endpoints/quota'
 import { createEndpointListItemView } from '@/models/endpoints/endpoint-item'
 import {
+  ENDPOINTS_REFRESH_KEY,
   endpointActionKey,
   networkTestKey,
   type EndpointListItemView,
@@ -423,14 +427,39 @@ export function EndpointsPage() {
   }
 
   async function refresh(): Promise<void> {
-    const reads: Promise<unknown>[] = [endpointPageQuery.refetch()]
-    if (isAdmin) reads.push(userOptionsQuery.refetch())
-    await Promise.all(reads)
+    const capturedQuotaIds = endpoints
+      .filter(isQuotaEligible)
+      .map((endpoint) => endpoint.endpoint_id)
+    try {
+      const outcome = await asyncAction.run(
+        ENDPOINTS_REFRESH_KEY,
+        async () => {
+          const reads: Promise<unknown>[] = [endpointPageQuery.refetch()]
+          if (isAdmin) reads.push(userOptionsQuery.refetch())
+          const [readResults, quotaOutcomes] = await Promise.all([
+            Promise.allSettled(reads),
+            refreshTokenPlanUsageBatch(capturedQuotaIds),
+          ])
+          return { readResults, quotaOutcomes }
+        },
+        'refresh',
+      )
+      if (!outcome.executed) return
+      for (const result of outcome.value.readResults) {
+        if (result.status === 'rejected') reportApiError(result.reason)
+      }
+      for (const result of outcome.value.quotaOutcomes) {
+        if (result.failed) reportApiError(result.cause)
+      }
+    } catch (cause) {
+      reportApiError(cause)
+    }
   }
 
   const dialogPending = asyncAction.isPending(
     endpointActionKey(dialogEndpointId),
   )
+  const refreshing = asyncAction.isPending(ENDPOINTS_REFRESH_KEY)
 
   if (!isAdmin) return null
 
@@ -443,12 +472,13 @@ export function EndpointsPage() {
       <HeaderActions>
         <Button
           aria-label={t('refresh')}
+          disabled={refreshing}
           onClick={() => void refresh()}
           size="sm"
           type="button"
           variant="outline"
         >
-          {endpointPageQuery.isFetching || userOptionsQuery.isFetching ? (
+          {refreshing ? (
             <span
               aria-hidden="true"
               className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent"

@@ -121,9 +121,18 @@ async function handleControl(
   }
 
   if (url.pathname === '/__fixtures/quota' && request.method === 'POST') {
-    const body = (await request.json()) as { stale?: boolean }
+    const body = (await request.json()) as {
+      stale?: boolean
+      restored?: boolean
+    }
     state.quotaStale = body.stale === true
-    return control({ stale: state.quotaStale })
+    state.quotaRestored = body.restored === true
+    if (!state.quotaRestored) state.quotaRestoredApplied = false
+    return control({
+      stale: state.quotaStale,
+      restored: state.quotaRestored,
+      applied: state.quotaRestoredApplied === true,
+    })
   }
 
   if (url.pathname === '/__fixtures/overview' && request.method === 'POST') {

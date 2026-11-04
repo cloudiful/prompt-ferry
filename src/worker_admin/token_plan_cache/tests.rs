@@ -417,4 +417,72 @@ mod persist_tests {
         assert!(!format!("{row:?}").contains("secret-key-xyz"));
         cleanup(&pool, endpoint_id).await;
     }
+
+    #[tokio::test]
+    async fn manual_force_clears_only_confirmed_restored_feedback() {
+        use crate::worker_admin::quota_feedback::{
+            QuotaFeedbackCause, QuotaFeedbackEligibility, QuotaFeedbackScope,
+        };
+
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let cache = TokenPlanQuotaCache::default();
+        let endpoint_id = create_endpoint(&pool).await;
+        let key_id = create_key(&pool, endpoint_id, "restored-key").await;
+        let scope = QuotaFeedbackScope::new(endpoint_id, Some(key_id));
+        let failed_at = Instant::now();
+        cache.feedback.record_failure(
+            scope,
+            QuotaFeedbackCause::Exhausted,
+            None,
+            failed_at,
+            failed_at,
+        );
+        cache
+            .refresh_with_source(
+                &pool,
+                endpoint_id,
+                true,
+                QuotaObservationSource::Manual,
+                || async { Ok(Some(opencode_go_usage(key_id, 80.0))) },
+            )
+            .await
+            .expect("manual force refresh succeeds");
+        assert_eq!(
+            cache.feedback.eligibility(scope, Instant::now()),
+            QuotaFeedbackEligibility::Eligible,
+            "a confirmed restored key loses its old exhaustion cooldown"
+        );
+
+        let automatic_endpoint = create_endpoint(&pool).await;
+        let automatic_key = create_key(&pool, automatic_endpoint, "automatic-key").await;
+        let automatic_scope = QuotaFeedbackScope::new(automatic_endpoint, Some(automatic_key));
+        let failed_at = Instant::now();
+        cache.feedback.record_failure(
+            automatic_scope,
+            QuotaFeedbackCause::Exhausted,
+            None,
+            failed_at,
+            failed_at,
+        );
+        cache
+            .refresh_with_source(
+                &pool,
+                automatic_endpoint,
+                true,
+                QuotaObservationSource::Request,
+                || async { Ok(Some(opencode_go_usage(automatic_key, 80.0))) },
+            )
+            .await
+            .expect("automatic refresh succeeds");
+        assert_eq!(
+            cache.feedback.eligibility(automatic_scope, Instant::now()),
+            QuotaFeedbackEligibility::Cooling,
+            "automatic refreshes never clear manual cooldown feedback"
+        );
+
+        cleanup(&pool, endpoint_id).await;
+        cleanup(&pool, automatic_endpoint).await;
+    }
 }

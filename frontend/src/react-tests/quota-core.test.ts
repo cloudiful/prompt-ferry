@@ -23,6 +23,7 @@ import {
   isTokenPlanUsageFresh,
   prefetchTokenPlanBatch,
   prefetchTokenPlanUsage,
+  refreshTokenPlanUsageBatch,
   requestTokenPlanUsage,
   subscribeTokenPlanUsage,
   subscribeTokenPlanUsageExpiry,
@@ -425,8 +426,51 @@ describe('React quota singleton', () => {
     )
   })
 
-  it('does not let a batch wait on or join a forced cold flight', async () => {
-    const pendingForce = deferred<TokenPlanUsageResponse>()
+  it('forces a bounded manual batch and reports per-item outcomes without masking successes', async () => {
+    const first = deferred<TokenPlanUsageResponse>()
+    const second = deferred<TokenPlanUsageResponse>()
+    vi.mocked(fetchTokenPlanUsage).mockImplementation((endpointId) => {
+      if (endpointId === 'refresh-a') return first.promise
+      if (endpointId === 'refresh-b') return second.promise
+      return Promise.resolve(emptyUsage())
+    })
+    const batch = refreshTokenPlanUsageBatch(
+      ['refresh-a', 'refresh-a', 'refresh-b', 'refresh-skip'],
+      4,
+      (endpointId) => endpointId !== 'refresh-skip',
+    )
+    await flushMicrotasks()
+    expect(
+      vi.mocked(fetchTokenPlanUsage).mock.calls.map(([id, force]) => [id, force]),
+    ).toEqual([
+      ['refresh-a', true],
+      ['refresh-b', true],
+    ])
+
+    first.resolve(emptyUsage('minimax'))
+    second.reject(new Error('refresh failed'))
+    const outcomes = await batch
+    expect(outcomes.map((item) => [item.endpointId, item.failed])).toEqual([
+      ['refresh-a', false],
+      ['refresh-b', true],
+    ])
+    expect(getCachedTokenPlanUsage('refresh-a')).not.toBeNull()
+  })
+
+  it('shares one forced flight across duplicate manual batches', async () => {
+    const pending = deferred<TokenPlanUsageResponse>()
+    vi.mocked(fetchTokenPlanUsage).mockReturnValueOnce(pending.promise)
+    const first = refreshTokenPlanUsageBatch(['refresh-duplicate'])
+    const second = refreshTokenPlanUsageBatch(['refresh-duplicate'])
+    await flushMicrotasks()
+    expect(vi.mocked(fetchTokenPlanUsage)).toHaveBeenCalledTimes(1)
+    pending.resolve(emptyUsage())
+    const [firstOutcomes, secondOutcomes] = await Promise.all([first, second])
+    expect(firstOutcomes[0].failed).toBe(false)
+    expect(secondOutcomes[0].failed).toBe(false)
+  })
+
+  it('does not let a batch wait on or join a forced cold flight', async () => {    const pendingForce = deferred<TokenPlanUsageResponse>()
     vi.mocked(fetchTokenPlanUsage).mockReturnValueOnce(pendingForce.promise)
     const forcedRead = requestTokenPlanUsage('endpoint-batch-force', {
       refresh: true,

@@ -461,6 +461,71 @@ describe('upstream building block', () => {
     __resetTokenPlanCacheForTests()
   })
 
+  it('forces quota refresh for eligible current-page rows and guards duplicate clicks', async () => {
+    endpointRecords = [
+      makeEndpoint(1, { provider: 'minimax' }),
+      makeEndpoint(2, {
+        provider: 'openai',
+        has_oauth_token: true,
+        plan: 'chatgpt_subscription',
+      }),
+      makeEndpoint(3, { provider: 'generic' }),
+      makeEndpoint(4, { provider: 'openai', has_oauth_token: false }),
+    ]
+    api.fetchTokenPlanUsage.mockImplementation(async (endpointId: string) =>
+      usage(endpointId === 'endpoint-1' ? 'minimax' : 'openai', []),
+    )
+    renderPage()
+    await screen.findAllByText('Upstream 4')
+    await waitFor(() =>
+      expect(api.fetchTokenPlanUsage).toHaveBeenCalledTimes(2),
+    )
+
+    const pending = deferred<TokenPlanUsageResponse>()
+    api.fetchTokenPlanUsage.mockClear()
+    api.fetchTokenPlanUsage.mockImplementation((endpointId: string) =>
+      endpointId === 'endpoint-1'
+        ? pending.promise
+        : Promise.reject(new Error('openai refresh failed')),
+    )
+    const refreshButton = screen.getByRole('button', {
+      name: /^Refresh$/,
+    })
+    fireEvent.click(refreshButton)
+    await waitFor(() =>
+      expect(api.fetchTokenPlanUsage).toHaveBeenCalledWith('endpoint-1', true),
+    )
+    expect(api.fetchTokenPlanUsage).toHaveBeenCalledWith('endpoint-2', true)
+    expect(api.fetchTokenPlanUsage).not.toHaveBeenCalledWith(
+      'endpoint-3',
+      true,
+    )
+    expect(api.fetchTokenPlanUsage).not.toHaveBeenCalledWith(
+      'endpoint-4',
+      true,
+    )
+    expect((refreshButton as HTMLButtonElement).disabled).toBe(true)
+    expect(refreshButton.querySelector('.animate-spin')).not.toBeNull()
+    expect(
+      (
+        within(endpointCard('endpoint-3')).getByRole('button', {
+          name: /^Test$/,
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false)
+    fireEvent.click(refreshButton)
+    expect(api.fetchTokenPlanUsage).toHaveBeenCalledTimes(2)
+
+    pending.resolve(usage('minimax', []))
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    await waitFor(() =>
+      expect((refreshButton as HTMLButtonElement).disabled).toBe(false),
+    )
+
+    __resetTokenPlanForegroundForTests()
+    __resetTokenPlanCacheForTests()
+  })
+
   it('coalesces a cold page prefetch with the dialog read through the shared cache', async () => {
     endpointRecords = [makeEndpoint(1, { provider: 'minimax' })]
     const pendingUsage = deferred<TokenPlanUsageResponse>()

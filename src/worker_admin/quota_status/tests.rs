@@ -404,3 +404,100 @@ fn glm_mixed_weekly_exhausted_with_fresh_five_hour_is_exhausted() {
     });
     assert_state(EndpointProvider::Glm, &glm, now, Exhausted);
 }
+
+#[test]
+fn restored_available_requires_real_capacity_not_just_ok() {
+    let now = Utc::now();
+    let mut minimax = key(Uuid::new_v4());
+    minimax.model_remains = vec![TokenPlanModelUsage {
+        model_name: "General".into(),
+        interval: Some(window(0.0, Some(now + ChronoDuration::minutes(5)))),
+        weekly: Some(window(50.0, Some(now + ChronoDuration::days(1)))),
+        windows: None,
+        observation: None,
+    }];
+    assert!(!restored_available(
+        EndpointProvider::Minimax,
+        &minimax,
+        now
+    ));
+    minimax.model_remains[0].interval = Some(window(50.0, Some(now + ChronoDuration::minutes(5))));
+    assert!(restored_available(EndpointProvider::Minimax, &minimax, now));
+    minimax.ok = false;
+    assert!(!restored_available(
+        EndpointProvider::Minimax,
+        &minimax,
+        now
+    ));
+    minimax.ok = true;
+    minimax.model_remains = Vec::new();
+    assert!(!restored_available(
+        EndpointProvider::Minimax,
+        &minimax,
+        now
+    ));
+}
+
+#[test]
+fn subscription_restore_requires_a_fresh_error_free_available_observation() {
+    let now = Utc::now();
+    let observed_at = now - ChronoDuration::seconds(10);
+    let mut key = key(Uuid::new_v4());
+    key.model_remains = vec![TokenPlanModelUsage {
+        model_name: "plus".into(),
+        interval: None,
+        weekly: None,
+        windows: Some(vec![subscription_window(
+            Some(50.0),
+            SubscriptionWindowAvailability::Known,
+            Some(now + ChronoDuration::minutes(1)),
+        )]),
+        observation: Some(SubscriptionQuotaObservation {
+            observed_at: Some(observed_at),
+            source: Some("manual".into()),
+            stale: false,
+            last_error_code: None,
+            next_retry_at: None,
+            refreshing: false,
+        }),
+    }];
+    assert!(restored_available(EndpointProvider::OpenAi, &key, now));
+
+    key.model_remains[0]
+        .observation
+        .as_mut()
+        .expect("observation")
+        .stale = true;
+    assert!(!restored_available(EndpointProvider::OpenAi, &key, now));
+
+    let observation = key.model_remains[0]
+        .observation
+        .as_mut()
+        .expect("observation");
+    observation.stale = false;
+    observation.last_error_code = Some("refresh_failed".into());
+    assert!(!restored_available(EndpointProvider::OpenAi, &key, now));
+
+    let observation = key.model_remains[0]
+        .observation
+        .as_mut()
+        .expect("observation");
+    observation.last_error_code = None;
+    observation.observed_at = Some(now - ChronoDuration::minutes(6));
+    assert!(!restored_available(EndpointProvider::OpenAi, &key, now));
+
+    key.model_remains[0].observation = Some(SubscriptionQuotaObservation {
+        observed_at: Some(observed_at),
+        source: Some("manual".into()),
+        stale: false,
+        last_error_code: None,
+        next_retry_at: None,
+        refreshing: false,
+    });
+    key.model_remains[0].windows = Some(vec![subscription_window(
+        Some(0.0),
+        SubscriptionWindowAvailability::Known,
+        Some(now + ChronoDuration::minutes(1)),
+    )]);
+    assert!(!restored_available(EndpointProvider::OpenAi, &key, now));
+}

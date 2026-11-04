@@ -48,6 +48,8 @@ export type FixtureAccount = {
 
 export type FixtureState = {
   quotaStale?: boolean
+  quotaRestored?: boolean
+  quotaRestoredApplied?: boolean
   accounts: FixtureAccount[]
   sessionToken: string
   relayToken: string

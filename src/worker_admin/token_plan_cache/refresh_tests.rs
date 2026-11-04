@@ -204,6 +204,57 @@ async fn relative_reset_ages_effective_input_without_mutating_raw_detail() {
 }
 
 #[tokio::test]
+async fn manual_force_success_clears_only_restored_keys_and_keeps_newer_failures() {
+    use crate::worker_admin::quota_feedback::{
+        QuotaFeedbackCause, QuotaFeedbackEligibility, QuotaFeedbackScope,
+    };
+    let cache = TokenPlanQuotaCache::default();
+    let endpoint_id = Uuid::new_v4();
+    let available_key = Uuid::new_v4();
+    let exhausted_key = Uuid::new_v4();
+    let available = QuotaFeedbackScope::new(endpoint_id, Some(available_key));
+    let exhausted = QuotaFeedbackScope::new(endpoint_id, Some(exhausted_key));
+    let attempt_start = Instant::now();
+    for scope in [available, exhausted] {
+        cache.feedback.record_failure(
+            scope,
+            QuotaFeedbackCause::Exhausted,
+            None,
+            attempt_start,
+            attempt_start,
+        );
+    }
+    let mut response = opencode_go_usage(available_key, 80.0);
+    response
+        .keys
+        .extend(opencode_go_usage(exhausted_key, 0.0).keys);
+
+    cache.clear_restored_feedback(endpoint_id, &response, attempt_start);
+    let now = Instant::now();
+    assert_eq!(
+        cache.feedback.eligibility(available, now),
+        QuotaFeedbackEligibility::Eligible
+    );
+    assert_eq!(
+        cache.feedback.eligibility(exhausted, now),
+        QuotaFeedbackEligibility::Cooling,
+        "still-exhausted keys keep their cooldown"
+    );
+
+    // A failure recorded after the attempt began is newer than this success
+    // and must survive it.
+    let newer = attempt_start + Duration::from_secs(1);
+    cache
+        .feedback
+        .record_failure(available, QuotaFeedbackCause::Exhausted, None, newer, newer);
+    cache.clear_restored_feedback(endpoint_id, &response, attempt_start);
+    assert_eq!(
+        cache.feedback.eligibility(available, newer),
+        QuotaFeedbackEligibility::Cooling
+    );
+}
+
+#[tokio::test]
 async fn concurrent_forced_refreshes_fetch_once() {
     let cache = TokenPlanQuotaCache::default();
     let id = Uuid::new_v4();
