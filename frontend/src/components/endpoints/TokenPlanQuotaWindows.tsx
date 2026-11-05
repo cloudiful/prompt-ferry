@@ -20,6 +20,7 @@ export type TokenPlanQuotaGroup = {
 
 export type TokenPlanQuotaWindowsProps = {
   keyUsage: TokenPlanKeyUsage
+  muted?: boolean
   nowMs: number
 }
 
@@ -135,6 +136,7 @@ export function quotaModelGroups(
 
 export function TokenPlanQuotaWindows({
   keyUsage,
+  muted = false,
   nowMs,
 }: TokenPlanQuotaWindowsProps) {
   const { locale, t } = useLocale()
@@ -154,10 +156,17 @@ export function TokenPlanQuotaWindows({
           <section
             className="grid min-w-0 content-start gap-2"
             data-quota-model={group.modelName ?? ''}
+            data-quota-muted={muted ? 'true' : 'false'}
             key={group.modelName ?? 'default'}
           >
             {showHeading && group.modelName !== null ? (
-              <h3 className="break-words text-xs font-medium text-foreground">
+              <h3
+                className={
+                  muted
+                    ? 'break-words text-xs font-medium text-muted-foreground'
+                    : 'break-words text-xs font-medium text-foreground'
+                }
+              >
                 {group.modelName}
               </h3>
             ) : null}
@@ -195,6 +204,7 @@ export function TokenPlanQuotaWindows({
                     key={row.sourceId}
                     label={quotaWindowLabel(row, t as Translate)}
                     modelName={row.sourceModel}
+                    muted={muted}
                     nowMs={nowMs}
                     quantitySuffix={
                       row.unit === 'currency' ? ' USD' : undefined

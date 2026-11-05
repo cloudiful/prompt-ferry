@@ -4,7 +4,7 @@ use chrono::{DateTime, Duration as ChronoDuration, Utc};
 
 use crate::db::ChatgptQuotaSnapshotSource;
 
-pub(super) const ACTIVE_REFRESH_AFTER: ChronoDuration = ChronoDuration::minutes(5);
+pub(super) const ACTIVE_REFRESH_AFTER: ChronoDuration = ChronoDuration::seconds(60);
 pub(super) const IDLE_REFRESH_AFTER: ChronoDuration = ChronoDuration::hours(1);
 pub(super) const ACTIVITY_LOOKBACK: ChronoDuration = ChronoDuration::minutes(30);
 pub(super) const FAILURE_BACKOFF_BASE_SECONDS: i64 = 60;

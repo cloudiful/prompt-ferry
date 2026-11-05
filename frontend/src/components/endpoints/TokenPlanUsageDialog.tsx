@@ -31,6 +31,7 @@ import {
 import type {
   EndpointProvider,
   TokenPlanKeyUsage,
+  TokenPlanQuotaState,
   TokenPlanQuotaStatus,
   TokenPlanUsageResponse,
 } from '@/generated/admin-api'
@@ -56,6 +57,17 @@ export type TokenPlanUsageDialogProps = {
   onOpenChange: (open: boolean) => void
   open: boolean
   provider: EndpointProvider
+}
+
+const MUTED_QUOTA_STATES: ReadonlySet<TokenPlanQuotaState> = new Set([
+  'exhausted',
+  'cooling',
+  'rate_limited',
+  'upstream_unavailable',
+])
+
+function isMutedQuotaStatus(status: TokenPlanQuotaStatus | null): boolean {
+  return status !== null && MUTED_QUOTA_STATES.has(status.state)
 }
 
 function quotaStatusForKey(
@@ -218,6 +230,7 @@ export function TokenPlanUsageDialog({
               ) : null}
               {usage.keys.map((key) => {
                 const status = quotaStatusForKey(key, snapshot.state, nowMs)
+                const muted = isMutedQuotaStatus(status)
                 const facts = factRows(key, nowMs)
                 const deepseekAmounts = deepseekBalanceAmounts(
                   key.deepseek_balance,
@@ -227,6 +240,7 @@ export function TokenPlanUsageDialog({
                   <details
                     className="min-w-0 border-b last:border-b-0"
                     data-quota-key={key.key_id}
+                    data-quota-muted={muted ? 'true' : 'false'}
                     key={key.key_id}
                     open
                   >
@@ -249,7 +263,13 @@ export function TokenPlanUsageDialog({
                         ) : null}
                       </span>
                     </summary>
-                    <div className="grid min-w-0 gap-3 px-1 pb-3">
+                    <div
+                      className={
+                        muted
+                          ? 'grid min-w-0 gap-3 px-1 pb-3 text-muted-foreground'
+                          : 'grid min-w-0 gap-3 px-1 pb-3'
+                      }
+                    >
                       {!key.ok ? (
                         <p className="break-words text-red-700 dark:text-red-300">
                           {key.error_message ?? t('tokenPlanUsageFailed')}
@@ -258,7 +278,13 @@ export function TokenPlanUsageDialog({
                         <>
                           {key.balances ? (
                             <section className="grid min-w-0 gap-1 rounded-md border p-3">
-                              <h3 className="break-words font-medium text-foreground">
+                              <h3
+                                className={
+                                  muted
+                                    ? 'break-words font-medium text-muted-foreground'
+                                    : 'break-words font-medium text-foreground'
+                                }
+                              >
                                 {t('tokenPlanBalances')}
                               </h3>
                               <div className="flex min-w-0 flex-wrap gap-x-4 gap-y-1">
@@ -283,7 +309,13 @@ export function TokenPlanUsageDialog({
                           ) : null}
                           {key.openrouter_balance ? (
                             <section className="grid min-w-0 gap-1 rounded-md border p-3">
-                              <h3 className="break-words font-medium text-foreground">
+                              <h3
+                                className={
+                                  muted
+                                    ? 'break-words font-medium text-muted-foreground'
+                                    : 'break-words font-medium text-foreground'
+                                }
+                              >
                                 {t('tokenPlanOpenRouterBalance')}
                               </h3>
                               <div className="flex min-w-0 flex-wrap gap-x-4 gap-y-1">
@@ -331,7 +363,13 @@ export function TokenPlanUsageDialog({
                           ) : null}
                           {key.deepseek_balance ? (
                             <section className="grid min-w-0 gap-1 rounded-md border p-3">
-                              <h3 className="break-words font-medium text-foreground">
+                              <h3
+                                className={
+                                  muted
+                                    ? 'break-words font-medium text-muted-foreground'
+                                    : 'break-words font-medium text-foreground'
+                                }
+                              >
                                 {t('tokenPlanDeepSeekBalance')}
                               </h3>
                               <span className="break-words">
@@ -383,7 +421,13 @@ export function TokenPlanUsageDialog({
                           ) : null}
                           {key.openrouter_spend ? (
                             <section className="grid min-w-0 gap-1 rounded-md border p-3">
-                              <h3 className="break-words font-medium text-foreground">
+                              <h3
+                                className={
+                                  muted
+                                    ? 'break-words font-medium text-muted-foreground'
+                                    : 'break-words font-medium text-foreground'
+                                }
+                              >
                                 {t('tokenPlanOpenRouterSpend')}
                               </h3>
                               <div className="flex min-w-0 flex-wrap gap-x-4 gap-y-1">
@@ -410,6 +454,7 @@ export function TokenPlanUsageDialog({
                             <TokenPlanQuotaWindowRow
                               key={row.sourceId}
                               label={topLevelLabel(row, t)}
+                              muted={muted}
                               nowMs={nowMs}
                               quantitySuffix={
                                 row.unit === 'currency' ? ' USD' : undefined
@@ -422,7 +467,11 @@ export function TokenPlanUsageDialog({
                               {t('tokenPlanPaygNoWindow')}
                             </p>
                           ) : null}
-                          <TokenPlanQuotaWindows keyUsage={key} nowMs={nowMs} />
+                          <TokenPlanQuotaWindows
+                            keyUsage={key}
+                            muted={muted}
+                            nowMs={nowMs}
+                          />
                         </>
                       )}
                     </div>

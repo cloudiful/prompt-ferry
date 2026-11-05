@@ -12,6 +12,7 @@ import {
 export type TokenPlanQuotaWindowRowProps = {
   label: string
   modelName?: string | null
+  muted?: boolean
   nowMs: number
   quantitySuffix?: string
   row: CanonicalQuotaRow
@@ -25,6 +26,7 @@ function isTimeWindow(row: CanonicalQuotaRow): boolean {
 export function TokenPlanQuotaWindowRow({
   label,
   modelName,
+  muted = false,
   nowMs,
   quantitySuffix,
   row,
@@ -49,7 +51,11 @@ export function TokenPlanQuotaWindowRow({
           ? t('tokenPlanUsageUnknown')
           : `${caption}${quantitySuffix ?? ''}`
     return (
-      <div className="@container min-w-0" data-quota-row={row.sourceId}>
+      <div
+        className="@container min-w-0"
+        data-quota-muted={muted ? 'true' : 'false'}
+        data-quota-row={row.sourceId}
+      >
         <div className="grid min-w-0 gap-1 @[20rem]:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)] @[20rem]:items-center @[20rem]:gap-3">
           <span
             className="break-words text-muted-foreground"
@@ -57,7 +63,13 @@ export function TokenPlanQuotaWindowRow({
           >
             {label}
           </span>
-          <span className="break-words">{value}</span>
+          <span
+            className={
+              muted ? 'break-words text-muted-foreground' : 'break-words'
+            }
+          >
+            {value}
+          </span>
         </div>
       </div>
     )
@@ -78,11 +90,19 @@ export function TokenPlanQuotaWindowRow({
     showModelName && modelName ? `${modelName} · ${shortLabel}` : shortLabel
 
   return (
-    <div className="@container min-w-0" data-quota-row={row.sourceId}>
+    <div
+      className="@container min-w-0"
+      data-quota-muted={muted ? 'true' : 'false'}
+      data-quota-row={row.sourceId}
+    >
       <div className="grid min-w-0 gap-1">
         <div className="flex min-w-0 items-baseline justify-between gap-2">
           <span
-            className="min-w-0 break-words text-xs font-medium text-foreground"
+            className={
+              muted
+                ? 'min-w-0 break-words text-xs font-medium text-muted-foreground'
+                : 'min-w-0 break-words text-xs font-medium text-foreground'
+            }
             title={accessibleLabel}
           >
             {visibleLabel}
@@ -109,14 +129,21 @@ export function TokenPlanQuotaWindowRow({
             role="progressbar"
           >
             <div
-              className="h-full"
+              className={muted ? 'h-full bg-muted-foreground/40' : 'h-full'}
+              data-quota-fill={muted ? 'muted' : 'colored'}
               style={{
-                backgroundColor: progressColor(adapted),
+                ...(muted ? {} : { backgroundColor: progressColor(adapted) }),
                 width: `${percentage}%`,
               }}
             />
             <div className="absolute inset-0 flex min-w-0 items-center justify-between gap-2 px-1.5 text-xs">
-              <span className="rounded bg-background/85 px-1 font-semibold whitespace-nowrap text-foreground">
+              <span
+                className={
+                  muted
+                    ? 'rounded bg-background/85 px-1 font-semibold whitespace-nowrap text-muted-foreground'
+                    : 'rounded bg-background/85 px-1 font-semibold whitespace-nowrap text-foreground'
+                }
+              >
                 {percentage.toFixed(1)}%
               </span>
               <span className="min-w-0 truncate rounded bg-background/85 px-1 text-muted-foreground">
