@@ -183,6 +183,22 @@ describe('quota window rows adapt to their container', () => {
     expect(bar.className).toContain('w-full')
   })
 
+  it('renders localized compact window labels and countdown in Chinese', () => {
+    localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    render(
+      <LocaleProvider>
+        <TokenPlanQuotaWindowRow label="Weekly" nowMs={NOW} row={quotaRow()} />
+      </LocaleProvider>,
+    )
+    const row = document.querySelector(
+      '[data-quota-row="model-a:primary"]',
+    ) as HTMLElement
+    expect(row.textContent).toContain('5小时')
+    expect(row.textContent).toContain('1小时')
+    expect(row.textContent).not.toContain('5h')
+    expect(row.textContent).not.toContain('1h')
+  })
+
   it('keeps an unknown percentage as a placeholder without a fake progress bar', () => {
     render(
       <LocaleProvider>

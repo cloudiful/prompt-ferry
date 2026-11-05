@@ -68,7 +68,12 @@ export function TokenPlanQuotaWindowRow({
     remaining === null
       ? '-'
       : formatCompactResetCountdown(resetMs, t as unknown as TranslateFn)
-  const shortLabel = shortWindowLabel(row.kind, row.durationSeconds) ?? label
+  const shortLabel =
+    shortWindowLabel(
+      row.kind,
+      row.durationSeconds,
+      t as unknown as TranslateFn,
+    ) ?? label
   const visibleLabel =
     showModelName && modelName ? `${modelName} · ${shortLabel}` : shortLabel
 

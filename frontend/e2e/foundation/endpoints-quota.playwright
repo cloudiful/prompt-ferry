@@ -694,13 +694,78 @@ async page => {
     zhDark.lang === 'zh-CN' && zhDark.dark,
     `zh-CN dark quota preferences did not render: ${JSON.stringify(zhDark)}`,
   )
+  const zhMinimaxText = await dialog.innerText()
+  assert(
+    zhMinimaxText.includes('5小时') &&
+      zhMinimaxText.includes('7天') &&
+      zhMinimaxText.includes('30天') &&
+      zhMinimaxText.includes('小时') &&
+      zhMinimaxText.includes('分'),
+    `zh-CN compact window labels/countdowns missing: ${zhMinimaxText}`,
+  )
+  assert(
+    zhMinimaxText.includes('按 key 的额度历史') &&
+      !zhMinimaxText.includes('按键'),
+    `zh-CN key history terminology is stale: ${zhMinimaxText}`,
+  )
   await capture('endpoints-quota-zh-dark-1440')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await capture('endpoints-quota-zh-dark-390')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const zhHistorySummary = dialog
+    .locator('summary')
+    .filter({ hasText: '按 key 的额度历史' })
+  const zhTrendResponse = waitForResponse(
+    'GET',
+    '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations/trend',
+    200,
+    (url) =>
+      url.searchParams.get('range') === '24h' &&
+      !url.searchParams.has('key_id'),
+  )
+  await zhHistorySummary.click()
+  await zhTrendResponse
+  const zhKeySelect = dialog.getByRole('combobox', { name: 'key' })
+  await zhKeySelect.click()
+  const zhKeyTrendResponse = waitForResponse(
+    'GET',
+    '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations/trend',
+    200,
+    (url) => url.searchParams.get('key_id') === 'key-minimax-1',
+  )
+  await page.getByRole('option', { name: 'primary', exact: true }).click()
+  await zhKeyTrendResponse
+  const zhKeyTrendQuery = (
+    await fixture('/__fixtures/log?limit=500')
+  ).requests.findLast(
+    (request) =>
+      request.path ===
+        '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations/trend' &&
+      request.query.key_id === 'key-minimax-1',
+  )?.query
+  assert(
+    zhKeyTrendQuery?.key_id === 'key-minimax-1',
+    `zh-CN key filter did not request the selected key: ${JSON.stringify(zhKeyTrendQuery)}`,
+  )
+  report.checks.zhQuotaHistory = {
+    opened: true,
+    keyFilterQuery: zhKeyTrendQuery,
+  }
   await dialog.getByRole('button', { name: 'Close', exact: true }).click()
 
   dialog = await openQuota(opencodeId)
   await dialog
     .locator('[data-quota-key="key-opencodego-1"]')
     .waitFor({ state: 'visible' })
+  const zhOpencodeText = await dialog.innerText()
+  assert(
+    zhOpencodeText.includes('滚动窗口') &&
+      zhOpencodeText.includes('7天') &&
+      zhOpencodeText.includes('30天') &&
+      zhOpencodeText.includes('分') &&
+      !zhOpencodeText.includes('按键'),
+    `zh-CN opencode labels are not localized: ${zhOpencodeText}`,
+  )
   await capture('endpoints-quota-opencode-zh-dark-1440')
   await dialog.getByRole('button', { name: 'Close', exact: true }).click()
   report.checks.zhDarkQuota = zhDark

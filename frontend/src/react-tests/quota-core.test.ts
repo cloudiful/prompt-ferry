@@ -791,13 +791,28 @@ describe('neutral quota calculations and formatters', () => {
     expect(formatResetDuration(86_400_000, translate('en-US'))).toBe(
       'Resets in 1d 0h 0m',
     )
-    expect(compactWindowDuration(18_000)).toBe('5h')
-    expect(compactWindowDuration(604_800)).toBe('7d')
-    expect(compactWindowDuration(2_592_000)).toBe('30d')
-    expect(compactWindowDuration(null)).toBe(null)
-    expect(shortWindowLabel('weekly', null)).toBe('7d')
-    expect(shortWindowLabel('custom', 90_000)).toBe('25h')
-    expect(shortWindowLabel('custom', null)).toBe(null)
+    expect(compactWindowDuration(18_000, translate('en-US'))).toBe('5h')
+    expect(compactWindowDuration(604_800, translate('en-US'))).toBe('7d')
+    expect(compactWindowDuration(2_592_000, translate('en-US'))).toBe('30d')
+    expect(compactWindowDuration(null, translate('en-US'))).toBe(null)
+    expect(shortWindowLabel('weekly', null, translate('en-US'))).toBe('7d')
+    expect(shortWindowLabel('custom', 90_000, translate('en-US'))).toBe('25h')
+    expect(shortWindowLabel('custom', null, translate('en-US'))).toBe(null)
+    const zh = translate('zh-CN')
+    expect(compactWindowDuration(18_000, zh)).toBe('5小时')
+    expect(compactWindowDuration(604_800, zh)).toBe('7天')
+    expect(compactWindowDuration(2_592_000, zh)).toBe('30天')
+    expect(shortWindowLabel('monthly', null, zh)).toBe('30天')
+    expect(shortWindowLabel('five_hour', null, zh)).toBe('5小时')
+    expect(formatCompactResetCountdown(null, zh)).toBe('-')
+    expect(formatCompactResetCountdown(-1, zh)).toBe('已到期')
+    expect(formatCompactResetCountdown(6 * 86_400_000, zh)).toBe('6天')
+    expect(formatCompactResetCountdown((4 * 3_600 + 59 * 60) * 1_000, zh)).toBe(
+      '4小时59分',
+    )
+    expect(formatCompactResetCountdown((86_400 + 3_600) * 1_000, zh)).toBe(
+      '1天1小时',
+    )
     expect(formatCompactResetCountdown(null, translate('en-US'))).toBe('-')
     expect(formatCompactResetCountdown(-1, translate('en-US'))).toBe('Expired')
     expect(formatCompactResetCountdown(3_600_000, translate('en-US'))).toBe(

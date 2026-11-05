@@ -386,6 +386,22 @@ describe('React quota usage dialog', () => {
     expect(scroller.textContent).not.toContain('Observed')
   })
 
+  it('renders localized compact labels and key history terminology in Chinese', async () => {
+    localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    sdkMock.tokenPlanUsage.mockResolvedValueOnce({
+      data: {
+        keys: [keyWithQuota()],
+        provider: 'deepseek',
+        provider_region: null,
+      },
+    })
+    renderDialog('endpoint-detail-zh')
+    await screen.findByText('Fixture quota key')
+    expect(screen.getAllByText('5小时').length).toBeGreaterThan(0)
+    expect(screen.getByText('按 key 的额度历史')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('按键')
+  })
+
   it('keeps stale snapshots and numeric pills while background revalidation fails quietly', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)

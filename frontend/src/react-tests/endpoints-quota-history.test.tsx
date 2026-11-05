@@ -540,6 +540,24 @@ describe('per-key quota history and trend', () => {
     ])
   })
 
+  it('localizes quota history key terminology in Chinese', async () => {
+    localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    renderWithProviders(
+      <KeyQuotaObservationHistory endpointId="endpoint-history-zh" />,
+    )
+    expect(screen.getByText('按 key 的额度历史')).toBeTruthy()
+    openSection('按 key 的额度历史')
+    fireEvent.click(await screen.findByRole('button', { name: '列表' }))
+    await waitFor(() =>
+      expect(sdkMock.quotaKeyObservationHistory).toHaveBeenCalledTimes(1),
+    )
+    fireEvent.click(screen.getByRole('combobox', { name: 'key' }))
+    expect(await screen.findByRole('option', { name: '全部 key' })).toBeTruthy()
+    expect(screen.queryByText('全部按键')).toBeNull()
+    const quotaSurface = document.querySelector('details') as HTMLElement
+    expect(quotaSurface.textContent).not.toContain('按键')
+  })
+
   it('pages only in list mode, maps All to an omitted API key, retries load-more, and retains pages across mode switches', async () => {
     vi.setSystemTime(NOW + 60 * 60 * 1000)
     const cursor = 'cursor:{opaque}/next'
