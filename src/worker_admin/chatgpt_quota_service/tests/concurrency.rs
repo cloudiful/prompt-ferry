@@ -12,7 +12,10 @@ use uuid::Uuid;
 
 use crate::{
     db::{self, ConfigRepository},
-    worker_admin::chatgpt_quota_service::{ChatGptQuotaService, policy::ACTIVITY_LOOKBACK},
+    worker_admin::chatgpt_quota_service::{
+        ChatGptQuotaService,
+        policy::{ACTIVE_REFRESH_AFTER, ACTIVITY_LOOKBACK},
+    },
 };
 
 use super::support::{
@@ -305,7 +308,7 @@ async fn passive_cold_read_fetches_once_and_warm_read_uses_the_snapshot() {
 }
 
 #[tokio::test]
-async fn selected_request_wake_refreshes_only_observations_older_than_five_minutes() {
+async fn selected_request_wake_refreshes_only_observations_older_than_active_threshold() {
     let Some(pool) = test_pool().await else {
         return;
     };
@@ -313,7 +316,7 @@ async fn selected_request_wake_refreshes_only_observations_older_than_five_minut
     seed_snapshot(
         &pool,
         endpoint_id,
-        Utc::now() - ChronoDuration::minutes(6),
+        Utc::now() - ACTIVE_REFRESH_AFTER - ChronoDuration::seconds(1),
         Some(75.0),
     )
     .await;
@@ -330,13 +333,13 @@ async fn selected_request_wake_refreshes_only_observations_older_than_five_minut
 }
 
 #[tokio::test]
-async fn periodic_collection_uses_recent_request_activity_for_five_minute_cadence() {
+async fn periodic_collection_uses_recent_request_activity_for_active_cadence() {
     let Some(outcome) = with_owned_fixtures(|fixtures| async move {
         let pool = fixtures.pool().clone();
         cleanup_orphan_fixtures(&pool).await;
         let active_endpoint = fixtures.endpoint().await;
         let idle_endpoint = fixtures.endpoint().await;
-        let recent = Utc::now() - ChronoDuration::minutes(6);
+        let recent = Utc::now() - ACTIVE_REFRESH_AFTER - ChronoDuration::seconds(1);
         seed_snapshot(&pool, active_endpoint, recent, Some(75.0)).await;
         seed_snapshot(&pool, idle_endpoint, recent, Some(75.0)).await;
         fixtures
@@ -546,7 +549,7 @@ async fn foreign_sample_is_excluded_from_owned_counts_and_left_alive() {
     let Some(outcome) = with_owned_fixtures(|fixtures| async move {
         let pool = fixtures.pool().clone();
         let active_endpoint = fixtures.endpoint().await;
-        let recent = Utc::now() - ChronoDuration::minutes(6);
+        let recent = Utc::now() - ACTIVE_REFRESH_AFTER - ChronoDuration::seconds(1);
         seed_snapshot(&pool, active_endpoint, recent, Some(75.0)).await;
         fixtures
             .request_activity(

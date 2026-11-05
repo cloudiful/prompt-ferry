@@ -516,6 +516,132 @@ describe('React quota usage dialog', () => {
     commandCodeView.unmount()
   })
 
+  it('mutes every window of a blocked key while available and unknown keys stay colored', async () => {
+    const blockedStates = [
+      'exhausted',
+      'cooling',
+      'rate_limited',
+      'upstream_unavailable',
+    ] as const
+    const keys: TokenPlanKeyUsage[] = blockedStates.map((state) => {
+      const key = keyWithQuota()
+      return {
+        ...key,
+        key_id: `key-${state}`,
+        key_label: `Key ${state}`,
+        model_remains: [],
+        deepseek_balance: null,
+        quota_status: {
+          state,
+          scope: 'text_inference',
+          observed_at: '2026-10-24T00:00:00.000Z',
+          cooldown_until: null,
+          refresh_failed: false,
+        },
+        quota_windows: [
+          quotaWindow({
+            source_id: `${state}:primary`,
+            kind: 'five_hour',
+            duration_seconds: 18_000,
+            remaining_percent: 100,
+            reset_at: '2026-10-24T01:00:00.000Z',
+          }),
+        ],
+      }
+    })
+    const available = keyWithQuota()
+    available.key_id = 'key-available'
+    available.key_label = 'Key available'
+    available.model_remains = []
+    available.quota_windows = [
+      quotaWindow({
+        source_id: 'available:primary',
+        kind: 'five_hour',
+        duration_seconds: 18_000,
+        remaining_percent: 100,
+        reset_at: '2026-10-24T01:00:00.000Z',
+      }),
+    ]
+    const unknown = keyWithQuota()
+    unknown.key_id = 'key-unknown'
+    unknown.key_label = 'Key unknown'
+    unknown.model_remains = []
+    unknown.quota_status = {
+      state: 'unknown',
+      scope: 'text_inference',
+      observed_at: '2026-10-24T00:00:00.000Z',
+      cooldown_until: null,
+      refresh_failed: true,
+    }
+    unknown.quota_windows = [
+      quotaWindow({
+        source_id: 'unknown:primary',
+        source_model: 'Default model',
+        kind: 'five_hour',
+        duration_seconds: 18_000,
+        remaining_percent: 100,
+        reset_at: '2026-10-24T01:00:00.000Z',
+      }),
+    ]
+    unknown.model_remains = [
+      {
+        model_name: 'Default model',
+        interval: null,
+        weekly: null,
+        observation: {
+          observed_at: '2026-10-24T00:00:00.000Z',
+          source: 'request',
+          refreshing: false,
+          stale: false,
+          last_error_code: 'temporary_failure',
+          next_retry_at: null,
+        },
+      },
+    ]
+    sdkMock.tokenPlanUsage.mockResolvedValueOnce({
+      data: {
+        keys: [...keys, available, unknown],
+        provider: 'minimax',
+        provider_region: null,
+      },
+    })
+    renderDialog('endpoint-muted-status')
+
+    for (const state of blockedStates) {
+      const key = await screen.findByText(`Key ${state}`)
+      const details = key.closest('[data-quota-key]') as HTMLElement
+      expect(details.getAttribute('data-quota-muted')).toBe('true')
+      expect(details.textContent).toContain('100.0%')
+      const row = details.querySelector('[data-quota-row]') as HTMLElement
+      expect(row.getAttribute('data-quota-muted')).toBe('true')
+      expect(
+        (row.querySelector('[data-quota-fill]') as HTMLElement).getAttribute(
+          'data-quota-fill',
+        ),
+      ).toBe('muted')
+    }
+
+    const availableKey = screen
+      .getByText('Key available')
+      .closest('[data-quota-key]') as HTMLElement
+    expect(availableKey.getAttribute('data-quota-muted')).toBe('false')
+    const availableFill = availableKey.querySelector(
+      '[data-quota-fill]',
+    ) as HTMLElement
+    expect(availableFill.getAttribute('data-quota-fill')).toBe('colored')
+    expect(availableFill.getAttribute('style') ?? '').toContain(
+      'background-color',
+    )
+
+    const unknownKey = screen
+      .getByText('Key unknown')
+      .closest('[data-quota-key]') as HTMLElement
+    expect(unknownKey.getAttribute('data-quota-muted')).toBe('false')
+    expect(unknownKey.textContent).toContain(
+      'Refresh failed; showing the latest successful observation.',
+    )
+  })
+
   it('keeps the shared key-history slot visible during usage loading and error and gates providers', async () => {
     const pending = deferred<{ data: TokenPlanUsageResponse }>()
     sdkMock.tokenPlanUsage.mockReturnValueOnce(pending.promise)

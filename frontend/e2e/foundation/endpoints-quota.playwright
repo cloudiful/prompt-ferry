@@ -185,6 +185,32 @@ async page => {
   await dialog
     .locator('[data-quota-key="key-minimax-1"]')
     .waitFor({ state: 'visible' })
+  await dialog
+    .locator('[data-quota-key="key-minimax-exhausted"]')
+    .waitFor({ state: 'visible' })
+  const exhaustedMuted =
+    (await dialog
+      .locator('[data-quota-key="key-minimax-exhausted"]')
+      .getAttribute('data-quota-muted')) === 'true'
+  const exhaustedFill =
+    (await dialog
+      .locator(
+        '[data-quota-key="key-minimax-exhausted"] [data-quota-fill]',
+      )
+      .first()
+      .getAttribute('data-quota-fill')) === 'muted'
+  const availableMuted =
+    (await dialog
+      .locator('[data-quota-key="key-minimax-1"]')
+      .getAttribute('data-quota-muted')) === 'true'
+  assert(
+    exhaustedMuted && exhaustedFill && !availableMuted,
+    `muted key presentation mismatch: ${JSON.stringify({ exhaustedMuted, exhaustedFill, availableMuted })}`,
+  )
+  await capture('endpoints-quota-muted-en-light-1440')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await capture('endpoints-quota-muted-en-light-390')
+  await page.setViewportSize({ width: 1440, height: 900 })
   await page.waitForTimeout(150)
   const minimaxQuotaCallsAfter = (
     await fixture('/__fixtures/log?limit=500')
@@ -238,7 +264,11 @@ async page => {
     .count()
   assert(
     JSON.stringify(keyOrder) ===
-      JSON.stringify(['key-minimax-1', 'key-minimax-2']),
+      JSON.stringify([
+        'key-minimax-1',
+        'key-minimax-2',
+        'key-minimax-exhausted',
+      ]),
     `quota keys are not in configured order: ${JSON.stringify(keyOrder)}`,
   )
   assert(
@@ -869,6 +899,13 @@ async page => {
       .locator('[data-endpoint-row="ep-minimax-cn"]')
       .waitFor({ state: 'visible' })
     const appearanceDialog = await openQuota('ep-minimax-cn')
+    await appearanceDialog
+      .locator('[data-quota-key="key-minimax-exhausted"]')
+      .waitFor({ state: 'visible' })
+    await capture(`${prefix}-mixed-1440`)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await capture(`${prefix}-mixed-390`)
+    await page.setViewportSize({ width: 1440, height: 900 })
     const historySummary = appearanceDialog
       .locator('summary')
       .filter({

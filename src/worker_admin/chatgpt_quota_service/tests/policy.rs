@@ -26,9 +26,9 @@ fn active_and_idle_refresh_cadences_have_exact_boundaries() {
 #[test]
 fn request_wake_staleness_and_exponential_retry_are_bounded() {
     let now = Utc.with_ymd_and_hms(2030, 1, 1, 12, 0, 0).unwrap();
-    assert!(!stale(now - Duration::minutes(5), now));
+    assert!(!stale(now - ACTIVE_REFRESH_AFTER, now));
     assert!(stale(
-        now - Duration::minutes(5) - Duration::nanoseconds(1),
+        now - ACTIVE_REFRESH_AFTER - Duration::nanoseconds(1),
         now
     ));
     assert_eq!(retry_delay(1), Duration::seconds(60));

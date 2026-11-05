@@ -7,7 +7,7 @@
 //! [`RuntimeControl`]. Due-ness comes from the last actually persisted
 //! observation per key — never the tick clock — so cached results are not
 //! duplicated: an active endpoint (request activity in the last 30 minutes)
-//! refreshes every 5 minutes, an idle one every 30 minutes. Due endpoints
+//! refreshes every minute, an idle one every 30 minutes. Due endpoints
 //! force a fresh fetch with the periodic source, which also retries a
 //! previously failed persist. Expired observations prune hourly in bounded
 //! batches, inside the same coordination.
@@ -38,7 +38,7 @@ use super::{
 };
 
 const COLLECTOR_TICK: Duration = Duration::from_secs(60);
-const ACTIVE_REFRESH_AFTER: ChronoDuration = ChronoDuration::minutes(5);
+const ACTIVE_REFRESH_AFTER: ChronoDuration = ChronoDuration::seconds(60);
 const IDLE_REFRESH_AFTER: ChronoDuration = ChronoDuration::minutes(30);
 const ACTIVITY_LOOKBACK: ChronoDuration = ChronoDuration::minutes(30);
 const PRUNE_INTERVAL: ChronoDuration = ChronoDuration::hours(1);
@@ -53,13 +53,18 @@ mod tests {
         let now = Utc::now();
         assert!(!endpoint_due(&[], true, now));
         assert!(endpoint_due(&[None], false, now));
+        assert!(endpoint_due(&[Some(now - ACTIVE_REFRESH_AFTER)], true, now));
         assert!(endpoint_due(
-            &[Some(now - ChronoDuration::minutes(6))],
+            &[Some(
+                now - ACTIVE_REFRESH_AFTER - ChronoDuration::seconds(1)
+            )],
             true,
             now
         ));
         assert!(!endpoint_due(
-            &[Some(now - ChronoDuration::minutes(4))],
+            &[Some(
+                now - ACTIVE_REFRESH_AFTER + ChronoDuration::seconds(1)
+            )],
             true,
             now
         ));

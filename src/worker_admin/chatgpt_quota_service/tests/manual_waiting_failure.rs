@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use chrono::{Duration as ChronoDuration, Utc};
 use tokio::time::timeout;
 
-use crate::db;
+use crate::{db, worker_admin::chatgpt_quota_service::policy::ACTIVE_REFRESH_AFTER};
 
 use super::support::{
     cleanup_endpoint, cleanup_orphan_fixtures, create_endpoint, endpoint, seed_snapshot, service,
@@ -20,7 +20,7 @@ pub(super) async fn failure_body() {
     seed_snapshot(
         &pool,
         endpoint_id,
-        Utc::now() - ChronoDuration::minutes(6),
+        Utc::now() - ACTIVE_REFRESH_AFTER - ChronoDuration::seconds(1),
         Some(75.0),
     )
     .await;
