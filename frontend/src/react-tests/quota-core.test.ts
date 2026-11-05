@@ -76,11 +76,14 @@ import {
   subscriptionWindowResetMs,
 } from '@/models/endpoints/subscription-window'
 import {
+  compactWindowDuration,
+  formatCompactResetCountdown,
   formatMoney,
   formatOpenRouterCredits,
   formatResetDuration,
   knownRemainingPercent,
   progressColor,
+  shortWindowLabel,
 } from '@/models/endpoints/token-plan-window'
 import {
   badgeColorForPercent,
@@ -441,7 +444,9 @@ describe('React quota singleton', () => {
     )
     await flushMicrotasks()
     expect(
-      vi.mocked(fetchTokenPlanUsage).mock.calls.map(([id, force]) => [id, force]),
+      vi
+        .mocked(fetchTokenPlanUsage)
+        .mock.calls.map(([id, force]) => [id, force]),
     ).toEqual([
       ['refresh-a', true],
       ['refresh-b', true],
@@ -470,7 +475,8 @@ describe('React quota singleton', () => {
     expect(secondOutcomes[0].failed).toBe(false)
   })
 
-  it('does not let a batch wait on or join a forced cold flight', async () => {    const pendingForce = deferred<TokenPlanUsageResponse>()
+  it('does not let a batch wait on or join a forced cold flight', async () => {
+    const pendingForce = deferred<TokenPlanUsageResponse>()
     vi.mocked(fetchTokenPlanUsage).mockReturnValueOnce(pendingForce.promise)
     const forcedRead = requestTokenPlanUsage('endpoint-batch-force', {
       refresh: true,
@@ -785,6 +791,21 @@ describe('neutral quota calculations and formatters', () => {
     expect(formatResetDuration(86_400_000, translate('en-US'))).toBe(
       'Resets in 1d 0h 0m',
     )
+    expect(compactWindowDuration(18_000)).toBe('5h')
+    expect(compactWindowDuration(604_800)).toBe('7d')
+    expect(compactWindowDuration(2_592_000)).toBe('30d')
+    expect(compactWindowDuration(null)).toBe(null)
+    expect(shortWindowLabel('weekly', null)).toBe('7d')
+    expect(shortWindowLabel('custom', 90_000)).toBe('25h')
+    expect(shortWindowLabel('custom', null)).toBe(null)
+    expect(formatCompactResetCountdown(null, translate('en-US'))).toBe('-')
+    expect(formatCompactResetCountdown(-1, translate('en-US'))).toBe('Expired')
+    expect(formatCompactResetCountdown(3_600_000, translate('en-US'))).toBe(
+      '1h',
+    )
+    expect(formatCompactResetCountdown(90_061_000, translate('en-US'))).toBe(
+      '1d 1h',
+    )
   })
 
   it('delegates date, timezone, and chart theme through explicit neutral cores', () => {
@@ -887,6 +908,41 @@ describe('quota history pure cores', () => {
       'amount:credits',
       'remaining_percent:percent',
     ])
+  })
+
+  it('filters minmax video series from trend display', () => {
+    const groups = groupTrendSeries([
+      trendSeries({ source_id: 'minimax:general:interval' }),
+      trendSeries({
+        source_id: 'minimax:video:interval',
+        key_id: 'key-video',
+        key_label: 'Video',
+      }),
+      trendSeries({
+        source_id: 'opencode_go:rolling',
+        kind: 'rolling',
+        key_id: 'key-other',
+        key_label: 'Other',
+      }),
+      trendSeries({
+        source_id: 'openai:video:interval',
+        key_id: 'key-openai',
+        key_label: 'OpenAI video',
+        kind: 'custom',
+      }),
+    ])
+    const entries = groups.flatMap((group) =>
+      createTrendLegendEntries(group, coreOptionInput()),
+    )
+    expect(entries).toHaveLength(3)
+    expect(
+      entries.some((entry) => entry.series.source_id.includes('video')),
+    ).toBe(true)
+    expect(
+      entries.some(
+        (entry) => entry.series.source_id === 'minimax:video:interval',
+      ),
+    ).toBe(false)
   })
 
   it('keeps duplicate key identities, legend names, theme colors, and hidden series stable', () => {

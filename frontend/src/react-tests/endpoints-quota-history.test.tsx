@@ -493,6 +493,53 @@ describe('per-key quota history and trend', () => {
     expect(echartsMock.dispose).toHaveBeenCalled()
   })
 
+  it('visibly identifies distinct models beside window labels in history rows', async () => {
+    sdkMock.quotaKeyObservationHistory.mockResolvedValueOnce({
+      data: {
+        items: [
+          observation('observation-models', {
+            windows: [
+              quotaWindow({
+                source_id: 'minimax:model-a:interval',
+                source_model: 'model-a',
+                kind: 'five_hour',
+                duration_seconds: 18_000,
+                remaining_percent: 50,
+              }),
+              quotaWindow({
+                source_id: 'minimax:model-b:interval',
+                source_model: 'model-b',
+                kind: 'five_hour',
+                duration_seconds: 18_000,
+                remaining_percent: 70,
+              }),
+            ],
+          }),
+        ],
+        retention_days: 30,
+      },
+    })
+    renderWithProviders(
+      <KeyQuotaObservationHistory endpointId="endpoint-history-models" />,
+    )
+    openSection('Per-key quota history')
+    fireEvent.click(await screen.findByRole('button', { name: 'List' }))
+    await waitFor(() =>
+      expect(sdkMock.quotaKeyObservationHistory).toHaveBeenCalledTimes(1),
+    )
+    const first = await screen.findByText('model-a · 5h')
+    const second = screen.getByText('model-b · 5h')
+    expect(first).toBeTruthy()
+    expect(second).toBeTruthy()
+    const labels = [
+      ...document.querySelectorAll('[data-quota-row] [role="progressbar"]'),
+    ].map((bar) => bar.getAttribute('aria-label'))
+    expect(labels).toEqual([
+      'model-a · 5-hour window',
+      'model-b · 5-hour window',
+    ])
+  })
+
   it('pages only in list mode, maps All to an omitted API key, retries load-more, and retains pages across mode switches', async () => {
     vi.setSystemTime(NOW + 60 * 60 * 1000)
     const cursor = 'cursor:{opaque}/next'

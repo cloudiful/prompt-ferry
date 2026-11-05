@@ -1,4 +1,7 @@
-import type { TokenPlanWindowUsage } from '@/generated/admin-api'
+import type {
+  CanonicalQuotaWindowKind,
+  TokenPlanWindowUsage,
+} from '@/generated/admin-api'
 
 export function currencySymbol(currency: string | null | undefined): string {
   switch ((currency ?? '').toUpperCase()) {
@@ -63,6 +66,63 @@ export function formatResetDuration(ms: number | null, t: TranslateFn): string {
     return t('tokenPlanResetExpiresMinutes', { minutes })
   }
   return t('tokenPlanResetExpiresSeconds', { seconds: totalSeconds })
+}
+
+function compactDurationUnit(seconds: number): string {
+  const day = 24 * 60 * 60
+  if (seconds % day === 0) return `${seconds / day}d`
+  if (seconds % 3600 === 0) return `${seconds / 3600}h`
+  if (seconds % 60 === 0) return `${seconds / 60}m`
+  return `${seconds}s`
+}
+
+// Short duration label derived from an observed window length. A missing or
+// non-positive duration never invents a slot.
+export function compactWindowDuration(seconds: number | null): string | null {
+  if (seconds === null || !Number.isFinite(seconds) || seconds <= 0) {
+    return null
+  }
+  return compactDurationUnit(seconds)
+}
+
+// Compact label for one quota window. Known kinds supply their own slot only
+// when no real duration was observed; custom windows keep their measured
+// duration and stay unknown without one.
+export function shortWindowLabel(
+  kind: CanonicalQuotaWindowKind,
+  durationSeconds: number | null,
+): string | null {
+  const duration = compactWindowDuration(durationSeconds)
+  if (duration !== null) return duration
+  switch (kind) {
+    case 'five_hour':
+      return '5h'
+    case 'weekly':
+      return '7d'
+    case 'monthly':
+      return '30d'
+    default:
+      return null
+  }
+}
+
+// Compact countdown for the current-detail bar: duration units only, with the
+// shared expired token when the reset already passed and no countdown when the
+// anchor is missing.
+export function formatCompactResetCountdown(
+  ms: number | null,
+  t: TranslateFn,
+): string {
+  if (ms === null || !Number.isFinite(ms)) return '-'
+  if (ms <= 0) return t('tokenPlanExpired')
+  const totalSeconds = Math.floor(ms / 1000)
+  const days = Math.floor(totalSeconds / 86400)
+  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`
+  if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`
+  if (minutes > 0) return `${minutes}m`
+  return `${totalSeconds}s`
 }
 
 export function formatOpenRouterCredits(

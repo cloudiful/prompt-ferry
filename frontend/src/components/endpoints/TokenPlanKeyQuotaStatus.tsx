@@ -26,21 +26,8 @@ export function TokenPlanKeyQuotaStatus({
             : state === 'upstream_unavailable'
               ? t('tokenPlanUpstreamUnavailable')
               : t('tokenPlanQuotaUnknown')
-  const observedAt = status?.observed_at
   const cooldownUntil = status?.cooldown_until
   const hints = [t('tokenPlanDefaultTextScope')]
-  if (observedAt) {
-    hints.push(
-      t('quotaObservedAt', {
-        time: formatDateTime(
-          observedAt,
-          locale,
-          { dateStyle: 'medium', timeStyle: 'short' },
-          timeZone.effective,
-        ),
-      }),
-    )
-  }
   if (status?.refresh_failed) hints.push(t('quotaRefreshFailedCached'))
   if (cooldownUntil) {
     hints.push(

@@ -62,9 +62,7 @@ async page => {
 
   async function openQuota(endpointId) {
     const row = page.locator(`[data-endpoint-row="${endpointId}"]`)
-    await row
-      .getByRole('button', { name: 'Token plan usage', exact: true })
-      .click()
+    await row.locator('button[title]').first().click()
     const dialog = page.getByRole('dialog').last()
     await dialog
       .locator(`[data-quota-dialog="${endpointId}"]`)
@@ -80,6 +78,37 @@ async page => {
 
   await page.waitForURL(
     (url) => new URL(url).pathname === '/endpoints/upstreams',
+  )
+  const opencodeCookie = (await page.context().cookies(FIXTURE))
+    .map((cookie) => `${cookie.name}=${cookie.value}`)
+    .join('; ')
+  const opencodeCreate = await fetch(`${FIXTURE}/api/v1/admin/endpoints`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie: opencodeCookie },
+    body: JSON.stringify({
+      name: 'OpencodeGo Zen Quota Fixture',
+      base_url: 'https://opencode.ai/zen/v1',
+      scope: 'global',
+      provider: 'opencode_go',
+      plan: 'platform_api_key',
+      enabled: true,
+      api_keys: [
+        {
+          key_label: 'zen-primary',
+          api_key: 'fixture-zen-secret',
+          enabled: true,
+        },
+      ],
+    }),
+  })
+  if (!opencodeCreate.ok) {
+    throw new Error(`opencode endpoint create -> ${opencodeCreate.status}`)
+  }
+  const opencodeEndpoint = await opencodeCreate.json()
+  const opencodeId = opencodeEndpoint.endpoint_id
+  assert(
+    typeof opencodeId === 'string' && opencodeId.length > 0,
+    'opencode fixture endpoint was not created',
   )
   const warmQuotaResponse = page.waitForResponse(
     (response) =>
@@ -168,25 +197,70 @@ async page => {
     'warm page/dialog cache issued another current-usage request',
   )
   const unknownQuotaText = await dialog
-    .locator('[data-quota-row="minimax:weekly"]')
+    .locator(
+      '[data-quota-key="key-minimax-1"] [data-quota-row="minimax:weekly"]',
+    )
     .innerText()
   const knownWindowText = await dialog
-    .locator('[data-quota-row="minimax:primary"]')
+    .locator(
+      '[data-quota-key="key-minimax-1"] [data-quota-row="minimax:primary"]',
+    )
     .innerText()
     .catch(() => '')
   const knownWindowFallback =
     knownWindowText ||
-    (await dialog.locator('[data-quota-row]').first().innerText())
+    (await dialog
+      .locator('[data-quota-key="key-minimax-1"] [data-quota-row]')
+      .first()
+      .innerText())
   assert(
     unknownQuotaText.includes('—') && !/\b0(?:\.0)?%/.test(unknownQuotaText),
     'unknown quota was displayed as a real zero',
   )
   assert(
     knownWindowFallback.includes('38.00 / 100.00') &&
-      knownWindowFallback.includes('Expired'),
-    `known quota quantity/status missing: ${knownWindowFallback}`,
+      knownWindowFallback.includes('62.0%'),
+    `known quota quantity/percentage missing: ${knownWindowFallback}`,
   )
+  const keyOrder = await dialog
+    .locator('[data-quota-key]')
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute('data-quota-key')),
+    )
+  const firstKeyRows = await dialog
+    .locator('[data-quota-key="key-minimax-1"] [data-quota-row]')
+    .count()
+  const secondKeyRows = await dialog
+    .locator('[data-quota-key="key-minimax-2"] [data-quota-row]')
+    .count()
+  const videoRows = await dialog
+    .locator('[data-quota-row="minimax:video:interval"]')
+    .count()
+  assert(
+    JSON.stringify(keyOrder) ===
+      JSON.stringify(['key-minimax-1', 'key-minimax-2']),
+    `quota keys are not in configured order: ${JSON.stringify(keyOrder)}`,
+  )
+  assert(
+    firstKeyRows === 2 && secondKeyRows === 3,
+    `shared quota window grid rendered unexpected rows: first=${firstKeyRows} second=${secondKeyRows}`,
+  )
+  assert(
+    videoRows === 0 && !(await dialog.innerText()).includes('video'),
+    'minimax video remained in the quota detail',
+  )
+  report.checks.sharedQuotaWindows = {
+    keyOrder,
+    firstKeyRows,
+    secondKeyRows,
+    videoRows,
+  }
   await capture('endpoints-quota-current-en-light-1440')
+  await page.setViewportSize({ width: 768, height: 900 })
+  await capture('endpoints-quota-current-en-light-768')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await capture('endpoints-quota-current-en-light-390')
+  await page.setViewportSize({ width: 1440, height: 900 })
   await dialog.getByRole('button', { name: 'Close', exact: true }).click()
 
   await page.setViewportSize({ width: 390, height: 844 })
@@ -269,6 +343,13 @@ async page => {
     height: element.clientHeight,
     canvasCount: element.querySelectorAll('canvas').length,
   }))
+  const trendLegendLabels = await dialog
+    .locator('[role="group"][aria-label="Chart series"] button')
+    .allTextContents()
+  assert(
+    !trendLegendLabels.some((label) => label.includes('video')),
+    `minimax video remained in the trend legend: ${JSON.stringify(trendLegendLabels)}`,
+  )
   assert(
     chartStats.width > 0 && chartStats.height > 0 && chartStats.canvasCount > 0,
     `lazy ECharts chart did not render at nonzero size: ${JSON.stringify(chartStats)}`,
@@ -403,7 +484,91 @@ async page => {
   await capture('endpoints-quota-history-en-light-1440')
   await dialog.getByRole('button', { name: 'Close', exact: true }).click()
 
+  dialog = await openQuota(opencodeId)
+  const opencodeProvider = await dialog
+    .locator(`[data-quota-dialog="${opencodeId}"]`)
+    .getAttribute('data-quota-provider')
+  await dialog
+    .locator('[data-quota-key="key-opencodego-1"]')
+    .waitFor({ state: 'visible' })
+  const opencodeRows = await dialog
+    .locator('[data-quota-key="key-opencodego-1"] [data-quota-row]')
+    .count()
+  const opencodeText = await dialog.innerText()
+  const opencodeLabels = await dialog
+    .locator('[role="progressbar"]')
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label')))
+  assert(
+    opencodeProvider === 'opencode_go' && opencodeRows === 3,
+    `opencode quota did not render three shared windows: provider=${opencodeProvider} rows=${opencodeRows}`,
+  )
+  assert(
+    opencodeText.includes('0.0%') &&
+      opencodeText.includes('55.0%') &&
+      opencodeText.includes('100.0%'),
+    `opencode windows missed 0/55/100 percent states: ${opencodeText}`,
+  )
+  assert(
+    new Set(opencodeLabels).size === 3 &&
+      opencodeLabels.includes('Monthly window'),
+    `opencode accessible window names are not distinct: ${JSON.stringify(opencodeLabels)}`,
+  )
+  await capture('endpoints-quota-opencode-en-light-1440')
+  await page.setViewportSize({ width: 768, height: 900 })
+  await capture('endpoints-quota-opencode-en-light-768')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await capture('endpoints-quota-opencode-en-light-390')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  report.checks.opencodeQuota = {
+    provider: opencodeProvider,
+    rows: opencodeRows,
+    labels: opencodeLabels,
+  }
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+
   dialog = await openQuota('ep-openai-codex')
+  const openaiProvider = await dialog
+    .locator('[data-quota-dialog="ep-openai-codex"]')
+    .getAttribute('data-quota-provider')
+  await dialog
+    .locator('[data-quota-key="key-openai-1"]')
+    .waitFor({ state: 'visible' })
+  const openaiText = await dialog.innerText()
+  const openaiLabels = await dialog
+    .locator('[role="progressbar"]')
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label')))
+  assert(
+    openaiProvider === 'openai',
+    `openai quota provider mismatch: ${openaiProvider}`,
+  )
+  assert(
+    openaiText.includes('100.0%') && openaiText.includes('40.0%'),
+    `openai windows missed 100/40 percent states: ${openaiText}`,
+  )
+  assert(
+    openaiText.includes('Cached observation') &&
+      openaiText.includes('Refresh failed; showing the latest successful observation.') &&
+      openaiText.includes('Next retry:'),
+    `openai observation-only failure metadata was lost: ${openaiText}`,
+  )
+  assert(
+    openaiLabels.length === 2 &&
+      new Set(openaiLabels).size === 2 &&
+      openaiLabels.every((label) => label.includes('gpt-5.1-codex · ')),
+    `openai accessible window names are not distinct: ${JSON.stringify(openaiLabels)}`,
+  )
+  await page.waitForTimeout(150)
+  await capture('endpoints-quota-openai-en-light-1440')
+  await page.setViewportSize({ width: 768, height: 900 })
+  await capture('endpoints-quota-openai-en-light-768')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await capture('endpoints-quota-openai-en-light-390')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  report.checks.openaiQuota = {
+    provider: openaiProvider,
+    labels: openaiLabels,
+    observationOnlyFailure: true,
+  }
   const subscriptionHistoryResponse = waitForResponse(
     'GET',
     '/api/v1/admin/endpoints/ep-openai-codex/quota-history',
@@ -478,7 +643,9 @@ async page => {
   )?.query
   dialog = await openQuota('ep-minimax-cn')
   const restoredWindowText = await dialog
-    .locator('[data-quota-row="minimax:primary"]')
+    .locator(
+      '[data-quota-key="key-minimax-1"] [data-quota-row="minimax:primary"]',
+    )
     .innerText()
   await dialog.getByRole('button', { name: 'Close', exact: true }).click()
   const afterRefreshCalls = (
@@ -490,6 +657,7 @@ async page => {
   assert(
     forcedQuery?.force === 'true' &&
       restoredWindowText.includes('0.00 / 100.00') &&
+      restoredWindowText.includes('100.0%') &&
       !restoredWindowText.includes('38.00 / 100.00'),
     `manual refresh did not restore the quota: query=${JSON.stringify(forcedQuery)} row=${restoredWindowText}`,
   )
@@ -502,6 +670,56 @@ async page => {
     restoredWindowText,
     extraRequests: afterRefreshCalls - beforeRefreshCalls,
   }
+
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    localStorage.setItem('prompt-ferry:theme-mode', 'dark')
+  })
+  await page.reload()
+  await page
+    .locator('[data-foundation-route-id="R-ENDPOINTS-UPSTREAMS"]')
+    .waitFor({ state: 'visible' })
+  await page
+    .locator('[data-endpoint-row="ep-minimax-cn"]')
+    .waitFor({ state: 'visible' })
+  dialog = await openQuota('ep-minimax-cn')
+  await dialog
+    .locator('[data-quota-key="key-minimax-1"]')
+    .waitFor({ state: 'visible' })
+  const zhDark = await page.evaluate(() => ({
+    lang: document.documentElement.lang,
+    dark: document.documentElement.classList.contains('dark'),
+  }))
+  assert(
+    zhDark.lang === 'zh-CN' && zhDark.dark,
+    `zh-CN dark quota preferences did not render: ${JSON.stringify(zhDark)}`,
+  )
+  await capture('endpoints-quota-zh-dark-1440')
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+
+  dialog = await openQuota(opencodeId)
+  await dialog
+    .locator('[data-quota-key="key-opencodego-1"]')
+    .waitFor({ state: 'visible' })
+  await capture('endpoints-quota-opencode-zh-dark-1440')
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+  report.checks.zhDarkQuota = zhDark
+
+  const opencodeDelete = await fetch(
+    `${FIXTURE}/api/v1/admin/endpoints/${opencodeId}`,
+    { method: 'DELETE', headers: { cookie: opencodeCookie } },
+  )
+  if (!opencodeDelete.ok) {
+    throw new Error(`opencode endpoint delete -> ${opencodeDelete.status}`)
+  }
+  await page.evaluate(() => {
+    localStorage.setItem('prompt-ferry:locale', 'en-US')
+    localStorage.setItem('prompt-ferry:theme-mode', 'light')
+  })
+  await page.reload()
+  await page
+    .locator('[data-endpoint-row="ep-minimax-cn"]')
+    .waitFor({ state: 'visible' })
 
   report.checks.consoleErrors = consoleErrors
   report.checks.pageErrors = pageErrors

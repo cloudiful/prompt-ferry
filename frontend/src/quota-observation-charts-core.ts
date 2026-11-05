@@ -85,6 +85,7 @@ export function groupQuotaTrendSeries(
 ): QuotaTrendGroup[] {
   const groups = new Map<string, QuotaTrendGroup>()
   for (const entry of series) {
+    if (isHiddenQuotaTrendSource(entry.source_id)) continue
     const key = `${entry.metric}\u0000${entry.unit}`
     let group = groups.get(key)
     if (!group) {
@@ -125,6 +126,17 @@ export function shortKeyId(keyId: string): string {
 function customSourceIdentity(sourceId: string): string {
   const separator = sourceId.lastIndexOf(':')
   return separator >= 0 ? sourceId.slice(separator + 1) : sourceId
+}
+
+// MiniMax video observations are stored, but the shared display projection
+// hides them from quota detail, history, and trend charts. Identity lives in
+// the canonical source id (`minimax:<model>:<slot>`).
+export function isHiddenQuotaTrendSource(sourceId: string): boolean {
+  const [provider, model] = sourceId.split(':')
+  return (
+    provider?.trim().toLowerCase() === 'minimax' &&
+    model?.trim().toLowerCase() === 'video'
+  )
 }
 
 export function quotaTrendSeriesName(

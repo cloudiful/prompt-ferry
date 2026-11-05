@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { TokenPlanQuotaWindowRow } from '@/components/endpoints/TokenPlanQuotaWindowRow'
+import { quotaWindowLabel } from '@/components/endpoints/TokenPlanQuotaWindows'
 import { toCanonicalQuotaRows } from '@/composables/useCanonicalQuotaWindows'
 import type {
   QuotaKeyObservationHistoryItem,
@@ -568,9 +569,14 @@ export function KeyQuotaObservationHistory({
                             {rows.map((row) => (
                               <TokenPlanQuotaWindowRow
                                 key={`${row.sourceId}:${row.sourceModel ?? ''}`}
-                                label={row.sourceModel ?? row.sourceId}
+                                label={quotaWindowLabel(
+                                  row,
+                                  t as unknown as TranslateFn,
+                                )}
+                                modelName={row.sourceModel}
                                 nowMs={observedMs}
                                 row={row}
+                                showModelName
                               />
                             ))}
                           </div>

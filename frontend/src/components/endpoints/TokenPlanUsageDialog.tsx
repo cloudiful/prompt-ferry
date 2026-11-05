@@ -15,9 +15,12 @@ import {
 } from '@/components/ui/dialog'
 import { KeyQuotaObservationHistory } from '@/components/endpoints/KeyQuotaObservationHistory'
 import { SubscriptionQuotaHistory } from '@/components/endpoints/SubscriptionQuotaHistory'
-import { SubscriptionQuotaWindows } from '@/components/endpoints/SubscriptionQuotaWindows'
 import { TokenPlanKeyQuotaStatus } from '@/components/endpoints/TokenPlanKeyQuotaStatus'
 import { TokenPlanQuotaWindowRow } from '@/components/endpoints/TokenPlanQuotaWindowRow'
+import {
+  quotaWindowLabel,
+  TokenPlanQuotaWindows,
+} from '@/components/endpoints/TokenPlanQuotaWindows'
 import {
   toCanonicalQuotaRows,
   type CanonicalQuotaRow,
@@ -28,7 +31,6 @@ import {
 } from '@/composables/tokenPlanEffectiveKeys'
 import type {
   EndpointProvider,
-  SubscriptionQuotaObservation,
   TokenPlanKeyUsage,
   TokenPlanQuotaStatus,
   TokenPlanUsageResponse,
@@ -47,7 +49,6 @@ import {
   formatMoney,
   formatOpenRouterCredits,
 } from '@/models/endpoints/token-plan-window'
-import { quotaWindowLabel } from '@/components/endpoints/SubscriptionQuotaWindows'
 
 export type TokenPlanUsageDialogProps = {
   endpointId: string
@@ -56,48 +57,6 @@ export type TokenPlanUsageDialogProps = {
   onOpenChange: (open: boolean) => void
   open: boolean
   provider: EndpointProvider
-}
-
-type ModelRows = {
-  modelName: string
-  observation: SubscriptionQuotaObservation | null
-  rows: CanonicalQuotaRow[]
-}
-
-function isTimeWindow(row: CanonicalQuotaRow): boolean {
-  return (
-    row.kind === 'five_hour' ||
-    row.kind === 'rolling' ||
-    row.kind === 'weekly' ||
-    row.kind === 'monthly' ||
-    row.kind === 'custom'
-  )
-}
-
-function modelRows(key: TokenPlanKeyUsage, nowMs: number): ModelRows[] {
-  const rowsByModel = new Map<string, CanonicalQuotaRow[]>()
-  for (const row of toCanonicalQuotaRows(key, nowMs)) {
-    if (row.sourceModel === null) continue
-    const rows = rowsByModel.get(row.sourceModel)
-    if (rows) rows.push(row)
-    else rowsByModel.set(row.sourceModel, [row])
-  }
-
-  const groups: ModelRows[] = []
-  for (const model of key.model_remains) {
-    const rows = rowsByModel.get(model.model_name) ?? []
-    rowsByModel.delete(model.model_name)
-    if (rows.length === 0 && model.observation == null) continue
-    groups.push({
-      modelName: model.model_name,
-      observation: model.observation ?? null,
-      rows,
-    })
-  }
-  for (const [modelName, rows] of rowsByModel) {
-    groups.push({ modelName, observation: null, rows })
-  }
-  return groups
 }
 
 function quotaStatusForKey(
@@ -118,35 +77,11 @@ function quotaStatusForKey(
   }
 }
 
-function windowCount(rows: CanonicalQuotaRow[]): number {
-  return rows.filter(isTimeWindow).length
-}
-
-function windowCountLabel(count: number, t: Translate): string {
-  const message = t('tokenPlanWindowCount', { count })
-  const [singular, plural] = message.split(' | ')
-  if (plural === undefined) return message
-  return count === 1 ? (singular ?? message) : plural
-}
-
-function minimumRemaining(rows: CanonicalQuotaRow[]): number | null {
-  const values = rows
-    .filter(
-      (row) =>
-        isTimeWindow(row) &&
-        row.remainingPercent !== null &&
-        (row.sourceModel === null || row.isDefaultScope),
-    )
-    .map((row) => row.remainingPercent as number)
-  return values.length === 0 ? null : Math.min(...values)
-}
-
-function topLevelRows(
-  key: TokenPlanKeyUsage,
-  nowMs: number,
-): CanonicalQuotaRow[] {
+function factRows(key: TokenPlanKeyUsage, nowMs: number): CanonicalQuotaRow[] {
   return toCanonicalQuotaRows(key, nowMs).filter(
-    (row) => row.sourceModel === null,
+    (row) =>
+      row.sourceModel === null &&
+      (row.kind === 'balance' || row.kind === 'unlimited'),
   )
 }
 
@@ -289,22 +224,12 @@ export function TokenPlanUsageDialog({
                 </Badge>
               ) : null}
               {usage.keys.map((key) => {
-                const rows = toCanonicalQuotaRows(key, nowMs)
-                const count = windowCount(rows)
-                const minimum = minimumRemaining(rows)
                 const status = quotaStatusForKey(key, snapshot.state, nowMs)
-                const groups = modelRows(key, nowMs)
-                const topRows = topLevelRows(key, nowMs)
+                const facts = factRows(key, nowMs)
                 const deepseekAmounts = deepseekBalanceAmounts(
                   key.deepseek_balance,
                 )
                 const deepseekEntries = key.deepseek_balance?.balances ?? []
-                const minimumLabel =
-                  minimum === null
-                    ? t('tokenPlanMinRemainingUnknown')
-                    : t('tokenPlanMinRemaining', {
-                        percent: minimum.toFixed(1),
-                      })
                 return (
                   <details
                     className="min-w-0 border-b last:border-b-0"
@@ -330,11 +255,6 @@ export function TokenPlanUsageDialog({
                           </Badge>
                         ) : null}
                       </span>
-                      {key.ok && count > 0 ? (
-                        <span className="min-w-0 text-xs text-muted-foreground">
-                          {minimumLabel} · {windowCountLabel(count, t)}
-                        </span>
-                      ) : null}
                     </summary>
                     <div className="grid min-w-0 gap-3 px-1 pb-3">
                       {!key.ok ? (
@@ -493,7 +413,7 @@ export function TokenPlanUsageDialog({
                               </div>
                             </section>
                           ) : null}
-                          {topRows.map((row) => (
+                          {facts.map((row) => (
                             <TokenPlanQuotaWindowRow
                               key={row.sourceId}
                               label={topLevelLabel(row, t)}
@@ -509,10 +429,7 @@ export function TokenPlanUsageDialog({
                               {t('tokenPlanPaygNoWindow')}
                             </p>
                           ) : null}
-                          <SubscriptionQuotaWindows
-                            groups={groups}
-                            nowMs={nowMs}
-                          />
+                          <TokenPlanQuotaWindows keyUsage={key} nowMs={nowMs} />
                         </>
                       )}
                     </div>

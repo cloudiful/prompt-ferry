@@ -104,6 +104,27 @@ function isDefaultMinimaxModel(modelName: string): boolean {
   return modelName.trim().toLowerCase() === 'general'
 }
 
+// MiniMax reports a video model beside the general text model. Video is not a
+// text-inference quota window, so the shared display projection hides it in
+// both the canonical and the legacy fallback path. Stored observations and
+// routing decisions stay untouched.
+export function isMinimaxVideoModel(
+  modelName: string | null | undefined,
+): boolean {
+  return (modelName ?? '').trim().toLowerCase() === 'video'
+}
+
+// Canonical source ids carry provider and model (`minimax:<model>:<slot>`), so
+// the display filter hides only MiniMax video while another provider's model
+// named video stays visible.
+export function isMinimaxVideoSourceId(sourceId: string): boolean {
+  const [provider, model] = sourceId.split(':')
+  return (
+    provider?.trim().toLowerCase() === 'minimax' &&
+    model?.trim().toLowerCase() === 'video'
+  )
+}
+
 function minimaxFallbackRows(
   key: TokenPlanKeyUsage,
   nowMs: number,
@@ -113,6 +134,7 @@ function minimaxFallbackRows(
     // Subscription-shaped models carry real durations and are projected
     // as custom rows, not minimax count slots.
     if (model.windows != null) continue
+    if (isMinimaxVideoModel(model.model_name)) continue
     const sourceModel = model.model_name
     const isDefaultScope = isDefaultMinimaxModel(sourceModel)
     for (const [slot, kind, window] of [
@@ -446,7 +468,9 @@ export function toCanonicalQuotaRows(
 ): CanonicalQuotaRow[] {
   if (!key.ok) return []
   if (key.quota_windows != null) {
-    return key.quota_windows.map((window) => validateRow(window, nowMs))
+    return key.quota_windows
+      .map((window) => validateRow(window, nowMs))
+      .filter((row) => !isMinimaxVideoSourceId(row.sourceId))
   }
   return [
     ...minimaxFallbackRows(key, nowMs),

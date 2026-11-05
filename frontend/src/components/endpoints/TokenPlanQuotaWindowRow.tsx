@@ -2,24 +2,33 @@ import type { CanonicalQuotaRow } from '@/composables/useCanonicalQuotaWindows'
 import { canonicalQuantityCaption } from '@/composables/useCanonicalQuotaWindows'
 import { useLocale } from '@/lib/i18n'
 import {
-  formatResetDuration,
+  formatCompactResetCountdown,
   knownRemainingPercent,
   progressColor,
   remainingPercent,
+  shortWindowLabel,
 } from '@/models/endpoints/token-plan-window'
 
 export type TokenPlanQuotaWindowRowProps = {
   label: string
+  modelName?: string | null
   nowMs: number
   quantitySuffix?: string
   row: CanonicalQuotaRow
+  showModelName?: boolean
+}
+
+function isTimeWindow(row: CanonicalQuotaRow): boolean {
+  return row.kind !== 'balance' && row.kind !== 'unlimited'
 }
 
 export function TokenPlanQuotaWindowRow({
   label,
+  modelName,
   nowMs,
   quantitySuffix,
   row,
+  showModelName = false,
 }: TokenPlanQuotaWindowRowProps) {
   const { t } = useLocale()
   const adapted = {
@@ -30,9 +39,9 @@ export function TokenPlanQuotaWindowRow({
   const resetAt = row.resetAt ? Date.parse(row.resetAt) : Number.NaN
   const resetMs = Number.isFinite(resetAt) ? resetAt - nowMs : null
   const caption = canonicalQuantityCaption(row)
-  const isTimeWindow = row.kind !== 'balance' && row.kind !== 'unlimited'
+  const accessibleLabel = modelName ? `${modelName} · ${label}` : label
 
-  if (!isTimeWindow) {
+  if (!isTimeWindow(row)) {
     const value =
       row.kind === 'unlimited'
         ? t('tokenPlanNoLimit')
@@ -42,7 +51,12 @@ export function TokenPlanQuotaWindowRow({
     return (
       <div className="@container min-w-0" data-quota-row={row.sourceId}>
         <div className="grid min-w-0 gap-1 @[20rem]:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)] @[20rem]:items-center @[20rem]:gap-3">
-          <span className="break-words text-muted-foreground">{label}</span>
+          <span
+            className="break-words text-muted-foreground"
+            title={accessibleLabel}
+          >
+            {label}
+          </span>
           <span className="break-words">{value}</span>
         </div>
       </div>
@@ -50,50 +64,62 @@ export function TokenPlanQuotaWindowRow({
   }
 
   const percentage = remaining === null ? null : remainingPercent(adapted)
-  const resetLabel = formatResetDuration(resetMs, t as unknown as TranslateFn)
-  const percentageLabel =
-    percentage === null
-      ? '—'
-      : `${t('quotaRemainingPercent')} ${percentage.toFixed(1)}%`
+  const resetLabel =
+    remaining === null
+      ? '-'
+      : formatCompactResetCountdown(resetMs, t as unknown as TranslateFn)
+  const shortLabel = shortWindowLabel(row.kind, row.durationSeconds) ?? label
+  const visibleLabel =
+    showModelName && modelName ? `${modelName} · ${shortLabel}` : shortLabel
 
   return (
     <div className="@container min-w-0" data-quota-row={row.sourceId}>
-      <div className="grid min-w-0 gap-1.5 @[26rem]:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)_minmax(8.5rem,auto)] @[26rem]:items-center @[26rem]:gap-3">
-        <span className="break-words text-muted-foreground">{label}</span>
+      <div className="grid min-w-0 gap-1">
+        <div className="flex min-w-0 items-baseline justify-between gap-2">
+          <span
+            className="min-w-0 break-words text-xs font-medium text-foreground"
+            title={accessibleLabel}
+          >
+            {visibleLabel}
+          </span>
+          {caption !== null ? (
+            <span className="min-w-0 break-words text-right text-muted-foreground">
+              {caption}
+              {quantitySuffix ?? ''}
+            </span>
+          ) : null}
+        </div>
         {percentage === null ? (
-          <span aria-hidden="true" className="h-1.5" />
+          <div className="flex h-8 min-h-8 items-center justify-between gap-2 rounded-md border border-dashed px-2 text-xs text-muted-foreground">
+            <span aria-hidden="true">—</span>
+            <span>{resetLabel}</span>
+          </div>
         ) : (
           <div
-            aria-label={label}
+            aria-label={accessibleLabel}
             aria-valuemax={100}
             aria-valuemin={0}
             aria-valuenow={percentage}
-            className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+            className="relative h-8 min-h-8 w-full overflow-hidden rounded-md bg-muted"
             role="progressbar"
           >
             <div
-              className="h-full rounded-full"
+              className="h-full"
               style={{
                 backgroundColor: progressColor(adapted),
                 width: `${percentage}%`,
               }}
             />
+            <div className="absolute inset-0 flex min-w-0 items-center justify-between gap-2 px-1.5 text-xs">
+              <span className="rounded bg-background/85 px-1 font-semibold whitespace-nowrap text-foreground">
+                {percentage.toFixed(1)}%
+              </span>
+              <span className="min-w-0 truncate rounded bg-background/85 px-1 text-muted-foreground">
+                {resetLabel}
+              </span>
+            </div>
           </div>
         )}
-        <div className="flex min-w-0 items-center justify-between gap-2 text-xs @[26rem]:justify-end">
-          <span className="min-w-0 break-words text-muted-foreground">
-            {resetLabel}
-          </span>
-          <span className="shrink-0 font-semibold whitespace-nowrap">
-            {percentageLabel}
-          </span>
-        </div>
-        {caption !== null ? (
-          <span className="break-words text-muted-foreground @[26rem]:col-span-2 @[26rem]:col-start-2">
-            {caption}
-            {quantitySuffix ?? ''}
-          </span>
-        ) : null}
       </div>
     </div>
   )

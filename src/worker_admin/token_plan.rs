@@ -83,6 +83,22 @@ const MINIMAX_CN_USAGE_URL: &str = "https://www.minimaxi.com/v1/token_plan/remai
 const MINIMAX_GLOBAL_USAGE_URL: &str = "https://www.minimax.io/v1/token_plan/remains";
 const MAX_CONCURRENT_KEY_REQUESTS: usize = 4;
 
+/// Fetch each enabled key once with the shared concurrency cap while keeping
+/// the endpoint's configured key order regardless of completion order.
+async fn collect_key_usage<F, Fut>(
+    keys: Vec<(Uuid, String, String)>,
+    fetch: F,
+) -> Vec<TokenPlanKeyUsage>
+where
+    F: FnMut((Uuid, String, String)) -> Fut,
+    Fut: std::future::Future<Output = TokenPlanKeyUsage>,
+{
+    stream::iter(keys.into_iter().map(fetch))
+        .buffered(MAX_CONCURRENT_KEY_REQUESTS)
+        .collect()
+        .await
+}
+
 pub async fn fetch_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPlanUsageResponse> {
     match endpoint.provider {
         EndpointProvider::Minimax => fetch_minimax_endpoint_usage(endpoint).await,
@@ -179,11 +195,9 @@ async fn fetch_minimax_endpoint_usage(
 
     let url = usage_url(region);
     let client = proxy_client(endpoint, url)?;
-    let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
+    let key_results = collect_key_usage(keys, |(key_id, key_label, secret)| {
         fetch_minimax_key_usage(client.clone(), url, key_id, key_label, secret)
-    }))
-    .buffer_unordered(MAX_CONCURRENT_KEY_REQUESTS)
-    .collect::<Vec<_>>()
+    })
     .await;
 
     Ok(provider_usage_response(
@@ -199,11 +213,9 @@ async fn fetch_command_code_endpoint_usage(
     let keys = require_enabled_keys(endpoint)?;
 
     let client = proxy_client(endpoint, COMMAND_CODE_BASE)?;
-    let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
+    let key_results = collect_key_usage(keys, |(key_id, key_label, secret)| {
         fetch_command_code_key_usage(client.clone(), COMMAND_CODE_BASE, key_id, key_label, secret)
-    }))
-    .buffer_unordered(MAX_CONCURRENT_KEY_REQUESTS)
-    .collect::<Vec<_>>()
+    })
     .await;
 
     Ok(provider_usage_response(
@@ -219,11 +231,9 @@ async fn fetch_opencode_go_endpoint_usage(
     let keys = require_enabled_keys(endpoint)?;
 
     let client = proxy_client(endpoint, OPENCODE_GO_BASE)?;
-    let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
+    let key_results = collect_key_usage(keys, |(key_id, key_label, secret)| {
         fetch_opencode_go_key_usage(client.clone(), OPENCODE_GO_BASE, key_id, key_label, secret)
-    }))
-    .buffer_unordered(MAX_CONCURRENT_KEY_REQUESTS)
-    .collect::<Vec<_>>()
+    })
     .await;
 
     Ok(provider_usage_response(
@@ -246,11 +256,9 @@ async fn fetch_openrouter_endpoint_usage(
         crate::config::NativeApi::Chat.into(),
     );
     let client = proxy_client(endpoint, &base)?;
-    let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
+    let key_results = collect_key_usage(keys, |(key_id, key_label, secret)| {
         fetch_openrouter_key_usage(client.clone(), base.clone(), key_id, key_label, secret)
-    }))
-    .buffer_unordered(MAX_CONCURRENT_KEY_REQUESTS)
-    .collect::<Vec<_>>()
+    })
     .await;
 
     Ok(provider_usage_response(
@@ -271,11 +279,9 @@ async fn fetch_glm_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPl
         crate::config::NativeApi::Chat.into(),
     );
     let client = proxy_client(endpoint, &base)?;
-    let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
+    let key_results = collect_key_usage(keys, |(key_id, key_label, secret)| {
         fetch_glm_key_usage(client.clone(), base.clone(), key_id, key_label, secret)
-    }))
-    .buffer_unordered(MAX_CONCURRENT_KEY_REQUESTS)
-    .collect::<Vec<_>>()
+    })
     .await;
 
     Ok(provider_usage_response(
@@ -298,11 +304,9 @@ async fn fetch_deepseek_endpoint_usage(
         crate::config::NativeApi::Chat.into(),
     );
     let client = proxy_client(endpoint, &base)?;
-    let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
+    let key_results = collect_key_usage(keys, |(key_id, key_label, secret)| {
         fetch_deepseek_key_usage(client.clone(), base.clone(), key_id, key_label, secret)
-    }))
-    .buffer_unordered(MAX_CONCURRENT_KEY_REQUESTS)
-    .collect::<Vec<_>>()
+    })
     .await;
 
     Ok(provider_usage_response(
@@ -609,6 +613,69 @@ mod tests {
     // The provider fetchers and the admin handler must never disagree about
     // whether an endpoint has a usable key: one shared predicate backs both, so
     // a rejected response and a rejected fetch stay the same decision.
+    #[tokio::test]
+    async fn key_fetch_keeps_configured_order_under_reverse_completion() {
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let third = Uuid::new_v4();
+        let ids = [first, second, third];
+
+        let results = collect_key_usage(
+            ids.iter()
+                .enumerate()
+                .map(|(position, key_id)| {
+                    (
+                        *key_id,
+                        format!("key-{position}"),
+                        format!("secret-{position}"),
+                    )
+                })
+                .collect(),
+            |(key_id, key_label, _)| async move {
+                let position = ids
+                    .iter()
+                    .position(|candidate| *candidate == key_id)
+                    .expect("known key");
+                tokio::time::sleep(Duration::from_millis(((ids.len() - position) * 10) as u64))
+                    .await;
+                failed_key(key_id, key_label, Some(502), None, "upstream".into())
+            },
+        )
+        .await;
+
+        assert_eq!(
+            results.iter().map(|key| key.key_id).collect::<Vec<_>>(),
+            ids
+        );
+    }
+
+    #[tokio::test]
+    async fn key_fetch_skips_disabled_keys_and_keeps_enabled_config_order() {
+        let disabled = Uuid::new_v4();
+        let first_enabled = Uuid::new_v4();
+        let second_enabled = Uuid::new_v4();
+        let endpoint = endpoint_with(
+            EndpointProvider::Glm,
+            vec![
+                (disabled, false, "secret-disabled"),
+                (first_enabled, true, "secret-first"),
+                (second_enabled, true, "secret-second"),
+            ],
+            "",
+        );
+
+        let keys = require_enabled_keys(&endpoint).expect("two enabled keys");
+        let results = collect_key_usage(keys, |(key_id, key_label, _)| async move {
+            failed_key(key_id, key_label, Some(502), None, "upstream".into())
+        })
+        .await;
+
+        assert_eq!(
+            results.iter().map(|key| key.key_id).collect::<Vec<_>>(),
+            vec![first_enabled, second_enabled]
+        );
+    }
+
     #[test]
     fn the_enabled_key_gate_is_shared_by_fetchers_and_the_admin_handler() {
         let key_id = Uuid::new_v4();
