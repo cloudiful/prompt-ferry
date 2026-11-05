@@ -63,6 +63,7 @@ import {
   quotaTrendLegendEntries as createTrendLegendEntries,
   quotaTrendSeriesName as trendSeriesName,
   shortKeyId as shortTrendKeyId,
+  splitQuotaTrendSegments as splitTrendSegments,
 } from '@/quota-observation-charts-core'
 import {
   subscriptionQuotaMinimumForBand,
@@ -76,11 +77,14 @@ import {
   subscriptionWindowResetMs,
 } from '@/models/endpoints/subscription-window'
 import {
+  compactWindowDuration,
+  formatCompactResetCountdown,
   formatMoney,
   formatOpenRouterCredits,
   formatResetDuration,
   knownRemainingPercent,
   progressColor,
+  shortWindowLabel,
 } from '@/models/endpoints/token-plan-window'
 import {
   badgeColorForPercent,
@@ -441,7 +445,9 @@ describe('React quota singleton', () => {
     )
     await flushMicrotasks()
     expect(
-      vi.mocked(fetchTokenPlanUsage).mock.calls.map(([id, force]) => [id, force]),
+      vi
+        .mocked(fetchTokenPlanUsage)
+        .mock.calls.map(([id, force]) => [id, force]),
     ).toEqual([
       ['refresh-a', true],
       ['refresh-b', true],
@@ -470,7 +476,8 @@ describe('React quota singleton', () => {
     expect(secondOutcomes[0].failed).toBe(false)
   })
 
-  it('does not let a batch wait on or join a forced cold flight', async () => {    const pendingForce = deferred<TokenPlanUsageResponse>()
+  it('does not let a batch wait on or join a forced cold flight', async () => {
+    const pendingForce = deferred<TokenPlanUsageResponse>()
     vi.mocked(fetchTokenPlanUsage).mockReturnValueOnce(pendingForce.promise)
     const forcedRead = requestTokenPlanUsage('endpoint-batch-force', {
       refresh: true,
@@ -785,6 +792,36 @@ describe('neutral quota calculations and formatters', () => {
     expect(formatResetDuration(86_400_000, translate('en-US'))).toBe(
       'Resets in 1d 0h 0m',
     )
+    expect(compactWindowDuration(18_000, translate('en-US'))).toBe('5h')
+    expect(compactWindowDuration(604_800, translate('en-US'))).toBe('7d')
+    expect(compactWindowDuration(2_592_000, translate('en-US'))).toBe('30d')
+    expect(compactWindowDuration(null, translate('en-US'))).toBe(null)
+    expect(shortWindowLabel('weekly', null, translate('en-US'))).toBe('7d')
+    expect(shortWindowLabel('custom', 90_000, translate('en-US'))).toBe('25h')
+    expect(shortWindowLabel('custom', null, translate('en-US'))).toBe(null)
+    const zh = translate('zh-CN')
+    expect(compactWindowDuration(18_000, zh)).toBe('5小时')
+    expect(compactWindowDuration(604_800, zh)).toBe('7天')
+    expect(compactWindowDuration(2_592_000, zh)).toBe('30天')
+    expect(shortWindowLabel('monthly', null, zh)).toBe('30天')
+    expect(shortWindowLabel('five_hour', null, zh)).toBe('5小时')
+    expect(formatCompactResetCountdown(null, zh)).toBe('-')
+    expect(formatCompactResetCountdown(-1, zh)).toBe('已到期')
+    expect(formatCompactResetCountdown(6 * 86_400_000, zh)).toBe('6天')
+    expect(formatCompactResetCountdown((4 * 3_600 + 59 * 60) * 1_000, zh)).toBe(
+      '4小时59分',
+    )
+    expect(formatCompactResetCountdown((86_400 + 3_600) * 1_000, zh)).toBe(
+      '1天1小时',
+    )
+    expect(formatCompactResetCountdown(null, translate('en-US'))).toBe('-')
+    expect(formatCompactResetCountdown(-1, translate('en-US'))).toBe('Expired')
+    expect(formatCompactResetCountdown(3_600_000, translate('en-US'))).toBe(
+      '1h',
+    )
+    expect(formatCompactResetCountdown(90_061_000, translate('en-US'))).toBe(
+      '1d 1h',
+    )
   })
 
   it('delegates date, timezone, and chart theme through explicit neutral cores', () => {
@@ -889,6 +926,41 @@ describe('quota history pure cores', () => {
     ])
   })
 
+  it('filters minmax video series from trend display', () => {
+    const groups = groupTrendSeries([
+      trendSeries({ source_id: 'minimax:general:interval' }),
+      trendSeries({
+        source_id: 'minimax:video:interval',
+        key_id: 'key-video',
+        key_label: 'Video',
+      }),
+      trendSeries({
+        source_id: 'opencode_go:rolling',
+        kind: 'rolling',
+        key_id: 'key-other',
+        key_label: 'Other',
+      }),
+      trendSeries({
+        source_id: 'openai:video:interval',
+        key_id: 'key-openai',
+        key_label: 'OpenAI video',
+        kind: 'custom',
+      }),
+    ])
+    const entries = groups.flatMap((group) =>
+      createTrendLegendEntries(group, coreOptionInput()),
+    )
+    expect(entries).toHaveLength(3)
+    expect(
+      entries.some((entry) => entry.series.source_id.includes('video')),
+    ).toBe(true)
+    expect(
+      entries.some(
+        (entry) => entry.series.source_id === 'minimax:video:interval',
+      ),
+    ).toBe(false)
+  })
+
   it('keeps duplicate key identities, legend names, theme colors, and hidden series stable', () => {
     const entries = [
       trendSeries({ key_id: 'key-a-1234', key_label: 'Shared' }),
@@ -946,16 +1018,187 @@ describe('quota history pure cores', () => {
       },
     }
     const option = createCoreTrendOption(group, input) as unknown as {
-      series: Array<{ data: Array<number | null> }>
-      xAxis: { axisLabel: { formatter: (value: string) => string } }
+      series: Array<{ data: Array<[number, number]> }>
+      xAxis: {
+        type: string
+        axisLabel: { formatter: (value: number) => string }
+      }
       yAxis: { min: number; max: number; axisLabel: { formatter: string } }
     }
     expect(option.yAxis).toMatchObject({ min: 0, max: 100 })
     expect(option.yAxis.axisLabel.formatter).toContain('%')
-    expect(option.series[0].data).toEqual([0, null, 100])
+    expect(option.xAxis.type).toBe('time')
+    expect(option.series.map((entry) => entry.data)).toEqual([
+      [[Date.parse('2026-10-15T23:30:00Z'), 0]],
+      [[Date.parse('2026-10-16T02:30:00Z'), 100]],
+    ])
     const labels = option.xAxis.axisLabel.formatter
-    expect(labels('2026-10-15T23:30:00Z')).toBe('time:2026-10-15T23:30:00Z')
-    expect(labels('2026-10-16T01:30:00Z')).toBe('time:2026-10-16T01:30:00Z')
+    expect(labels(Date.parse('2026-10-15T23:30:00Z'))).toBe(
+      'time:2026-10-15T23:30:00.000Z',
+    )
+    expect(labels(Date.parse('2026-10-16T01:30:00Z'))).toBe(
+      'time:2026-10-16T01:30:00.000Z',
+    )
+  })
+
+  it('honours the requested range bounds even when measurements are sparse', () => {
+    const from = '2026-10-16T00:00:00Z'
+    const to = '2026-10-17T00:00:00Z'
+    const series = trendSeries({
+      points: [
+        {
+          at: '2026-10-16T06:00:00Z',
+          observed_at: '2026-10-16T06:20:00Z',
+          value: 60,
+        },
+        {
+          at: '2026-10-16T18:00:00Z',
+          observed_at: '2026-10-16T18:40:00Z',
+          value: 50,
+        },
+      ],
+    })
+    const group = groupTrendSeries([series])[0]
+    const option = createCoreTrendOption(group, {
+      ...coreOptionInput(),
+      from,
+      to,
+    }) as unknown as {
+      series: Array<{ data: Array<[number, number]> }>
+      xAxis: { min: number; max: number; type: string }
+    }
+    expect(option.xAxis.type).toBe('time')
+    expect(option.xAxis.min).toBe(Date.parse(from))
+    expect(option.xAxis.max).toBe(Date.parse(to))
+    expect(option.series.map((entry) => entry.data)).toEqual([
+      [
+        [Date.parse('2026-10-16T06:20:00Z'), 60],
+        [Date.parse('2026-10-16T18:40:00Z'), 50],
+      ],
+    ])
+  })
+
+  it('plots true observation times and reports each point time for concurrent series', () => {
+    const bucket = '2026-10-16T10:00:00Z'
+    const entries = [
+      trendSeries({
+        key_id: 'key-a',
+        key_label: 'A',
+        points: [
+          { at: bucket, observed_at: '2026-10-16T10:50:00Z', value: 70 },
+          {
+            at: '2026-10-16T11:00:00Z',
+            observed_at: '2026-10-16T11:05:00Z',
+            value: 60,
+          },
+        ],
+      }),
+      trendSeries({
+        key_id: 'key-b',
+        key_label: 'B',
+        points: [
+          { at: bucket, observed_at: '2026-10-16T10:20:00Z', value: 30 },
+          {
+            at: '2026-10-16T11:00:00Z',
+            observed_at: '2026-10-16T11:40:00Z',
+            value: 20,
+          },
+        ],
+      }),
+    ]
+    const group = groupTrendSeries(entries)[0]
+    const input = coreOptionInput()
+    const legend = createTrendLegendEntries(group, input)
+    const option = createCoreTrendOption(group, input) as unknown as {
+      series: Array<{ data: Array<[number, number]> }>
+      tooltip: {
+        formatter: (params: Array<Record<string, unknown>>) => string
+      }
+    }
+    expect(option.series[0].data[0][0]).toBe(Date.parse('2026-10-16T10:50:00Z'))
+    expect(option.series[1].data[0][0]).toBe(Date.parse('2026-10-16T10:20:00Z'))
+    const output = option.tooltip.formatter([
+      {
+        axisValue: Date.parse(bucket),
+        marker: 'A',
+        seriesName: legend[0].name,
+        value: [Date.parse('2026-10-16T10:50:00Z'), 70],
+      },
+      {
+        axisValue: Date.parse(bucket),
+        marker: 'B',
+        seriesName: legend[1].name,
+        value: [Date.parse('2026-10-16T10:20:00Z'), 30],
+      },
+      {
+        axisValue: Date.parse(bucket),
+        marker: 'A',
+        seriesName: legend[0].name,
+        value: [Date.parse('2026-10-16T10:50:00Z'), 70],
+      },
+    ])
+    expect(output).toContain('10:50:00')
+    expect(output).toContain('10:20:00')
+    expect(output.match(/10:50:00/g)).toHaveLength(1)
+  })
+
+  it('does not invent a time for a finite value without a measurement timestamp', () => {
+    const segments = splitTrendSegments([
+      { at: '2026-10-16T10:00:00Z', observed_at: null, value: 40 },
+      {
+        at: '2026-10-16T11:00:00Z',
+        observed_at: '2026-10-16T11:05:00Z',
+        value: 30,
+      },
+    ])
+    expect(segments).toHaveLength(1)
+    expect(segments[0]).toHaveLength(1)
+    expect(segments[0][0].value).toBe(30)
+  })
+
+  it('splits only increases, gaps, and resets while keeping both edge samples', () => {
+    const points = [
+      trendPoint('2026-10-16T00:00:00Z', 50),
+      trendPoint('2026-10-16T00:05:00Z', 40),
+      trendPoint('2026-10-16T00:10:00Z', 40),
+      trendPoint('2026-10-16T00:15:00Z', null),
+      trendPoint('2026-10-16T00:20:00Z', 70),
+      trendPoint('2026-10-16T00:25:00Z', 30),
+      trendPoint('2026-10-16T00:30:00Z', 90),
+      trendPoint('2026-10-16T00:35:00Z', 90),
+    ]
+    const segments = splitTrendSegments(points)
+    expect(
+      segments.map((segment) => segment.map((point) => point.value)),
+    ).toEqual([
+      [50, 40, 40],
+      [70, 30],
+      [90, 90],
+    ])
+    expect(
+      segments
+        .flatMap((segment) => segment)
+        .every((point) => point.observed_at != null),
+    ).toBe(true)
+    expect(segments.flat()).toHaveLength(7)
+  })
+
+  it('keeps single-point segments and bounds large 720-point output', () => {
+    const alternating = Array.from({ length: 720 }, (_, index) =>
+      trendPoint(
+        new Date(Date.UTC(2026, 9, 1, 0, index)).toISOString(),
+        index % 2 === 0 ? 10 : 20,
+      ),
+    )
+    const segments = splitTrendSegments(alternating)
+    expect(segments).toHaveLength(361)
+    expect(
+      segments.every((segment) => segment.length === 1 || segment.length === 2),
+    ).toBe(true)
+    expect(segments.flat()).toHaveLength(720)
+    const single = splitTrendSegments([trendPoint('2026-10-16T00:00:00Z', 12)])
+    expect(single).toHaveLength(1)
+    expect(single[0]).toHaveLength(1)
   })
 
   it('escapes every untrusted tooltip string and leaves only ECharts markers and separators literal', () => {

@@ -146,7 +146,7 @@ describe('canonical quota windows', () => {
     expect(rows).toEqual([])
   })
 
-  it('legacy minimax counts only the default-scope model', () => {
+  it('hides minmax video rows from the shared projection', () => {
     const rows = toCanonicalQuotaRows(
       key({
         model_remains: [
@@ -166,10 +166,43 @@ describe('canonical quota windows', () => {
     )
     expect(canonicalBandPercent(rows, 'short')).toBe(35)
     expect(canonicalBandPercent(rows, 'long')).toBe(60)
-    const general = rows.filter((row) => row.sourceModel === 'General')
-    expect(general.every((row) => row.isDefaultScope)).toBe(true)
-    const video = rows.filter((row) => row.sourceModel === 'video')
-    expect(video.every((row) => !row.isDefaultScope)).toBe(true)
+    expect(rows.some((row) => row.sourceModel === 'video')).toBe(false)
+    expect(rows.filter((row) => row.sourceModel === 'General')).toHaveLength(2)
+  })
+
+  it('hides canonical minmax video windows without inventing a fallback', () => {
+    const rows = toCanonicalQuotaRows(
+      key({
+        quota_windows: [
+          observation({
+            source_id: 'minimax:general:interval',
+            kind: 'five_hour',
+            source_model: 'general',
+            remaining_percent: 35,
+          }),
+          observation({
+            source_id: 'minimax:video:interval',
+            kind: 'five_hour',
+            source_model: 'video',
+            is_default_scope: false,
+            remaining_percent: 99,
+          }),
+          observation({
+            source_id: 'openai:video:interval',
+            kind: 'five_hour',
+            source_model: 'video',
+            is_default_scope: false,
+            remaining_percent: 77,
+          }),
+        ],
+      }),
+      NOW,
+    )
+    expect(rows).toHaveLength(2)
+    expect(rows.map((row) => row.sourceId)).toEqual([
+      'minimax:general:interval',
+      'openai:video:interval',
+    ])
   })
 
   it('a real zero stays known and distinct from unknown', () => {

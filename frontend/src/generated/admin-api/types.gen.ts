@@ -1476,21 +1476,6 @@ export type QuotaKeyObservationTrendSeries = {
     unit: string;
 };
 
-export type QuotaSnapshotHistoryItem = {
-    limit_reached?: boolean | null;
-    observed_at: string;
-    plan_type?: string | null;
-    snapshot_id: string;
-    source: string;
-    windows: Array<SubscriptionWindowUsage>;
-};
-
-export type QuotaSnapshotHistoryResponse = {
-    items: Array<QuotaSnapshotHistoryItem>;
-    next_cursor?: string | null;
-    retention_days: number;
-};
-
 /**
  * Raw object-store backend selected by the administrator.
  */
@@ -3349,39 +3334,6 @@ export type OrganizationUsageResponses = {
 
 export type OrganizationUsageResponse = OrganizationUsageResponses[keyof OrganizationUsageResponses];
 
-export type QuotaSnapshotHistoryData = {
-    body?: never;
-    path: {
-        /**
-         * Endpoint ID
-         */
-        endpoint_id: string;
-    };
-    query?: {
-        limit?: number;
-        before_id?: string;
-    };
-    url: '/api/v1/admin/endpoints/{endpoint_id}/quota-history';
-};
-
-export type QuotaSnapshotHistoryErrors = {
-    400: ErrorEnvelope;
-    404: ErrorEnvelope;
-    500: ErrorEnvelope;
-    503: ErrorEnvelope;
-};
-
-export type QuotaSnapshotHistoryError = QuotaSnapshotHistoryErrors[keyof QuotaSnapshotHistoryErrors];
-
-export type QuotaSnapshotHistoryResponses = {
-    /**
-     * OpenAI quota history
-     */
-    200: QuotaSnapshotHistoryResponse;
-};
-
-export type QuotaSnapshotHistoryResponse2 = QuotaSnapshotHistoryResponses[keyof QuotaSnapshotHistoryResponses];
-
 export type QuotaKeyObservationHistoryData = {
     body?: never;
     path: {
@@ -3392,6 +3344,7 @@ export type QuotaKeyObservationHistoryData = {
     };
     query?: {
         key_id?: string;
+        key_ids?: string;
         limit?: number;
         before_id?: string;
     };
@@ -3426,6 +3379,8 @@ export type QuotaKeyObservationTrendData = {
     };
     query?: {
         key_id?: string;
+        key_ids?: string;
+        kinds?: string;
         range?: string;
     };
     url: '/api/v1/admin/endpoints/{endpoint_id}/quota-observations/trend';

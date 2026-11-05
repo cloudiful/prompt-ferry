@@ -90,8 +90,17 @@ callback_screenshots() {
       printf '%s\n' \
         'e2e/foundation/screenshots/endpoints-quota-current-en-light-1440.png' \
         'e2e/foundation/screenshots/endpoints-quota-chart-en-light-1440.png' \
+        'e2e/foundation/screenshots/endpoints-quota-multiselect-en-light-1440.png' \
+        'e2e/foundation/screenshots/endpoints-quota-tooltip-en-light-1440.png' \
+        'e2e/foundation/screenshots/endpoints-quota-legend-en-light-1440.png' \
         'e2e/foundation/screenshots/endpoints-quota-history-en-light-1440.png' \
-        'e2e/foundation/screenshots/endpoints-subscription-history-en-light-1440.png'
+        'e2e/foundation/screenshots/endpoints-quota-openai-history-en-light-1440.png' \
+        'e2e/foundation/screenshots/endpoints-quota-en-dark-1440.png' \
+        'e2e/foundation/screenshots/endpoints-quota-en-dark-390.png' \
+        'e2e/foundation/screenshots/endpoints-quota-zh-dark-chart-1440.png' \
+        'e2e/foundation/screenshots/endpoints-quota-zh-dark-chart-390.png' \
+        'e2e/foundation/screenshots/endpoints-quota-zh-light-1440.png' \
+        'e2e/foundation/screenshots/endpoints-quota-zh-light-390.png'
       ;;
     endpoints-finish)
       printf '%s\n' \

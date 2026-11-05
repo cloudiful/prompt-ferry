@@ -9,8 +9,7 @@ pub use refresh::{
     acquire_refresh_lease, complete_refresh_failure, complete_refresh_success, get_refresh_state,
 };
 pub use storage::{
-    eligible_endpoints, endpoint_activity, latest_snapshot, list_snapshot_history, list_snapshots,
-    prune_expired_snapshots, quota_history_endpoint,
+    eligible_endpoints, endpoint_activity, latest_snapshot, list_snapshots, prune_expired_snapshots,
 };
 
 pub const SNAPSHOT_RETENTION_DAYS: i64 = 30;

@@ -7,7 +7,7 @@ FROM quota_key_observations
 WHERE endpoint_id = $1
   AND observed_at >= $2
   AND observed_at < $3
-  AND ($4::UUID IS NULL OR key_id = $4)
+  AND ($4::UUID[] IS NULL OR key_id = ANY($4::UUID[]))
 GROUP BY key_id
 ORDER BY MAX(observed_at) DESC, key_id ASC
 LIMIT 25;

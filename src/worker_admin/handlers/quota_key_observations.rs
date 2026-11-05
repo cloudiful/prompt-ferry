@@ -5,6 +5,9 @@ mod tests;
 
 const HISTORY_PAGE_DEFAULT: u16 = 50;
 const HISTORY_PAGE_MAX: u16 = 200;
+/// Upper bound on distinct keys a single request may select; matches the
+/// trend display cap so a selected key is never silently dropped.
+const KEY_FILTER_MAX: usize = 24;
 
 pub(super) async fn quota_key_observation_history(
     State(state): State<AdminState>,
@@ -15,7 +18,7 @@ pub(super) async fn quota_key_observation_history(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response.into_response();
     }
-    let (limit, before_id, key_id) = match parse_observation_query(&query) {
+    let (limit, before_id, key_ids) = match parse_observation_query(&query) {
         Ok(parsed) => parsed,
         Err(ObservationQueryError::InvalidLimit) => {
             return error(
@@ -36,6 +39,27 @@ pub(super) async fn quota_key_observation_history(
                 StatusCode::BAD_REQUEST,
                 "invalid_key_id",
                 "key_id must be a UUID",
+            );
+        }
+        Err(ObservationQueryError::InvalidKeyIds) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "invalid_key_ids",
+                "key_ids must be a comma-separated list of up to 24 UUIDs",
+            );
+        }
+        Err(ObservationQueryError::ConflictingKeyFilters) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "conflicting_key_filters",
+                "key_id and key_ids cannot be combined",
+            );
+        }
+        Err(ObservationQueryError::InvalidKinds) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "invalid_kinds",
+                "kinds must be a comma-separated list of quota window kinds",
             );
         }
     };
@@ -60,7 +84,7 @@ pub(super) async fn quota_key_observation_history(
     let rows = match db::quota_key_observations::list_endpoint_observations(
         &state.pool,
         endpoint_id,
-        key_id,
+        key_ids.as_deref(),
         before_id,
         i64::from(limit) + 1,
     )
@@ -103,11 +127,14 @@ enum ObservationQueryError {
     InvalidLimit,
     InvalidCursor,
     InvalidKey,
+    InvalidKeyIds,
+    ConflictingKeyFilters,
+    InvalidKinds,
 }
 
 fn parse_observation_query(
     query: &QuotaKeyObservationHistoryQuery,
-) -> Result<(u16, Option<i64>, Option<Uuid>), ObservationQueryError> {
+) -> Result<(u16, Option<i64>, Option<Vec<Uuid>>), ObservationQueryError> {
     let limit = query.limit.unwrap_or(HISTORY_PAGE_DEFAULT);
     if !(1..=HISTORY_PAGE_MAX).contains(&limit) {
         return Err(ObservationQueryError::InvalidLimit);
@@ -119,19 +146,78 @@ fn parse_observation_query(
         },
         None => None,
     };
-    let key_id = match query.key_id.as_deref() {
-        Some(raw) => match raw.parse::<Uuid>() {
-            Ok(key_id) => Some(key_id),
-            _ => return Err(ObservationQueryError::InvalidKey),
-        },
-        None => None,
+    let key_ids = parse_key_filters(query.key_id.as_deref(), query.key_ids.as_deref())?;
+    Ok((limit, before_id, key_ids))
+}
+
+/// One request may name a single `key_id` or a comma-separated `key_ids` list,
+/// never both. Duplicates collapse; an empty, malformed, or over-cap list is
+/// rejected so the bounded query never silently ignores a selected key.
+fn parse_key_filters(
+    key_id: Option<&str>,
+    key_ids: Option<&str>,
+) -> Result<Option<Vec<Uuid>>, ObservationQueryError> {
+    match (key_id, key_ids) {
+        (Some(_), Some(_)) => Err(ObservationQueryError::ConflictingKeyFilters),
+        (Some(raw), None) => raw
+            .parse::<Uuid>()
+            .map(|key_id| Some(vec![key_id]))
+            .map_err(|_| ObservationQueryError::InvalidKey),
+        (None, Some(raw)) => {
+            let mut keys = Vec::new();
+            for raw_key in raw.split(',') {
+                let raw_key = raw_key.trim();
+                if raw_key.is_empty() {
+                    return Err(ObservationQueryError::InvalidKeyIds);
+                }
+                let key_id = raw_key
+                    .parse::<Uuid>()
+                    .map_err(|_| ObservationQueryError::InvalidKeyIds)?;
+                if !keys.contains(&key_id) {
+                    keys.push(key_id);
+                }
+            }
+            if keys.is_empty() || keys.len() > KEY_FILTER_MAX {
+                return Err(ObservationQueryError::InvalidKeyIds);
+            }
+            Ok(Some(keys))
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+/// Parses the optional comma-separated window kinds against the existing
+/// canonical enum, so an unknown or blank value is a request error rather than
+/// a silent filter. Duplicates collapse; an absent value means every kind.
+fn parse_trend_kinds(
+    kinds: Option<&str>,
+) -> Result<Option<Vec<CanonicalQuotaWindowKind>>, ObservationQueryError> {
+    let Some(raw) = kinds else {
+        return Ok(None);
     };
-    Ok((limit, before_id, key_id))
+    let mut parsed = Vec::new();
+    for raw_kind in raw.split(',') {
+        let raw_kind = raw_kind.trim();
+        if raw_kind.is_empty() {
+            return Err(ObservationQueryError::InvalidKinds);
+        }
+        let kind = serde_json::from_value::<CanonicalQuotaWindowKind>(serde_json::Value::String(
+            raw_kind.to_string(),
+        ))
+        .map_err(|_| ObservationQueryError::InvalidKinds)?;
+        if !parsed.contains(&kind) {
+            parsed.push(kind);
+        }
+    }
+    if parsed.is_empty() {
+        return Err(ObservationQueryError::InvalidKinds);
+    }
+    Ok(Some(parsed))
 }
 
 /// Bounded, fixed-range trend for the per-key quota observation history. The
-/// range and bucket grid are server-owned; only an optional key filter and the
-/// named range cross the boundary.
+/// range and bucket grid are server-owned; only the optional key and kind
+/// filters and the named range cross the boundary.
 pub(super) async fn quota_key_observation_trend(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -141,18 +227,40 @@ pub(super) async fn quota_key_observation_trend(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response.into_response();
     }
-    let key_id = match query.key_id.as_deref() {
-        Some(raw) => match raw.parse::<Uuid>() {
-            Ok(key_id) => Some(key_id),
-            Err(_) => {
-                return error(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_key_id",
-                    "key_id must be a UUID",
-                );
-            }
-        },
-        None => None,
+    let key_ids = match parse_key_filters(query.key_id.as_deref(), query.key_ids.as_deref()) {
+        Ok(key_ids) => key_ids,
+        Err(ObservationQueryError::InvalidKey) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "invalid_key_id",
+                "key_id must be a UUID",
+            );
+        }
+        Err(ObservationQueryError::InvalidKeyIds) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "invalid_key_ids",
+                "key_ids must be a comma-separated list of up to 24 UUIDs",
+            );
+        }
+        Err(ObservationQueryError::ConflictingKeyFilters) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "conflicting_key_filters",
+                "key_id and key_ids cannot be combined",
+            );
+        }
+        Err(_) => unreachable!("key parsing only returns key filter errors"),
+    };
+    let kinds = match parse_trend_kinds(query.kinds.as_deref()) {
+        Ok(kinds) => kinds,
+        Err(_) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "invalid_kinds",
+                "kinds must be a comma-separated list of quota window kinds",
+            );
+        }
     };
     let range = match db::quota_key_observations::TrendRange::parse(query.range.as_deref()) {
         Some(range) => range,
@@ -188,7 +296,7 @@ pub(super) async fn quota_key_observation_trend(
         endpoint_id,
         from,
         to,
-        key_id,
+        key_ids.as_deref(),
     )
     .await
     {
@@ -219,7 +327,11 @@ pub(super) async fn quota_key_observation_trend(
         }
     };
 
-    let projection = db::quota_key_observations::project_trend(range.bucket_count(), snapshots);
+    let projection = db::quota_key_observations::project_trend(
+        range.bucket_count(),
+        snapshots,
+        kinds.as_deref(),
+    );
     let bucket_seconds = range.bucket_seconds();
     let series = projection
         .series

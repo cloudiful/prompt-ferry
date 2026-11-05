@@ -148,6 +148,35 @@ async fn fresh_snapshot_serves_the_stored_payload_for_its_own_endpoint_only() {
     assert!(cache.fresh_snapshot(other_endpoint_id).await.is_none());
 }
 
+#[tokio::test]
+async fn fresh_snapshot_preserves_configured_key_order_after_reverse_completion() {
+    let cache = TokenPlanQuotaCache::default();
+    let endpoint_id = Uuid::new_v4();
+    let first_key = Uuid::new_v4();
+    let second_key = Uuid::new_v4();
+    let mut usage = opencode_go_usage(first_key, 80.0);
+    // The fetch collector yields configured order even when the second key
+    // completed first; the cache must hand back that exact order.
+    usage
+        .keys
+        .push(opencode_go_usage(second_key, 60.0).keys.remove(0));
+    cache.store_for_test(endpoint_id, usage).await;
+
+    let served = cache
+        .fresh_snapshot(endpoint_id)
+        .await
+        .expect("fresh entry");
+    assert_eq!(
+        served.keys.iter().map(|key| key.key_id).collect::<Vec<_>>(),
+        vec![first_key, second_key]
+    );
+    let raw = cache.raw_snapshot(endpoint_id).await.expect("raw entry");
+    assert_eq!(
+        raw.keys.iter().map(|key| key.key_id).collect::<Vec<_>>(),
+        vec![first_key, second_key]
+    );
+}
+
 #[cfg(test)]
 mod persist_tests {
     use super::opencode_go_usage;

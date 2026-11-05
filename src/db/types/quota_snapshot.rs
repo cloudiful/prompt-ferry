@@ -67,9 +67,3 @@ pub struct ChatgptQuotaEndpointActivity {
     pub endpoint_id: Uuid,
     pub last_activity_at: DateTime<Utc>,
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChatgptQuotaHistoryEndpoint {
-    pub endpoint_id: Uuid,
-    pub provider: String,
-}

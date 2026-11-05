@@ -1,6 +1,15 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { LoaderCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { MultiSelect } from '@/components/ui/multi-select'
 import {
   Select,
   SelectContent,
@@ -9,8 +18,10 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { TokenPlanQuotaWindowRow } from '@/components/endpoints/TokenPlanQuotaWindowRow'
+import { quotaWindowLabel } from '@/components/endpoints/TokenPlanQuotaWindows'
 import { toCanonicalQuotaRows } from '@/composables/useCanonicalQuotaWindows'
 import type {
+  CanonicalQuotaWindowKind,
   QuotaKeyObservationHistoryItem,
   QuotaKeyObservationTrendResponse,
   TokenPlanKeyUsage,
@@ -22,7 +33,12 @@ import {
   fetchKeyQuotaObservationHistory,
   fetchKeyQuotaObservationTrend,
 } from '@/stores/endpoints-api'
-import type { QuotaTrendRange } from '@/quota-observation-charts-core'
+import {
+  QUOTA_TREND_KINDS,
+  quotaTrendKindLabels,
+  shortKeyId,
+  type QuotaTrendRange,
+} from '@/quota-observation-charts-core'
 
 const KeyQuotaObservationChart = lazy(() =>
   import('@/components/endpoints/KeyQuotaObservationChart').then((module) => ({
@@ -32,10 +48,36 @@ const KeyQuotaObservationChart = lazy(() =>
 
 const PAGE_SIZE = 50
 const DEFAULT_RETENTION_DAYS = 30
-const ALL_KEYS = '__quota_history_all_keys__'
+const KEY_SELECTION_MAX = 24
 const TREND_RANGES: readonly QuotaTrendRange[] = ['24h', '7d', '30d']
-type KeyOptionState = { endpointId: string; values: Map<string, string> }
-type EndpointKeyScope = { endpointId: string; keyId: string | null }
+
+type KeyOption = {
+  keyId: string
+  label: string
+}
+
+type HistorySelection = {
+  endpointId: string
+  keyIds: string[]
+  kinds: CanonicalQuotaWindowKind[]
+}
+
+type ObservedKeys = {
+  endpointId: string
+  values: Map<string, string>
+}
+
+type ListScope = {
+  endpointId: string
+  keyKey: string
+}
+
+type TrendScope = {
+  endpointId: string
+  keyKey: string
+  kindKey: string
+  range: QuotaTrendRange
+}
 
 function uniqueObservations(
   items: QuotaKeyObservationHistoryItem[],
@@ -71,33 +113,93 @@ function rangeLabel(range: QuotaTrendRange, t: TranslateFn): string {
   )
 }
 
+function keyOptions(
+  configured: readonly KeyOption[],
+  observed: Map<string, string>,
+): KeyOption[] {
+  const labels = new Map<string, string>()
+  for (const key of configured) labels.set(key.keyId, key.label)
+  for (const [keyId, label] of observed) {
+    if (!labels.has(keyId)) labels.set(keyId, label)
+  }
+  const counts = new Map<string, number>()
+  for (const label of labels.values()) {
+    counts.set(label, (counts.get(label) ?? 0) + 1)
+  }
+  return [...labels.entries()].map(([keyId, label]) => ({
+    keyId,
+    label:
+      (counts.get(label) ?? 0) > 1 ? `${label} #${shortKeyId(keyId)}` : label,
+  }))
+}
+
+function selectionSummary(
+  selected: readonly string[],
+  options: readonly { value: string; label: string }[],
+  allLabel: string,
+  countLabel: string,
+): string {
+  if (selected.length === 0) return allLabel
+  const labels = options
+    .filter((option) => selected.includes(option.value))
+    .map((option) => option.label)
+  if (labels.length === 0) return countLabel
+  if (labels.length <= 2) return labels.join(', ')
+  return countLabel
+}
+
 export type KeyQuotaObservationHistoryProps = {
+  configuredKeys?: readonly KeyOption[]
   endpointId: string
 }
 
 export function KeyQuotaObservationHistory({
+  configuredKeys = [],
   endpointId,
 }: KeyQuotaObservationHistoryProps) {
   const { locale, t } = useLocale()
   const timeZone = useDisplayTimeZone()
+  const kindLabels = useMemo(
+    () => quotaTrendKindLabels(t as unknown as (key: string) => string),
+    [t],
+  )
   const [expanded, setExpanded] = useState(false)
   const [mode, setMode] = useState<'chart' | 'list'>('chart')
   const [range, setRange] = useState<QuotaTrendRange>('24h')
-  const [scope, setScope] = useState<EndpointKeyScope>({
+  const [selection, setSelection] = useState<HistorySelection>(() => ({
     endpointId,
-    keyId: null,
-  })
-  const selectedKeyId = scope.endpointId === endpointId ? scope.keyId : null
-  const [keyOptionState, setKeyOptionState] = useState<KeyOptionState>(() => ({
+    keyIds: [],
+    kinds: [],
+  }))
+  const [observedKeys, setObservedKeys] = useState<ObservedKeys>(() => ({
     endpointId,
     values: new Map(),
   }))
-  const knownKeys =
-    keyOptionState.endpointId === endpointId
-      ? keyOptionState.values
-      : new Map<string, string>()
-  const currentScope = useRef({ endpointId, keyId: selectedKeyId })
-  currentScope.current = { endpointId, keyId: selectedKeyId }
+
+  const activeKeyIds =
+    selection.endpointId === endpointId ? selection.keyIds : []
+  const activeKinds = selection.endpointId === endpointId ? selection.kinds : []
+  const keyKey = activeKeyIds.join(',')
+  const kindKey = activeKinds.join(',')
+
+  const options = useMemo(
+    () =>
+      keyOptions(
+        configuredKeys,
+        observedKeys.endpointId === endpointId
+          ? observedKeys.values
+          : new Map(),
+      ),
+    [configuredKeys, endpointId, observedKeys],
+  )
+  const keySelectOptions = options.map((option) => ({
+    value: option.keyId,
+    label: option.label,
+  }))
+  const kindSelectOptions = QUOTA_TREND_KINDS.map((kind) => ({
+    value: kind,
+    label: kindLabels[kind],
+  }))
 
   const [items, setItems] = useState<QuotaKeyObservationHistoryItem[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -107,6 +209,8 @@ export function KeyQuotaObservationHistory({
   const [listFailed, setListFailed] = useState(false)
   const [listLoaded, setListLoaded] = useState(false)
   const listGeneration = useRef(0)
+  const listScope = useRef<ListScope>({ endpointId, keyKey })
+  listScope.current = { endpointId, keyKey }
 
   const [trend, setTrend] = useState<QuotaKeyObservationTrendResponse | null>(
     null,
@@ -117,15 +221,17 @@ export function KeyQuotaObservationHistory({
 
   const chartActive = expanded && mode === 'chart'
   const listActive = expanded && mode === 'list'
-  const activeTrendScope = useRef({
+  const trendScope = useRef<TrendScope & { active: boolean }>({
     endpointId,
-    keyId: selectedKeyId,
+    keyKey,
+    kindKey,
     range,
     active: chartActive,
   })
-  activeTrendScope.current = {
+  trendScope.current = {
     endpointId,
-    keyId: selectedKeyId,
+    keyKey,
+    kindKey,
     range,
     active: chartActive,
   }
@@ -143,7 +249,8 @@ export function KeyQuotaObservationHistory({
 
   const loadListFirstPage = useCallback(async () => {
     const id = endpointId
-    const keyId = selectedKeyId
+    const requestKeyKey = keyKey
+    const keyIds = requestKeyKey ? requestKeyKey.split(',') : []
     if (!id) return
     const requestGeneration = ++listGeneration.current
     setItems([])
@@ -153,12 +260,12 @@ export function KeyQuotaObservationHistory({
     setListLoadingMore(false)
     setListLoading(true)
     try {
-      const page = await fetchKeyQuotaObservationHistory(id, keyId, PAGE_SIZE)
-      const active = currentScope.current
+      const page = await fetchKeyQuotaObservationHistory(id, keyIds, PAGE_SIZE)
+      const active = listScope.current
       if (
         requestGeneration !== listGeneration.current ||
         active.endpointId !== id ||
-        active.keyId !== keyId
+        active.keyKey !== requestKeyKey
       ) {
         return
       }
@@ -167,29 +274,30 @@ export function KeyQuotaObservationHistory({
       setRetentionDays(page.retention_days)
       setListLoaded(true)
     } catch {
-      const active = currentScope.current
+      const active = listScope.current
       if (
         requestGeneration === listGeneration.current &&
         active.endpointId === id &&
-        active.keyId === keyId
+        active.keyKey === requestKeyKey
       ) {
         setListFailed(true)
       }
     } finally {
-      const active = currentScope.current
+      const active = listScope.current
       if (
         requestGeneration === listGeneration.current &&
         active.endpointId === id &&
-        active.keyId === keyId
+        active.keyKey === requestKeyKey
       ) {
         setListLoading(false)
       }
     }
-  }, [endpointId, selectedKeyId])
+  }, [endpointId, keyKey])
 
   const loadListMore = useCallback(async () => {
     const id = endpointId
-    const keyId = selectedKeyId
+    const requestKeyKey = keyKey
+    const keyIds = requestKeyKey ? requestKeyKey.split(',') : []
     const cursor = nextCursor
     if (!id || !cursor || !listLoaded || listLoading || listLoadingMore) {
       return
@@ -200,15 +308,15 @@ export function KeyQuotaObservationHistory({
     try {
       const page = await fetchKeyQuotaObservationHistory(
         id,
-        keyId,
+        keyIds,
         PAGE_SIZE,
         cursor,
       )
-      const active = currentScope.current
+      const active = listScope.current
       if (
         requestGeneration !== listGeneration.current ||
         active.endpointId !== id ||
-        active.keyId !== keyId
+        active.keyKey !== requestKeyKey
       ) {
         return
       }
@@ -226,32 +334,25 @@ export function KeyQuotaObservationHistory({
       setNextCursor(page.next_cursor ?? null)
       setRetentionDays(page.retention_days)
     } catch {
-      const active = currentScope.current
+      const active = listScope.current
       if (
         requestGeneration === listGeneration.current &&
         active.endpointId === id &&
-        active.keyId === keyId
+        active.keyKey === requestKeyKey
       ) {
         setListFailed(true)
       }
     } finally {
-      const active = currentScope.current
+      const active = listScope.current
       if (
         requestGeneration === listGeneration.current &&
         active.endpointId === id &&
-        active.keyId === keyId
+        active.keyKey === requestKeyKey
       ) {
         setListLoadingMore(false)
       }
     }
-  }, [
-    endpointId,
-    listLoaded,
-    listLoading,
-    listLoadingMore,
-    nextCursor,
-    selectedKeyId,
-  ])
+  }, [endpointId, keyKey, listLoaded, listLoading, listLoadingMore, nextCursor])
 
   const retryList = useCallback(() => {
     if (items.length > 0 && nextCursor) void loadListMore()
@@ -260,7 +361,12 @@ export function KeyQuotaObservationHistory({
 
   const loadTrend = useCallback(async () => {
     const id = endpointId
-    const keyId = selectedKeyId
+    const requestKeyKey = keyKey
+    const requestKindKey = kindKey
+    const keyIds = requestKeyKey ? requestKeyKey.split(',') : []
+    const kinds = requestKindKey
+      ? (requestKindKey.split(',') as CanonicalQuotaWindowKind[])
+      : []
     const selectedRange = range
     if (!id) return
     const requestGeneration = ++trendGeneration.current
@@ -270,44 +376,48 @@ export function KeyQuotaObservationHistory({
     try {
       const result = await fetchKeyQuotaObservationTrend(
         id,
-        keyId,
+        keyIds,
+        kinds,
         selectedRange,
       )
-      const active = activeTrendScope.current
+      const active = trendScope.current
       if (
         requestGeneration !== trendGeneration.current ||
         !active.active ||
         active.endpointId !== id ||
-        active.keyId !== keyId ||
+        active.keyKey !== requestKeyKey ||
+        active.kindKey !== requestKindKey ||
         active.range !== selectedRange
       ) {
         return
       }
       setTrend(result)
     } catch {
-      const active = activeTrendScope.current
+      const active = trendScope.current
       if (
         requestGeneration === trendGeneration.current &&
         active.active &&
         active.endpointId === id &&
-        active.keyId === keyId &&
+        active.keyKey === requestKeyKey &&
+        active.kindKey === requestKindKey &&
         active.range === selectedRange
       ) {
         setTrendFailed(true)
       }
     } finally {
-      const active = activeTrendScope.current
+      const active = trendScope.current
       if (
         requestGeneration === trendGeneration.current &&
         active.active &&
         active.endpointId === id &&
-        active.keyId === keyId &&
+        active.keyKey === requestKeyKey &&
+        active.kindKey === requestKindKey &&
         active.range === selectedRange
       ) {
         setTrendLoading(false)
       }
     }
-  }, [endpointId, range, selectedKeyId])
+  }, [endpointId, keyKey, kindKey, range])
 
   useEffect(() => {
     if (!chartActive) {
@@ -333,40 +443,41 @@ export function KeyQuotaObservationHistory({
     }
   }, [expanded, listActive])
 
-  const previousScope = useRef({ endpointId, keyId: selectedKeyId })
+  const previousListScope = useRef<ListScope>({ endpointId, keyKey })
   useEffect(() => {
-    const previous = previousScope.current
-    if (
-      previous.endpointId === endpointId &&
-      previous.keyId === selectedKeyId
-    ) {
+    const previous = previousListScope.current
+    if (previous.endpointId === endpointId && previous.keyKey === keyKey) {
       return
     }
-    previousScope.current = { endpointId, keyId: selectedKeyId }
+    previousListScope.current = { endpointId, keyKey }
     if (listActive) void loadListFirstPage()
     else clearList()
-  }, [endpointId, selectedKeyId, listActive, loadListFirstPage, clearList])
+  }, [endpointId, keyKey, listActive, loadListFirstPage, clearList])
 
   useEffect(() => {
-    if (scope.endpointId !== endpointId) {
-      setScope({ endpointId, keyId: null })
-      setKeyOptionState({ endpointId, values: new Map() })
-    }
-  }, [endpointId, scope.endpointId, clearList])
+    if (selection.endpointId === endpointId) return
+    setSelection({ endpointId, keyIds: [], kinds: [] })
+    setObservedKeys({ endpointId, values: new Map() })
+  }, [endpointId, selection.endpointId])
 
   useEffect(() => {
-    if (scope.endpointId !== endpointId) return
-    const next = new Map(knownKeys)
+    if (observedKeys.endpointId !== endpointId) return
+    const next = new Map(observedKeys.values)
+    let changed = false
     for (const entry of trend?.series ?? []) {
-      if (!next.has(entry.key_id)) next.set(entry.key_id, entry.key_label)
+      if (!next.has(entry.key_id)) {
+        next.set(entry.key_id, entry.key_label)
+        changed = true
+      }
     }
     for (const item of items) {
-      if (!next.has(item.key_id)) next.set(item.key_id, item.key_label)
+      if (!next.has(item.key_id)) {
+        next.set(item.key_id, item.key_label)
+        changed = true
+      }
     }
-    if (next.size !== knownKeys.size) {
-      setKeyOptionState({ endpointId, values: next })
-    }
-  }, [endpointId, items, knownKeys, scope.endpointId, trend])
+    if (changed) setObservedKeys({ endpointId, values: next })
+  }, [endpointId, items, observedKeys, trend])
 
   useEffect(
     () => () => {
@@ -376,11 +487,40 @@ export function KeyQuotaObservationHistory({
     [],
   )
 
-  const selectKey = useCallback(
-    (value: string) => {
-      setScope({ endpointId, keyId: value === ALL_KEYS ? null : value })
+  const selectKeys = useCallback(
+    (next: string[]) => {
+      setSelection((current) => ({
+        endpointId,
+        keyIds: [...new Set(next)].sort(),
+        kinds: current.endpointId === endpointId ? current.kinds : [],
+      }))
     },
     [endpointId],
+  )
+
+  const selectKinds = useCallback(
+    (next: string[]) => {
+      const selected = new Set(next)
+      setSelection((current) => ({
+        endpointId,
+        keyIds: current.endpointId === endpointId ? current.keyIds : [],
+        kinds: QUOTA_TREND_KINDS.filter((kind) => selected.has(kind)),
+      }))
+    },
+    [endpointId],
+  )
+
+  const visibleKinds = useMemo(() => new Set(activeKinds), [activeKinds])
+  const visibleItems = useMemo(
+    () =>
+      visibleKinds.size === 0
+        ? items
+        : items.filter(
+            (item) =>
+              !item.ok ||
+              item.windows.some((window) => visibleKinds.has(window.kind)),
+          ),
+    [items, visibleKinds],
   )
 
   function rowsFor(item: QuotaKeyObservationHistoryItem) {
@@ -395,7 +535,7 @@ export function KeyQuotaObservationHistory({
     return toCanonicalQuotaRows(
       key,
       Number.isFinite(observedAt) ? observedAt : Date.now(),
-    )
+    ).filter((row) => visibleKinds.size === 0 || visibleKinds.has(row.kind))
   }
 
   return (
@@ -432,24 +572,42 @@ export function KeyQuotaObservationHistory({
                 {t('quotaObservationModeList')}
               </Button>
             </div>
-            <Select onValueChange={selectKey} value={selectedKeyId ?? ALL_KEYS}>
-              <SelectTrigger
-                aria-label={t('quotaObservationKeyLabel')}
-                className="min-w-40 flex-1"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_KEYS}>
-                  {t('quotaObservationAllKeys')}
-                </SelectItem>
-                {[...knownKeys].map(([keyId, label]) => (
-                  <SelectItem key={keyId} value={keyId}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <MultiSelect
+              allLabel={t('quotaObservationAllKeys')}
+              className="min-w-40 flex-1"
+              label={t('quotaObservationKeyLabel')}
+              limitLabel={t('quotaObservationKeyLimit', {
+                count: KEY_SELECTION_MAX,
+              })}
+              maxSelected={KEY_SELECTION_MAX}
+              onChange={selectKeys}
+              options={keySelectOptions}
+              selected={activeKeyIds}
+              summary={selectionSummary(
+                activeKeyIds,
+                keySelectOptions,
+                t('quotaObservationAllKeys'),
+                t('quotaObservationSelectedCount', {
+                  count: activeKeyIds.length,
+                }),
+              )}
+            />
+            <MultiSelect
+              allLabel={t('quotaObservationAllKinds')}
+              className="min-w-40"
+              label={t('quotaObservationKindLabel')}
+              onChange={selectKinds}
+              options={kindSelectOptions}
+              selected={activeKinds}
+              summary={selectionSummary(
+                activeKinds,
+                kindSelectOptions,
+                t('quotaObservationAllKinds'),
+                t('quotaObservationSelectedCount', {
+                  count: activeKinds.length,
+                }),
+              )}
+            />
             {mode === 'chart' ? (
               <Select
                 onValueChange={(value) => setRange(value as QuotaTrendRange)}
@@ -520,9 +678,17 @@ export function KeyQuotaObservationHistory({
                   {t('quotaHistoryEmpty', { days: retentionDays })}
                 </p>
               ) : null}
-              {items.length > 0 ? (
+              {listLoaded &&
+              items.length > 0 &&
+              visibleItems.length === 0 &&
+              !listFailed ? (
+                <p className="text-sm text-muted-foreground">
+                  {t('quotaHistoryFilteredEmpty')}
+                </p>
+              ) : null}
+              {visibleItems.length > 0 ? (
                 <div className="grid min-w-0 gap-2">
-                  {items.map((item) => {
+                  {visibleItems.map((item) => {
                     const observedAt = Date.parse(item.observed_at)
                     const observedMs = Number.isFinite(observedAt)
                       ? observedAt
@@ -568,9 +734,14 @@ export function KeyQuotaObservationHistory({
                             {rows.map((row) => (
                               <TokenPlanQuotaWindowRow
                                 key={`${row.sourceId}:${row.sourceModel ?? ''}`}
-                                label={row.sourceModel ?? row.sourceId}
+                                label={quotaWindowLabel(
+                                  row,
+                                  t as unknown as TranslateFn,
+                                )}
+                                modelName={row.sourceModel}
                                 nowMs={observedMs}
                                 row={row}
+                                showModelName
                               />
                             ))}
                           </div>

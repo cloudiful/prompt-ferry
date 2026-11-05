@@ -136,18 +136,18 @@ pub async fn list_observations(
     before_id: Option<i64>,
     limit: i64,
 ) -> Result<Vec<QuotaObservation>> {
-    list_endpoint_observations(pool, endpoint_id, Some(key_id), before_id, limit).await
+    list_endpoint_observations(pool, endpoint_id, Some(&[key_id]), before_id, limit).await
 }
 
 /// Endpoint-wide history with an optional key bound, all in one query:
 /// `None` returns every historical key of the endpoint (removed keys stay
-/// queryable since `key_id` carries no foreign key), while any `Some` UUID
-/// scopes rows to this endpoint only. The caller passes `limit + 1` for the
-/// canonical probe row; the clamp keeps the bounded probe.
+/// queryable since `key_id` carries no foreign key), while any `Some` slice
+/// scopes rows to this endpoint and those keys only. The caller passes
+/// `limit + 1` for the canonical probe row; the clamp keeps the bounded probe.
 pub async fn list_endpoint_observations(
     pool: &PgPool,
     endpoint_id: Uuid,
-    key_id: Option<Uuid>,
+    key_ids: Option<&[Uuid]>,
     before_id: Option<i64>,
     limit: i64,
 ) -> Result<Vec<QuotaObservation>> {
@@ -155,7 +155,7 @@ pub async fn list_endpoint_observations(
         ObservationDbRow,
         "src/sql/quota_key_observations/list_observations.sql",
         endpoint_id,
-        key_id,
+        key_ids,
         before_id,
         limit.clamp(1, OBSERVATION_PAGE_MAX + 1),
     )

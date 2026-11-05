@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   EndpointProvider,
@@ -8,7 +8,6 @@ import type { CanonicalQuotaRow } from '@/composables/useCanonicalQuotaWindows'
 
 const sdkMock = vi.hoisted(() => ({
   tokenPlanUsage: vi.fn(),
-  quotaSnapshotHistory: vi.fn(),
   quotaKeyObservationHistory: vi.fn(),
   quotaKeyObservationTrend: vi.fn(),
 }))
@@ -16,7 +15,6 @@ const sdkMock = vi.hoisted(() => ({
 vi.mock('@/generated/admin-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/generated/admin-api')>()),
   tokenPlanUsage: sdkMock.tokenPlanUsage,
-  quotaSnapshotHistory: sdkMock.quotaSnapshotHistory,
   quotaKeyObservationHistory: sdkMock.quotaKeyObservationHistory,
   quotaKeyObservationTrend: sdkMock.quotaKeyObservationTrend,
 }))
@@ -24,7 +22,7 @@ vi.mock('@/generated/admin-api', async (importOriginal) => ({
 import { __resetTokenPlanCacheForTests } from '@/lib/quota-cache'
 import { LocaleProvider } from '@/lib/i18n'
 import { TokenPlanUsageDialog } from '@/components/endpoints/TokenPlanUsageDialog'
-import { SubscriptionQuotaWindows } from '@/components/endpoints/SubscriptionQuotaWindows'
+import { TokenPlanQuotaWindows } from '@/components/endpoints/TokenPlanQuotaWindows'
 import { TokenPlanQuotaWindowRow } from '@/components/endpoints/TokenPlanQuotaWindowRow'
 
 const NOW = Date.parse('2026-10-24T00:00:00.000Z')
@@ -91,9 +89,6 @@ beforeEach(() => {
   localStorage.setItem('prompt-ferry:locale', 'en-US')
   vi.setSystemTime(NOW)
   sdkMock.tokenPlanUsage.mockResolvedValue({ data: usagePayload() })
-  sdkMock.quotaSnapshotHistory.mockResolvedValue({
-    data: { items: [], retention_days: 30 },
-  })
   sdkMock.quotaKeyObservationHistory.mockResolvedValue({
     data: { items: [], retention_days: 30 },
   })
@@ -156,7 +151,7 @@ describe('quota dialog responsive shell', () => {
 })
 
 describe('quota window rows adapt to their container', () => {
-  it('stacks the time window row until the row container is wide enough', () => {
+  it('renders a tall remaining bar with compact slot and countdown', () => {
     render(
       <LocaleProvider>
         <TokenPlanQuotaWindowRow
@@ -171,18 +166,32 @@ describe('quota window rows adapt to their container', () => {
       '[data-quota-row="model-a:primary"]',
     ) as HTMLElement
     expect(row.className).toContain('@container')
-    const grid = row.firstElementChild as HTMLElement
-    expect(grid.className).not.toContain('sm:grid-cols')
-    expect(grid.className).toContain('@[26rem]:grid-cols-')
-    expect(grid.className).toContain('@[26rem]:items-center')
-    expect(
-      row.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow'),
-    ).toBe('40')
-    expect(row.textContent).toContain('Remaining 40.0%')
+    expect(row.textContent).toContain('5h')
+    expect(row.textContent).toContain('40.0%')
+    expect(row.textContent).toContain('1h')
     expect(row.textContent).toContain('38.00 / 100.00 USD')
-    expect(
-      (row.querySelector('[role="progressbar"]') as HTMLElement).className,
-    ).toContain('w-full')
+    const bar = row.querySelector('[role="progressbar"]') as HTMLElement
+    expect(bar.getAttribute('aria-valuenow')).toBe('40')
+    expect(bar.getAttribute('aria-label')).toBe('Weekly')
+    expect(bar.className).toContain('h-8')
+    expect(bar.className).toContain('min-h-8')
+    expect(bar.className).toContain('w-full')
+  })
+
+  it('renders localized compact window labels and countdown in Chinese', () => {
+    localStorage.setItem('prompt-ferry:locale', 'zh-CN')
+    render(
+      <LocaleProvider>
+        <TokenPlanQuotaWindowRow label="Weekly" nowMs={NOW} row={quotaRow()} />
+      </LocaleProvider>,
+    )
+    const row = document.querySelector(
+      '[data-quota-row="model-a:primary"]',
+    ) as HTMLElement
+    expect(row.textContent).toContain('5小时')
+    expect(row.textContent).toContain('1小时')
+    expect(row.textContent).not.toContain('5h')
+    expect(row.textContent).not.toContain('1h')
   })
 
   it('keeps an unknown percentage as a placeholder without a fake progress bar', () => {
@@ -195,7 +204,7 @@ describe('quota window rows adapt to their container', () => {
             availability: 'unknown',
             observedRemainingPercent: null,
             remainingPercent: null,
-            resetAt: null,
+            resetAt: '2026-10-24T01:00:00.000Z',
             current: null,
             limit: null,
           })}
@@ -207,7 +216,29 @@ describe('quota window rows adapt to their container', () => {
     ) as HTMLElement
     expect(row.querySelector('[role="progressbar"]')).toBeNull()
     expect(row.textContent).toContain('—')
+    expect(row.textContent).toContain('-')
+    expect(row.textContent).not.toContain('1h')
     expect(row.className).toContain('@container')
+  })
+
+  it('keeps custom window identity from its measured duration', () => {
+    render(
+      <LocaleProvider>
+        <TokenPlanQuotaWindowRow
+          label="Fallback label"
+          nowMs={NOW}
+          row={quotaRow({
+            kind: 'custom',
+            durationSeconds: 30 * 24 * 60 * 60,
+          })}
+        />
+      </LocaleProvider>,
+    )
+    const row = document.querySelector(
+      '[data-quota-row="model-a:primary"]',
+    ) as HTMLElement
+    expect(row.textContent).toContain('30d')
+    expect(row.textContent).not.toContain('Fallback label')
   })
 
   it('lays a balance row out in one column until its container has room', () => {
@@ -236,46 +267,180 @@ describe('quota window rows adapt to their container', () => {
   })
 })
 
-describe('subscription quota windows container layout', () => {
-  it('uses its own width for the model card grid instead of the viewport', () => {
-    render(
+describe('shared quota window grid', () => {
+  function keyUsage(
+    windows: CanonicalQuotaRow[],
+    modelRemains: TokenPlanUsageResponse['keys'][number]['model_remains'] = [],
+  ): TokenPlanUsageResponse['keys'][number] {
+    return {
+      key_id: 'responsive-key',
+      key_label: 'Responsive key',
+      ok: true,
+      model_remains: modelRemains,
+      quota_windows: windows.map((row) => ({
+        source_id: row.sourceId,
+        kind: row.kind,
+        source_model: row.sourceModel,
+        unit: row.unit,
+        duration_seconds: row.durationSeconds,
+        is_default_scope: row.isDefaultScope,
+        availability: row.availability,
+        remaining_percent: row.remainingPercent,
+        current: row.current,
+        limit: row.limit,
+        remaining: row.remaining,
+        reset_at: row.resetAt,
+      })),
+    } as TokenPlanUsageResponse['keys'][number]
+  }
+
+  it('lays actual windows out with an auto-fit grid and omits a single default heading', () => {
+    const { container } = render(
       <LocaleProvider>
-        <SubscriptionQuotaWindows
-          groups={[
-            {
-              modelName: 'Default model',
-              observation: {
-                observed_at: '2026-10-24T00:00:00.000Z',
-                source: 'request',
-                refreshing: false,
-                stale: false,
-                last_error_code: null,
-                next_retry_at: null,
+        <TokenPlanQuotaWindows
+          keyUsage={keyUsage(
+            [
+              quotaRow({ sourceId: 'minimax:primary', sourceModel: 'general' }),
+              quotaRow({
+                sourceId: 'minimax:weekly',
+                sourceModel: 'general',
+                kind: 'weekly',
+                durationSeconds: 604_800,
+              }),
+            ],
+            [
+              {
+                model_name: 'general',
+                interval: null,
+                weekly: null,
+                observation: {
+                  observed_at: '2026-10-24T00:00:00.000Z',
+                  source: 'request',
+                  refreshing: false,
+                  stale: false,
+                  last_error_code: null,
+                  next_retry_at: null,
+                },
               },
-              rows: [quotaRow()],
-            },
-            {
-              modelName: 'Detail model',
-              observation: null,
-              rows: [
-                quotaRow({
-                  sourceId: 'model-b:detail',
-                  sourceModel: 'Detail model',
-                }),
-              ],
-            },
-          ]}
+            ],
+          )}
           nowMs={NOW}
         />
       </LocaleProvider>,
     )
-    const grid = document.querySelector('[data-quota-model="Default model"]')
-      ?.parentElement as HTMLElement
-    expect(grid.className).toContain('@container')
-    expect(grid.className).toContain('grid-cols-[minmax(0,1fr)]')
-    expect(grid.className).toContain('@[40rem]:grid-cols-2')
-    expect(grid.className).not.toContain('sm:grid-cols-2')
-    expect(document.querySelectorAll('[data-quota-model]')).toHaveLength(2)
-    expect(screen.getByText('Detail model')).toBeTruthy()
+    const section = container.querySelector(
+      '[data-quota-model="general"]',
+    ) as HTMLElement
+    expect(section).toBeTruthy()
+    expect(within(section).queryByText('general')).toBeNull()
+    const grid = section.lastElementChild as HTMLElement
+    expect(grid.className).toContain('auto-fit')
+    expect(grid.className).toContain('minmax(min(100%,12rem),1fr)')
+    expect(section.querySelectorAll('[data-quota-row]')).toHaveLength(2)
+  })
+
+  it('names each progressbar with its model and real window identity', () => {
+    const { container } = render(
+      <LocaleProvider>
+        <TokenPlanQuotaWindows
+          keyUsage={keyUsage([
+            quotaRow({
+              sourceId: 'minimax:general:interval',
+              sourceModel: 'general',
+            }),
+            quotaRow({
+              sourceId: 'minimax:general:weekly',
+              sourceModel: 'general',
+              kind: 'weekly',
+              durationSeconds: 604_800,
+            }),
+            quotaRow({
+              sourceId: 'opencode_go:monthly',
+              sourceModel: 'zen',
+              kind: 'monthly',
+              durationSeconds: 2_592_000,
+            }),
+          ])}
+          nowMs={NOW}
+        />
+      </LocaleProvider>,
+    )
+    const labels = [...container.querySelectorAll('[role="progressbar"]')].map(
+      (bar) => bar.getAttribute('aria-label'),
+    )
+    expect(labels).toEqual([
+      'general · 5-hour window',
+      'general · Weekly window',
+      'zen · Monthly window',
+    ])
+    expect(new Set(labels).size).toBe(3)
+  })
+
+  it('keeps actionable observation states even without window rows', () => {
+    const { container } = render(
+      <LocaleProvider>
+        <TokenPlanQuotaWindows
+          keyUsage={keyUsage(
+            [],
+            [
+              {
+                model_name: 'gpt-5.1-codex-mini',
+                interval: null,
+                weekly: null,
+                windows: null,
+                observation: {
+                  observed_at: '2026-10-24T00:00:00.000Z',
+                  source: 'request',
+                  refreshing: false,
+                  stale: true,
+                  last_error_code: 'fixture_refresh_failed',
+                  next_retry_at: '2026-10-24T01:00:00.000Z',
+                },
+              },
+            ],
+          )}
+          nowMs={NOW}
+        />
+      </LocaleProvider>,
+    )
+    expect(container.textContent).toContain('Cached observation')
+    expect(container.textContent).toContain(
+      'Refresh failed; showing the latest successful observation.',
+    )
+    expect(container.textContent).toContain('Next retry:')
+    expect(container.querySelectorAll('[data-quota-row]')).toHaveLength(0)
+  })
+
+  it('keeps distinct multiple model identities and hides minmax video rows', () => {
+    const { container } = render(
+      <LocaleProvider>
+        <TokenPlanQuotaWindows
+          keyUsage={keyUsage([
+            quotaRow({
+              sourceId: 'minimax:general:interval',
+              sourceModel: 'general',
+            }),
+            quotaRow({
+              sourceId: 'minimax:detail:interval',
+              sourceModel: 'detail-model',
+              isDefaultScope: false,
+            }),
+            quotaRow({
+              sourceId: 'minimax:video:interval',
+              sourceModel: 'video',
+              isDefaultScope: false,
+            }),
+          ])}
+          nowMs={NOW}
+        />
+      </LocaleProvider>,
+    )
+    expect(screen.getByText('general')).toBeTruthy()
+    expect(screen.getByText('detail-model')).toBeTruthy()
+    expect(screen.queryByText('video')).toBeNull()
+    expect(
+      container.querySelector('[data-quota-row="minimax:video:interval"]'),
+    ).toBeNull()
+    expect(container.querySelectorAll('[data-quota-model]')).toHaveLength(2)
   })
 })

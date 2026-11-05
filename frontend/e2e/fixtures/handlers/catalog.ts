@@ -38,8 +38,6 @@ const ENDPOINT_MODELS = /^\/api\/v1\/admin\/endpoints\/([^/]+)\/models$/
 const ENDPOINT_TEST = /^\/api\/v1\/admin\/endpoints\/([^/]+)\/test$/
 const ENDPOINT_TOKEN_PLAN =
   /^\/api\/v1\/admin\/endpoints\/([^/]+)\/token-plan-usage$/
-const ENDPOINT_QUOTA_HISTORY =
-  /^\/api\/v1\/admin\/endpoints\/([^/]+)\/quota-history$/
 const ENDPOINT_QUOTA_OBS =
   /^\/api\/v1\/admin\/endpoints\/([^/]+)\/quota-observations$/
 const ENDPOINT_QUOTA_TREND =
@@ -412,6 +410,180 @@ export async function handleCatalog(
 
   const tokenPlanId = ENDPOINT_TOKEN_PLAN.exec(pathname)?.[1]
   if (tokenPlanId && method === 'GET') {
+    const tokenPlanEndpoint = ctx.state.endpoints.find(
+      (endpoint) => endpoint.endpoint_id === tokenPlanId,
+    )
+    const tokenPlanProvider = tokenPlanEndpoint?.provider
+    const nowMs = Date.now()
+    const resetAfter = (ms: number) => new Date(nowMs + ms).toISOString()
+    if (tokenPlanProvider === 'opencode_go') {
+      return ok({
+        keys: [
+          {
+            balances: null,
+            deepseek_balance: null,
+            error_code: null,
+            error_message: null,
+            five_hour: null,
+            glm_five_hour: null,
+            glm_weekly: null,
+            key_id: 'key-opencodego-1',
+            key_label: 'zen',
+            model_remains: [],
+            ok: true,
+            opencodego_monthly: null,
+            opencodego_rolling: null,
+            opencodego_weekly: null,
+            openrouter_balance: null,
+            openrouter_spend: null,
+            quota_status: {
+              cooldown_until: null,
+              observed_at: resetAfter(-3_600_000),
+              refresh_failed: false,
+              scope: 'text_inference',
+              state: 'available',
+            },
+            quota_windows: [
+              {
+                availability: 'known',
+                current: null,
+                duration_seconds: null,
+                is_default_scope: true,
+                kind: 'rolling',
+                limit: null,
+                remaining: null,
+                remaining_percent: 0,
+                reset_at: resetAfter(3_600_000),
+                source_id: 'opencode_go:rolling',
+                source_model: null,
+                unit: null,
+              },
+              {
+                availability: 'known',
+                current: null,
+                duration_seconds: 604_800,
+                is_default_scope: true,
+                kind: 'weekly',
+                limit: null,
+                remaining: null,
+                remaining_percent: 55,
+                reset_at: resetAfter(7 * 24 * 3_600_000),
+                source_id: 'opencode_go:weekly',
+                source_model: null,
+                unit: null,
+              },
+              {
+                availability: 'known',
+                current: null,
+                duration_seconds: 2_592_000,
+                is_default_scope: true,
+                kind: 'monthly',
+                limit: null,
+                remaining: null,
+                remaining_percent: 100,
+                reset_at: resetAfter(30 * 24 * 3_600_000),
+                source_id: 'opencode_go:monthly',
+                source_model: null,
+                unit: null,
+              },
+            ],
+            status: 200,
+            weekly: null,
+          },
+        ],
+        local_today_tokens: null,
+        provider: 'opencode_go',
+        provider_region: null,
+      })
+    }
+    if (tokenPlanProvider === 'openai') {
+      return ok({
+        keys: [
+          {
+            balances: null,
+            deepseek_balance: null,
+            error_code: null,
+            error_message: null,
+            five_hour: null,
+            glm_five_hour: null,
+            glm_weekly: null,
+            key_id: 'key-openai-1',
+            key_label: 'codex',
+            model_remains: [
+              {
+                interval: null,
+                model_name: 'gpt-5.1-codex',
+                observation: null,
+                weekly: null,
+                windows: null,
+              },
+              {
+                interval: null,
+                model_name: 'gpt-5.1-codex-mini',
+                observation: {
+                  last_error_code: 'fixture_refresh_failed',
+                  next_retry_at: resetAfter(3_600_000),
+                  observed_at: resetAfter(-3_600_000),
+                  refreshing: false,
+                  source: 'fixture',
+                  stale: true,
+                },
+                weekly: null,
+                windows: null,
+              },
+            ],
+            ok: true,
+            opencodego_monthly: null,
+            opencodego_rolling: null,
+            opencodego_weekly: null,
+            openrouter_balance: null,
+            openrouter_spend: null,
+            quota_status: {
+              cooldown_until: null,
+              observed_at: resetAfter(-3_600_000),
+              refresh_failed: false,
+              scope: 'text_inference',
+              state: 'available',
+            },
+            quota_windows: [
+              {
+                availability: 'known',
+                current: null,
+                duration_seconds: 18_000,
+                is_default_scope: true,
+                kind: 'custom',
+                limit: null,
+                remaining: null,
+                remaining_percent: 100,
+                reset_at: resetAfter(5 * 3_600_000),
+                source_id: 'subscription:primary',
+                source_model: 'gpt-5.1-codex',
+                unit: null,
+              },
+              {
+                availability: 'known',
+                current: null,
+                duration_seconds: 604_800,
+                is_default_scope: true,
+                kind: 'custom',
+                limit: null,
+                remaining: null,
+                remaining_percent: 40,
+                reset_at: resetAfter(7 * 24 * 3_600_000),
+                source_id: 'subscription:secondary',
+                source_model: 'gpt-5.1-codex',
+                unit: null,
+              },
+            ],
+            status: 200,
+            weekly: null,
+          },
+        ],
+        local_today_tokens: null,
+        provider: 'openai',
+        provider_region: null,
+      })
+    }
     if (
       queryString(ctx.url, 'force') === 'true' &&
       ctx.state.quotaRestored === true
@@ -423,6 +595,15 @@ export async function handleCatalog(
     const used = 100 - remaining
     const weeklyRemaining = restored ? 100 : 81
     const weeklyUsed = 100 - weeklyRemaining
+    const fiveHourReset = new Date(
+      Date.now() + 5 * 60 * 60 * 1000,
+    ).toISOString()
+    const weeklyReset = new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000,
+    ).toISOString()
+    const monthlyReset = new Date(
+      Date.now() + 30 * 24 * 60 * 60 * 1000,
+    ).toISOString()
     return ok({
       keys: [
         {
@@ -433,7 +614,7 @@ export async function handleCatalog(
           five_hour: {
             cap: 100,
             remaining_percent: remaining,
-            reset_at: '2026-10-23T17:00:00.000Z',
+            reset_at: fiveHourReset,
             used,
             used_percent: used,
           },
@@ -444,7 +625,7 @@ export async function handleCatalog(
           model_remains: [
             {
               interval: {
-                end_at: '2026-10-23T17:00:00.000Z',
+                end_at: fiveHourReset,
                 remaining_percent: remaining,
                 start_at: '2026-10-23T12:00:00.000Z',
                 status: 1,
@@ -470,7 +651,7 @@ export async function handleCatalog(
                   availability: 'known',
                   remaining_percent: remaining,
                   reset_after_seconds: 18000,
-                  reset_at: '2026-10-23T17:00:00.000Z',
+                  reset_at: fiveHourReset,
                   source_window: 'primary',
                   used_percent: used,
                   window_seconds: 18000,
@@ -485,6 +666,20 @@ export async function handleCatalog(
                   window_seconds: null,
                 },
               ],
+            },
+            {
+              interval: {
+                end_at: fiveHourReset,
+                remaining_percent: 99,
+                start_at: '2026-10-23T12:00:00.000Z',
+                status: 1,
+                total_count: 10,
+                usage_count: 1,
+              },
+              model_name: 'video',
+              observation: null,
+              weekly: null,
+              windows: null,
             },
           ],
           ok: true,
@@ -510,7 +705,7 @@ export async function handleCatalog(
               limit: 100,
               remaining,
               remaining_percent: remaining,
-              reset_at: '2026-10-23T17:00:00.000Z',
+              reset_at: fiveHourReset,
               source_id: 'minimax:primary',
               source_model: 'minimax-m2',
               unit: 'requests',
@@ -529,15 +724,118 @@ export async function handleCatalog(
               source_model: 'minimax-m2',
               unit: null,
             },
+            {
+              availability: 'known',
+              current: 1,
+              duration_seconds: 18000,
+              is_default_scope: false,
+              kind: 'five_hour',
+              limit: 10,
+              remaining: 9,
+              remaining_percent: 99,
+              reset_at: fiveHourReset,
+              source_id: 'minimax:video:interval',
+              source_model: 'video',
+              unit: 'requests',
+            },
           ],
           status: 200,
           weekly: {
             cap: 700,
             remaining_percent: weeklyRemaining,
-            reset_at: '2026-10-27T00:00:00.000Z',
+            reset_at: weeklyReset,
             used: weeklyUsed,
             used_percent: weeklyUsed,
           },
+        },
+        {
+          balances: null,
+          deepseek_balance: null,
+          error_code: null,
+          error_message: null,
+          five_hour: null,
+          glm_five_hour: null,
+          glm_weekly: null,
+          key_id: 'key-minimax-2',
+          key_label: 'secondary',
+          model_remains: [
+            {
+              interval: null,
+              model_name: 'minimax-m2',
+              observation: null,
+              weekly: null,
+              windows: [
+                {
+                  availability: 'known',
+                  remaining_percent: 88,
+                  reset_after_seconds: 18000,
+                  reset_at: fiveHourReset,
+                  source_window: 'primary',
+                  used_percent: 12,
+                  window_seconds: 18000,
+                },
+              ],
+            },
+          ],
+          ok: true,
+          opencodego_monthly: null,
+          opencodego_rolling: null,
+          opencodego_weekly: null,
+          openrouter_balance: null,
+          openrouter_spend: null,
+          quota_status: {
+            cooldown_until: null,
+            observed_at: '2026-10-23T12:00:00.000Z',
+            refresh_failed: false,
+            scope: 'text_inference',
+            state: 'available',
+          },
+          quota_windows: [
+            {
+              availability: 'known',
+              current: 12,
+              duration_seconds: 18000,
+              is_default_scope: true,
+              kind: 'five_hour',
+              limit: 100,
+              remaining: 88,
+              remaining_percent: 88,
+              reset_at: fiveHourReset,
+              source_id: 'minimax:primary',
+              source_model: 'minimax-m2',
+              unit: 'requests',
+            },
+            {
+              availability: 'known',
+              current: 4,
+              duration_seconds: 604800,
+              is_default_scope: true,
+              kind: 'weekly',
+              limit: 100,
+              remaining: 96,
+              remaining_percent: 96,
+              reset_at: weeklyReset,
+              source_id: 'minimax:weekly',
+              source_model: 'minimax-m2',
+              unit: 'requests',
+            },
+            {
+              availability: 'known',
+              current: 10,
+              duration_seconds: 2592000,
+              is_default_scope: true,
+              kind: 'monthly',
+              limit: 100,
+              remaining: 90,
+              remaining_percent: 90,
+              reset_at: monthlyReset,
+              source_id: 'minimax:monthly',
+              source_model: 'minimax-m2',
+              unit: 'requests',
+            },
+          ],
+          status: 200,
+          weekly: null,
         },
       ],
       local_today_tokens: 4820,
@@ -546,64 +844,51 @@ export async function handleCatalog(
     })
   }
 
-  const quotaHistoryId = ENDPOINT_QUOTA_HISTORY.exec(pathname)?.[1]
-  if (quotaHistoryId && method === 'GET') {
-    return ok({
-      items: [
-        {
-          limit_reached: false,
-          observed_at: '2026-10-23T12:00:00.000Z',
-          plan_type: 'platform',
-          snapshot_id: 'snapshot-1',
-          source: 'fixture',
-          windows: [
-            {
-              availability: 'known',
-              remaining_percent: 62,
-              reset_after_seconds: 18000,
-              reset_at: '2026-10-23T17:00:00.000Z',
-              source_window: 'primary',
-              used_percent: 38,
-              window_seconds: 18000,
-            },
-          ],
-        },
-      ],
-      next_cursor: null,
-      retention_days: 30,
-    })
-  }
-
   const quotaObsId = ENDPOINT_QUOTA_OBS.exec(pathname)?.[1]
   if (quotaObsId && method === 'GET') {
+    const openai = quotaObsId === 'ep-openai-codex'
     return ok({
       items: [
         {
           error_code: null,
-          key_id: 'key-minimax-1',
-          key_label: 'primary',
+          key_id: openai ? 'key-openai-1' : 'key-minimax-1',
+          key_label: openai ? 'codex' : 'primary',
           limit_reached: false,
           observation_id: 'observation-1',
           observed_at: '2026-10-23T12:00:00.000Z',
           ok: true,
           plan_type: 'platform',
-          provider: 'minimax',
+          provider: openai ? 'openai' : 'minimax',
           source: 'fixture',
           status: '200',
           windows: [
             {
               availability: 'known',
-              current: 38,
+              current: openai ? 0 : 38,
               duration_seconds: 18000,
               is_default_scope: true,
-              kind: 'five_hour',
+              kind: openai ? 'custom' : 'five_hour',
               limit: 100,
-              remaining: 62,
-              remaining_percent: 62,
+              remaining: openai ? 100 : 62,
+              remaining_percent: openai ? 100 : 62,
               reset_at: '2026-10-23T17:00:00.000Z',
-              source_id: 'minimax:primary',
-              source_model: 'minimax-m2',
-              unit: 'requests',
+              source_id: openai ? 'subscription:primary' : 'minimax:primary',
+              source_model: openai ? 'gpt-5.1-codex' : 'minimax-m2',
+              unit: openai ? null : 'requests',
+            },
+            {
+              availability: 'known',
+              current: openai ? 60 : 40,
+              duration_seconds: 604800,
+              is_default_scope: true,
+              kind: openai ? 'custom' : 'weekly',
+              limit: 100,
+              remaining: openai ? 40 : 60,
+              remaining_percent: openai ? 40 : 60,
+              reset_at: '2026-10-29T17:00:00.000Z',
+              source_id: openai ? 'subscription:secondary' : 'minimax:weekly',
+              source_model: openai ? 'gpt-5.1-codex' : 'minimax-m2',
+              unit: openai ? null : 'requests',
             },
           ],
         },
@@ -615,38 +900,116 @@ export async function handleCatalog(
 
   const quotaTrendId = ENDPOINT_QUOTA_TREND.exec(pathname)?.[1]
   if (quotaTrendId && method === 'GET') {
+    const range = queryString(ctx.url, 'range') ?? '24h'
+    const grid =
+      range === '7d'
+        ? { seconds: 7_200, count: 84 }
+        : range === '30d'
+          ? { seconds: 3_600, count: 720 }
+          : { seconds: 900, count: 96 }
+    const toMs = Date.now()
+    const fromMs = toMs - grid.seconds * grid.count * 1000
+    const at = [0.15, 0.35, 0.6, 0.85].map((fraction) =>
+      new Date(fromMs + (toMs - fromMs) * fraction).toISOString(),
+    )
+    const observed = (index, minutes) =>
+      new Date(Date.parse(at[index]) + minutes * 60_000).toISOString()
+    const series =
+      quotaTrendId === 'ep-openai-codex'
+        ? [
+            {
+              key_id: 'key-openai-1',
+              key_label: 'codex',
+              kind: 'custom',
+              metric: 'remaining_percent',
+              points: [100, 90, 80, 70].map((value, index) => ({
+                at: at[index],
+                observed_at: observed(index, 35),
+                value,
+              })),
+              source_id: 'subscription:primary',
+              unit: 'percent',
+            },
+          ]
+        : [
+            {
+              key_id: 'key-minimax-1',
+              key_label: 'primary',
+              kind: 'five_hour',
+              metric: 'remaining_percent',
+              points: [74, 62, 80, 40].map((value, index) => ({
+                at: at[index],
+                observed_at: observed(index, 50),
+                value,
+              })),
+              source_id: 'minimax:primary',
+              unit: 'percent',
+            },
+            {
+              key_id: 'key-minimax-2',
+              key_label: 'secondary',
+              kind: 'weekly',
+              metric: 'remaining_percent',
+              points: [88, 86, 90, 84].map((value, index) => ({
+                at: at[index],
+                observed_at: observed(index, 20),
+                value,
+              })),
+              source_id: 'minimax:weekly',
+              unit: 'percent',
+            },
+            {
+              key_id: 'key-minimax-legacy',
+              key_label: 'legacy',
+              kind: 'rolling',
+              metric: 'remaining_percent',
+              points: [30, 28, 27, 25].map((value, index) => ({
+                at: at[index],
+                observed_at: observed(index, 5),
+                value,
+              })),
+              source_id: 'minimax:legacy',
+              unit: 'percent',
+            },
+            {
+              key_id: 'key-minimax-1',
+              key_label: 'primary',
+              kind: 'five_hour',
+              metric: 'remaining_percent',
+              points: [99, 99, 99, 99].map((value, index) => ({
+                at: at[index],
+                observed_at: observed(index, 10),
+                value,
+              })),
+              source_id: 'minimax:video:interval',
+              unit: 'percent',
+            },
+          ]
+    const singleKey = queryString(ctx.url, 'key_id')
+    const multiKeys = new Set(
+      (queryString(ctx.url, 'key_ids') ?? '').split(',').filter(Boolean),
+    )
+    const kinds = new Set(
+      (queryString(ctx.url, 'kinds') ?? '').split(',').filter(Boolean),
+    )
+    const selected = series.filter(
+      (entry) =>
+        (singleKey
+          ? entry.key_id === singleKey
+          : multiKeys.size === 0 || multiKeys.has(entry.key_id)) &&
+        (kinds.size === 0 || kinds.has(entry.kind)),
+    )
     return ok({
-      bucket_count: 2,
-      bucket_seconds: 3600,
+      bucket_count: grid.count,
+      bucket_seconds: grid.seconds,
       failed_observations: 0,
-      from: '2026-10-22T12:00:00.000Z',
+      from: new Date(fromMs).toISOString(),
       keys_truncated: false,
-      range: queryString(ctx.url, 'range') ?? '24h',
-      sampled_observations: 2,
-      series: [
-        {
-          key_id: 'key-minimax-1',
-          key_label: 'primary',
-          kind: 'five_hour',
-          metric: 'remaining_percent',
-          points: [
-            {
-              at: '2026-10-22T12:00:00.000Z',
-              observed_at: '2026-10-22T12:00:00.000Z',
-              value: 74,
-            },
-            {
-              at: '2026-10-23T12:00:00.000Z',
-              observed_at: '2026-10-23T12:00:00.000Z',
-              value: 62,
-            },
-          ],
-          source_id: 'minimax:primary',
-          unit: 'percent',
-        },
-      ],
+      range,
+      sampled_observations: 4,
+      series: selected,
       series_truncated: false,
-      to: '2026-10-23T12:00:00.000Z',
+      to: new Date(toMs).toISOString(),
     })
   }
 
