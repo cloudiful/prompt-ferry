@@ -4,8 +4,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::db::types::{
-    ChatgptQuotaEndpointActivity, ChatgptQuotaHistoryEndpoint, ChatgptQuotaSnapshot,
-    ChatgptQuotaSnapshotSource,
+    ChatgptQuotaEndpointActivity, ChatgptQuotaSnapshot, ChatgptQuotaSnapshotSource,
 };
 
 use super::{SNAPSHOT_PAGE_MAX, SNAPSHOT_PRUNE_BATCH_SIZE, SNAPSHOT_RETENTION_DAYS};
@@ -68,47 +67,6 @@ pub async fn list_snapshots(
     .fetch_all(pool)
     .await?;
     rows.into_iter().map(map_snapshot).collect()
-}
-
-pub async fn list_snapshot_history(
-    pool: &PgPool,
-    endpoint_id: Uuid,
-    before_id: Option<i64>,
-    limit: i64,
-) -> Result<Vec<ChatgptQuotaSnapshot>> {
-    let rows = sqlx::query_file_as!(
-        SnapshotDbRow,
-        "src/sql/quota_snapshots/list_snapshot_history.sql",
-        endpoint_id,
-        before_id,
-        limit.clamp(1, SNAPSHOT_PAGE_MAX),
-    )
-    .fetch_all(pool)
-    .await?;
-    rows.into_iter().map(map_snapshot).collect()
-}
-
-#[derive(Debug)]
-struct QuotaHistoryEndpointDbRow {
-    endpoint_id: Uuid,
-    provider: String,
-}
-
-pub async fn quota_history_endpoint(
-    pool: &PgPool,
-    endpoint_id: Uuid,
-) -> Result<Option<ChatgptQuotaHistoryEndpoint>> {
-    Ok(sqlx::query_file_as!(
-        QuotaHistoryEndpointDbRow,
-        "src/sql/quota_snapshots/quota_history_endpoint.sql",
-        endpoint_id,
-    )
-    .fetch_optional(pool)
-    .await?
-    .map(|row| ChatgptQuotaHistoryEndpoint {
-        endpoint_id: row.endpoint_id,
-        provider: row.provider,
-    }))
 }
 
 pub async fn prune_expired_snapshots(

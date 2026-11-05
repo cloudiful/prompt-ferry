@@ -64,7 +64,7 @@ const requiredChecks = [
   'oauthNegativeCancelQuotaListRetry',
   'keyQuotaHistory',
   'oauthQuota',
-  'subscriptionQuotaHistory',
+  'openaiKeyHistory',
   'oauthStatusAndStartFailures',
   'deviceOAuthCompletion',
   'browserOAuth',
@@ -89,7 +89,14 @@ export const EXPECTED_SCREENSHOTS = [
   'e2e/foundation/screenshots/endpoints-quota-current-en-light-1440.png',
   'e2e/foundation/screenshots/endpoints-quota-chart-en-light-1440.png',
   'e2e/foundation/screenshots/endpoints-quota-history-en-light-1440.png',
-  'e2e/foundation/screenshots/endpoints-subscription-history-en-light-1440.png',
+  'e2e/foundation/screenshots/endpoints-quota-openai-history-en-light-1440.png',
+  'e2e/foundation/screenshots/endpoints-quota-tooltip-en-light-1440.png',
+  'e2e/foundation/screenshots/endpoints-quota-zh-dark-chart-1440.png',
+  'e2e/foundation/screenshots/endpoints-quota-zh-dark-chart-390.png',
+  'e2e/foundation/screenshots/endpoints-quota-en-dark-1440.png',
+  'e2e/foundation/screenshots/endpoints-quota-en-dark-390.png',
+  'e2e/foundation/screenshots/endpoints-quota-zh-light-1440.png',
+  'e2e/foundation/screenshots/endpoints-quota-zh-light-390.png',
   'e2e/foundation/screenshots/endpoints-en-light-1024.png',
   'e2e/foundation/screenshots/endpoints-en-light-768.png',
   'e2e/foundation/screenshots/endpoints-en-light-390.png',
@@ -596,10 +603,17 @@ export function evaluateEndpointsReport(
   if (
     checks.keyQuotaHistory?.actualCanvas !== true ||
     checks.keyQuotaHistory?.lazyImportObserved !== true ||
-    checks.keyQuotaHistory?.ranges?.join(',') !== '24h,7d,30d'
+    checks.keyQuotaHistory?.ranges?.join(',') !== '24h,7d,30d' ||
+    checks.keyQuotaHistory?.multiKeyFilter !== 'key-minimax-1,key-minimax-2' ||
+    checks.keyQuotaHistory?.kindFilter !== 'weekly' ||
+    checks.keyQuotaHistory?.trend30dBuckets !== 720 ||
+    checks.keyQuotaHistory?.trend30dSeconds !== 3600 ||
+    !checks.keyQuotaHistory?.trend30dFrom ||
+    !checks.keyQuotaHistory?.trend30dTo ||
+    checks.keyQuotaHistory?.listRowsAfterKindFilter !== 1
   ) {
     failures.push(
-      'key quota chart was not observed as a lazy real chart across all ranges',
+      'key quota chart was not observed as a lazy real chart with multi-key and kind filters across all ranges',
     )
   }
   if (
@@ -613,12 +627,12 @@ export function evaluateEndpointsReport(
     )
   }
   if (
-    checks.subscriptionQuotaHistory?.query?.limit !== '50' ||
-    checks.subscriptionQuotaHistory?.sourceRendered !== true ||
-    checks.subscriptionQuotaHistory?.noLoadMore !== true
+    checks.openaiKeyHistory?.query?.limit !== '50' ||
+    checks.openaiKeyHistory?.observationId !== 'observation-1' ||
+    checks.openaiKeyHistory?.removedHistoryRequests !== 0
   ) {
     failures.push(
-      'subscription history did not verify its first page and fixture cursor behavior',
+      'OpenAI shared key history did not verify the default page or the removed exclusive read surface',
     )
   }
   if (

@@ -18,8 +18,40 @@ export type QuotaTrendGroup = {
 
 export type QuotaTrendKindLabels = Record<CanonicalQuotaWindowKind, string>
 
+export const QUOTA_TREND_KIND_KEYS: Record<CanonicalQuotaWindowKind, string> = {
+  five_hour: 'tokenPlanInterval',
+  rolling: 'tokenPlanRolling',
+  weekly: 'tokenPlanWeekly',
+  monthly: 'tokenPlanMonthly',
+  balance: 'quotaTrendKindBalance',
+  unlimited: 'tokenPlanNoLimit',
+  custom: 'quotaTrendKindCustom',
+}
+
+export const QUOTA_TREND_KINDS: readonly CanonicalQuotaWindowKind[] = [
+  'five_hour',
+  'rolling',
+  'weekly',
+  'monthly',
+  'balance',
+  'unlimited',
+  'custom',
+]
+
+export function quotaTrendKindLabels(
+  translate: (key: string) => string,
+): QuotaTrendKindLabels {
+  const labels = {} as QuotaTrendKindLabels
+  for (const kind of QUOTA_TREND_KINDS) {
+    labels[kind] = translate(QUOTA_TREND_KIND_KEYS[kind])
+  }
+  return labels
+}
+
 export type QuotaTrendCoreOptionInput = {
   range: QuotaTrendRange
+  from?: string
+  to?: string
   formatAxisDate: (value: string) => string
   formatAxisTime: (value: string) => string
   formatTooltipTime: (value: string) => string
@@ -78,6 +110,46 @@ function sortedPoints(
   entry: QuotaKeyObservationTrendSeries,
 ): QuotaKeyObservationTrendPoint[] {
   return [...entry.points].sort((a, b) => compareText(a.at, b.at))
+}
+
+/**
+ * Splits one logical series into non-increasing segments. A finite increase or
+ * a null/unknown/gap starts a new segment: the earlier low sample ends the old
+ * segment and the high sample begins the new one, so no line is ever drawn
+ * upward and no reset is bridged. Original measured points are never copied or
+ * synthesized.
+ */
+function measurementMs(point: QuotaKeyObservationTrendPoint): number | null {
+  if (point.value == null || !Number.isFinite(point.value)) return null
+  if (point.observed_at == null) return null
+  const ms = Date.parse(point.observed_at)
+  return Number.isFinite(ms) ? ms : null
+}
+
+export function splitQuotaTrendSegments(
+  points: readonly QuotaKeyObservationTrendPoint[],
+): QuotaKeyObservationTrendPoint[][] {
+  const ordered = [...points].sort((a, b) => compareText(a.at, b.at))
+  const segments: QuotaKeyObservationTrendPoint[][] = []
+  let current: QuotaKeyObservationTrendPoint[] = []
+  let previousValue: number | null = null
+  for (const point of ordered) {
+    const value = measurementMs(point) == null ? null : point.value
+    if (value == null) {
+      if (current.length > 0) segments.push(current)
+      current = []
+      previousValue = null
+      continue
+    }
+    if (previousValue != null && value > previousValue) {
+      if (current.length > 0) segments.push(current)
+      current = []
+    }
+    current.push(point)
+    previousValue = value
+  }
+  if (current.length > 0) segments.push(current)
+  return segments
 }
 
 export function groupQuotaTrendSeries(
@@ -206,60 +278,77 @@ export function createQuotaTrendPanelOption(
     metaByName.set(name, { metric: group.metric, unit: group.unit })
     if (hidden.has(name)) continue
     const points = sortedPoints(entry)
-    series.push({
-      name,
-      type: 'line',
-      step: 'end',
-      connectNulls: false,
-      showSymbol: points.length <= 48,
-      symbol: 'circle',
-      symbolSize: 4,
-      data: points.map((point) => (point.value == null ? null : point.value)),
-      itemStyle: { color },
-      lineStyle: { color },
-    })
+    const denseSymbols = points.length <= 48
+    for (const segment of splitQuotaTrendSegments(points)) {
+      const data = segment.flatMap((point) => {
+        const ms = measurementMs(point)
+        return ms == null ? [] : [[ms, point.value]]
+      })
+      if (data.length === 0) continue
+      series.push({
+        name,
+        type: 'line',
+        smooth: 0.2,
+        smoothMonotone: 'x',
+        connectNulls: false,
+        showSymbol: segment.length === 1 || denseSymbols,
+        symbol: 'circle',
+        symbolSize: 4,
+        data,
+        itemStyle: { color },
+        lineStyle: { color },
+      })
+    }
   }
 
   type TooltipParam = {
     axisValue?: string | number
     marker?: string
     seriesName?: string
-    value?: number | string | null
+    value?: number | string | null | Array<number | string | null>
   }
+  const measurementOf = (item: TooltipParam): number | null => {
+    const value = Array.isArray(item.value) ? item.value[0] : undefined
+    const ms = typeof value === 'number' ? value : Number(value)
+    if (Number.isFinite(ms)) return ms
+    const axis = Number(item.axisValue)
+    return Number.isFinite(axis) ? axis : null
+  }
+  const isoAt = (ms: number): string => new Date(ms).toISOString()
   const formatTooltip = (params: TooltipParam[]): string => {
     const first = params[0]
     if (!first) return ''
-    const lines = params.map((item) => {
-      const meta = item.seriesName ? metaByName.get(item.seriesName) : undefined
+    const headerMs = measurementOf(first)
+    const header =
+      headerMs == null
+        ? input.formatTooltipTime(String(first.axisValue ?? ''))
+        : input.formatTooltipTime(isoAt(headerMs))
+    const seen = new Set<string>()
+    const lines: string[] = []
+    for (const item of params) {
+      const name = item.seriesName ?? ''
+      const raw = Array.isArray(item.value) ? item.value[1] : item.value
+      const itemMs = measurementOf(item)
+      const dedupe = `${name}\u0000${itemMs ?? 'axis'}`
+      if (seen.has(dedupe)) continue
+      seen.add(dedupe)
+      const meta = metaByName.get(name)
       let display = input.labels.unavailable
-      if (item.value != null) {
+      if (raw != null) {
         display =
           meta?.metric === PERCENT_METRIC
-            ? `${item.value}${input.labels.percentSuffix}`
-            : input.formatAmount(Number(item.value), meta?.unit ?? '')
+            ? `${raw}${input.labels.percentSuffix}`
+            : input.formatAmount(Number(raw), meta?.unit ?? '')
       }
-      return `${item.marker ?? ''}${escapeHtml(item.seriesName ?? '')}: ${escapeHtml(display)}`
-    })
-    const axis = input.formatTooltipTime(String(first.axisValue ?? ''))
-    return `${escapeHtml(axis)}<br/>${lines.join('<br/>')}`
-  }
-
-  const categoryPoints =
-    group.series.length > 0 ? sortedPoints(group.series[0]) : []
-  const categories = categoryPoints.map((point) => point.at)
-  const axisLabels = new Map<string, string>()
-  let previousDay: string | null = null
-  for (const at of categories) {
-    const date = new Date(at)
-    const day = Number.isNaN(date.getTime()) ? at : input.formatDayKey(date)
-    const label =
-      input.range === '24h'
-        ? previousDay !== null && previousDay !== day
-          ? `${input.formatAxisDate(at)} ${input.formatAxisTime(at)}`
-          : input.formatAxisTime(at)
-        : input.formatAxisDate(at)
-    axisLabels.set(at, label)
-    previousDay = day
+      const measurement =
+        itemMs != null && itemMs !== headerMs
+          ? ` · ${input.formatTooltipTime(isoAt(itemMs))}`
+          : ''
+      lines.push(
+        `${item.marker ?? ''}${escapeHtml(name)}: ${escapeHtml(display)}${escapeHtml(measurement)}`,
+      )
+    }
+    return `${escapeHtml(header)}<br/>${lines.join('<br/>')}`
   }
 
   const isPercent = group.metric === PERCENT_METRIC
@@ -289,6 +378,12 @@ export function createQuotaTrendPanelOption(
         splitLine: { lineStyle: { color: theme.grid, type: 'dashed' } },
       }
   const legend: LegendComponentOption = { show: false }
+  const fromMs = input.from === undefined ? Number.NaN : Date.parse(input.from)
+  const toMs = input.to === undefined ? Number.NaN : Date.parse(input.to)
+  const rangeBounds = {
+    ...(Number.isFinite(fromMs) ? { min: fromMs } : {}),
+    ...(Number.isFinite(toMs) ? { max: toMs } : {}),
+  }
 
   return {
     backgroundColor: 'transparent',
@@ -303,13 +398,15 @@ export function createQuotaTrendPanelOption(
       formatter: formatTooltip,
     },
     xAxis: {
-      type: 'category',
-      data: categories,
+      type: 'time',
+      ...rangeBounds,
       axisLabel: {
         color: theme.muted,
         fontSize: 10,
-        formatter: (value: string | number) =>
-          axisLabels.get(String(value)) ?? input.formatAxisTime(String(value)),
+        formatter: (value: number) =>
+          input.range === '24h'
+            ? input.formatAxisTime(isoAt(value))
+            : input.formatAxisDate(isoAt(value)),
       },
       axisLine: { lineStyle: { color: theme.axis } },
     },

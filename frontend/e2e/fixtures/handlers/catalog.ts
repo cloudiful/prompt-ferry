@@ -38,8 +38,6 @@ const ENDPOINT_MODELS = /^\/api\/v1\/admin\/endpoints\/([^/]+)\/models$/
 const ENDPOINT_TEST = /^\/api\/v1\/admin\/endpoints\/([^/]+)\/test$/
 const ENDPOINT_TOKEN_PLAN =
   /^\/api\/v1\/admin\/endpoints\/([^/]+)\/token-plan-usage$/
-const ENDPOINT_QUOTA_HISTORY =
-  /^\/api\/v1\/admin\/endpoints\/([^/]+)\/quota-history$/
 const ENDPOINT_QUOTA_OBS =
   /^\/api\/v1\/admin\/endpoints\/([^/]+)\/quota-observations$/
 const ENDPOINT_QUOTA_TREND =
@@ -846,64 +844,51 @@ export async function handleCatalog(
     })
   }
 
-  const quotaHistoryId = ENDPOINT_QUOTA_HISTORY.exec(pathname)?.[1]
-  if (quotaHistoryId && method === 'GET') {
-    return ok({
-      items: [
-        {
-          limit_reached: false,
-          observed_at: '2026-10-23T12:00:00.000Z',
-          plan_type: 'platform',
-          snapshot_id: 'snapshot-1',
-          source: 'fixture',
-          windows: [
-            {
-              availability: 'known',
-              remaining_percent: 62,
-              reset_after_seconds: 18000,
-              reset_at: '2026-10-23T17:00:00.000Z',
-              source_window: 'primary',
-              used_percent: 38,
-              window_seconds: 18000,
-            },
-          ],
-        },
-      ],
-      next_cursor: null,
-      retention_days: 30,
-    })
-  }
-
   const quotaObsId = ENDPOINT_QUOTA_OBS.exec(pathname)?.[1]
   if (quotaObsId && method === 'GET') {
+    const openai = quotaObsId === 'ep-openai-codex'
     return ok({
       items: [
         {
           error_code: null,
-          key_id: 'key-minimax-1',
-          key_label: 'primary',
+          key_id: openai ? 'key-openai-1' : 'key-minimax-1',
+          key_label: openai ? 'codex' : 'primary',
           limit_reached: false,
           observation_id: 'observation-1',
           observed_at: '2026-10-23T12:00:00.000Z',
           ok: true,
           plan_type: 'platform',
-          provider: 'minimax',
+          provider: openai ? 'openai' : 'minimax',
           source: 'fixture',
           status: '200',
           windows: [
             {
               availability: 'known',
-              current: 38,
+              current: openai ? 0 : 38,
               duration_seconds: 18000,
               is_default_scope: true,
-              kind: 'five_hour',
+              kind: openai ? 'custom' : 'five_hour',
               limit: 100,
-              remaining: 62,
-              remaining_percent: 62,
+              remaining: openai ? 100 : 62,
+              remaining_percent: openai ? 100 : 62,
               reset_at: '2026-10-23T17:00:00.000Z',
-              source_id: 'minimax:primary',
-              source_model: 'minimax-m2',
-              unit: 'requests',
+              source_id: openai ? 'subscription:primary' : 'minimax:primary',
+              source_model: openai ? 'gpt-5.1-codex' : 'minimax-m2',
+              unit: openai ? null : 'requests',
+            },
+            {
+              availability: 'known',
+              current: openai ? 60 : 40,
+              duration_seconds: 604800,
+              is_default_scope: true,
+              kind: openai ? 'custom' : 'weekly',
+              limit: 100,
+              remaining: openai ? 40 : 60,
+              remaining_percent: openai ? 40 : 60,
+              reset_at: '2026-10-29T17:00:00.000Z',
+              source_id: openai ? 'subscription:secondary' : 'minimax:weekly',
+              source_model: openai ? 'gpt-5.1-codex' : 'minimax-m2',
+              unit: openai ? null : 'requests',
             },
           ],
         },
@@ -915,58 +900,116 @@ export async function handleCatalog(
 
   const quotaTrendId = ENDPOINT_QUOTA_TREND.exec(pathname)?.[1]
   if (quotaTrendId && method === 'GET') {
+    const range = queryString(ctx.url, 'range') ?? '24h'
+    const grid =
+      range === '7d'
+        ? { seconds: 7_200, count: 84 }
+        : range === '30d'
+          ? { seconds: 3_600, count: 720 }
+          : { seconds: 900, count: 96 }
+    const toMs = Date.now()
+    const fromMs = toMs - grid.seconds * grid.count * 1000
+    const at = [0.15, 0.35, 0.6, 0.85].map((fraction) =>
+      new Date(fromMs + (toMs - fromMs) * fraction).toISOString(),
+    )
+    const observed = (index, minutes) =>
+      new Date(Date.parse(at[index]) + minutes * 60_000).toISOString()
+    const series =
+      quotaTrendId === 'ep-openai-codex'
+        ? [
+            {
+              key_id: 'key-openai-1',
+              key_label: 'codex',
+              kind: 'custom',
+              metric: 'remaining_percent',
+              points: [100, 90, 80, 70].map((value, index) => ({
+                at: at[index],
+                observed_at: observed(index, 35),
+                value,
+              })),
+              source_id: 'subscription:primary',
+              unit: 'percent',
+            },
+          ]
+        : [
+            {
+              key_id: 'key-minimax-1',
+              key_label: 'primary',
+              kind: 'five_hour',
+              metric: 'remaining_percent',
+              points: [74, 62, 80, 40].map((value, index) => ({
+                at: at[index],
+                observed_at: observed(index, 50),
+                value,
+              })),
+              source_id: 'minimax:primary',
+              unit: 'percent',
+            },
+            {
+              key_id: 'key-minimax-2',
+              key_label: 'secondary',
+              kind: 'weekly',
+              metric: 'remaining_percent',
+              points: [88, 86, 90, 84].map((value, index) => ({
+                at: at[index],
+                observed_at: observed(index, 20),
+                value,
+              })),
+              source_id: 'minimax:weekly',
+              unit: 'percent',
+            },
+            {
+              key_id: 'key-minimax-legacy',
+              key_label: 'legacy',
+              kind: 'rolling',
+              metric: 'remaining_percent',
+              points: [30, 28, 27, 25].map((value, index) => ({
+                at: at[index],
+                observed_at: observed(index, 5),
+                value,
+              })),
+              source_id: 'minimax:legacy',
+              unit: 'percent',
+            },
+            {
+              key_id: 'key-minimax-1',
+              key_label: 'primary',
+              kind: 'five_hour',
+              metric: 'remaining_percent',
+              points: [99, 99, 99, 99].map((value, index) => ({
+                at: at[index],
+                observed_at: observed(index, 10),
+                value,
+              })),
+              source_id: 'minimax:video:interval',
+              unit: 'percent',
+            },
+          ]
+    const singleKey = queryString(ctx.url, 'key_id')
+    const multiKeys = new Set(
+      (queryString(ctx.url, 'key_ids') ?? '').split(',').filter(Boolean),
+    )
+    const kinds = new Set(
+      (queryString(ctx.url, 'kinds') ?? '').split(',').filter(Boolean),
+    )
+    const selected = series.filter(
+      (entry) =>
+        (singleKey
+          ? entry.key_id === singleKey
+          : multiKeys.size === 0 || multiKeys.has(entry.key_id)) &&
+        (kinds.size === 0 || kinds.has(entry.kind)),
+    )
     return ok({
-      bucket_count: 2,
-      bucket_seconds: 3600,
+      bucket_count: grid.count,
+      bucket_seconds: grid.seconds,
       failed_observations: 0,
-      from: '2026-10-22T12:00:00.000Z',
+      from: new Date(fromMs).toISOString(),
       keys_truncated: false,
-      range: queryString(ctx.url, 'range') ?? '24h',
-      sampled_observations: 2,
-      series: [
-        {
-          key_id: 'key-minimax-1',
-          key_label: 'primary',
-          kind: 'five_hour',
-          metric: 'remaining_percent',
-          points: [
-            {
-              at: '2026-10-22T12:00:00.000Z',
-              observed_at: '2026-10-22T12:00:00.000Z',
-              value: 74,
-            },
-            {
-              at: '2026-10-23T12:00:00.000Z',
-              observed_at: '2026-10-23T12:00:00.000Z',
-              value: 62,
-            },
-          ],
-          source_id: 'minimax:primary',
-          unit: 'percent',
-        },
-        {
-          key_id: 'key-minimax-1',
-          key_label: 'primary',
-          kind: 'five_hour',
-          metric: 'remaining_percent',
-          points: [
-            {
-              at: '2026-10-22T12:00:00.000Z',
-              observed_at: '2026-10-22T12:00:00.000Z',
-              value: 99,
-            },
-            {
-              at: '2026-10-23T12:00:00.000Z',
-              observed_at: '2026-10-23T12:00:00.000Z',
-              value: 99,
-            },
-          ],
-          source_id: 'minimax:video:interval',
-          unit: 'percent',
-        },
-      ],
+      range,
+      sampled_observations: 4,
+      series: selected,
       series_truncated: false,
-      to: '2026-10-23T12:00:00.000Z',
+      to: new Date(toMs).toISOString(),
     })
   }
 

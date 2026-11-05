@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -6,11 +7,9 @@ import type {
   QuotaKeyObservationHistoryResponse,
   QuotaKeyObservationTrendResponse,
   QuotaKeyObservationTrendSeries,
-  QuotaSnapshotHistoryItem,
 } from '@/generated/admin-api'
 
 const sdkMock = vi.hoisted(() => ({
-  quotaSnapshotHistory: vi.fn(),
   quotaKeyObservationHistory: vi.fn(),
   quotaKeyObservationTrend: vi.fn(),
 }))
@@ -24,7 +23,6 @@ const echartsMock = vi.hoisted(() => ({
 
 vi.mock('@/generated/admin-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/generated/admin-api')>()),
-  quotaSnapshotHistory: sdkMock.quotaSnapshotHistory,
   quotaKeyObservationHistory: sdkMock.quotaKeyObservationHistory,
   quotaKeyObservationTrend: sdkMock.quotaKeyObservationTrend,
 }))
@@ -44,7 +42,7 @@ vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }))
 import { LocaleProvider } from '@/lib/i18n'
 import { ThemeProvider } from '@/lib/theme'
 import { KeyQuotaObservationHistory } from '@/components/endpoints/KeyQuotaObservationHistory'
-import { SubscriptionQuotaHistory } from '@/components/endpoints/SubscriptionQuotaHistory'
+import { MultiSelect } from '@/components/ui/multi-select'
 
 const NOW = Date.parse('2026-10-24T00:00:00.000Z')
 const originalScrollIntoView = HTMLElement.prototype.scrollIntoView
@@ -112,21 +110,6 @@ function quotaWindow(
   }
 }
 
-function snapshot(
-  snapshotId: string,
-  overrides: Partial<QuotaSnapshotHistoryItem> = {},
-): QuotaSnapshotHistoryItem {
-  return {
-    snapshot_id: snapshotId,
-    observed_at: '2026-10-24T00:00:00.000Z',
-    plan_type: null,
-    source: 'manual',
-    limit_reached: false,
-    windows: [],
-    ...overrides,
-  }
-}
-
 function observation(
   observationId: string,
   overrides: Partial<QuotaKeyObservationHistoryItem> = {},
@@ -158,7 +141,13 @@ function trendSeries(
     kind: 'five_hour',
     metric: 'remaining_percent',
     unit: 'percent',
-    points: [{ at: '2026-10-24T00:00:00.000Z', observed_at: null, value: 50 }],
+    points: [
+      {
+        at: '2026-10-24T00:00:00.000Z',
+        observed_at: '2026-10-24T00:00:00.000Z',
+        value: 50,
+      },
+    ],
     ...overrides,
   }
 }
@@ -198,6 +187,12 @@ async function chooseSelect(name: string, option: string): Promise<void> {
   fireEvent.click(await screen.findByRole('option', { name: option }))
 }
 
+async function chooseMulti(name: string, option: string): Promise<void> {
+  fireEvent.click(screen.getByRole('button', { name }))
+  fireEvent.click(await screen.findByRole('checkbox', { name: option }))
+  fireEvent.keyDown(document, { key: 'Escape' })
+}
+
 beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
     configurable: true,
@@ -224,9 +219,6 @@ beforeEach(() => {
     resize: echartsMock.resize,
     dispose: echartsMock.dispose,
   }))
-  sdkMock.quotaSnapshotHistory.mockResolvedValue({
-    data: { items: [], retention_days: 30 },
-  })
   sdkMock.quotaKeyObservationHistory.mockResolvedValue({
     data: { items: [], retention_days: 30 },
   })
@@ -263,115 +255,6 @@ afterEach(() => {
   } else {
     Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView')
   }
-})
-
-describe('subscription quota history', () => {
-  it('loads lazily, preserves opaque cursors, deduplicates snapshots, and anchors resets to observation time', async () => {
-    const cursor = 'opaque/cursor?<token>'
-    sdkMock.quotaSnapshotHistory
-      .mockResolvedValueOnce({
-        data: {
-          items: [
-            snapshot('snapshot-one', {
-              observed_at: '2026-10-24T00:00:00.000Z',
-              plan_type: '<plan>',
-              source: 'request',
-              limit_reached: true,
-              windows: [
-                {
-                  source_window: 'primary',
-                  window_seconds: 18_000,
-                  remaining_percent: 40,
-                  used_percent: 60,
-                  availability: 'known',
-                  reset_at: null,
-                  reset_after_seconds: 60,
-                },
-              ],
-            }),
-          ],
-          next_cursor: cursor,
-          retention_days: 9,
-        },
-      })
-      .mockResolvedValueOnce({
-        data: {
-          items: [
-            snapshot('snapshot-one'),
-            snapshot('snapshot-two', { windows: [] }),
-          ],
-          next_cursor: null,
-          retention_days: 9,
-        },
-      })
-
-    renderWithProviders(
-      <SubscriptionQuotaHistory
-        endpointId="openai-endpoint"
-        nowMs={Date.parse('2026-10-24T00:02:00.000Z')}
-        refreshKey=""
-      />,
-    )
-    expect(sdkMock.quotaSnapshotHistory).not.toHaveBeenCalled()
-
-    openSection('Quota history')
-    expect(await screen.findByText('<plan>')).toBeTruthy()
-    expect(sdkMock.quotaSnapshotHistory).toHaveBeenCalledWith({
-      path: { endpoint_id: 'openai-endpoint' },
-      query: { limit: 50 },
-      responseStyle: 'data',
-    })
-    expect(screen.getByText('Upstream limit reached')).toBeTruthy()
-    expect(screen.getByText('Request trigger')).toBeTruthy()
-    expect(screen.getByText('Expired')).toBeTruthy()
-    expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe(
-      '40',
-    )
-    expect(screen.queryByText(cursor)).toBeNull()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
-    await screen.findByText('No window details')
-    expect(sdkMock.quotaSnapshotHistory).toHaveBeenLastCalledWith({
-      path: { endpoint_id: 'openai-endpoint' },
-      query: { limit: 50, before_id: cursor },
-      responseStyle: 'data',
-    })
-    expect(
-      document.querySelectorAll('[data-quota-snapshot-id="snapshot-one"]'),
-    ).toHaveLength(1)
-    expect(
-      document.querySelectorAll('[data-quota-snapshot-id="snapshot-two"]'),
-    ).toHaveLength(1)
-  })
-
-  it('retries a cold failure and reports the returned retention period when empty', async () => {
-    sdkMock.quotaSnapshotHistory
-      .mockRejectedValueOnce(new Error('history unavailable'))
-      .mockResolvedValueOnce({
-        data: { items: [], retention_days: 12, next_cursor: null },
-      })
-    renderWithProviders(
-      <SubscriptionQuotaHistory
-        endpointId="openai-retry"
-        nowMs={NOW}
-        refreshKey=""
-      />,
-    )
-    openSection('Quota history')
-    expect(
-      await screen.findByText('Quota history could not be loaded.'),
-    ).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
-    expect(
-      await screen.findByText(
-        'No successful observations in the last 12 days.',
-      ),
-    ).toBeTruthy()
-    expect(sdkMock.quotaSnapshotHistory).toHaveBeenCalledTimes(2)
-    expect(sdkMock.quotaSnapshotHistory.mock.calls[1][0].query).toEqual({
-      limit: 50,
-    })
-  })
 })
 
 describe('per-key quota history and trend', () => {
@@ -540,6 +423,105 @@ describe('per-key quota history and trend', () => {
     ])
   })
 
+  it('sends multi-key and kind selections in one request and filters list rows by kind', async () => {
+    sdkMock.quotaKeyObservationTrend.mockResolvedValue({
+      data: trend({
+        series: [
+          trendSeries({ key_id: 'key-a', key_label: 'Key A' }),
+          trendSeries({
+            key_id: 'key-b',
+            key_label: 'Key B',
+            kind: 'weekly',
+            source_id: 'minimax:general:weekly',
+          }),
+          trendSeries({
+            key_id: 'key-c',
+            key_label: 'Key C',
+            kind: 'rolling',
+            source_id: 'minimax:general:rolling',
+          }),
+        ],
+      }),
+    })
+    sdkMock.quotaKeyObservationHistory.mockResolvedValue({
+      data: {
+        items: [
+          observation('obs-kinds', {
+            windows: [
+              quotaWindow({
+                source_id: 'fixture:rolling',
+                kind: 'rolling',
+                remaining_percent: 40,
+              }),
+              quotaWindow({
+                source_id: 'fixture:weekly',
+                kind: 'weekly',
+                remaining_percent: 60,
+              }),
+            ],
+          }),
+          observation('obs-error', {
+            ok: false,
+            error_code: 'auth',
+            windows: [],
+          }),
+        ],
+        next_cursor: null,
+        retention_days: 30,
+      },
+    })
+
+    renderWithProviders(
+      <KeyQuotaObservationHistory endpointId="endpoint-filters" />,
+    )
+    openSection('Per-key quota history')
+    await waitFor(() =>
+      expect(sdkMock.quotaKeyObservationTrend).toHaveBeenCalledTimes(1),
+    )
+    await chooseMulti('Keys', 'Key A')
+    await waitFor(() =>
+      expect(sdkMock.quotaKeyObservationTrend).toHaveBeenCalledTimes(2),
+    )
+    expect(sdkMock.quotaKeyObservationTrend).toHaveBeenLastCalledWith({
+      path: { endpoint_id: 'endpoint-filters' },
+      query: { range: '24h', key_id: 'key-a' },
+      responseStyle: 'data',
+    })
+    await chooseMulti('Keys', 'Key B')
+    await waitFor(() =>
+      expect(sdkMock.quotaKeyObservationTrend).toHaveBeenCalledTimes(3),
+    )
+    expect(sdkMock.quotaKeyObservationTrend).toHaveBeenLastCalledWith({
+      path: { endpoint_id: 'endpoint-filters' },
+      query: { range: '24h', key_ids: 'key-a,key-b' },
+      responseStyle: 'data',
+    })
+
+    await chooseMulti('Window kinds', 'Weekly window')
+    await waitFor(() =>
+      expect(sdkMock.quotaKeyObservationTrend).toHaveBeenCalledTimes(4),
+    )
+    expect(sdkMock.quotaKeyObservationTrend).toHaveBeenLastCalledWith({
+      path: { endpoint_id: 'endpoint-filters' },
+      query: { range: '24h', key_ids: 'key-a,key-b', kinds: 'weekly' },
+      responseStyle: 'data',
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'List' }))
+    await waitFor(() =>
+      expect(sdkMock.quotaKeyObservationHistory).toHaveBeenCalledTimes(1),
+    )
+    expect(sdkMock.quotaKeyObservationHistory).toHaveBeenLastCalledWith({
+      path: { endpoint_id: 'endpoint-filters' },
+      query: { limit: 50, key_ids: 'key-a,key-b' },
+      responseStyle: 'data',
+    })
+    await screen.findByText('auth')
+    expect(
+      document.querySelectorAll('[data-quota-row] [role="progressbar"]'),
+    ).toHaveLength(1)
+  })
+
   it('localizes quota history key terminology in Chinese', async () => {
     localStorage.setItem('prompt-ferry:locale', 'zh-CN')
     renderWithProviders(
@@ -551,8 +533,10 @@ describe('per-key quota history and trend', () => {
     await waitFor(() =>
       expect(sdkMock.quotaKeyObservationHistory).toHaveBeenCalledTimes(1),
     )
-    fireEvent.click(screen.getByRole('combobox', { name: 'key' }))
-    expect(await screen.findByRole('option', { name: '全部 key' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'key' }))
+    expect(
+      await screen.findByRole('checkbox', { name: '全部 key' }),
+    ).toBeTruthy()
     expect(screen.queryByText('全部按键')).toBeNull()
     const quotaSurface = document.querySelector('details') as HTMLElement
     expect(quotaSurface.textContent).not.toContain('按键')
@@ -634,7 +618,7 @@ describe('per-key quota history and trend', () => {
       '55',
     )
 
-    await chooseSelect('Key', 'List-only key')
+    await chooseMulti('Keys', 'List-only key')
     await waitFor(() =>
       expect(sdkMock.quotaKeyObservationHistory).toHaveBeenCalledTimes(2),
     )
@@ -677,7 +661,7 @@ describe('per-key quota history and trend', () => {
       callsBeforeChart,
     )
 
-    await chooseSelect('Key', 'All keys')
+    await chooseMulti('Keys', 'All keys')
     await waitFor(() =>
       expect(sdkMock.quotaKeyObservationHistory).toHaveBeenCalledTimes(
         callsBeforeChart + 1,
@@ -756,7 +740,7 @@ describe('per-key quota history and trend', () => {
     await waitFor(() =>
       expect(sdkMock.quotaKeyObservationHistory).toHaveBeenCalledTimes(1),
     )
-    await chooseSelect('Key', 'Key B')
+    await chooseMulti('Keys', 'Key B')
     expect(await screen.findByText('Key B history')).toBeTruthy()
     expect(
       sdkMock.quotaKeyObservationHistory.mock.calls.map(
@@ -840,5 +824,110 @@ describe('per-key quota history and trend', () => {
         listCalls + 1,
       ),
     )
+  })
+})
+
+function MultiSelectHarness({
+  maxSelected,
+  optionCount = 3,
+}: {
+  maxSelected?: number
+  optionCount?: number
+}) {
+  const options = Array.from({ length: optionCount }, (_, index) => ({
+    value: `k${index}`,
+    label: `k${index}`,
+  }))
+  const [selected, setSelected] = useState<string[]>([])
+  return (
+    <div>
+      <MultiSelect
+        allLabel="All options"
+        label="Test filter"
+        limitLabel={maxSelected ? `Up to ${maxSelected}` : undefined}
+        maxSelected={maxSelected}
+        onChange={setSelected}
+        options={options}
+        selected={selected}
+        summary={selected.length > 0 ? selected.join(',') : 'All options'}
+      />
+      <output data-testid="selection">{selected.join(',')}</output>
+    </div>
+  )
+}
+
+function checkboxState(name: string): string | null {
+  return screen.getByRole('checkbox', { name }).getAttribute('data-state')
+}
+
+describe('multi-select implicit-all semantics', () => {
+  it('starts at All, switches to explicit choices, and unchecks inside an explicit set', () => {
+    render(<MultiSelectHarness />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test filter' }))
+    expect(checkboxState('All options')).toBe('checked')
+    for (const name of ['k0', 'k1', 'k2']) {
+      expect(checkboxState(name)).toBe('unchecked')
+    }
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'k0' }))
+    expect(screen.getByTestId('selection').textContent).toBe('k0')
+    expect(checkboxState('All options')).toBe('unchecked')
+    expect(checkboxState('k0')).toBe('checked')
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'k1' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'k2' }))
+    expect(screen.getByTestId('selection').textContent).toBe('k0,k1,k2')
+    expect(checkboxState('All options')).toBe('unchecked')
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'k0' }))
+    expect(screen.getByTestId('selection').textContent).toBe('k1,k2')
+  })
+
+  it('returns to All after removing the final explicit choice and clears with All', () => {
+    render(<MultiSelectHarness />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test filter' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'k0' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'k0' }))
+    expect(screen.getByTestId('selection').textContent).toBe('')
+    expect(checkboxState('All options')).toBe('checked')
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'k1' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'k2' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'All options' }))
+    expect(screen.getByTestId('selection').textContent).toBe('')
+    expect(checkboxState('All options')).toBe('checked')
+  })
+
+  it('caps explicit key choices at 24 while leaving All available', () => {
+    render(<MultiSelectHarness maxSelected={24} optionCount={25} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test filter' }))
+    for (let index = 0; index < 24; index += 1) {
+      fireEvent.click(screen.getByRole('checkbox', { name: `k${index}` }))
+    }
+    expect(screen.getByTestId('selection').textContent?.split(',').length).toBe(
+      24,
+    )
+    expect(checkboxState('All options')).not.toBe('checked')
+    expect(
+      screen
+        .getByRole('checkbox', { name: 'All options' })
+        .hasAttribute('disabled'),
+    ).toBe(false)
+    expect(
+      screen.getByRole('checkbox', { name: 'k24' }).hasAttribute('disabled'),
+    ).toBe(true)
+    expect(screen.getByText('Up to 24')).toBeTruthy()
+  })
+
+  it('does not impose the key cap on the kinds-style selector', () => {
+    render(<MultiSelectHarness optionCount={25} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test filter' }))
+    for (let index = 0; index < 24; index += 1) {
+      fireEvent.click(screen.getByRole('checkbox', { name: `k${index}` }))
+    }
+    expect(
+      screen.getByRole('checkbox', { name: 'k24' }).hasAttribute('disabled'),
+    ).toBe(false)
+    expect(screen.queryByText('Up to 24')).toBeNull()
   })
 })

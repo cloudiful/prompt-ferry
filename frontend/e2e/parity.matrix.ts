@@ -267,7 +267,6 @@ export const ROUTES: RouteRow[] = [
       'GET /api/v1/admin/users/options',
       'GET /api/v1/admin/endpoints/{id}/models',
       'GET /api/v1/admin/endpoints/{id}/token-plan-usage',
-      'GET /api/v1/admin/endpoints/{id}/quota-history',
       'GET /api/v1/admin/endpoints/{id}/quota-observations',
       'GET /api/v1/admin/endpoints/{id}/quota-observations/trend',
       'GET /api/v1/admin/endpoints/{id}/oauth',
@@ -307,7 +306,6 @@ export const ROUTES: RouteRow[] = [
       'quota-observation-trend.test.ts',
       'quota-progress-semantics.test.ts',
       'quota-provider.test.ts',
-      'subscription-quota-history.test.ts',
       'subscription-quota-windows.test.ts',
       'token-plan-badge-surface.test.ts',
       'token-plan-cache-expiry.test.ts',
@@ -1210,7 +1208,6 @@ export const LEGACY_TEST_OVERRIDES: Record<string, LegacyTestDisposition> = {
   'schedule-all-day.test.ts': 'preserved-framework-neutral',
   'quota-observation-trend.test.ts': 'pending-react-replacement',
   'subscription-quota-windows.test.ts': 'preserved-framework-neutral',
-  'subscription-quota-history.test.ts': 'pending-react-replacement',
   'token-plan-cache-expiry.test.ts': 'preserved-framework-neutral',
   'token-plan-reset-duration.test.ts': 'preserved-framework-neutral',
   'token-plan-key-status.test.ts': 'preserved-framework-neutral',
@@ -1364,7 +1361,6 @@ export const RETAINED_LEGACY_MODULE_NAMES: string[] = [
   'src/admin-mappers/forms/endpoint.test.ts',
   'src/admin-mappers/forms/model-route.test.ts',
   'src/admin-mappers/forms/relay-host.test.ts',
-  'subscription-quota-history.test.ts',
   'subscription-quota-windows.test.ts',
   'table-pagination-labels.test.ts',
   'theme-first-paint.test.ts',
@@ -1834,15 +1830,6 @@ const REPLACED_LEGACY_MODULES: Array<[string, LegacyEvidenceGroup[]]> = [
       reactEvidence(
         'src/react-tests/quota-core.test.ts',
         'keeps duplicate key identities, legend names, theme colors, and hidden series stable',
-      ),
-    ],
-  ],
-  [
-    'subscription-quota-history.test.ts',
-    [
-      reactEvidence(
-        'src/react-tests/endpoints-quota.test.tsx',
-        'refreshes the open subscription history only when the first model observation changes',
       ),
     ],
   ],

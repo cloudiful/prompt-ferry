@@ -14,7 +14,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { KeyQuotaObservationHistory } from '@/components/endpoints/KeyQuotaObservationHistory'
-import { SubscriptionQuotaHistory } from '@/components/endpoints/SubscriptionQuotaHistory'
 import { TokenPlanKeyQuotaStatus } from '@/components/endpoints/TokenPlanKeyQuotaStatus'
 import { TokenPlanQuotaWindowRow } from '@/components/endpoints/TokenPlanQuotaWindowRow'
 import {
@@ -174,17 +173,11 @@ export function TokenPlanUsageDialog({
   }, [open])
 
   const usage: TokenPlanUsageResponse | null = snapshot.usage
-  const historyRefreshObservation = usage?.keys
-    .flatMap((key) => key.model_remains)
-    .find((model) => model.observation)?.observation
-  const historyRefreshKey = historyRefreshObservation
-    ? [
-        historyRefreshObservation.observed_at ?? '',
-        historyRefreshObservation.last_error_code ?? '',
-        historyRefreshObservation.source ?? '',
-      ].join('|')
-    : ''
   const translate = t as unknown as TranslateFn
+  const configuredKeys = (usage?.keys ?? []).map((key) => ({
+    keyId: key.key_id,
+    label: key.key_label,
+  }))
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -441,16 +434,9 @@ export function TokenPlanUsageDialog({
               ) : null}
             </>
           )}
-          {open && provider === 'openai' && endpointId ? (
-            <SubscriptionQuotaHistory
-              endpointId={endpointId}
-              key={endpointId}
-              nowMs={nowMs}
-              refreshKey={historyRefreshKey}
-            />
-          ) : null}
           {open && endpointId && provider !== 'generic' ? (
             <KeyQuotaObservationHistory
+              configuredKeys={configuredKeys}
               endpointId={endpointId}
               key={`observations-${endpointId}`}
             />

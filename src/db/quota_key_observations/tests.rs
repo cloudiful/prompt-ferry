@@ -599,7 +599,7 @@ fn trend_range_maps_to_fixed_buckets() {
     for (range, seconds, count) in [
         (TrendRange::Last24h, 900, 96),
         (TrendRange::Last7d, 7_200, 84),
-        (TrendRange::Last30d, 28_800, 90),
+        (TrendRange::Last30d, 3_600, 720),
     ] {
         assert_eq!(range.bucket_seconds(), seconds);
         assert_eq!(range.bucket_count(), count);
@@ -647,7 +647,7 @@ fn trend_projection_separates_identities_and_blanks_gaps() {
             trend_unlimited_window("unlimited"),
         ],
     )];
-    let projection = project_trend(3, snapshots);
+    let projection = project_trend(3, snapshots, None);
     assert_eq!(projection.sampled_observations, 1);
     assert_eq!(projection.failed_observations, 0);
     assert!(!projection.series_truncated);
@@ -723,7 +723,7 @@ fn trend_projection_blanks_failed_and_absent_windows() {
             )],
         ),
     ];
-    let projection = project_trend(4, snapshots);
+    let projection = project_trend(4, snapshots, None);
     assert_eq!(projection.sampled_observations, 3);
     assert_eq!(projection.failed_observations, 1);
 
@@ -778,7 +778,7 @@ fn trend_projection_establishes_unknown_series_as_null() {
             ),
         ],
     )];
-    let projection = project_trend(2, snapshots);
+    let projection = project_trend(2, snapshots, None);
     assert_eq!(
         projection.series.len(),
         2,
@@ -817,9 +817,48 @@ fn trend_projection_caps_series_and_reports_truncation() {
             true,
             windows,
         )],
+        None,
     );
     assert_eq!(projection.series.len(), TREND_SERIES_MAX);
     assert!(projection.series_truncated);
+}
+
+#[test]
+fn trend_projection_filters_kinds_before_the_series_cap() {
+    let key = Uuid::new_v4();
+    let mut windows: Vec<CanonicalQuotaWindow> = (0..TREND_SERIES_MAX)
+        .map(|index| {
+            trend_percent_window(
+                &format!("a{index:03}"),
+                CanonicalQuotaWindowKind::Rolling,
+                Some(1.0),
+                SubscriptionWindowAvailability::Known,
+            )
+        })
+        .collect();
+    windows.push(trend_percent_window(
+        "z-weekly",
+        CanonicalQuotaWindowKind::Weekly,
+        Some(2.0),
+        SubscriptionWindowAvailability::Known,
+    ));
+    let snapshot = trend_snapshot(key, "key", 0, observed_at(10), true, windows);
+
+    let unfiltered = project_trend(1, vec![snapshot.clone()], None);
+    assert!(unfiltered.series_truncated);
+    assert!(
+        unfiltered
+            .series
+            .iter()
+            .all(|series| series.kind != CanonicalQuotaWindowKind::Weekly),
+        "the trailing weekly identity is dropped by the plain cap"
+    );
+
+    let allowed = [CanonicalQuotaWindowKind::Weekly];
+    let filtered = project_trend(1, vec![snapshot], Some(&allowed[..]));
+    assert_eq!(filtered.series.len(), 1);
+    assert_eq!(filtered.series[0].kind, CanonicalQuotaWindowKind::Weekly);
+    assert!(!filtered.series_truncated);
 }
 
 #[test]
@@ -840,6 +879,7 @@ fn trend_projection_ignores_snapshots_outside_the_grid() {
                 SubscriptionWindowAvailability::Known,
             )],
         )],
+        None,
     );
     assert_eq!(projection.sampled_observations, 0);
     assert!(projection.series.is_empty());
@@ -906,10 +946,14 @@ async fn trend_keys_and_buckets_select_latest_per_bucket_and_bound_keys() {
         assert!(selected.contains(&expected), "missing {expected:?}");
     }
 
-    let filtered = load_trend_keys(&pool, endpoint_id, from, to, Some(second_key))
+    let filtered = load_trend_keys(&pool, endpoint_id, from, to, Some(&[second_key]))
         .await
         .unwrap();
     assert_eq!(filtered, vec![second_key]);
+    let multi = load_trend_keys(&pool, endpoint_id, from, to, Some(&[first_key, second_key]))
+        .await
+        .unwrap();
+    assert_eq!(multi, vec![first_key, second_key]);
     cleanup_fixtures(&pool, endpoint_id).await;
 }
 

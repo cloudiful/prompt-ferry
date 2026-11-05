@@ -15,7 +15,7 @@ SELECT
     created_at
 FROM quota_key_observations
 WHERE endpoint_id = $1
-  AND ($2::UUID IS NULL OR key_id = $2)
+  AND ($2::UUID[] IS NULL OR key_id = ANY($2::UUID[]))
   AND ($3::BIGINT IS NULL OR observation_id < $3)
 ORDER BY observation_id DESC
 LIMIT $4;

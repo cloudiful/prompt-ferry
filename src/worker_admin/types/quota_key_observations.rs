@@ -12,6 +12,9 @@ pub struct QuotaKeyObservationHistoryQuery {
     #[param(value_type = String, format = "uuid")]
     pub key_id: Option<String>,
     #[serde(default)]
+    #[param(value_type = String)]
+    pub key_ids: Option<String>,
+    #[serde(default)]
     #[param(default = 50, minimum = 1, maximum = 200)]
     pub limit: Option<u16>,
     #[serde(default)]
@@ -49,6 +52,12 @@ pub struct QuotaKeyObservationTrendQuery {
     #[serde(default)]
     #[param(value_type = String, format = "uuid")]
     pub key_id: Option<String>,
+    #[serde(default)]
+    #[param(value_type = String)]
+    pub key_ids: Option<String>,
+    #[serde(default)]
+    #[param(value_type = String)]
+    pub kinds: Option<String>,
     #[serde(default)]
     #[param(default = "24h")]
     pub range: Option<String>,

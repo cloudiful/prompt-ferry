@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n    observation_id,\n    endpoint_id,\n    key_id,\n    provider,\n    key_label,\n    source,\n    observed_at,\n    ok,\n    status,\n    error_code,\n    plan_type,\n    limit_reached,\n    windows,\n    created_at\nFROM quota_key_observations\nWHERE endpoint_id = $1\n  AND ($2::UUID IS NULL OR key_id = $2)\n  AND ($3::BIGINT IS NULL OR observation_id < $3)\nORDER BY observation_id DESC\nLIMIT $4;\n",
+  "query": "SELECT\n    observation_id,\n    endpoint_id,\n    key_id,\n    provider,\n    key_label,\n    source,\n    observed_at,\n    ok,\n    status,\n    error_code,\n    plan_type,\n    limit_reached,\n    windows,\n    created_at\nFROM quota_key_observations\nWHERE endpoint_id = $1\n  AND ($2::UUID[] IS NULL OR key_id = ANY($2::UUID[]))\n  AND ($3::BIGINT IS NULL OR observation_id < $3)\nORDER BY observation_id DESC\nLIMIT $4;\n",
   "describe": {
     "columns": [
       {
@@ -161,7 +161,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
+        "UuidArray",
         "Int8",
         "Int8"
       ]
@@ -183,5 +183,5 @@
       false
     ]
   },
-  "hash": "71934494ad799291afb09c09335e3f0b0208a9164f4f5919f86e8eaa95b89ccb"
+  "hash": "18fc39bef8695e8cd7534bd379ac7904025c28d899e45ed85a8fb74fc56c0d26"
 }

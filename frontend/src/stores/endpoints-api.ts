@@ -8,7 +8,6 @@ import {
   listModelRoutes,
   quotaKeyObservationHistory,
   quotaKeyObservationTrend,
-  quotaSnapshotHistory,
   testEndpoint,
   tokenPlanUsage,
   testModelRoute,
@@ -16,6 +15,7 @@ import {
   updateModelRoute,
 } from '../generated/admin-api'
 import type {
+  CanonicalQuotaWindowKind,
   EndpointModelsResponse,
   EndpointPageResponse,
   EndpointRequest,
@@ -28,7 +28,6 @@ import type {
   ProviderEndpoint,
   QuotaKeyObservationHistoryResponse,
   QuotaKeyObservationTrendResponse,
-  QuotaSnapshotHistoryResponse,
   TokenPlanUsageResponse,
 } from '../generated/admin-api'
 import {
@@ -127,26 +126,13 @@ export async function fetchTokenPlanUsage(
   )
 }
 
-export async function fetchQuotaSnapshotHistory(
-  endpointId: string,
-  limit = 50,
-  beforeId?: string,
-): Promise<QuotaSnapshotHistoryResponse> {
-  return expectData(
-    await quotaSnapshotHistory<true>(
-      withData({
-        path: { endpoint_id: endpointId },
-        query: { limit, ...(beforeId ? { before_id: beforeId } : {}) },
-      }),
-    ),
-  )
-}
-
 // Issue #863 P4: generic per-key quota observation history for every
 // capable provider. Display-only; never part of routing or quota math.
+// Issue #1207 P2: one CSV request carries every selected key, so filters stay
+// server-side and never fan out into per-key requests.
 export async function fetchKeyQuotaObservationHistory(
   endpointId: string,
-  keyId: string | null,
+  keyIds: readonly string[] = [],
   limit = 50,
   beforeId?: string,
 ): Promise<QuotaKeyObservationHistoryResponse> {
@@ -156,7 +142,7 @@ export async function fetchKeyQuotaObservationHistory(
         path: { endpoint_id: endpointId },
         query: {
           limit,
-          ...(keyId ? { key_id: keyId } : {}),
+          ...keyFilterQuery(keyIds),
           ...(beforeId ? { before_id: beforeId } : {}),
         },
       }),
@@ -168,17 +154,32 @@ export async function fetchKeyQuotaObservationHistory(
 // and range-fixed; the caller never chooses a bucket size or fetches every page.
 export async function fetchKeyQuotaObservationTrend(
   endpointId: string,
-  keyId: string | null,
-  range: '24h' | '7d' | '30d',
+  keyIds: readonly string[] = [],
+  kinds: readonly CanonicalQuotaWindowKind[] = [],
+  range: '24h' | '7d' | '30d' = '24h',
 ): Promise<QuotaKeyObservationTrendResponse> {
   return expectData(
     await quotaKeyObservationTrend<true>(
       withData({
         path: { endpoint_id: endpointId },
-        query: { range, ...(keyId ? { key_id: keyId } : {}) },
+        query: {
+          range,
+          ...keyFilterQuery(keyIds),
+          ...(kinds.length > 0 ? { kinds: kinds.join(',') } : {}),
+        },
       }),
     ),
   )
+}
+
+function keyFilterQuery(keyIds: readonly string[]): {
+  key_id?: string
+  key_ids?: string
+} {
+  const keys = [...new Set(keyIds)].sort()
+  if (keys.length === 0) return {}
+  if (keys.length === 1) return { key_id: keys[0] }
+  return { key_ids: keys.join(',') }
 }
 
 // Issue #589 P2c: OpenAI Platform organization usage for the endpoint's

@@ -17,7 +17,6 @@ import type {
 
 const sdkMock = vi.hoisted(() => ({
   tokenPlanUsage: vi.fn(),
-  quotaSnapshotHistory: vi.fn(),
   quotaKeyObservationHistory: vi.fn(),
   quotaKeyObservationTrend: vi.fn(),
 }))
@@ -25,7 +24,6 @@ const sdkMock = vi.hoisted(() => ({
 vi.mock('@/generated/admin-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/generated/admin-api')>()),
   tokenPlanUsage: sdkMock.tokenPlanUsage,
-  quotaSnapshotHistory: sdkMock.quotaSnapshotHistory,
   quotaKeyObservationHistory: sdkMock.quotaKeyObservationHistory,
   quotaKeyObservationTrend: sdkMock.quotaKeyObservationTrend,
 }))
@@ -185,30 +183,6 @@ function keyWithQuota(): TokenPlanKeyUsage {
   }
 }
 
-function openAiUsageWithObservation(
-  observedAt: string,
-  source: string,
-  errorCode: string | null,
-): TokenPlanUsageResponse {
-  const key = keyWithQuota()
-  const [first, ...rest] = key.model_remains
-  key.model_remains = [
-    {
-      ...first,
-      observation: {
-        observed_at: observedAt,
-        source,
-        refreshing: false,
-        stale: false,
-        last_error_code: errorCode,
-        next_retry_at: null,
-      },
-    },
-    ...rest,
-  ]
-  return { keys: [key], provider: 'openai', provider_region: null }
-}
-
 function renderDialog(
   endpointId: string,
   onError = vi.fn(),
@@ -237,9 +211,6 @@ beforeEach(() => {
   sdkMock.tokenPlanUsage.mockImplementation(async () => ({
     data: emptyUsage(),
   }))
-  sdkMock.quotaSnapshotHistory.mockResolvedValue({
-    data: { items: [], retention_days: 30 },
-  })
   sdkMock.quotaKeyObservationHistory.mockResolvedValue({
     data: { items: [], retention_days: 30 },
   })
@@ -545,7 +516,7 @@ describe('React quota usage dialog', () => {
     commandCodeView.unmount()
   })
 
-  it('keeps history slots visible during usage loading and error and gates providers', async () => {
+  it('keeps the shared key-history slot visible during usage loading and error and gates providers', async () => {
     const pending = deferred<{ data: TokenPlanUsageResponse }>()
     sdkMock.tokenPlanUsage.mockReturnValueOnce(pending.promise)
     const loadingView = renderDialog(
@@ -554,9 +525,7 @@ describe('React quota usage dialog', () => {
       true,
       'openai',
     )
-    expect(screen.getByText('Quota history')).toBeTruthy()
     expect(screen.getByText('Per-key quota history')).toBeTruthy()
-    expect(sdkMock.quotaSnapshotHistory).not.toHaveBeenCalled()
     expect(sdkMock.quotaKeyObservationHistory).not.toHaveBeenCalled()
 
     pending.resolve({ data: emptyUsage('openai') })
@@ -572,7 +541,6 @@ describe('React quota usage dialog', () => {
       'openai',
     )
     expect(await screen.findByText('Usage query failed')).toBeTruthy()
-    expect(screen.getByText('Quota history')).toBeTruthy()
     expect(screen.getByText('Per-key quota history')).toBeTruthy()
     errorView.unmount()
     __resetTokenPlanCacheForTests()
@@ -584,7 +552,6 @@ describe('React quota usage dialog', () => {
       'generic',
     )
     await screen.findByText('No usage data')
-    expect(screen.queryByText('Quota history')).toBeNull()
     expect(screen.queryByText('Per-key quota history')).toBeNull()
     genericView.unmount()
     __resetTokenPlanCacheForTests()
@@ -596,73 +563,7 @@ describe('React quota usage dialog', () => {
       'deepseek',
     )
     await screen.findByText('No usage data')
-    expect(screen.queryByText('Quota history')).toBeNull()
     expect(screen.getByText('Per-key quota history')).toBeTruthy()
     otherProviderView.unmount()
-  })
-
-  it('refreshes the open subscription history only when the first model observation changes', async () => {
-    sdkMock.tokenPlanUsage
-      .mockResolvedValueOnce({
-        data: openAiUsageWithObservation(
-          '2026-10-24T00:00:00.000Z',
-          'request',
-          null,
-        ),
-      })
-      .mockResolvedValueOnce({
-        data: openAiUsageWithObservation(
-          '2026-10-24T00:01:00.000Z',
-          'periodic',
-          'temporary_failure',
-        ),
-      })
-      .mockResolvedValueOnce({
-        data: openAiUsageWithObservation(
-          '2026-10-24T00:02:00.000Z',
-          'manual',
-          null,
-        ),
-      })
-
-    const setInterval = vi.spyOn(window, 'setInterval')
-    const view = renderDialog('openai-history-refresh', vi.fn(), true, 'openai')
-    await act(async () => flushMicrotasks())
-    const historyDetails = screen
-      .getByText('Quota history')
-      .closest('details') as HTMLDetailsElement
-    historyDetails.open = true
-    fireEvent(historyDetails, new Event('toggle'))
-    await waitFor(() =>
-      expect(sdkMock.quotaSnapshotHistory).toHaveBeenCalledTimes(1),
-    )
-
-    await act(async () => {
-      await requestTokenPlanUsage('openai-history-refresh', { refresh: true })
-    })
-    await act(async () => flushMicrotasks())
-    expect(sdkMock.quotaSnapshotHistory).toHaveBeenCalledTimes(2)
-    expect(sdkMock.quotaSnapshotHistory.mock.calls[1][0].query).toEqual({
-      limit: 50,
-    })
-
-    const ticker = setInterval.mock.calls.at(-1)?.[0]
-    expect(typeof ticker).toBe('function')
-    await act(async () => {
-      vi.setSystemTime(NOW + 3000)
-      ;(ticker as () => void)()
-    })
-    expect(sdkMock.quotaSnapshotHistory).toHaveBeenCalledTimes(2)
-
-    historyDetails.open = false
-    fireEvent(historyDetails, new Event('toggle'))
-    await waitFor(() => expect(historyDetails.open).toBe(false))
-    await act(async () => {
-      await requestTokenPlanUsage('openai-history-refresh', { refresh: true })
-    })
-    await act(async () => flushMicrotasks())
-    expect(sdkMock.quotaSnapshotHistory).toHaveBeenCalledTimes(2)
-    view.unmount()
-    setInterval.mockRestore()
   })
 })

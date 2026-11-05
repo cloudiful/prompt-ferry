@@ -63,7 +63,7 @@ impl TrendRange {
         match self {
             Self::Last24h => 900,
             Self::Last7d => 7_200,
-            Self::Last30d => 28_800,
+            Self::Last30d => 3_600,
         }
     }
 
@@ -79,7 +79,7 @@ impl TrendRange {
         match self {
             Self::Last24h => 96,
             Self::Last7d => 84,
-            Self::Last30d => 90,
+            Self::Last30d => 720,
         }
     }
 
@@ -155,7 +155,7 @@ pub async fn load_trend_keys(
     endpoint_id: Uuid,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
-    key_id: Option<Uuid>,
+    key_ids: Option<&[Uuid]>,
 ) -> Result<Vec<Uuid>> {
     let rows = sqlx::query_file_as!(
         TrendKeyRow,
@@ -163,7 +163,7 @@ pub async fn load_trend_keys(
         endpoint_id,
         from,
         to,
-        key_id,
+        key_ids,
     )
     .fetch_all(pool)
     .await?;
@@ -210,8 +210,15 @@ pub async fn load_trend_buckets(
 /// Projects selected snapshots into bounded, identity-separated series.
 ///
 /// The projection is pure: it never carries a value forward, never fabricates
-/// a number from a ratio, and never merges two units or meanings.
-pub fn project_trend(bucket_count: usize, snapshots: Vec<TrendSnapshot>) -> TrendProjection {
+/// a number from a ratio, and never merges two units or meanings. An optional
+/// kind filter is applied while identities are collected, before the display
+/// cap truncates, so a selected kind is never dropped behind an unselected
+/// kind.
+pub fn project_trend(
+    bucket_count: usize,
+    snapshots: Vec<TrendSnapshot>,
+    allowed_kinds: Option<&[CanonicalQuotaWindowKind]>,
+) -> TrendProjection {
     // Defensive: a snapshot outside the fixed grid cannot be plotted and must
     // not seed a phantom series.
     let snapshots: Vec<TrendSnapshot> = snapshots
@@ -238,6 +245,9 @@ pub fn project_trend(bucket_count: usize, snapshots: Vec<TrendSnapshot>) -> Tren
     let mut identities: BTreeSet<SeriesIdentity> = BTreeSet::new();
     for snapshot in &snapshots {
         for window in &snapshot.windows {
+            if allowed_kinds.is_some_and(|allowed| !allowed.contains(&window.kind)) {
+                continue;
+            }
             if let Some(identity) = series_identity(snapshot.key_id, window) {
                 identities.insert(identity);
             }

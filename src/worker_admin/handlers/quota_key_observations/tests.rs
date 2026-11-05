@@ -1,6 +1,6 @@
 use super::{
-    ObservationQueryError, parse_observation_query, quota_key_observation_history,
-    quota_key_observation_trend,
+    ObservationQueryError, parse_observation_query, parse_trend_kinds,
+    quota_key_observation_history, quota_key_observation_trend,
 };
 use crate::{
     db,
@@ -130,6 +130,7 @@ fn observation_query_defaults_and_enforces_bounded_pages() {
     assert_eq!(
         parse_observation_query(&QuotaKeyObservationHistoryQuery {
             key_id: None,
+            key_ids: None,
             limit: Some(1),
             before_id: None,
         })
@@ -140,6 +141,7 @@ fn observation_query_defaults_and_enforces_bounded_pages() {
         assert_eq!(
             parse_observation_query(&QuotaKeyObservationHistoryQuery {
                 key_id: None,
+                key_ids: None,
                 limit: Some(limit),
                 before_id: None,
             }),
@@ -154,16 +156,18 @@ fn observation_cursor_and_key_id_reject_bad_shapes() {
     assert_eq!(
         parse_observation_query(&QuotaKeyObservationHistoryQuery {
             key_id: Some(key.to_string()),
+            key_ids: None,
             limit: None,
             before_id: Some(i64::MAX.to_string()),
         })
         .unwrap(),
-        (50, Some(i64::MAX), Some(key))
+        (50, Some(i64::MAX), Some(vec![key]))
     );
     for before_id in ["0", "-1", "1.5", " 1", "9223372036854775808"] {
         assert_eq!(
             parse_observation_query(&QuotaKeyObservationHistoryQuery {
                 key_id: None,
+                key_ids: None,
                 limit: None,
                 before_id: Some(before_id.to_string()),
             }),
@@ -175,11 +179,81 @@ fn observation_cursor_and_key_id_reject_bad_shapes() {
         assert_eq!(
             parse_observation_query(&QuotaKeyObservationHistoryQuery {
                 key_id: Some(key_id.to_string()),
+                key_ids: None,
                 limit: None,
                 before_id: None,
             }),
             Err(ObservationQueryError::InvalidKey),
             "key_id={key_id}"
+        );
+    }
+}
+
+#[test]
+fn observation_key_ids_filter_is_deduped_bounded_and_exclusive() {
+    let first = Uuid::new_v4();
+    let second = Uuid::new_v4();
+    assert_eq!(
+        parse_observation_query(&QuotaKeyObservationHistoryQuery {
+            key_id: None,
+            key_ids: Some(format!("{first},{first},{second}")),
+            limit: None,
+            before_id: None,
+        })
+        .unwrap(),
+        (50, None, Some(vec![first, second]))
+    );
+    assert_eq!(
+        parse_observation_query(&QuotaKeyObservationHistoryQuery {
+            key_id: Some(first.to_string()),
+            key_ids: Some(second.to_string()),
+            limit: None,
+            before_id: None,
+        }),
+        Err(ObservationQueryError::ConflictingKeyFilters)
+    );
+    let over_cap = (0..25)
+        .map(|_| Uuid::new_v4().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    for key_ids in [
+        String::new(),
+        format!("{first},"),
+        format!("{first},,{second}"),
+        format!("{first},not-a-uuid"),
+        over_cap,
+    ] {
+        assert_eq!(
+            parse_observation_query(&QuotaKeyObservationHistoryQuery {
+                key_id: None,
+                key_ids: Some(key_ids.clone()),
+                limit: None,
+                before_id: None,
+            }),
+            Err(ObservationQueryError::InvalidKeyIds),
+            "key_ids={key_ids}"
+        );
+    }
+}
+
+#[test]
+fn trend_kinds_accept_canonical_values_and_reject_unknown_or_blank() {
+    assert_eq!(parse_trend_kinds(None).unwrap(), None);
+    let parsed = parse_trend_kinds(Some("weekly, rolling,weekly"))
+        .unwrap()
+        .expect("known kinds parse");
+    assert_eq!(
+        parsed.into_iter().collect::<Vec<_>>(),
+        vec![
+            CanonicalQuotaWindowKind::Weekly,
+            CanonicalQuotaWindowKind::Rolling
+        ]
+    );
+    for kinds in ["", "five_hour,", "weekly,,balance", "fortnightly"] {
+        assert_eq!(
+            parse_trend_kinds(Some(kinds)),
+            Err(ObservationQueryError::InvalidKinds),
+            "kinds={kinds}"
         );
     }
 }
@@ -219,16 +293,19 @@ async fn invalid_observation_parameters_are_rejected_before_storage() {
     for query in [
         QuotaKeyObservationHistoryQuery {
             key_id: None,
+            key_ids: None,
             limit: Some(201),
             before_id: None,
         },
         QuotaKeyObservationHistoryQuery {
             key_id: None,
+            key_ids: None,
             limit: None,
             before_id: Some("0".to_string()),
         },
         QuotaKeyObservationHistoryQuery {
             key_id: Some("not-a-uuid".to_string()),
+            key_ids: None,
             limit: None,
             before_id: None,
         },
@@ -288,15 +365,27 @@ async fn create_key(pool: &PgPool, endpoint_id: Uuid, key_label: &str) -> Uuid {
 }
 
 fn known_window() -> CanonicalQuotaWindow {
+    percent_window(
+        "opencode_go:rolling",
+        CanonicalQuotaWindowKind::Rolling,
+        80.0,
+    )
+}
+
+fn percent_window(
+    source_id: &str,
+    kind: CanonicalQuotaWindowKind,
+    remaining_percent: f64,
+) -> CanonicalQuotaWindow {
     CanonicalQuotaWindow {
-        source_id: "opencode_go:rolling".to_string(),
-        kind: CanonicalQuotaWindowKind::Rolling,
+        source_id: source_id.to_string(),
+        kind,
         source_model: None,
         unit: None,
         duration_seconds: None,
         is_default_scope: true,
         availability: SubscriptionWindowAvailability::Known,
-        remaining_percent: Some(80.0),
+        remaining_percent: Some(remaining_percent),
         current: None,
         limit: None,
         remaining: None,
@@ -311,6 +400,25 @@ async fn record_observation(
     observed_at: chrono::DateTime<Utc>,
     ok: bool,
 ) {
+    record_observation_windows(
+        pool,
+        endpoint_id,
+        key_id,
+        observed_at,
+        ok,
+        if ok { vec![known_window()] } else { vec![] },
+    )
+    .await;
+}
+
+async fn record_observation_windows(
+    pool: &PgPool,
+    endpoint_id: Uuid,
+    key_id: Uuid,
+    observed_at: chrono::DateTime<Utc>,
+    ok: bool,
+    windows: Vec<CanonicalQuotaWindow>,
+) {
     let create = db::QuotaObservationCreate::new(
         endpoint_id,
         key_id,
@@ -323,7 +431,7 @@ async fn record_observation(
         if ok { None } else { Some("auth".to_string()) },
         None,
         None,
-        if ok { vec![known_window()] } else { vec![] },
+        windows,
     )
     .expect("valid test observation builds");
     db::quota_key_observations::insert_observation(pool, &create)
@@ -434,6 +542,7 @@ async fn history_key_filter_and_cursor_pagination_hold_endpoint_boundaries() {
             endpoint_id,
             QuotaKeyObservationHistoryQuery {
                 key_id: Some(second_key.to_string()),
+                key_ids: None,
                 limit: None,
                 before_id: None,
             },
@@ -445,6 +554,30 @@ async fn history_key_filter_and_cursor_pagination_hold_endpoint_boundaries() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["key_id"], second_key.to_string());
 
+    let multi = body_json(
+        get_history(
+            &state,
+            headers.clone(),
+            endpoint_id,
+            QuotaKeyObservationHistoryQuery {
+                key_id: None,
+                key_ids: Some(format!("{first_key},{second_key},{first_key}")),
+                limit: None,
+                before_id: None,
+            },
+        )
+        .await,
+    )
+    .await;
+    let multi_items = multi["items"].as_array().expect("items array");
+    assert_eq!(multi_items.len(), 3, "both selected keys, deduplicated");
+    assert!(
+        multi_items
+            .iter()
+            .all(|item| item["key_id"] == first_key.to_string()
+                || item["key_id"] == second_key.to_string())
+    );
+
     let page = body_json(
         get_history(
             &state,
@@ -452,6 +585,7 @@ async fn history_key_filter_and_cursor_pagination_hold_endpoint_boundaries() {
             endpoint_id,
             QuotaKeyObservationHistoryQuery {
                 key_id: None,
+                key_ids: None,
                 limit: Some(2),
                 before_id: None,
             },
@@ -468,6 +602,7 @@ async fn history_key_filter_and_cursor_pagination_hold_endpoint_boundaries() {
             endpoint_id,
             QuotaKeyObservationHistoryQuery {
                 key_id: None,
+                key_ids: None,
                 limit: Some(2),
                 before_id: Some(cursor),
             },
@@ -486,6 +621,7 @@ async fn history_key_filter_and_cursor_pagination_hold_endpoint_boundaries() {
             endpoint_id,
             QuotaKeyObservationHistoryQuery {
                 key_id: Some(foreign_key.to_string()),
+                key_ids: None,
                 limit: None,
                 before_id: None,
             },
@@ -580,6 +716,7 @@ async fn removed_key_rows_stay_queryable_without_current_config_membership() {
             endpoint_id,
             QuotaKeyObservationHistoryQuery {
                 key_id: Some(removed_key.to_string()),
+                key_ids: None,
                 limit: None,
                 before_id: None,
             },
@@ -641,14 +778,20 @@ async fn trend_rejects_unknown_range_and_bad_key_before_storage() {
     for query in [
         QuotaKeyObservationTrendQuery {
             key_id: None,
+            key_ids: None,
+            kinds: None,
             range: Some("1h".to_string()),
         },
         QuotaKeyObservationTrendQuery {
             key_id: None,
+            key_ids: None,
+            kinds: None,
             range: Some("".to_string()),
         },
         QuotaKeyObservationTrendQuery {
             key_id: Some("not-a-uuid".to_string()),
+            key_ids: None,
+            kinds: None,
             range: None,
         },
     ] {
@@ -774,6 +917,192 @@ async fn trend_returns_bounded_series_with_failed_bucket() {
         .find(|point| point["observed_at"].is_string() && point["value"].is_null())
         .expect("failed bucket keeps an observed_at with a null value");
     assert!(failed["value"].is_null());
+    cleanup(&pool, endpoint_id).await;
+}
+
+#[tokio::test]
+async fn trend_multi_key_filter_selects_only_named_keys() {
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    let state = test_state_with_pool(pool.clone());
+    attach_session(&state, "quota-trend-multi", true).await;
+    let headers = admin_headers("quota-trend-multi");
+    let endpoint_id = create_endpoint(&pool, "opencode_go").await;
+    let first_key = create_key(&pool, endpoint_id, "first-key").await;
+    let second_key = create_key(&pool, endpoint_id, "second-key").await;
+    let other_key = create_key(&pool, endpoint_id, "other-key").await;
+    let now = Utc::now();
+    for (key_id, offset) in [(first_key, 5), (second_key, 4), (other_key, 3)] {
+        record_observation(
+            &pool,
+            endpoint_id,
+            key_id,
+            now - Duration::minutes(offset),
+            true,
+        )
+        .await;
+    }
+
+    let body = body_json(
+        get_trend(
+            &state,
+            headers,
+            endpoint_id,
+            QuotaKeyObservationTrendQuery {
+                key_id: None,
+                key_ids: Some(format!("{first_key},{second_key},{first_key}")),
+                kinds: None,
+                range: None,
+            },
+        )
+        .await,
+    )
+    .await;
+    let mut selected: Vec<_> = body["series"]
+        .as_array()
+        .expect("series array")
+        .iter()
+        .map(|series| series["key_id"].as_str().unwrap().to_string())
+        .collect();
+    selected.sort();
+    let mut expected = vec![first_key.to_string(), second_key.to_string()];
+    expected.sort();
+    assert_eq!(selected, expected);
+    assert_eq!(body["sampled_observations"], 2);
+    cleanup(&pool, endpoint_id).await;
+}
+
+#[tokio::test]
+async fn trend_kind_filter_applies_before_the_series_cap() {
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    let state = test_state_with_pool(pool.clone());
+    attach_session(&state, "quota-trend-kinds", true).await;
+    let headers = admin_headers("quota-trend-kinds");
+    let endpoint_id = create_endpoint(&pool, "opencode_go").await;
+    let first_key = create_key(&pool, endpoint_id, "first-key").await;
+    let second_key = create_key(&pool, endpoint_id, "second-key").await;
+    let now = Utc::now() - Duration::minutes(2);
+    for key_id in [first_key, second_key] {
+        let mut windows: Vec<CanonicalQuotaWindow> = (0..63)
+            .map(|index| {
+                percent_window(
+                    &format!("a{index:03}"),
+                    CanonicalQuotaWindowKind::Rolling,
+                    50.0,
+                )
+            })
+            .collect();
+        windows.push(percent_window(
+            "z-weekly",
+            CanonicalQuotaWindowKind::Weekly,
+            70.0,
+        ));
+        record_observation_windows(&pool, endpoint_id, key_id, now, true, windows).await;
+    }
+
+    let all = body_json_large(
+        get_trend(
+            &state,
+            headers.clone(),
+            endpoint_id,
+            QuotaKeyObservationTrendQuery::default(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(all["series"].as_array().unwrap().len(), 96);
+    assert_eq!(all["series_truncated"], true);
+
+    let weekly = body_json_large(
+        get_trend(
+            &state,
+            headers,
+            endpoint_id,
+            QuotaKeyObservationTrendQuery {
+                key_id: None,
+                key_ids: None,
+                kinds: Some("weekly".to_string()),
+                range: None,
+            },
+        )
+        .await,
+    )
+    .await;
+    let series = weekly["series"].as_array().expect("series array");
+    assert_eq!(series.len(), 2, "the selected kind survives the cap");
+    assert!(series.iter().all(|series| series["kind"] == "weekly"));
+    assert_eq!(weekly["series_truncated"], false);
+    cleanup(&pool, endpoint_id).await;
+}
+
+#[tokio::test]
+async fn trend_30d_uses_hourly_half_open_buckets() {
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    let state = test_state_with_pool(pool.clone());
+    attach_session(&state, "quota-trend-30d", true).await;
+    let headers = admin_headers("quota-trend-30d");
+    let endpoint_id = create_endpoint(&pool, "opencode_go").await;
+    let key_id = create_key(&pool, endpoint_id, "trend-key").await;
+    let now = Utc::now();
+    record_observation(
+        &pool,
+        endpoint_id,
+        key_id,
+        now - Duration::days(30) + Duration::minutes(5),
+        true,
+    )
+    .await;
+    record_observation(
+        &pool,
+        endpoint_id,
+        key_id,
+        now - Duration::days(30) - Duration::hours(1),
+        true,
+    )
+    .await;
+
+    let body = body_json_large(
+        get_trend(
+            &state,
+            headers,
+            endpoint_id,
+            QuotaKeyObservationTrendQuery {
+                key_id: None,
+                key_ids: None,
+                kinds: None,
+                range: Some("30d".to_string()),
+            },
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(body["range"], "30d");
+    assert_eq!(body["bucket_seconds"], 3_600);
+    assert_eq!(body["bucket_count"], 720);
+    assert_eq!(body["sampled_observations"], 1);
+    let points = body["series"][0]["points"].as_array().expect("points");
+    assert_eq!(points.len(), 720);
+    let from = DateTime::parse_from_rfc3339(body["from"].as_str().unwrap())
+        .unwrap()
+        .with_timezone(&Utc);
+    let to = DateTime::parse_from_rfc3339(body["to"].as_str().unwrap())
+        .unwrap()
+        .with_timezone(&Utc);
+    assert_eq!(parse_point_at(&points[0]), from);
+    assert!(parse_point_at(&points[719]) < to);
+    assert_eq!(
+        parse_point_at(&points[0]) + Duration::hours(719),
+        parse_point_at(&points[719])
+    );
+    assert_eq!(
+        points[0]["value"], 80.0,
+        "the boundary sample lands in bucket 0"
+    );
     cleanup(&pool, endpoint_id).await;
 }
 

@@ -8,7 +8,6 @@ import type { CanonicalQuotaRow } from '@/composables/useCanonicalQuotaWindows'
 
 const sdkMock = vi.hoisted(() => ({
   tokenPlanUsage: vi.fn(),
-  quotaSnapshotHistory: vi.fn(),
   quotaKeyObservationHistory: vi.fn(),
   quotaKeyObservationTrend: vi.fn(),
 }))
@@ -16,7 +15,6 @@ const sdkMock = vi.hoisted(() => ({
 vi.mock('@/generated/admin-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/generated/admin-api')>()),
   tokenPlanUsage: sdkMock.tokenPlanUsage,
-  quotaSnapshotHistory: sdkMock.quotaSnapshotHistory,
   quotaKeyObservationHistory: sdkMock.quotaKeyObservationHistory,
   quotaKeyObservationTrend: sdkMock.quotaKeyObservationTrend,
 }))
@@ -91,9 +89,6 @@ beforeEach(() => {
   localStorage.setItem('prompt-ferry:locale', 'en-US')
   vi.setSystemTime(NOW)
   sdkMock.tokenPlanUsage.mockResolvedValue({ data: usagePayload() })
-  sdkMock.quotaSnapshotHistory.mockResolvedValue({
-    data: { items: [], retention_days: 30 },
-  })
   sdkMock.quotaKeyObservationHistory.mockResolvedValue({
     data: { items: [], retention_days: 30 },
   })

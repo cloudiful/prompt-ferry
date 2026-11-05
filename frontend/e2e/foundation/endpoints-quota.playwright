@@ -376,29 +376,83 @@ async page => {
     (url) => url.searchParams.get('range') === '30d',
   )
   await page.getByRole('option', { name: 'Last 30 days', exact: true }).click()
-  await range30Response
-  const keySelect = dialog.getByLabel('Key')
-  await keySelect.click()
+  const range30Body = await (await range30Response).json()
+  assert(
+    range30Body.bucket_count === 720 &&
+      range30Body.bucket_seconds === 3600 &&
+      Date.parse(range30Body.from) < Date.parse(range30Body.to),
+    `30d trend did not use the hourly 720-bucket real range: ${JSON.stringify(range30Body)}`,
+  )
+  const keyFilter = dialog.getByRole('button', { name: 'Keys', exact: true })
+  await keyFilter.click()
+  await capture('endpoints-quota-multiselect-en-light-1440')
   const keyFilterResponse = waitForResponse(
     'GET',
     '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations/trend',
     200,
     (url) => url.searchParams.get('key_id') === 'key-minimax-1',
   )
-  await page.getByRole('option', { name: 'primary', exact: true }).click()
+  await page.getByRole('checkbox', { name: 'primary', exact: true }).click()
   await keyFilterResponse
-  await keySelect.click()
+  const multiKeyResponse = waitForResponse(
+    'GET',
+    '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations/trend',
+    200,
+    (url) => url.searchParams.get('key_ids') === 'key-minimax-1,key-minimax-2',
+  )
+  await page.getByRole('checkbox', { name: 'secondary', exact: true }).click()
+  await multiKeyResponse
   const allKeysResponse = waitForResponse(
     'GET',
     '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations/trend',
     200,
     (url) =>
       url.searchParams.get('range') === '30d' &&
-      !url.searchParams.has('key_id'),
+      !url.searchParams.has('key_id') &&
+      !url.searchParams.has('key_ids'),
   )
-  await page.getByRole('option', { name: 'All keys', exact: true }).click()
+  await page.getByRole('checkbox', { name: 'All keys', exact: true }).click()
   await allKeysResponse
+  await page.keyboard.press('Escape')
+  const kindFilter = dialog.getByRole('button', {
+    name: 'Window kinds',
+    exact: true,
+  })
+  await kindFilter.click()
+  const kindFilterResponse = waitForResponse(
+    'GET',
+    '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations/trend',
+    200,
+    (url) => url.searchParams.get('kinds') === 'weekly',
+  )
+  await page.getByRole('checkbox', { name: 'Weekly window', exact: true }).click()
+  await kindFilterResponse
+  await page.keyboard.press('Escape')
+  const weeklyLegend = await dialog
+    .locator('[role="group"][aria-label="Chart series"] button')
+    .allTextContents()
+  assert(
+    weeklyLegend.some((label) => label.includes('Weekly window')) &&
+      !weeklyLegend.some((label) => label.includes('5-hour window')),
+    `kind filter did not reach the trend chart: ${JSON.stringify(weeklyLegend)}`,
+  )
+  const weeklyLegendButtons = dialog.locator(
+    '[role="group"][aria-label="Chart series"] button',
+  )
+  await weeklyLegendButtons.first().click()
+  await capture('endpoints-quota-legend-en-light-1440')
+  await weeklyLegendButtons.first().click()
   await capture('endpoints-quota-chart-en-light-1440')
+  const chartBox = await chartElement.boundingBox()
+  if (chartBox) {
+    await page.mouse.move(
+      chartBox.x + chartBox.width * 0.55,
+      chartBox.y + chartBox.height * 0.5,
+    )
+    await page.waitForTimeout(300)
+    await capture('endpoints-quota-tooltip-en-light-1440')
+    await page.mouse.move(chartBox.x + 4, chartBox.y + 4)
+  }
 
   await fixture('/__fixtures/faults', 'POST', {
     pathPrefix: '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations',
@@ -463,10 +517,24 @@ async page => {
     listPreservedOnChartRoundtrip: true,
     noCursorProvidedByFixture: true,
   }
+  const observationRows = await dialog
+    .locator('[data-quota-observation-id="observation-1"] [role="progressbar"]')
+    .count()
+  assert(
+    observationRows === 1,
+    `kind filter did not narrow the list rows: ${observationRows}`,
+  )
   report.checks.keyQuotaHistory = {
     initialTrend: allKeyTrend?.query,
     ranges: ['24h', '7d', '30d'],
     filteredKey: 'key-minimax-1',
+    multiKeyFilter: 'key-minimax-1,key-minimax-2',
+    kindFilter: 'weekly',
+    trend30dBuckets: range30Body.bucket_count,
+    trend30dSeconds: range30Body.bucket_seconds,
+    trend30dFrom: range30Body.from,
+    trend30dTo: range30Body.to,
+    listRowsAfterKindFilter: observationRows,
     allKeysOmitKeyId: true,
     actualCanvas: true,
     lazyImportObserved:
@@ -569,50 +637,54 @@ async page => {
     labels: openaiLabels,
     observationOnlyFailure: true,
   }
-  const subscriptionHistoryResponse = waitForResponse(
+  const openaiTrendResponse = waitForResponse(
     'GET',
-    '/api/v1/admin/endpoints/ep-openai-codex/quota-history',
+    '/api/v1/admin/endpoints/ep-openai-codex/quota-observations/trend',
     200,
   )
   await dialog
     .locator('summary')
-    .filter({ hasText: /^Quota history$/ })
+    .filter({ hasText: 'Per-key quota history' })
     .click()
-  await subscriptionHistoryResponse
+  await openaiTrendResponse
+  const openaiHistoryResponse = waitForResponse(
+    'GET',
+    '/api/v1/admin/endpoints/ep-openai-codex/quota-observations',
+    200,
+  )
+  await dialog.getByRole('button', { name: 'List', exact: true }).click()
+  await openaiHistoryResponse
   await dialog
-    .locator('[data-quota-snapshot-id="snapshot-1"]')
+    .locator('[data-quota-observation-id="observation-1"]')
     .waitFor({ state: 'visible' })
-  const subscriptionQuery = (
+  const openaiHistoryRequests = (
     await fixture('/__fixtures/log?limit=500')
-  ).requests.findLast(
+  ).requests
+  const openaiHistoryQuery = openaiHistoryRequests.findLast(
     (request) =>
-      request.path === '/api/v1/admin/endpoints/ep-openai-codex/quota-history',
+      request.path ===
+      '/api/v1/admin/endpoints/ep-openai-codex/quota-observations',
   )?.query
   assert(
-    subscriptionQuery?.limit === '50',
-    'subscription history did not request limit=50',
+    openaiHistoryQuery?.limit === '50' &&
+      !Object.hasOwn(openaiHistoryQuery, 'key_id') &&
+      !Object.hasOwn(openaiHistoryQuery, 'key_ids'),
+    `openai shared key history did not request the default page: ${JSON.stringify(openaiHistoryQuery)}`,
+  )
+  const removedHistoryRequests = openaiHistoryRequests.filter(
+    (request) =>
+      request.path === '/api/v1/admin/endpoints/ep-openai-codex/quota-history',
   )
   assert(
-    (await dialog
-      .getByRole('button', { name: 'Load more', exact: true })
-      .count()) === 0,
-    'history showed load-more without a fixture cursor',
+    removedHistoryRequests.length === 0,
+    'the removed exclusive quota-history read surface was still requested',
   )
-  const subscriptionText = await dialog
-    .locator('[data-quota-snapshot-id="snapshot-1"]')
-    .innerText()
-  assert(
-    subscriptionText.includes('Unknown source'),
-    'subscription history omitted source label',
-  )
-  report.checks.subscriptionQuotaHistory = {
-    query: subscriptionQuery,
-    observationId: 'snapshot-1',
-    sourceRendered: true,
-    cursor: null,
-    noLoadMore: true,
+  report.checks.openaiKeyHistory = {
+    query: openaiHistoryQuery,
+    observationId: 'observation-1',
+    removedHistoryRequests: 0,
   }
-  await capture('endpoints-subscription-history-en-light-1440')
+  await capture('endpoints-quota-openai-history-en-light-1440')
   await dialog.getByRole('button', { name: 'Close', exact: true }).click()
 
   // Manual header Refresh forces fresh quota for the current page; the
@@ -725,7 +797,16 @@ async page => {
   )
   await zhHistorySummary.click()
   await zhTrendResponse
-  const zhKeySelect = dialog.getByRole('combobox', { name: 'key' })
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('[data-usage-chart] canvas')),
+    null,
+    { timeout: 7000 },
+  )
+  await capture('endpoints-quota-zh-dark-chart-1440')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await capture('endpoints-quota-zh-dark-chart-390')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const zhKeySelect = dialog.getByRole('button', { name: 'key', exact: true })
   await zhKeySelect.click()
   const zhKeyTrendResponse = waitForResponse(
     'GET',
@@ -733,8 +814,9 @@ async page => {
     200,
     (url) => url.searchParams.get('key_id') === 'key-minimax-1',
   )
-  await page.getByRole('option', { name: 'primary', exact: true }).click()
+  await page.getByRole('checkbox', { name: 'primary', exact: true }).click()
   await zhKeyTrendResponse
+  await page.keyboard.press('Escape')
   const zhKeyTrendQuery = (
     await fixture('/__fixtures/log?limit=500')
   ).requests.findLast(
@@ -769,6 +851,52 @@ async page => {
   await capture('endpoints-quota-opencode-zh-dark-1440')
   await dialog.getByRole('button', { name: 'Close', exact: true }).click()
   report.checks.zhDarkQuota = zhDark
+
+  async function captureQuotaAppearance(
+    locale,
+    theme,
+    prefix,
+  ) {
+    await page.evaluate(
+      ({ nextLocale, nextTheme }) => {
+        localStorage.setItem('prompt-ferry:locale', nextLocale)
+        localStorage.setItem('prompt-ferry:theme-mode', nextTheme)
+      },
+      { nextLocale: locale, nextTheme: theme },
+    )
+    await page.reload()
+    await page
+      .locator('[data-endpoint-row="ep-minimax-cn"]')
+      .waitFor({ state: 'visible' })
+    const appearanceDialog = await openQuota('ep-minimax-cn')
+    const historySummary = appearanceDialog
+      .locator('summary')
+      .filter({
+        hasText: locale === 'zh-CN' ? '按 key 的额度历史' : 'Per-key quota history',
+      })
+    const trendResponse = waitForResponse(
+      'GET',
+      '/api/v1/admin/endpoints/ep-minimax-cn/quota-observations/trend',
+      200,
+    )
+    await historySummary.click()
+    await trendResponse
+    await page.waitForFunction(
+      () => Boolean(document.querySelector('[data-usage-chart] canvas')),
+      null,
+      { timeout: 7000 },
+    )
+    await capture(`${prefix}-1440`)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await capture(`${prefix}-390`)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await appearanceDialog
+      .getByRole('button', { name: 'Close', exact: true })
+      .click()
+  }
+
+  await captureQuotaAppearance('en-US', 'dark', 'endpoints-quota-en-dark')
+  await captureQuotaAppearance('zh-CN', 'light', 'endpoints-quota-zh-light')
 
   const opencodeDelete = await fetch(
     `${FIXTURE}/api/v1/admin/endpoints/${opencodeId}`,

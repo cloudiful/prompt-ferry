@@ -1,10 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import type {
-  CanonicalQuotaWindowKind,
-  QuotaKeyObservationTrendResponse,
-} from '@/generated/admin-api'
+import type { QuotaKeyObservationTrendResponse } from '@/generated/admin-api'
 import { useDisplayTimeZone } from '@/lib/display-timezone'
 import type { EChartsOption } from 'echarts'
 import { useLocale } from '@/lib/i18n'
@@ -13,6 +10,7 @@ import { formatDateOnly, formatDateTime } from '@/format/datetime-core'
 import {
   createQuotaTrendPanelOption,
   groupQuotaTrendSeries,
+  quotaTrendKindLabels,
   quotaTrendLegendEntries,
   type QuotaTrendRange,
 } from '@/quota-observation-charts-core'
@@ -57,15 +55,7 @@ export function KeyQuotaObservationChart({
   }, [trend])
 
   const optionInput = useMemo(() => {
-    const kinds: Record<CanonicalQuotaWindowKind, string> = {
-      five_hour: t('tokenPlanInterval'),
-      rolling: t('tokenPlanRolling'),
-      weekly: t('tokenPlanWeekly'),
-      monthly: t('tokenPlanMonthly'),
-      balance: t('quotaTrendKindBalance'),
-      unlimited: t('tokenPlanNoLimit'),
-      custom: t('quotaTrendKindCustom'),
-    }
+    const kinds = quotaTrendKindLabels(t as unknown as (key: string) => string)
     return {
       range,
       formatAxisDate: (value: string) =>
@@ -88,6 +78,8 @@ export function KeyQuotaObservationChart({
         `${value.toFixed(2)}${unit ? ` ${unit}` : ''}`,
       formatDayKey: (value: string | number | Date) =>
         formatDateOnly(value, locale, undefined, timeZone.effective),
+      from: trend?.from,
+      to: trend?.to,
       theme: chartThemeFor(mode),
       labels: {
         percentSuffix: '%',
@@ -95,7 +87,7 @@ export function KeyQuotaObservationChart({
         kinds,
       },
     }
-  }, [locale, mode, range, t, timeZone.effective])
+  }, [locale, mode, range, t, timeZone.effective, trend?.from, trend?.to])
 
   const groups = useMemo(
     () => groupQuotaTrendSeries(trend?.series ?? []),
