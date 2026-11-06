@@ -106,15 +106,17 @@ fn build_upstream_request_applies_tier_for_chat_and_responses() {
             PreparedRequestBody::PassthroughStream(br#"{"model":"gpt-5"}"#.to_vec()),
         ] {
             let request = build_upstream_request(
-                &Client::new(),
-                &Method::POST,
-                url,
-                &route,
-                match native_api {
-                    NativeApi::Chat => "/v1/chat/completions",
-                    _ => "/v1/responses",
+                UpstreamRequestTarget {
+                    client: &Client::new(),
+                    method: &Method::POST,
+                    url,
+                    route: &route,
+                    path: match native_api {
+                        NativeApi::Chat => "/v1/chat/completions",
+                        _ => "/v1/responses",
+                    },
+                    body: &body,
                 },
-                &body,
                 &[],
                 None,
                 uuid::Uuid::new_v4(),
@@ -132,12 +134,16 @@ fn build_upstream_request_applies_tier_for_chat_and_responses() {
     // An untiered route preserves the caller field verbatim.
     let untiered = responses_route(EndpointProvider::OpenAi, None);
     let request = build_upstream_request(
-        &Client::new(),
-        &Method::POST,
-        "https://api.openai.com/v1/responses",
-        &untiered,
-        "/v1/responses",
-        &PreparedRequestBody::BufferedBytes(br#"{"model":"gpt-5","service_tier":"auto"}"#.to_vec()),
+        UpstreamRequestTarget {
+            client: &Client::new(),
+            method: &Method::POST,
+            url: "https://api.openai.com/v1/responses",
+            route: &untiered,
+            path: "/v1/responses",
+            body: &PreparedRequestBody::BufferedBytes(
+                br#"{"model":"gpt-5","service_tier":"auto"}"#.to_vec(),
+            ),
+        },
         &[],
         None,
         uuid::Uuid::new_v4(),
@@ -158,12 +164,14 @@ fn codex_backend_preserves_configured_tier_through_normalization() {
     // configured tier must survive that rewrite on the same Responses body.
     let route = responses_route(EndpointProvider::OpenAi, Some("fast"));
     let request = build_codex_upstream_request(
-        &Client::new(),
-        &Method::POST,
-        "https://chatgpt.com/backend-api/codex/responses",
-        &route,
-        "/v1/responses",
-        &PreparedRequestBody::BufferedBytes(br#"{"model":"gpt-4o"}"#.to_vec()),
+        UpstreamRequestTarget {
+            client: &Client::new(),
+            method: &Method::POST,
+            url: "https://chatgpt.com/backend-api/codex/responses",
+            route: &route,
+            path: "/v1/responses",
+            body: &PreparedRequestBody::BufferedBytes(br#"{"model":"gpt-4o"}"#.to_vec()),
+        },
         &CodexAuth::new("oauth-access-token".to_string(), false),
         &[],
     )

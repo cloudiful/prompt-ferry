@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button'
 import { HeaderActions } from '@/components/layout/HeaderActions'
 import {
   EMPTY_MCP_CATALOG,
+  disconnectMcpOAuth,
   fetchMcpCatalog,
   fetchMcpProviders,
   fetchMcpServerPage,
@@ -31,6 +32,7 @@ import {
   mcpActionKey,
   mcpCatalogFromTest,
   mcpLastPageFirst,
+  mcpOAuthStatusQueryKey,
   mcpProvidersQueryKey,
   mcpServerPageQueryKey,
   mcpTestKey,
@@ -39,6 +41,7 @@ import {
   removeMcpServerRecord,
   saveMcpServerRecord,
   runMcpServerTest,
+  startMcpOAuth,
 } from '@/lib/mcp'
 import { useAsyncAction } from '@/lib/use-async-action'
 import { useLocale } from '@/lib/i18n'
@@ -58,11 +61,33 @@ const EMPTY_USERS: User[] = []
 
 type CatalogCache = Record<string, McpCatalogResponse>
 
+type OwnedOAuthPopup = {
+  popup: Window
+  serverId: string
+  generation: number
+}
+
+type ConnectPreparation =
+  | { kind: 'blocked' }
+  | { kind: 'isolation-failed' }
+  | { kind: 'opened'; popup: Window; url: string; entry: OwnedOAuthPopup }
+
+function closeWindow(popup: Window): void {
+  try {
+    popup.close()
+  } catch {}
+}
+
+function navigateOwnedOAuthPopup(popup: Window, url: string): void {
+  popup.location.href = url
+  popup.opener = null
+}
+
 export function McpPage() {
   const { t } = useLocale()
   const queryClient = useQueryClient()
   const asyncAction = useAsyncAction()
-  const { notifyApiError, notifySuccess } = useNotifier()
+  const { notifyApiError, notifyError, notifySuccess } = useNotifier()
   const me = useSessionStore((state) => state.me)
   const userId = me?.user_id ?? 0
   const isAdmin = me?.is_admin === true
@@ -83,6 +108,9 @@ export function McpPage() {
   const catalogRevisionRef = useRef<Record<string, number>>({})
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogForm, setDialogForm] = useState<McpForm | null>(null)
+  const [dialogOauthServer, setDialogOauthServer] = useState<McpServer | null>(
+    null,
+  )
   const [dialogCatalog, setDialogCatalog] =
     useState<McpCatalogResponse>(EMPTY_MCP_CATALOG)
   const [dialogCatalogLoading, setDialogCatalogLoading] = useState(false)
@@ -93,9 +121,22 @@ export function McpPage() {
   const dialogServerIdRef = useRef<string | null>(null)
   const dialogGenerationRef = useRef(0)
   const notifiedErrors = useRef(new WeakSet<object>())
+  const oauthPopupsRef = useRef(new Map<string, OwnedOAuthPopup>())
+  const mountedRef = useRef(true)
 
   firstRef.current = first
   rowsRef.current = rows
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      for (const entry of oauthPopupsRef.current.values()) {
+        closeWindow(entry.popup)
+      }
+      oauthPopupsRef.current.clear()
+    }
+  }, [])
 
   const serverPageQuery = useQuery({
     enabled: me !== null,
@@ -291,6 +332,7 @@ export function McpPage() {
     dialogGenerationRef.current = generation
     dialogServerIdRef.current = server.server_id
     dialogOpenRef.current = true
+    setDialogOauthServer(server)
     setDialogForm(mcpServerToForm(server))
     setDialogCatalog(catalogsRef.current[server.server_id] ?? EMPTY_MCP_CATALOG)
     setDialogCatalogError(false)
@@ -309,6 +351,7 @@ export function McpPage() {
     dialogOpenRef.current = false
     setDialogOpen(false)
     setDialogForm(null)
+    setDialogOauthServer(null)
     setDialogCatalog(EMPTY_MCP_CATALOG)
     setDialogCatalogLoading(false)
     setDialogCatalogError(false)
@@ -355,6 +398,130 @@ export function McpPage() {
     setOpenTestResultKey((current) => (current === key ? null : current))
   }
 
+  function invalidateOAuthStatus(serverId: string): Promise<void> {
+    return queryClient.invalidateQueries({
+      queryKey: mcpOAuthStatusQueryKey(serverId),
+    })
+  }
+
+  function closeOwnedOAuthPopup(
+    serverId: string,
+    entry?: OwnedOAuthPopup,
+  ): void {
+    const tracked = oauthPopupsRef.current.get(serverId)
+    if (!tracked || (entry && tracked !== entry)) return
+    oauthPopupsRef.current.delete(serverId)
+    closeWindow(tracked.popup)
+  }
+
+  function oauthActionContextIsCurrent(
+    serverId: string,
+    generation: number,
+  ): boolean {
+    return (
+      mountedRef.current &&
+      dialogOpenRef.current &&
+      dialogGenerationRef.current === generation &&
+      dialogServerIdRef.current === serverId
+    )
+  }
+
+  function ownedOAuthPopupIsCurrent(entry: OwnedOAuthPopup): boolean {
+    return (
+      oauthActionContextIsCurrent(entry.serverId, entry.generation) &&
+      entry.popup.opener === null &&
+      !entry.popup.closed
+    )
+  }
+
+  async function connectOAuth(server: McpServer): Promise<void> {
+    const serverId = server.server_id
+    if (asyncAction.isPending(mcpActionKey(serverId))) return
+    const generation = dialogGenerationRef.current
+    try {
+      const outcome = await asyncAction.run(
+        mcpActionKey(serverId),
+        async (): Promise<ConnectPreparation> => {
+          const popup = window.open('about:blank', '_blank')
+          if (!popup) return { kind: 'blocked' }
+          try {
+            popup.opener = null
+            if (popup.opener !== null) throw new Error('opener retained')
+          } catch {
+            closeWindow(popup)
+            return { kind: 'isolation-failed' }
+          }
+          closeOwnedOAuthPopup(serverId)
+          const entry: OwnedOAuthPopup = { popup, serverId, generation }
+          oauthPopupsRef.current.set(serverId, entry)
+          try {
+            const started = await startMcpOAuth(serverId)
+            await invalidateOAuthStatus(serverId)
+            return {
+              kind: 'opened',
+              popup,
+              url: started.authorization_url,
+              entry,
+            }
+          } catch (cause) {
+            closeOwnedOAuthPopup(serverId, entry)
+            throw cause
+          }
+        },
+        'oauth-connect',
+      )
+      if (!outcome.executed) return
+      const prepared = outcome.value
+      const contextCurrent = oauthActionContextIsCurrent(serverId, generation)
+      if (prepared.kind === 'blocked') {
+        if (contextCurrent) notifyError(t('oauthPopupBlocked'))
+        return
+      }
+      if (prepared.kind === 'isolation-failed') {
+        if (contextCurrent) notifyError(t('oauthPopupUnsafe'))
+        return
+      }
+      if (!ownedOAuthPopupIsCurrent(prepared.entry)) {
+        closeOwnedOAuthPopup(serverId, prepared.entry)
+        return
+      }
+      try {
+        navigateOwnedOAuthPopup(prepared.popup, prepared.url)
+      } catch {
+        closeOwnedOAuthPopup(serverId, prepared.entry)
+        if (contextCurrent) notifyError(t('oauthPopupBlocked'))
+      }
+    } catch (cause) {
+      if (oauthActionContextIsCurrent(serverId, generation)) {
+        reportApiError(cause)
+      }
+    }
+  }
+
+  async function disconnectOAuth(server: McpServer): Promise<void> {
+    const serverId = server.server_id
+    const generation = dialogGenerationRef.current
+    try {
+      const outcome = await asyncAction.run(
+        mcpActionKey(serverId),
+        async () => {
+          await disconnectMcpOAuth(serverId)
+          await invalidateOAuthStatus(serverId)
+        },
+        'oauth-disconnect',
+      )
+      if (!outcome.executed) return
+      closeOwnedOAuthPopup(serverId)
+      if (oauthActionContextIsCurrent(serverId, generation)) {
+        notifySuccess(t('oauthDisconnect'))
+      }
+    } catch (cause) {
+      if (oauthActionContextIsCurrent(serverId, generation)) {
+        reportApiError(cause)
+      }
+    }
+  }
+
   async function submitServer(): Promise<void> {
     const currentForm = dialogForm
     if (!currentForm) return
@@ -369,7 +536,10 @@ export function McpPage() {
         mcpActionKey(capturedServerId),
         async () => {
           const saved = await saveMcpServerRecord(capturedServerId, body)
-          if (capturedServerId) invalidateCatalog(capturedServerId)
+          if (capturedServerId) {
+            invalidateCatalog(capturedServerId)
+            invalidateOAuthStatus(capturedServerId)
+          }
           const refreshed = await refreshMcpServerPage(
             queryClient,
             capturedFirst,
@@ -573,6 +743,7 @@ export function McpPage() {
         items={workspace.list_items}
         onDelete={(server) => void deleteServer(server)}
         onEdit={openEditDialog}
+        onOAuth={openEditDialog}
         onPageChange={changePage}
         onResultOpenChange={changeTestResultOpen}
         onTest={(server, surface) => void testServer(server, surface)}
@@ -591,6 +762,12 @@ export function McpPage() {
           header={dialogForm.server_id ? t('editMcpServer') : t('newMcpServer')}
           isAdmin={isAdmin}
           onChange={setDialogForm}
+          onOAuthConnect={connectOAuth}
+          onOAuthDisconnect={disconnectOAuth}
+          oauthPending={asyncAction.isPending(
+            mcpActionKey(dialogOauthServer?.server_id ?? null),
+          )}
+          oauthServer={dialogOauthServer}
           onOpenChange={changeDialogOpen}
           onRefreshCatalog={() => {
             const serverId = dialogServerIdRef.current

@@ -44,57 +44,6 @@ const ACTIVITY_LOOKBACK: ChronoDuration = ChronoDuration::minutes(30);
 const PRUNE_INTERVAL: ChronoDuration = ChronoDuration::hours(1);
 const MAX_CONCURRENT_REFRESHES: usize = 4;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn due_needs_a_first_observation_or_an_aged_one() {
-        let now = Utc::now();
-        assert!(!endpoint_due(&[], true, now));
-        assert!(endpoint_due(&[None], false, now));
-        assert!(endpoint_due(&[Some(now - ACTIVE_REFRESH_AFTER)], true, now));
-        assert!(endpoint_due(
-            &[Some(
-                now - ACTIVE_REFRESH_AFTER - ChronoDuration::seconds(1)
-            )],
-            true,
-            now
-        ));
-        assert!(!endpoint_due(
-            &[Some(
-                now - ACTIVE_REFRESH_AFTER + ChronoDuration::seconds(1)
-            )],
-            true,
-            now
-        ));
-        assert!(!endpoint_due(
-            &[Some(now - ChronoDuration::minutes(29))],
-            false,
-            now
-        ));
-        assert!(endpoint_due(
-            &[Some(now - ChronoDuration::minutes(31))],
-            false,
-            now
-        ));
-        // One due key refreshes the endpoint even when siblings are fresh.
-        assert!(endpoint_due(
-            &[Some(now - ChronoDuration::minutes(1)), None],
-            true,
-            now
-        ));
-    }
-
-    #[test]
-    fn prune_runs_once_an_hour() {
-        let now = Utc::now();
-        assert!(prune_due(None, now));
-        assert!(!prune_due(Some(now - ChronoDuration::minutes(59)), now));
-        assert!(prune_due(Some(now - ChronoDuration::minutes(61)), now));
-    }
-}
-
 pub(super) fn spawn(
     config: &WorkerConfig,
     pool: PgPool,
@@ -295,10 +244,61 @@ async fn refresh_endpoint_if_due(
     if !endpoint_due(&latest_per_key, active, now) {
         return;
     }
-    if let Err(_) = cache.refresh_periodic(pool, endpoint_id).await {
+    if cache.refresh_periodic(pool, endpoint_id).await.is_err() {
         warn!(
             endpoint_id = %endpoint_id,
             "quota observation collector refresh failed"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn due_needs_a_first_observation_or_an_aged_one() {
+        let now = Utc::now();
+        assert!(!endpoint_due(&[], true, now));
+        assert!(endpoint_due(&[None], false, now));
+        assert!(endpoint_due(&[Some(now - ACTIVE_REFRESH_AFTER)], true, now));
+        assert!(endpoint_due(
+            &[Some(
+                now - ACTIVE_REFRESH_AFTER - ChronoDuration::seconds(1)
+            )],
+            true,
+            now
+        ));
+        assert!(!endpoint_due(
+            &[Some(
+                now - ACTIVE_REFRESH_AFTER + ChronoDuration::seconds(1)
+            )],
+            true,
+            now
+        ));
+        assert!(!endpoint_due(
+            &[Some(now - ChronoDuration::minutes(29))],
+            false,
+            now
+        ));
+        assert!(endpoint_due(
+            &[Some(now - ChronoDuration::minutes(31))],
+            false,
+            now
+        ));
+        // One due key refreshes the endpoint even when siblings are fresh.
+        assert!(endpoint_due(
+            &[Some(now - ChronoDuration::minutes(1)), None],
+            true,
+            now
+        ));
+    }
+
+    #[test]
+    fn prune_runs_once_an_hour() {
+        let now = Utc::now();
+        assert!(prune_due(None, now));
+        assert!(!prune_due(Some(now - ChronoDuration::minutes(59)), now));
+        assert!(prune_due(Some(now - ChronoDuration::minutes(61)), now));
     }
 }

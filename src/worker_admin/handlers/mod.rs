@@ -19,6 +19,7 @@ mod config_import;
 mod endpoint_usage;
 mod endpoints;
 mod mcp;
+mod mcp_oauth;
 mod me;
 mod model_routes;
 pub mod oauth;
@@ -82,8 +83,9 @@ use tower_http::cors::CorsLayer;
 
 use self::{
     approvals::*, auth::*, billing::*, config_audit::*, config_export::*, config_import::*,
-    endpoint_usage::*, endpoints::*, mcp::*, model_routes::*, quota_key_observations::*, relays::*,
-    session_routing::*, settings::*, settings_cache_alert::*, usage::*, users::*,
+    endpoint_usage::*, endpoints::*, mcp::*, mcp_oauth::*, model_routes::*,
+    quota_key_observations::*, relays::*, session_routing::*, settings::*, settings_cache_alert::*,
+    usage::*, users::*,
 };
 
 pub(super) use self::support::*;

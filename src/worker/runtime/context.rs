@@ -71,8 +71,11 @@ pub(super) struct RuntimeServices {
     /// P2 repair). It witnesses the actual settlement boundary without adding
     /// a second production sink or any public API.
     #[cfg(test)]
-    pub(super) submitted_logs: Option<std::sync::Arc<dyn Fn(&UsageLog) + Send + Sync>>,
+    pub(super) submitted_logs: Option<SubmittedLogObserver>,
 }
+
+#[cfg(test)]
+type SubmittedLogObserver = std::sync::Arc<dyn Fn(&UsageLog) + Send + Sync>;
 
 impl RuntimeServices {
     pub(super) fn new(

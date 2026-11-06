@@ -25,6 +25,7 @@ const MCP_PATH = /^\/api\/v1\/admin\/(?:mcp-providers|mcp-servers(?:\/[^/]+)*)$/
 const MCP_ONE = /^\/api\/v1\/admin\/mcp-servers\/([^/]+)$/
 const MCP_CATALOG = /^\/api\/v1\/admin\/mcp-servers\/([^/]+)\/catalog$/
 const MCP_TEST = /^\/api\/v1\/admin\/mcp-servers\/([^/]+)\/test$/
+const MCP_OAUTH = /^\/api\/v1\/admin\/mcp-servers\/([^/]+)\/oauth$/
 const RELAYS = /^\/api\/v1\/admin\/relays$/
 const RELAY_ONE = /^\/api\/v1\/admin\/relays\/([^/]+)$/
 const RELAY_RECONNECT = /^\/api\/v1\/admin\/relays\/([^/]+)\/reconnect$/
@@ -513,6 +514,46 @@ export async function handleMcpRelays(
       ctx.state.mcpServers.push(applyServerRequest(server, body, serverId, ctx))
       return ok(ctx.state.mcpServers.at(-1))
     }
+  }
+
+  const mcpOAuthMatch = MCP_OAUTH.exec(pathname)
+  if (mcpOAuthMatch) {
+    if (!ctx.account) return unauthorized()
+    const serverId = mcpOAuthMatch[1]
+    const server = ctx.state.mcpServers.find(
+      (candidate) => candidate.server_id === serverId,
+    )
+    if (!server || !serverVisibleToAccount(server, ctx)) {
+      return error('not_found', 'fixture MCP server not found', 404)
+    }
+    if (method === 'POST') {
+      ctx.state.mcpOAuthStatus[serverId] = {
+        status: 'authorizing',
+        scopes: [],
+        reason: null,
+        expires_at: null,
+      }
+      return ok({
+        authorization_url: `http://127.0.0.1:8789/__fixtures/mcp-oauth/authorize?server_id=${serverId}`,
+      })
+    }
+    if (method === 'DELETE') {
+      ctx.state.mcpOAuthStatus[serverId] = {
+        status: 'disconnected',
+        scopes: [],
+        reason: null,
+        expires_at: null,
+      }
+      return new Response(null, { status: 204 })
+    }
+    return ok(
+      ctx.state.mcpOAuthStatus[serverId] ?? {
+        status: 'disconnected',
+        scopes: [],
+        reason: null,
+        expires_at: null,
+      },
+    )
   }
 
   const isMcpCatalogPath = MCP_CATALOG.test(pathname)

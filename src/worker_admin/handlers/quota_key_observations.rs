@@ -132,9 +132,11 @@ enum ObservationQueryError {
     InvalidKinds,
 }
 
+type ParsedObservationQuery = (u16, Option<i64>, Option<Vec<Uuid>>);
+
 fn parse_observation_query(
     query: &QuotaKeyObservationHistoryQuery,
-) -> Result<(u16, Option<i64>, Option<Vec<Uuid>>), ObservationQueryError> {
+) -> Result<ParsedObservationQuery, ObservationQueryError> {
     let limit = query.limit.unwrap_or(HISTORY_PAGE_DEFAULT);
     if !(1..=HISTORY_PAGE_MAX).contains(&limit) {
         return Err(ObservationQueryError::InvalidLimit);

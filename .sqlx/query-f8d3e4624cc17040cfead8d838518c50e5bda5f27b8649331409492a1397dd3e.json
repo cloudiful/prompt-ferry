@@ -1,0 +1,175 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM mcp_oauth_states\nWHERE state_key_hash = $1\n  AND owner_user_id = $2\n  AND session_binding_hash = $3\n  AND config_fingerprint = $4\n  AND expires_at > NOW()\nRETURNING server_id,\n    owner_user_id,\n    session_binding_hash,\n    connection_id,\n    config_fingerprint,\n    redirect_uri,\n    expires_at,\n    authorization_ciphertext,\n    authorization_nonce,\n    authorization_key_version,\n    pending_client_ciphertext,\n    pending_client_nonce,\n    pending_client_key_version\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "server_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_states",
+            "name": "server_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_states",
+            "name": "owner_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "session_binding_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_states",
+            "name": "session_binding_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "connection_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_states",
+            "name": "connection_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "config_fingerprint",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_states",
+            "name": "config_fingerprint"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "redirect_uri",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_states",
+            "name": "redirect_uri"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_states",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "authorization_ciphertext",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_states",
+            "name": "authorization_ciphertext"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "authorization_nonce",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_states",
+            "name": "authorization_nonce"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "authorization_key_version",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_states",
+            "name": "authorization_key_version"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "pending_client_ciphertext",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_states",
+            "name": "pending_client_ciphertext"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "pending_client_nonce",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_states",
+            "name": "pending_client_nonce"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "pending_client_key_version",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_states",
+            "name": "pending_client_key_version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "f8d3e4624cc17040cfead8d838518c50e5bda5f27b8649331409492a1397dd3e"
+}

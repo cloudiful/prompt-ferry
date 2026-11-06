@@ -28,7 +28,10 @@ use super::{
         PreparedRouteRequest, ai_route_usage_log, prepare_upstream_request_for_route,
     },
     thinking_downgrade::{self, ThinkingDisposition},
-    upstream::{build_codex_upstream_request, build_upstream_request, upstream_url_for_route},
+    upstream::{
+        UpstreamRequestTarget, build_codex_upstream_request, build_upstream_request,
+        upstream_url_for_route,
+    },
 };
 
 const MAX_UPSTREAM_ATTEMPTS: usize = 3;
@@ -303,22 +306,26 @@ pub(super) async fn forward_route_request_with_probe(
         let body = attempt_body(&prepared, downgraded_body.as_ref(), thinking_off);
         let upstream_request = match (chatgpt_auth.as_ref(), chatgpt_url.as_deref()) {
             (Some(auth), Some(url)) => build_codex_upstream_request(
-                &proxy_client,
-                method,
-                url,
-                &route,
-                &prepared.path,
-                body,
+                UpstreamRequestTarget {
+                    client: &proxy_client,
+                    method,
+                    url,
+                    route: &route,
+                    path: &prepared.path,
+                    body,
+                },
                 auth,
                 &request.headers,
             ),
             _ => build_upstream_request(
-                &proxy_client,
-                method,
-                &upstream_url,
-                &route,
-                &prepared.path,
-                body,
+                UpstreamRequestTarget {
+                    client: &proxy_client,
+                    method,
+                    url: &upstream_url,
+                    route: &route,
+                    path: &prepared.path,
+                    body,
+                },
                 &request.headers,
                 request_ctx.request_prompt_log.conversation_id,
                 // Issue #884: one request id for every attempt, so a stateless
@@ -326,13 +333,13 @@ pub(super) async fn forward_route_request_with_probe(
                 request_ctx.request_id,
             ),
         };
-        if route.provider == db::EndpointProvider::OpenAi && chatgpt_auth.is_some() {
-            if let Some(service) = services
+        if route.provider == db::EndpointProvider::OpenAi
+            && chatgpt_auth.is_some()
+            && let Some(service) = services
                 .admin_state()
                 .and_then(|state| state.chatgpt_quota_service.as_deref())
-            {
-                service.notify_selected_request(route.route_id);
-            }
+        {
+            service.notify_selected_request(route.route_id);
         }
         let attempt_feedback = feedback_factory.begin_attempt();
         let send_result = upstream_request.send().await;
@@ -617,15 +624,17 @@ async fn handle_self_summarize_compact(
         .or(request_ctx.request_model.as_deref());
     let (body, summary, attempt_feedback) =
         match super::super::compaction::run_self_summarize_compact(
-            &proxy_client,
-            &summarize_url,
-            &route.api_key,
-            route.native_api,
-            &request_bytes,
-            model_fallback,
-            services,
-            route,
-            feedback_factory,
+            super::super::compaction::SelfSummarizeInput {
+                client: &proxy_client,
+                summarize_url: &summarize_url,
+                api_key: &route.api_key,
+                native_api: route.native_api,
+                request_body: &request_bytes,
+                model_fallback,
+                services,
+                route,
+                feedback_factory,
+            },
         )
         .await
         {

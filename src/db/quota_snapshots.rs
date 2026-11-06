@@ -69,14 +69,14 @@ pub(super) fn validate_windows(value: &Value) -> Result<()> {
         }
         optional_positive_seconds(object.get("window_seconds"), "window_seconds")?;
         optional_nonnegative_seconds(object.get("reset_after_seconds"), "reset_after_seconds")?;
-        if let Some(reset_at) = object.get("reset_at") {
-            if !reset_at.is_null() {
-                let timestamp = reset_at
-                    .as_str()
-                    .context("ChatGPT quota reset_at must be an RFC3339 timestamp")?;
-                chrono::DateTime::parse_from_rfc3339(timestamp)
-                    .context("ChatGPT quota reset_at must be an RFC3339 timestamp")?;
-            }
+        if let Some(reset_at) = object.get("reset_at")
+            && !reset_at.is_null()
+        {
+            let timestamp = reset_at
+                .as_str()
+                .context("ChatGPT quota reset_at must be an RFC3339 timestamp")?;
+            chrono::DateTime::parse_from_rfc3339(timestamp)
+                .context("ChatGPT quota reset_at must be an RFC3339 timestamp")?;
         }
     }
     Ok(())

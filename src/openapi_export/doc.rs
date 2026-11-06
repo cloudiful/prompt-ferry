@@ -96,6 +96,55 @@ mod tests {
         );
     }
 
+    /// The callback is a query-bearing redirect endpoint: `server_id` is the
+    /// only required path parameter and the authorization response values are
+    /// optional query parameters. Byte parity alone cannot prove this.
+    #[test]
+    fn mcp_oauth_callback_parameters_are_optional_query_parameters() {
+        use utoipa::openapi::Required;
+        use utoipa::openapi::path::ParameterIn;
+
+        let document = admin_api_doc();
+        let item = document
+            .paths
+            .paths
+            .get("/api/v1/admin/mcp-servers/{server_id}/oauth/callback")
+            .expect("the OAuth callback path is documented");
+        let operation = operation(item, "get").expect("the callback is a GET");
+        let parameters = operation
+            .parameters
+            .as_ref()
+            .expect("the callback documents its parameters");
+
+        let server_id = parameters
+            .iter()
+            .find(|parameter| parameter.name == "server_id")
+            .expect("server_id parameter");
+        assert!(
+            server_id.parameter_in == ParameterIn::Path,
+            "server_id must be a path parameter"
+        );
+        assert!(
+            server_id.required == Required::True,
+            "server_id is a required path parameter"
+        );
+
+        for name in ["code", "state", "iss"] {
+            let parameter = parameters
+                .iter()
+                .find(|parameter| parameter.name == name)
+                .unwrap_or_else(|| panic!("{name} parameter"));
+            assert!(
+                parameter.parameter_in == ParameterIn::Query,
+                "{name} must be a query parameter"
+            );
+            assert!(
+                parameter.required == Required::False,
+                "{name} must stay optional"
+            );
+        }
+    }
+
     /// Every relay management route the listener serves is in the spec.
     ///
     /// The relay's routes are exported from a separate tree, so a route added

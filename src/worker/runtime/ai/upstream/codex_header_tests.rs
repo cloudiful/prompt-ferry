@@ -132,12 +132,16 @@ fn platform_builder_keeps_the_platform_model_and_store_field() {
     // never gain Codex subscription headers.
     let route = openai_responses_route();
     let request = build_upstream_request(
-        &Client::new(),
-        &Method::POST,
-        "https://api.openai.com/v1/responses",
-        &route,
-        "/v1/responses",
-        &PreparedRequestBody::BufferedBytes(br#"{"model":"gpt-4o","store":true}"#.to_vec()),
+        UpstreamRequestTarget {
+            client: &Client::new(),
+            method: &Method::POST,
+            url: "https://api.openai.com/v1/responses",
+            route: &route,
+            path: "/v1/responses",
+            body: &PreparedRequestBody::BufferedBytes(
+                br#"{"model":"gpt-4o","store":true}"#.to_vec(),
+            ),
+        },
         &[("session-id".to_string(), "session-1".to_string())],
         None,
         uuid::Uuid::new_v4(),
@@ -340,12 +344,16 @@ fn codex_request_preserves_prompt_cache_key() {
 fn platform_builder_ignores_all_session_aliases() {
     let route = openai_responses_route();
     let request = build_upstream_request(
-        &Client::new(),
-        &Method::POST,
-        "https://api.openai.com/v1/responses",
-        &route,
-        "/v1/responses",
-        &PreparedRequestBody::BufferedBytes(br#"{"model":"gpt-4o","store":true}"#.to_vec()),
+        UpstreamRequestTarget {
+            client: &Client::new(),
+            method: &Method::POST,
+            url: "https://api.openai.com/v1/responses",
+            route: &route,
+            path: "/v1/responses",
+            body: &PreparedRequestBody::BufferedBytes(
+                br#"{"model":"gpt-4o","store":true}"#.to_vec(),
+            ),
+        },
         &[
             ("x-opencode-session-id".to_string(), "ses_child".to_string()),
             ("x-session-id".to_string(), "ses_explicit".to_string()),

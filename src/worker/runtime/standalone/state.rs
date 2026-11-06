@@ -15,9 +15,11 @@ use crate::{
     worker_usage::{StandaloneUsageSummary, UsageLog},
 };
 
+use super::{DEFAULT_USAGE_CAPACITY, StandaloneUsageBuffer};
+#[cfg(test)]
 use super::{
-    DEFAULT_USAGE_CAPACITY, StandaloneFeature, StandaloneFeatureDiagnostic, StandaloneUsageBuffer,
-    standalone_feature_diagnostic, standalone_feature_diagnostics,
+    StandaloneFeature, StandaloneFeatureDiagnostic, standalone_feature_diagnostic,
+    standalone_feature_diagnostics,
 };
 
 #[derive(Clone)]
@@ -149,17 +151,17 @@ impl StandaloneRuntimeState {
         self.recent_usage.persist(summary).await;
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn recent_usage(&self) -> Vec<StandaloneUsageSummary> {
         self.recent_usage.snapshot()
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn feature_diagnostics(&self) -> [StandaloneFeatureDiagnostic; 7] {
         standalone_feature_diagnostics()
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn feature_diagnostic(
         &self,
         feature: StandaloneFeature,

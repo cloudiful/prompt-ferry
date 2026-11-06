@@ -5,6 +5,7 @@ mod connection;
 mod endpoints;
 mod mcp;
 mod mcp_credentials;
+pub mod mcp_oauth;
 mod partition_ddl;
 mod partition_maintenance;
 mod pool_wait;

@@ -25,8 +25,14 @@ use super::{
 const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub(super) enum RefreshAttempt {
-    Completed(RefreshCompletion),
+    Completed(Box<RefreshCompletion>),
     LeaseLost,
+}
+
+impl RefreshAttempt {
+    fn completed(completion: RefreshCompletion) -> Self {
+        Self::Completed(Box::new(completion))
+    }
 }
 
 impl ChatGptQuotaService {
@@ -53,11 +59,11 @@ impl ChatGptQuotaService {
         let (snapshot, state) = match self.load(endpoint_id).await {
             Ok(value) => value,
             Err(error) => {
-                return RefreshAttempt::Completed(completion(None, None, Some(error)));
+                return RefreshAttempt::completed(completion(None, None, Some(error)));
             }
         };
         if completed_after(trigger, arrival, snapshot.as_ref(), state.as_ref()) {
-            return RefreshAttempt::Completed(completion(snapshot, state, None));
+            return RefreshAttempt::completed(completion(snapshot, state, None));
         }
         if !trigger.is_manual() {
             let now = Utc::now();
@@ -79,7 +85,7 @@ impl ChatGptQuotaService {
                     .and_then(|state| state.next_retry_at)
                     .is_some_and(|retry_at| retry_at > now)
             {
-                return RefreshAttempt::Completed(completion(
+                return RefreshAttempt::completed(completion(
                     snapshot,
                     state.clone(),
                     state.as_ref().and_then(error_from_state),
@@ -89,7 +95,7 @@ impl ChatGptQuotaService {
         let permit = match self.inner.quota_slots.clone().acquire_owned().await {
             Ok(permit) => permit,
             Err(_) => {
-                return RefreshAttempt::Completed(completion(
+                return RefreshAttempt::completed(completion(
                     snapshot,
                     state,
                     Some(ChatGptQuotaError::InProgress),
@@ -99,7 +105,7 @@ impl ChatGptQuotaService {
         let (shared_snapshot, shared_state) = match self.load(endpoint_id).await {
             Ok(value) => value,
             Err(error) => {
-                return RefreshAttempt::Completed(completion(snapshot, None, Some(error)));
+                return RefreshAttempt::completed(completion(snapshot, None, Some(error)));
             }
         };
         if completed_after(
@@ -108,7 +114,7 @@ impl ChatGptQuotaService {
             shared_snapshot.as_ref(),
             shared_state.as_ref(),
         ) {
-            return RefreshAttempt::Completed(completion(shared_snapshot, shared_state, None));
+            return RefreshAttempt::completed(completion(shared_snapshot, shared_state, None));
         }
         let (snapshot, state) = (shared_snapshot, shared_state);
         let owner = Uuid::new_v4();
@@ -126,7 +132,7 @@ impl ChatGptQuotaService {
         {
             Ok(acquired) => acquired,
             Err(_) => {
-                return RefreshAttempt::Completed(completion(
+                return RefreshAttempt::completed(completion(
                     snapshot,
                     state,
                     Some(ChatGptQuotaError::Storage),
@@ -159,7 +165,7 @@ impl ChatGptQuotaService {
                 ) {
                     Ok(windows) => windows,
                     Err(_) => {
-                        return RefreshAttempt::Completed(
+                        return RefreshAttempt::completed(
                             self.finish_failure(
                                 endpoint_id,
                                 owner,
@@ -227,7 +233,7 @@ impl ChatGptQuotaService {
                     .await
             }
         };
-        RefreshAttempt::Completed(completed)
+        RefreshAttempt::completed(completed)
     }
 
     /// A manual force success only clears the endpoint-level cooldown when the
@@ -334,7 +340,7 @@ impl ChatGptQuotaService {
             Some(error.code()),
         )
         .await;
-        let result = match update {
+        match update {
             Ok(true) => match self.load(endpoint_id).await {
                 Ok((snapshot, state)) => completion(snapshot, state, Some(error)),
                 Err(_) => completion(None, None, Some(ChatGptQuotaError::Storage)),
@@ -347,7 +353,6 @@ impl ChatGptQuotaService {
                 let (snapshot, state) = self.load(endpoint_id).await.unwrap_or((None, None));
                 completion(snapshot, state, Some(ChatGptQuotaError::Storage))
             }
-        };
-        result
+        }
     }
 }

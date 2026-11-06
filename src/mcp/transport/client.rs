@@ -1,26 +1,33 @@
 use std::{
     collections::HashMap,
-    sync::{LazyLock, Mutex},
+    sync::{Arc, LazyLock, Mutex},
     time::{Duration, Instant},
 };
 
 use anyhow::anyhow;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{DateTime, Utc};
+use futures::stream::BoxStream;
 use http::{HeaderName, HeaderValue};
 use rmcp::{
     ClientServiceExt,
     model::{
-        CallToolRequestParams, CallToolResponse, CompleteRequestParams, GetPromptRequestParams,
-        GetPromptResponse, ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse,
+        CallToolRequestParams, CallToolResponse, ClientJsonRpcMessage, CompleteRequestParams,
+        GetPromptRequestParams, GetPromptResponse, ProtocolVersion, ReadResourceRequestParams,
+        ReadResourceResponse,
     },
     service::ClientLifecycleMode,
     transport::{
         StreamableHttpClientTransport, TokioChildProcess,
-        streamable_http_client::StreamableHttpClientTransportConfig,
+        auth::AuthError,
+        streamable_http_client::{
+            StreamableHttpClient, StreamableHttpClientTransportConfig, StreamableHttpError,
+            StreamableHttpPostResponse,
+        },
     },
 };
 use serde_json::{Value, json};
+use sse_stream::{Error as SseError, Sse};
 use uuid::Uuid;
 
 use crate::db::McpServer;
@@ -30,6 +37,7 @@ use super::{
     token_selection::SelectedToken,
     tool_headers,
 };
+use crate::mcp::oauth::{McpOAuthError, McpOAuthService};
 
 pub(super) async fn call_once(
     storage: Option<&super::super::McpRuntimeStorage>,
@@ -72,6 +80,64 @@ pub(super) async fn connect_with_selected(
             // by construction.
             let config = http_transport_config(server, selected)?;
             let upstream_url = server.url.as_deref().unwrap_or_default();
+            // Personal OAuth requires the pinned, proxy-free path: a proxy
+            // would move DNS away from the validated addresses and could
+            // observe the bearer token.
+            if server.effective_auth_mode() == crate::db::MCP_AUTH_MODE_OAUTH {
+                super::proxy::oauth_proxy_blocked(server.proxy_url.as_deref(), upstream_url)
+                    .map_err(|message| anyhow!("{message}"))?;
+                let url = reqwest::Url::parse(upstream_url)
+                    .map_err(|_| anyhow!("MCP HTTP server URL is not valid"))?;
+                let timeout = Duration::from_millis(server.timeout_ms.max(100) as u64);
+                let storage = storage.ok_or_else(|| {
+                    anyhow!("personal MCP OAuth requires the worker runtime storage")
+                })?;
+                let service = storage
+                    .oauth()
+                    .ok_or_else(|| anyhow!("personal MCP OAuth is not configured"))?
+                    .clone();
+                #[cfg(test)]
+                let pinned = if service.allows_test_network() {
+                    super::pinning::loopback_client_for_url(&url, timeout).await?
+                } else {
+                    super::pinning::pinned_client_for_url(&url, timeout).await?
+                };
+                #[cfg(not(test))]
+                let pinned = super::pinning::pinned_client_for_url(&url, timeout).await?;
+                let owner_user_id = server
+                    .owner_user_id
+                    .ok_or_else(|| anyhow!("personal MCP OAuth requires a server owner"))?;
+                let (connection_id, config_fingerprint, url) = service
+                    .send_context(server, owner_user_id)
+                    .await
+                    .map_err(|error| anyhow!("{}", error.message()))?;
+                let guarded = GuardedOAuthStreamableClient::new(
+                    pinned,
+                    service,
+                    server.server_id,
+                    owner_user_id,
+                    connection_id,
+                    config_fingerprint,
+                    url,
+                );
+                return connect_with_lifecycle_fallback(
+                    Some(storage),
+                    server,
+                    move |mode, protocol_version| {
+                        let config = config.clone();
+                        let guarded = guarded.clone();
+                        async move {
+                            let transport =
+                                StreamableHttpClientTransport::with_client(guarded, config);
+                            Ok(client_info()
+                                .with_protocol_version(protocol_version)
+                                .serve_with_lifecycle(transport, mode)
+                                .await?)
+                        }
+                    },
+                )
+                .await;
+            }
             // The error text already carries the redacted proxy (userinfo
             // scrubbed in `super::proxy`); never log the raw row or env value
             // here.
@@ -862,6 +928,180 @@ fn strip_transport_meta<T: rmcp::model::RequestParamsMeta>(params: &mut T) {
     }
 }
 
+/// The OAuth transport client that guards every actual HTTP send.
+///
+/// The pinned `reqwest` client performs the request, but each `post_message`,
+/// `get_stream` and `delete_session` first revalidates the original authorized
+/// server/owner/configuration/connection epoch and obtains a token for that one
+/// send only. A token is never stored in the transport configuration, so a
+/// paused session whose grant was disconnected, replaced or re-owned cannot
+/// keep sending with the old credential.
+#[derive(Clone)]
+pub(super) struct GuardedOAuthStreamableClient<C = reqwest::Client> {
+    inner: C,
+    service: Arc<McpOAuthService>,
+    server_id: Uuid,
+    owner_user_id: i64,
+    connection_id: Uuid,
+    config_fingerprint: String,
+    url: String,
+}
+
+impl<C> GuardedOAuthStreamableClient<C> {
+    pub(super) fn new(
+        inner: C,
+        service: Arc<McpOAuthService>,
+        server_id: Uuid,
+        owner_user_id: i64,
+        connection_id: Uuid,
+        config_fingerprint: String,
+        url: String,
+    ) -> Self {
+        Self {
+            inner,
+            service,
+            server_id,
+            owner_user_id,
+            connection_id,
+            config_fingerprint,
+            url,
+        }
+    }
+}
+
+fn guard_error<E>(error: McpOAuthError) -> StreamableHttpError<E>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    match error {
+        McpOAuthError::AuthorizationRequired
+        | McpOAuthError::NotFound
+        | McpOAuthError::Forbidden
+        | McpOAuthError::Disabled(_)
+        | McpOAuthError::Unavailable => StreamableHttpError::Auth(AuthError::AuthorizationRequired),
+        McpOAuthError::RefreshInProgress => {
+            StreamableHttpError::Auth(AuthError::AuthorizationFailed(
+                "a personal MCP OAuth token refresh is already in progress".to_string(),
+            ))
+        }
+        McpOAuthError::InvalidState | McpOAuthError::Upstream(_) => {
+            StreamableHttpError::Auth(AuthError::AuthorizationFailed(
+                "the personal MCP OAuth token is unavailable for this send".to_string(),
+            ))
+        }
+    }
+}
+
+impl<C> GuardedOAuthStreamableClient<C>
+where
+    C: StreamableHttpClient + Send + Sync,
+{
+    async fn send_token(&self) -> Result<String, StreamableHttpError<C::Error>> {
+        self.service
+            .send_token(
+                self.server_id,
+                self.owner_user_id,
+                self.connection_id,
+                &self.config_fingerprint,
+                &self.url,
+            )
+            .await
+            .map_err(guard_error)
+    }
+}
+
+impl<C> StreamableHttpClient for GuardedOAuthStreamableClient<C>
+where
+    C: StreamableHttpClient + Send + Sync,
+{
+    type Error = C::Error;
+
+    async fn post_message(
+        &self,
+        uri: Arc<str>,
+        message: ClientJsonRpcMessage,
+        session_id: Option<Arc<str>>,
+        _auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+    ) -> Result<StreamableHttpPostResponse, StreamableHttpError<Self::Error>> {
+        let token = self.send_token().await?;
+        self.inner
+            .post_message(uri, message, session_id, Some(token), custom_headers)
+            .await
+    }
+
+    async fn post_message_with_max_sse_event_size(
+        &self,
+        uri: Arc<str>,
+        message: ClientJsonRpcMessage,
+        session_id: Option<Arc<str>>,
+        _auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+        max_sse_event_size: usize,
+    ) -> Result<StreamableHttpPostResponse, StreamableHttpError<Self::Error>> {
+        let token = self.send_token().await?;
+        self.inner
+            .post_message_with_max_sse_event_size(
+                uri,
+                message,
+                session_id,
+                Some(token),
+                custom_headers,
+                max_sse_event_size,
+            )
+            .await
+    }
+
+    async fn delete_session(
+        &self,
+        uri: Arc<str>,
+        session_id: Arc<str>,
+        _auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+    ) -> Result<(), StreamableHttpError<Self::Error>> {
+        let token = self.send_token().await?;
+        self.inner
+            .delete_session(uri, session_id, Some(token), custom_headers)
+            .await
+    }
+
+    async fn get_stream(
+        &self,
+        uri: Arc<str>,
+        session_id: Option<Arc<str>>,
+        last_event_id: Option<String>,
+        _auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+    ) -> Result<BoxStream<'static, Result<Sse, SseError>>, StreamableHttpError<Self::Error>> {
+        let token = self.send_token().await?;
+        self.inner
+            .get_stream(uri, session_id, last_event_id, Some(token), custom_headers)
+            .await
+    }
+
+    async fn get_stream_with_max_sse_event_size(
+        &self,
+        uri: Arc<str>,
+        session_id: Option<Arc<str>>,
+        last_event_id: Option<String>,
+        _auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+        max_sse_event_size: usize,
+    ) -> Result<BoxStream<'static, Result<Sse, SseError>>, StreamableHttpError<Self::Error>> {
+        let token = self.send_token().await?;
+        self.inner
+            .get_stream_with_max_sse_event_size(
+                uri,
+                session_id,
+                last_event_id,
+                Some(token),
+                custom_headers,
+                max_sse_event_size,
+            )
+            .await
+    }
+}
+
 fn http_transport_config(
     server: &McpServer,
     selected: SelectedToken,
@@ -906,6 +1146,13 @@ fn http_transport_config(
             if let Some(token) = selected.value.filter(|token| !token.trim().is_empty()) {
                 config = config.auth_header(token);
             }
+            if !custom_headers.is_empty() {
+                config = config.custom_headers(custom_headers);
+            }
+        }
+        crate::db::MCP_AUTH_MODE_OAUTH => {
+            // The per-send guard supplies the token, so no token is ever
+            // written into the long-lived transport configuration.
             if !custom_headers.is_empty() {
                 config = config.custom_headers(custom_headers);
             }
@@ -1397,6 +1644,677 @@ mod tests {
             lifecycle_learned_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod oauth_guard_tests {
+    use std::sync::{Arc, Mutex};
+
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use futures::stream::BoxStream;
+    use http::{HeaderName, HeaderValue};
+    use rmcp::model::ClientJsonRpcMessage;
+    use rmcp::transport::streamable_http_client::{
+        StreamableHttpClient, StreamableHttpError, StreamableHttpPostResponse,
+    };
+    use sse_stream::{Error as SseError, Sse};
+    use uuid::Uuid;
+
+    use super::GuardedOAuthStreamableClient;
+    use super::client_info;
+    use crate::db::{ConfigRepository, McpServerInput, UserStore};
+    use crate::mcp::oauth::McpOAuthService;
+    use crate::relay_secrets::RelaySecretManager;
+    use crate::standalone_config::StandaloneConfigStore;
+    use axum::{
+        Router,
+        body::Body,
+        extract::State,
+        http::Request,
+        middleware::{self, Next},
+        response::Response,
+    };
+    use rmcp::service::ClientLifecycleMode;
+    use rmcp::transport::streamable_http_client::{
+        StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
+    };
+    use rmcp::{
+        ClientServiceExt, ServerHandler,
+        model::{Implementation, InitializeResult, ServerCapabilities, ServerConfig},
+        transport::streamable_http_server::{
+            StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+        },
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const OWNER: i64 = 31;
+    const OTHER_OWNER: i64 = 32;
+    const MCP_URL: &str = "https://mcp.example.test/mcp";
+
+    type RecordedCall = (&'static str, Option<String>);
+
+    /// Records every request that actually reaches the transport boundary,
+    /// together with the authorization token it was handed.
+    #[derive(Clone, Default)]
+    struct CountingClient {
+        calls: Arc<Mutex<Vec<RecordedCall>>>,
+    }
+
+    impl CountingClient {
+        fn record(&self, method: &'static str, token: Option<String>) {
+            self.calls.lock().expect("calls").push((method, token));
+        }
+
+        fn calls(&self) -> Vec<RecordedCall> {
+            self.calls.lock().expect("calls").clone()
+        }
+
+        fn count(&self) -> usize {
+            self.calls.lock().expect("calls").len()
+        }
+    }
+
+    fn message() -> ClientJsonRpcMessage {
+        serde_json::from_value(serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized"
+        }))
+        .expect("json-rpc notification")
+    }
+
+    impl StreamableHttpClient for CountingClient {
+        type Error = std::io::Error;
+
+        async fn post_message(
+            &self,
+            _uri: Arc<str>,
+            _message: ClientJsonRpcMessage,
+            _session_id: Option<Arc<str>>,
+            auth_header: Option<String>,
+            _custom_headers: std::collections::HashMap<HeaderName, HeaderValue>,
+        ) -> Result<StreamableHttpPostResponse, StreamableHttpError<Self::Error>> {
+            self.record("post_message", auth_header);
+            Ok(StreamableHttpPostResponse::Accepted)
+        }
+
+        async fn delete_session(
+            &self,
+            _uri: Arc<str>,
+            _session_id: Arc<str>,
+            auth_header: Option<String>,
+            _custom_headers: std::collections::HashMap<HeaderName, HeaderValue>,
+        ) -> Result<(), StreamableHttpError<Self::Error>> {
+            self.record("delete_session", auth_header);
+            Ok(())
+        }
+
+        async fn get_stream(
+            &self,
+            _uri: Arc<str>,
+            _session_id: Option<Arc<str>>,
+            _last_event_id: Option<String>,
+            auth_header: Option<String>,
+            _custom_headers: std::collections::HashMap<HeaderName, HeaderValue>,
+        ) -> Result<BoxStream<'static, Result<Sse, SseError>>, StreamableHttpError<Self::Error>>
+        {
+            self.record("get_stream", auth_header);
+            let stream: BoxStream<'static, Result<Sse, SseError>> =
+                Box::pin(futures::stream::empty());
+            Ok(stream)
+        }
+    }
+
+    struct Fixture {
+        store: Arc<StandaloneConfigStore>,
+        path: std::path::PathBuf,
+        repository: ConfigRepository,
+        service: Arc<McpOAuthService>,
+        server: crate::db::McpServer,
+        connection_id: Uuid,
+        fingerprint: String,
+    }
+
+    impl Fixture {
+        async fn new() -> Self {
+            Self::new_with_url(MCP_URL).await
+        }
+
+        async fn new_with_url(url: &str) -> Self {
+            let base = std::env::var("PROMPT_FERRY_TEST_TMPDIR")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::env::temp_dir());
+            let _ = std::fs::create_dir_all(&base);
+            let path = base.join(format!(
+                "prompt-ferry-oauth-guard-{}.sqlite",
+                Uuid::new_v4()
+            ));
+            let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
+            for user_id in [OWNER, OTHER_OWNER] {
+                sqlx::query(
+                    "INSERT INTO standalone_users \
+                     (user_id, login_name, display_name, password_hash, is_admin, enabled) \
+                     VALUES (?1, ?2, ?2, 'hash', 0, 1)",
+                )
+                .bind(user_id)
+                .bind(format!("guard-user-{user_id}"))
+                .execute(store.pool())
+                .await
+                .expect("insert user");
+            }
+            let manager =
+                RelaySecretManager::from_base64(&STANDARD.encode([13_u8; 32])).expect("manager");
+            let repository = ConfigRepository::sqlite(store.clone(), manager.clone());
+            let server_id = Uuid::new_v4();
+            repository
+                .create_mcp_server(server_id, server_input("guard server", url))
+                .await
+                .expect("create server");
+            let server = repository
+                .get_mcp_server(server_id)
+                .await
+                .expect("load server")
+                .expect("server row");
+            let installed = repository
+                .install_mcp_oauth_grant(&manager, server_id, OWNER, &grant())
+                .await
+                .expect("install grant");
+            let service = Arc::new(
+                McpOAuthService::new(
+                    repository.clone(),
+                    Some(manager),
+                    Some("https://app.example.test".to_string()),
+                    UserStore::sqlite(store.pool().clone()),
+                )
+                .with_private_network(),
+            );
+            Self {
+                store,
+                path,
+                repository,
+                service,
+                server,
+                connection_id: installed.connection_id,
+                fingerprint: installed.config_fingerprint,
+            }
+        }
+
+        async fn guarded(
+            &self,
+            client: CountingClient,
+        ) -> GuardedOAuthStreamableClient<CountingClient> {
+            let (connection_id, fingerprint, url) = self
+                .service
+                .send_context(&self.server, OWNER)
+                .await
+                .expect("send context");
+            assert_eq!(connection_id, self.connection_id);
+            assert_eq!(fingerprint, self.fingerprint);
+            GuardedOAuthStreamableClient::new(
+                client,
+                self.service.clone(),
+                self.server.server_id,
+                OWNER,
+                connection_id,
+                fingerprint,
+                url,
+            )
+        }
+
+        async fn guarded_reqwest(
+            &self,
+            client: reqwest::Client,
+        ) -> GuardedOAuthStreamableClient<reqwest::Client> {
+            let (connection_id, fingerprint, url) = self
+                .service
+                .send_context(&self.server, OWNER)
+                .await
+                .expect("send context");
+            GuardedOAuthStreamableClient::new(
+                client,
+                self.service.clone(),
+                self.server.server_id,
+                OWNER,
+                connection_id,
+                fingerprint,
+                url,
+            )
+        }
+
+        async fn close(self) {
+            let pool = self.store.pool().clone();
+            drop(self.store);
+            pool.close().await;
+            let _ = std::fs::remove_file(self.path);
+        }
+    }
+
+    fn server_input(name: &str, url: &str) -> McpServerInput {
+        McpServerInput {
+            scope: "user".to_string(),
+            owner_user_id: Some(OWNER),
+            source_endpoint_id: None,
+            name: name.to_string(),
+            aggregate_naming_mode: "qualified_only".to_string(),
+            transport: "http".to_string(),
+            provider_kind: None,
+            url: Some(url.to_string()),
+            command: None,
+            args: serde_json::json!([]),
+            env_json: serde_json::json!({}),
+            bearer_tokens_json: serde_json::json!([]),
+            http_headers_json: serde_json::json!({}),
+            auth_mode: "oauth".to_string(),
+            basic_username: None,
+            basic_password: None,
+            proxy_url: None,
+            tool_filter_mode: "blacklist".to_string(),
+            allowed_tools: serde_json::json!([]),
+            disabled_tools: serde_json::json!([]),
+            disabled_resources: serde_json::json!([]),
+            enabled: true,
+            timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
+        }
+    }
+
+    fn grant() -> crate::db::McpOAuthGrant {
+        crate::db::McpOAuthGrant {
+            registration: crate::db::McpOAuthRegistration {
+                snapshot: serde_json::json!({
+                    "client_id": "guard-client",
+                    "client_secret": "guard-client-secret",
+                    "client_auth_method": "client_secret_basic",
+                    "redirect_uri": "https://app.example.test/api/v1/admin/mcp-servers/x/oauth/callback",
+                    "resource": MCP_URL,
+                    "issuer": "https://issuer.example.test",
+                    "metadata": {
+                        "authorization_endpoint": "https://issuer.example.test/authorize",
+                        "token_endpoint": "https://issuer.example.test/token"
+                    }
+                }),
+            },
+            credentials: crate::db::McpOAuthStoredCredentials {
+                engine: serde_json::json!({
+                    "client_id": "guard-client",
+                    "token_response": {
+                        "access_token": "guard-token-1",
+                        "refresh_token": "guard-refresh-1",
+                        "token_type": "Bearer",
+                        "expires_in": 3600
+                    },
+                    "granted_scopes": ["read-mcp"],
+                    "token_received_at": 1_760_000_001_i64,
+                    "issuer": "https://issuer.example.test"
+                }),
+                scopes: vec!["read-mcp".to_string()],
+                expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(1)),
+                issuer: Some("https://issuer.example.test".to_string()),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn every_transport_method_forwards_a_token_for_that_send_only() {
+        let fixture = Fixture::new().await;
+        let inner = CountingClient::default();
+        let guarded = fixture.guarded(inner.clone()).await;
+
+        guarded
+            .post_message(
+                Arc::from("https://mcp.example.test/mcp"),
+                message(),
+                None,
+                None,
+                std::collections::HashMap::new(),
+            )
+            .await
+            .expect("initialization POST");
+        // A follow-up POST on the same paused session is guarded again: the
+        // token is not baked into the transport configuration.
+        guarded
+            .post_message(
+                Arc::from("https://mcp.example.test/mcp"),
+                message(),
+                None,
+                None,
+                std::collections::HashMap::new(),
+            )
+            .await
+            .expect("follow-up POST");
+        let _stream = guarded
+            .get_stream(
+                Arc::from("https://mcp.example.test/mcp"),
+                None,
+                None,
+                None,
+                std::collections::HashMap::new(),
+            )
+            .await
+            .expect("GET stream");
+        guarded
+            .delete_session(
+                Arc::from("https://mcp.example.test/mcp"),
+                Arc::from("session-1"),
+                None,
+                std::collections::HashMap::new(),
+            )
+            .await
+            .expect("DELETE session");
+
+        let calls = inner.calls();
+        let methods: Vec<_> = calls.iter().map(|(method, _)| *method).collect();
+        assert_eq!(
+            methods,
+            [
+                "post_message",
+                "post_message",
+                "get_stream",
+                "delete_session"
+            ]
+        );
+        for (method, token) in calls {
+            assert_eq!(
+                token.as_deref(),
+                Some("guard-token-1"),
+                "{method} must carry the guarded token"
+            );
+        }
+        fixture.close().await;
+    }
+
+    #[tokio::test]
+    async fn a_disconnect_stops_every_further_send() {
+        let fixture = Fixture::new().await;
+        let inner = CountingClient::default();
+        let guarded = fixture.guarded(inner.clone()).await;
+        guarded
+            .post_message(
+                Arc::from("https://mcp.example.test/mcp"),
+                message(),
+                None,
+                None,
+                std::collections::HashMap::new(),
+            )
+            .await
+            .expect("before disconnect");
+        assert_eq!(inner.count(), 1);
+
+        fixture
+            .service
+            .disconnect(&fixture.server, OWNER)
+            .await
+            .expect("disconnect");
+
+        assert!(
+            guarded
+                .post_message(
+                    Arc::from("https://mcp.example.test/mcp"),
+                    message(),
+                    None,
+                    None,
+                    std::collections::HashMap::new(),
+                )
+                .await
+                .is_err()
+        );
+        assert!(
+            guarded
+                .get_stream(
+                    Arc::from("https://mcp.example.test/mcp"),
+                    None,
+                    None,
+                    None,
+                    std::collections::HashMap::new(),
+                )
+                .await
+                .is_err()
+        );
+        assert!(
+            guarded
+                .delete_session(
+                    Arc::from("https://mcp.example.test/mcp"),
+                    Arc::from("session-1"),
+                    None,
+                    std::collections::HashMap::new(),
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(inner.count(), 1, "no further send may reach the network");
+        fixture.close().await;
+    }
+
+    #[tokio::test]
+    async fn an_owner_or_url_change_stops_the_paused_client() {
+        let fixture = Fixture::new().await;
+        let inner = CountingClient::default();
+        let guarded = fixture.guarded(inner.clone()).await;
+        guarded
+            .post_message(
+                Arc::from("https://mcp.example.test/mcp"),
+                message(),
+                None,
+                None,
+                std::collections::HashMap::new(),
+            )
+            .await
+            .expect("before owner change");
+
+        sqlx::query("UPDATE standalone_mcp_servers SET owner_user_id = ?1 WHERE server_id = ?2")
+            .bind(OTHER_OWNER)
+            .bind(fixture.server.server_id.to_string())
+            .execute(fixture.store.pool())
+            .await
+            .expect("change owner");
+        assert!(
+            guarded
+                .post_message(
+                    Arc::from("https://mcp.example.test/mcp"),
+                    message(),
+                    None,
+                    None,
+                    std::collections::HashMap::new(),
+                )
+                .await
+                .is_err(),
+            "an owner change must stop the paused client"
+        );
+        assert_eq!(inner.count(), 1);
+
+        // A separate fixture proves the URL change on its own.
+        let url_fixture = Fixture::new().await;
+        let url_inner = CountingClient::default();
+        let url_guarded = url_fixture.guarded(url_inner.clone()).await;
+        url_guarded
+            .post_message(
+                Arc::from("https://mcp.example.test/mcp"),
+                message(),
+                None,
+                None,
+                std::collections::HashMap::new(),
+            )
+            .await
+            .expect("before url change");
+        sqlx::query("UPDATE standalone_mcp_servers SET url = ?1 WHERE server_id = ?2")
+            .bind("https://other.example.test/mcp")
+            .bind(url_fixture.server.server_id.to_string())
+            .execute(url_fixture.store.pool())
+            .await
+            .expect("change url");
+        assert!(
+            url_guarded
+                .post_message(
+                    Arc::from("https://mcp.example.test/mcp"),
+                    message(),
+                    None,
+                    None,
+                    std::collections::HashMap::new(),
+                )
+                .await
+                .is_err(),
+            "a URL change must stop the paused client"
+        );
+        assert_eq!(url_inner.count(), 1);
+
+        fixture.close().await;
+        url_fixture.close().await;
+    }
+
+    #[tokio::test]
+    async fn a_reconnect_epoch_stops_the_old_client() {
+        let fixture = Fixture::new().await;
+        let inner = CountingClient::default();
+        let guarded = fixture.guarded(inner.clone()).await;
+        guarded
+            .post_message(
+                Arc::from("https://mcp.example.test/mcp"),
+                message(),
+                None,
+                None,
+                std::collections::HashMap::new(),
+            )
+            .await
+            .expect("before reconnect");
+
+        let manager =
+            RelaySecretManager::from_base64(&STANDARD.encode([13_u8; 32])).expect("manager");
+        let reconnected = fixture
+            .repository
+            .install_mcp_oauth_grant(&manager, fixture.server.server_id, OWNER, &grant())
+            .await
+            .expect("reinstall grant");
+        assert_ne!(reconnected.connection_id, fixture.connection_id);
+
+        assert!(
+            guarded
+                .post_message(
+                    Arc::from("https://mcp.example.test/mcp"),
+                    message(),
+                    None,
+                    None,
+                    std::collections::HashMap::new(),
+                )
+                .await
+                .is_err(),
+            "a reconnect installs a new epoch that the old client must not use"
+        );
+        assert_eq!(inner.count(), 1);
+        fixture.close().await;
+    }
+
+    #[derive(Clone, Default)]
+    struct RequestCounters {
+        authenticated: Arc<AtomicUsize>,
+    }
+
+    async fn count_authenticated(
+        State(counters): State<RequestCounters>,
+        request: Request<Body>,
+        next: Next,
+    ) -> Response {
+        if request
+            .headers()
+            .contains_key(axum::http::header::AUTHORIZATION)
+        {
+            counters.authenticated.fetch_add(1, Ordering::SeqCst);
+        }
+        next.run(request).await
+    }
+
+    #[derive(Clone, Default)]
+    struct GuardTestServer;
+
+    impl ServerHandler for GuardTestServer {
+        fn get_info(&self) -> ServerConfig {
+            InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
+                .with_server_info(Implementation::new("guard-test", "1.0"))
+        }
+    }
+
+    async fn spawn_guard_mcp() -> (String, RequestCounters) {
+        let counters = RequestCounters::default();
+        let service = StreamableHttpService::new(
+            || Ok(GuardTestServer),
+            LocalSessionManager::default().into(),
+            StreamableHttpServerConfig::default().disable_allowed_hosts(),
+        );
+        let router =
+            Router::new()
+                .nest_service("/mcp", service)
+                .layer(middleware::from_fn_with_state(
+                    counters.clone(),
+                    count_authenticated,
+                ));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind guard MCP server");
+        let address = listener.local_addr().expect("guard MCP address");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        (format!("http://{address}/mcp"), counters)
+    }
+
+    #[tokio::test]
+    async fn an_initialized_real_session_stops_after_revocation() {
+        for revocation in ["disconnect", "owner", "url"] {
+            let (url, counters) = spawn_guard_mcp().await;
+            let fixture = Fixture::new_with_url(&url).await;
+            let guarded = fixture.guarded_reqwest(reqwest::Client::new()).await;
+            let config = StreamableHttpClientTransportConfig::with_uri(url.clone());
+            let transport = StreamableHttpClientTransport::with_client(guarded, config);
+            let client = client_info()
+                .serve_with_lifecycle(transport, ClientLifecycleMode::Initialize)
+                .await
+                .expect("real initialize over the guarded client");
+            client.list_tools(None).await.expect("initial tools/list");
+
+            let before = counters.authenticated.load(Ordering::SeqCst);
+            assert!(before > 0, "the initialized session must authenticate");
+
+            match revocation {
+                "disconnect" => {
+                    fixture
+                        .service
+                        .disconnect(&fixture.server, OWNER)
+                        .await
+                        .expect("disconnect");
+                }
+                "owner" => {
+                    sqlx::query(
+                        "UPDATE standalone_mcp_servers SET owner_user_id = ?1 WHERE server_id = ?2",
+                    )
+                    .bind(OTHER_OWNER)
+                    .bind(fixture.server.server_id.to_string())
+                    .execute(fixture.store.pool())
+                    .await
+                    .expect("change owner");
+                }
+                "url" => {
+                    sqlx::query("UPDATE standalone_mcp_servers SET url = ?1 WHERE server_id = ?2")
+                        .bind("http://127.0.0.1:1/mcp")
+                        .bind(fixture.server.server_id.to_string())
+                        .execute(fixture.store.pool())
+                        .await
+                        .expect("change url");
+                }
+                other => panic!("unknown revocation {other}"),
+            }
+
+            let result = client.list_tools(None).await;
+            assert!(
+                result.is_err(),
+                "{revocation} must stop the initialized session"
+            );
+            assert_eq!(
+                counters.authenticated.load(Ordering::SeqCst),
+                before,
+                "{revocation} must not send another authenticated request"
+            );
+            fixture.close().await;
         }
     }
 }

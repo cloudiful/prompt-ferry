@@ -34,11 +34,7 @@ pub use self::cache_alert_monitor::{CacheAlertDependencies, run_cache_alert_chec
 
 use crate::{config::WorkerConfig, worker_admin::AdminState};
 use reqwest::Client;
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
 
 use self::bootstrap::{build_admin_state, build_standalone_state, validate_config};
@@ -204,10 +200,6 @@ impl WorkerRuntimeState {
 
     async fn wait_for_shutdown(&self) {
         self.control.wait_for_shutdown().await;
-    }
-
-    async fn wait_for_drain(&self, timeout: Duration) {
-        self.control.wait_for_drain(timeout).await;
     }
 }
 

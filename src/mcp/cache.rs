@@ -162,13 +162,15 @@ pub(super) struct SqliteCatalogBackend {
     pub(super) ttl_seconds: u64,
 }
 
+type FailureBackoff = Arc<RwLock<HashMap<(Uuid, DateTime<Utc>), Instant>>>;
+
 #[derive(Clone)]
 pub struct McpCatalogCache {
     backend: CacheBackend,
     local: Arc<RwLock<HashMap<Uuid, LocalSlot>>>,
     policy: CatalogFreshnessPolicy,
     refresh_registry: LocalRefreshRegistry,
-    failure_backoff: Arc<RwLock<HashMap<(Uuid, DateTime<Utc>), Instant>>>,
+    failure_backoff: FailureBackoff,
     coordinator: Arc<CatalogRefreshCoordinator>,
 }
 

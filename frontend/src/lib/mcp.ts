@@ -2,18 +2,23 @@ import type { QueryClient } from '@tanstack/react-query'
 import {
   createMcpServer,
   deleteMcpServer,
+  disconnectMcpOauth,
   getMcpCatalog,
+  getMcpOauthStatus,
   listMcpProviders,
   listMcpServers,
   listUserOptions,
+  startMcpOauth,
   testMcpServer,
   updateMcpServer,
 } from '@/generated/admin-api'
 import type {
   McpCatalogResponse,
+  McpOAuthStatusResponse,
   McpProviderDescriptor,
   McpServer,
   McpServerPageResponse,
+  McpOAuthStartResponse,
   McpServerRequest,
   McpTestResponse,
   User,
@@ -25,6 +30,7 @@ import { recordActionKey } from '@/stores/record-action-types'
 const mcpServersNamespace = ['mcp-servers-page'] as const
 const mcpProvidersNamespace = ['mcp-providers'] as const
 const mcpUserOptionsNamespace = ['mcp-user-options'] as const
+const mcpOAuthStatusNamespace = ['mcp-oauth-status'] as const
 
 export const MCP_KEY_PREFIX = 'mcp'
 export const MCP_TEST_KEY_PREFIX = 'mcptest'
@@ -70,6 +76,32 @@ export function mcpProvidersQueryKey() {
 
 export function mcpUserOptionsQueryKey(adminId: number) {
   return [...mcpUserOptionsNamespace, adminId] as const
+}
+
+export function mcpOAuthStatusQueryKey(serverId: string) {
+  return [...mcpOAuthStatusNamespace, serverId] as const
+}
+
+export async function fetchMcpOAuthStatus(
+  serverId: string,
+): Promise<McpOAuthStatusResponse> {
+  return expectData(
+    await getMcpOauthStatus<true>(withData({ path: { server_id: serverId } })),
+  )
+}
+
+export async function startMcpOAuth(
+  serverId: string,
+): Promise<McpOAuthStartResponse> {
+  return expectData(
+    await startMcpOauth<true>(withData({ path: { server_id: serverId } })),
+  )
+}
+
+export async function disconnectMcpOAuth(serverId: string): Promise<void> {
+  await disconnectMcpOauth<true>(
+    withData({ path: { server_id: serverId } }),
+  )
 }
 
 export function mcpLastPageFirst(total: number, rows: number): number {

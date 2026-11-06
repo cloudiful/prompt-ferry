@@ -5,6 +5,7 @@ pub(crate) mod call_record;
 mod entry;
 mod filtering;
 mod freshness;
+pub(crate) mod oauth;
 mod output_schema;
 mod protocol;
 mod provider_usage;
@@ -57,6 +58,9 @@ pub(crate) struct McpRuntimeStorage {
     /// The builtin provider transport. `None` uses the proxied HTTP client;
     /// the in-process tests install a stub instead.
     builtin_transport: Option<std::sync::Arc<dyn MiniMaxTransport>>,
+    /// Personal MCP OAuth backend, when the runtime has one. `None` disables
+    /// personal OAuth credentials only; every other auth mode is unaffected.
+    oauth: Option<std::sync::Arc<crate::mcp::oauth::McpOAuthService>>,
 }
 
 impl McpRuntimeStorage {
@@ -66,6 +70,7 @@ impl McpRuntimeStorage {
             tracker: McpCallTracker::new(),
             quota: None,
             builtin_transport: None,
+            oauth: None,
         }
     }
 
@@ -75,6 +80,7 @@ impl McpRuntimeStorage {
             tracker: McpCallTracker::new(),
             quota: None,
             builtin_transport: None,
+            oauth: None,
         }
     }
 
@@ -129,6 +135,22 @@ impl McpRuntimeStorage {
     pub(crate) fn builtin_transport(&self) -> Option<&std::sync::Arc<dyn MiniMaxTransport>> {
         self.builtin_transport.as_ref()
     }
+
+    /// A storage that can resolve personal MCP OAuth credentials.
+    pub(crate) fn with_oauth_service(
+        &self,
+        service: std::sync::Arc<crate::mcp::oauth::McpOAuthService>,
+    ) -> Self {
+        Self {
+            oauth: Some(service),
+            ..self.clone()
+        }
+    }
+
+    /// The personal MCP OAuth backend, when one is configured.
+    pub(crate) fn oauth(&self) -> Option<&std::sync::Arc<crate::mcp::oauth::McpOAuthService>> {
+        self.oauth.as_ref()
+    }
 }
 
 #[derive(Clone)]
@@ -148,8 +170,11 @@ impl McpRuntimeState {
         // Issue #1179 P1: the builtin providers reuse the worker quota cache,
         // so the same snapshot and feedback state backs the AI routes and the
         // builtin MCP tools.
-        let storage = McpRuntimeStorage::from_repository(state.config_repository.clone())
+        let mut storage = McpRuntimeStorage::from_repository(state.config_repository.clone())
             .with_quota_cache(state.token_plan_quota.clone());
+        if let Some(oauth) = state.mcp_oauth.clone() {
+            storage = storage.with_oauth_service(oauth);
+        }
         Self {
             storage,
             catalog_cache: state.mcp_catalog_cache.clone(),

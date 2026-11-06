@@ -286,7 +286,7 @@ pub fn validate_embeddings_request_body(request_body: &[u8]) -> Result<(), Compa
     match object.get("input") {
         Some(serde_json::Value::String(text)) if !text.is_empty() => {}
         Some(serde_json::Value::Array(items)) if !items.is_empty() => {
-            validate_embeddings_input_batch(items).map_err(|message| invalid(message))?;
+            validate_embeddings_input_batch(items).map_err(invalid)?;
         }
         _ => {
             return Err(invalid(

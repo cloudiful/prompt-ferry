@@ -13,8 +13,6 @@ pub(super) enum RouteResolution {
         route: Box<db::RouteConfig>,
         quota_probe: Option<crate::worker::runtime::routing::QuotaProbePermit>,
     },
-    #[allow(dead_code)]
-    Responded,
 }
 
 pub(super) async fn resolve_route(
@@ -395,7 +393,6 @@ mod tests {
         fn ready_route(self) -> crate::db::RouteConfig {
             match self {
                 Self::Ready { route, .. } => *route,
-                Self::Responded => panic!("route unexpectedly responded"),
             }
         }
     }

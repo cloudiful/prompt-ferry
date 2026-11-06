@@ -101,6 +101,10 @@ set the same explicit base64 32-byte key in both environments before first
 bootstrap. The existing database keeps its existing admin account — the
 bootstrap password file is written only on initial creation when no admin exists.
 
+## Personal MCP OAuth
+
+Personal HTTP MCP servers (for example `https://huggingface.co/mcp?login`) can use OAuth in the admin console instead of a static bearer token. Set `PROMPT_FERRY_WORKER__MCP_OAUTH_REDIRECT_BASE` to a public HTTPS base URL (callback suffix `/api/v1/admin/mcp-servers/{server_id}/oauth/callback`); on PostgreSQL also set an explicit shared `PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY` so every worker can decrypt the same grant. Personal OAuth requests only the read-only `read-mcp` scope. A per-server proxy, plain HTTP server URL, stdio or built-in transport, admin scope, or missing configuration disables OAuth for that server with an actionable error; other auth modes keep working. Runtime tokens are never exported or shown in the UI, and disconnecting locally requires reconnecting.
+
 ## Before you expose it
 
 - Back up PostgreSQL and `<data-root>/prompt-ferry/worker-config.key`; without that key, stored secrets cannot be decrypted.

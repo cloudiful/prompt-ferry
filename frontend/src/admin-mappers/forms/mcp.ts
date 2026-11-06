@@ -102,7 +102,9 @@ export function mcpServerToForm(server: McpServer): McpForm {
   // INLINE-proxy-ui-a1: tolerate legacy payloads missing Phase F fields.
   const source = (server ?? {}) as Partial<McpServer>
   const authMode =
-    source.auth_mode === 'bearer' || source.auth_mode === 'basic'
+    source.auth_mode === 'bearer' ||
+    source.auth_mode === 'basic' ||
+    source.auth_mode === 'oauth'
       ? source.auth_mode
       : 'none'
   return {

@@ -3,7 +3,10 @@ use futures::StreamExt;
 use rmcp::transport::streamable_http_server::session::{
     SessionState, SessionStore, SessionStoreError,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, atomic::AtomicUsize},
+};
 use tokio::sync::RwLock;
 
 #[allow(dead_code)]
@@ -1111,6 +1114,206 @@ async fn sqlite_storage_with_server(
         McpRuntimeStorage::from_repository(repository),
         McpCatalogCache::new(),
     )
+}
+
+/// The storage of one request against a personal (user-scoped) OAuth server,
+/// with a real installed grant so a wrongly attempted fetch would reach the
+/// network.
+async fn sqlite_storage_with_personal_oauth() -> (
+    McpRuntimeStorage,
+    McpCatalogCache,
+    Arc<AtomicUsize>,
+    crate::db::McpServer,
+) {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    use crate::{
+        db::{ConfigRepository, McpServerInput, UserCreate, UserStore},
+        mcp::oauth::McpOAuthService,
+        relay_secrets::RelaySecretManager,
+        standalone_config::StandaloneConfigStore,
+    };
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counter = hits.clone();
+    let app = axum::Router::new().route(
+        "/mcp",
+        axum::routing::any(move || {
+            let counter = counter.clone();
+            async move {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                (axum::http::StatusCode::ACCEPTED, "")
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind listener");
+    let address = listener.local_addr().expect("listener address");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let url = format!("http://{address}/mcp");
+
+    let path = std::env::temp_dir().join(format!(
+        "prompt-ferry-entry-oauth-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let store = std::sync::Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
+    let manager = RelaySecretManager::from_base64(&STANDARD.encode([9_u8; 32])).expect("manager");
+    let repository = ConfigRepository::sqlite(store.clone(), manager.clone());
+    let owner = UserStore::sqlite(store.pool().clone())
+        .create_user(UserCreate {
+            login_name: "entry-oauth-owner".to_string(),
+            password_hash: "hash".to_string(),
+            display_name: "Entry OAuth Owner".to_string(),
+            is_admin: false,
+        })
+        .await
+        .expect("create owner");
+    let server_id = uuid::Uuid::new_v4();
+    repository
+        .create_mcp_server(
+            server_id,
+            McpServerInput {
+                scope: "user".to_string(),
+                owner_user_id: Some(owner.user_id),
+                source_endpoint_id: None,
+                name: "personal-oauth".to_string(),
+                aggregate_naming_mode: "qualified_only".to_string(),
+                transport: "http".to_string(),
+                provider_kind: None,
+                url: Some(url),
+                command: None,
+                args: serde_json::json!([]),
+                env_json: serde_json::json!({}),
+                bearer_tokens_json: serde_json::json!([]),
+                http_headers_json: serde_json::json!({}),
+                auth_mode: "oauth".to_string(),
+                basic_username: None,
+                basic_password: None,
+                proxy_url: None,
+                tool_filter_mode: "blacklist".to_string(),
+                allowed_tools: serde_json::json!([]),
+                disabled_tools: serde_json::json!([]),
+                disabled_resources: serde_json::json!([]),
+                enabled: true,
+                timeout_ms: 30_000,
+                lifecycle_policy: "auto".to_string(),
+                lifecycle_manual_protocol_version: None,
+            },
+        )
+        .await
+        .expect("create oauth server");
+    let grant = crate::db::McpOAuthGrant {
+        registration: crate::db::McpOAuthRegistration {
+            snapshot: serde_json::json!({
+                "client_id": "entry-oauth-client",
+                "client_secret": "entry-oauth-secret",
+                "client_auth_method": "client_secret_basic",
+                "redirect_uri": "https://app.example.test/api/v1/admin/mcp-servers/x/oauth/callback",
+                "resource": "https://mcp.example.test/mcp",
+                "issuer": "https://issuer.example.test",
+                "metadata": {
+                    "authorization_endpoint": "https://issuer.example.test/authorize",
+                    "token_endpoint": "https://issuer.example.test/token"
+                }
+            }),
+        },
+        credentials: crate::db::McpOAuthStoredCredentials {
+            engine: serde_json::json!({
+                "client_id": "entry-oauth-client",
+                "token_response": {
+                    "access_token": "entry-oauth-token",
+                    "refresh_token": "entry-oauth-refresh",
+                    "token_type": "Bearer",
+                    "expires_in": 3600
+                },
+                "granted_scopes": ["read-mcp"],
+                "token_received_at": 1_760_000_001_i64,
+                "issuer": "https://issuer.example.test"
+            }),
+            scopes: vec!["read-mcp".to_string()],
+            expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(1)),
+            issuer: Some("https://issuer.example.test".to_string()),
+        },
+    };
+    repository
+        .install_mcp_oauth_grant(&manager, server_id, owner.user_id, &grant)
+        .await
+        .expect("install grant");
+    let oauth_service = Arc::new(
+        McpOAuthService::new(
+            repository.clone(),
+            Some(manager),
+            Some("https://app.example.test".to_string()),
+            UserStore::sqlite(store.pool().clone()),
+        )
+        .with_private_network(),
+    );
+    let server = repository
+        .get_mcp_server(server_id)
+        .await
+        .expect("load server")
+        .expect("server row");
+    (
+        McpRuntimeStorage::from_repository(repository).with_oauth_service(oauth_service),
+        McpCatalogCache::new(),
+        hits,
+        server,
+    )
+}
+
+#[tokio::test]
+async fn public_aggregate_never_fetches_a_personal_oauth_server() {
+    let (storage, cache, hits, server) = sqlite_storage_with_personal_oauth().await;
+    let _ = crate::mcp::transport::call_with_storage(
+        Some(&storage),
+        &server,
+        serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        None,
+        None,
+    )
+    .await;
+    for _ in 0..50 {
+        if hits.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(
+        hits.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        "the eligible OAuth owner path must reach the real listener"
+    );
+    hits.store(0, std::sync::atomic::Ordering::SeqCst);
+    let session_id = initialize_legacy_session(&storage, &cache, None).await;
+    let headers = vec![
+        ("mcp-session-id".to_string(), session_id),
+        ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
+    ];
+    let (status, _, _, _) = collect_response(
+        handle_stream_with_storage(
+            &storage,
+            &cache,
+            request(
+                "POST",
+                "/mcp",
+                &headers,
+                &legacy_request_body("tools/list", 2, serde_json::json!({})),
+            ),
+            None,
+            &[],
+        )
+        .await
+        .expect("aggregate response"),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        hits.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the public aggregate must not use a personal OAuth grant"
+    );
 }
 
 fn v2_request_body(method: &str, id: i64, mut params: Value) -> Vec<u8> {

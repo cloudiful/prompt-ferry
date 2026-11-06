@@ -1,0 +1,93 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO mcp_oauth_leases (\n    server_id,\n    owner_user_id,\n    connection_id,\n    generation,\n    lease_owner,\n    expires_at,\n    updated_at\n)\nVALUES ($1, $2, $3, $4, $5, $6, NOW())\nON CONFLICT (server_id, owner_user_id) DO UPDATE\nSET lease_owner = EXCLUDED.lease_owner,\n    expires_at = EXCLUDED.expires_at,\n    updated_at = NOW()\nWHERE mcp_oauth_leases.connection_id = EXCLUDED.connection_id\n  AND mcp_oauth_leases.generation = EXCLUDED.generation\n  AND mcp_oauth_leases.expires_at <= NOW()\nRETURNING server_id,\n    owner_user_id,\n    connection_id,\n    generation,\n    lease_owner,\n    expires_at\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "server_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_leases",
+            "name": "server_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_leases",
+            "name": "owner_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "connection_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_leases",
+            "name": "connection_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_leases",
+            "name": "generation"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "lease_owner",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_leases",
+            "name": "lease_owner"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_leases",
+            "name": "expires_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Uuid",
+        "Int8",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9914b6e351ac743dde49007f2e22441ada4c48c7cf6e0614873d08a9738bcc77"
+}

@@ -126,7 +126,10 @@ pub(crate) async fn persist_response(
                 continue;
             }
         };
-        if let Err(_) = quota_key_observations::insert_observation(pool, &create).await {
+        if quota_key_observations::insert_observation(pool, &create)
+            .await
+            .is_err()
+        {
             tracing::warn!(
                 endpoint_id = %endpoint_id,
                 "quota observation persist failed"
@@ -168,7 +171,10 @@ pub(crate) async fn persist_endpoint_failure(
             Ok(create) => create,
             Err(_) => continue,
         };
-        if let Err(_) = quota_key_observations::insert_observation(pool, &create).await {
+        if quota_key_observations::insert_observation(pool, &create)
+            .await
+            .is_err()
+        {
             tracing::warn!(
                 endpoint_id = %endpoint_id,
                 "quota observation persist failed"

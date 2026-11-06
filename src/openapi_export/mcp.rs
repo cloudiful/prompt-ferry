@@ -1,6 +1,7 @@
 use crate::worker_admin_types::{
-    McpCatalogResponse, McpProviderDescriptor, McpServer, McpServerPageResponse, McpServerRequest,
-    McpTestResponse, TablePageQuery,
+    McpCatalogResponse, McpOAuthCallbackQuery, McpOAuthRefreshResponse, McpOAuthStartResponse,
+    McpOAuthStatusResponse, McpProviderDescriptor, McpServer, McpServerPageResponse,
+    McpServerRequest, McpTestResponse, TablePageQuery,
 };
 
 #[utoipa::path(
@@ -65,3 +66,51 @@ pub(super) fn get_mcp_catalog() {}
     tag = "mcp"
 )]
 pub(super) fn test_mcp_server() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/mcp-servers/{server_id}/oauth",
+    params(("server_id" = uuid::Uuid, Path, description = "MCP server ID")),
+    responses((status = 200, body = McpOAuthStatusResponse, description = "Personal MCP OAuth status")),
+    tag = "mcp"
+)]
+pub(super) fn get_mcp_oauth_status() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/mcp-servers/{server_id}/oauth",
+    params(("server_id" = uuid::Uuid, Path, description = "MCP server ID")),
+    responses((status = 200, body = McpOAuthStartResponse, description = "Authorization URL to visit")),
+    tag = "mcp"
+)]
+pub(super) fn start_mcp_oauth() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/mcp-servers/{server_id}/oauth/callback",
+    params(
+        ("server_id" = uuid::Uuid, Path, description = "MCP server ID"),
+        McpOAuthCallbackQuery
+    ),
+    responses((status = 200, description = "Fixed authorization result page")),
+    tag = "mcp"
+)]
+pub(super) fn mcp_oauth_callback() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/mcp-servers/{server_id}/oauth/refresh",
+    params(("server_id" = uuid::Uuid, Path, description = "MCP server ID")),
+    responses((status = 200, body = McpOAuthRefreshResponse, description = "Refreshed grant status")),
+    tag = "mcp"
+)]
+pub(super) fn refresh_mcp_oauth() {}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/admin/mcp-servers/{server_id}/oauth",
+    params(("server_id" = uuid::Uuid, Path, description = "MCP server ID")),
+    responses((status = 204, description = "Grant, pending states and leases cleared")),
+    tag = "mcp"
+)]
+pub(super) fn disconnect_mcp_oauth() {}

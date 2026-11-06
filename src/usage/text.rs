@@ -191,11 +191,15 @@ enum MetadataField<T> {
 
 impl<T> Default for MetadataField<T> {
     fn default() -> Self {
-        Self::Missing
+        Self::missing()
     }
 }
 
 impl<T> MetadataField<T> {
+    const fn missing() -> Self {
+        Self::Missing
+    }
+
     fn value(&self) -> Option<&T> {
         match self {
             Self::Present(Some(value)) => Some(value),

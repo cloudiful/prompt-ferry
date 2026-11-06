@@ -40,7 +40,7 @@ async fn iterative_cycle_handles_many_lease_losses() {
                 let attempt = if attempts.fetch_add(1, Ordering::SeqCst) < LEASE_LOSSES {
                     RefreshAttempt::LeaseLost
                 } else {
-                    RefreshAttempt::Completed(empty_completion())
+                    RefreshAttempt::Completed(Box::new(empty_completion()))
                 };
                 Box::pin(async move { attempt }) as BoxFuture<'static, _>
             }

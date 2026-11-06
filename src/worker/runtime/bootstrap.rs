@@ -192,7 +192,17 @@ pub(super) async fn build_standalone_state(
     };
     let mcp_runtime = crate::mcp::McpRuntimeState::sqlite(
         config,
-        crate::mcp::McpRuntimeStorage::from_repository(mcp_repository),
+        {
+            let storage = crate::mcp::McpRuntimeStorage::from_repository(mcp_repository);
+            storage.with_oauth_service(std::sync::Arc::new(
+                crate::mcp::oauth::McpOAuthService::new(
+                    storage.repository().clone(),
+                    Some(manager.clone()),
+                    Some(config.mcp_oauth_redirect_base.clone()),
+                    crate::db::UserStore::sqlite(store.pool().clone()),
+                ),
+            ))
+        },
         store.pool().clone(),
         catalog_cache,
     )
@@ -202,6 +212,38 @@ pub(super) async fn build_standalone_state(
             .with_mcp_runtime(mcp_runtime);
     state.hydrate_usage().await;
     Ok(state)
+}
+
+/// Attach the personal MCP OAuth backend to a freshly built admin state.
+///
+/// The backend is optional by construction: a deployment without a redirect
+/// base still builds, and only personal OAuth reports the missing setting.
+fn attach_mcp_oauth(state: AdminState, config: &crate::config::WorkerConfig) -> AdminState {
+    let shared_key_missing = config.mcp_oauth_shared_key_missing();
+    let mut service = crate::mcp::oauth::McpOAuthService::new(
+        state.config_repository.clone(),
+        if shared_key_missing {
+            None
+        } else {
+            state.relay_secret_manager.clone()
+        },
+        Some(config.mcp_oauth_redirect_base.clone()),
+        state.user_store.clone(),
+    );
+    if shared_key_missing {
+        service = service.with_disabled_reason(
+            "PostgreSQL personal MCP OAuth requires an explicitly configured shared \
+             WORKER_CONFIG_ENCRYPTION_KEY so every worker can decrypt the same grants",
+        );
+    }
+    let service = std::sync::Arc::new(service);
+    let catalog = state
+        .mcp_catalog_service
+        .clone()
+        .with_oauth_service(service.clone());
+    state
+        .with_mcp_catalog_service(catalog)
+        .with_mcp_oauth_service(service)
 }
 
 /// Start the admin HTTP server on a socket the caller already bound.
@@ -364,6 +406,7 @@ pub(super) async fn build_admin_state(
         })
         .with_user_store(user_store)
         .with_config_repository(config_repository);
+        let state = attach_mcp_oauth(state, config);
         if spawn_admin_server {
             start_admin_server(state.clone(), config, admin_listener, worker_shutdown);
         }
@@ -470,6 +513,7 @@ pub(super) async fn build_admin_state(
     })
     .with_user_store(user_store)
     .with_cache_alert(cache_alert);
+    let state = attach_mcp_oauth(state, config);
     let quota_service = Arc::new(
         worker_admin::chatgpt_quota_service::ChatGptQuotaService::new_with_feedback(
             state.pool.clone(),
@@ -489,7 +533,8 @@ pub(super) async fn build_admin_state(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_admin_state, build_standalone_state, publish_bootstrap_password, validate_config,
+        attach_mcp_oauth, build_admin_state, build_standalone_state, publish_bootstrap_password,
+        validate_config,
     };
     use crate::config::WorkerConfig;
     use base64::Engine as _;
@@ -777,6 +822,122 @@ mod tests {
         drop(state);
         let _ = std::fs::remove_file(path);
         std::fs::remove_dir_all(secrets_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn postgres_oauth_without_a_shared_key_is_disabled_at_bootstrap() {
+        #[allow(dead_code)]
+        mod test_db_url {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/support/test_db_url.rs"
+            ));
+        }
+
+        fn lazy_state(pool: sqlx::PgPool) -> crate::worker_admin::AdminState {
+            crate::worker_admin::AdminState::new(crate::worker_admin_state::AdminStateInit {
+                pool: pool.clone(),
+                lease_pool: pool.clone(),
+                replay_cache: crate::replay_cache::ReplayCache::default(),
+                configured_relays: Vec::new(),
+                managed_mode: false,
+                relay_secret_manager: Some(
+                    crate::relay_secrets::RelaySecretManager::from_base64(&test_key())
+                        .expect("manager"),
+                ),
+                redaction_enabled: false,
+                model_route_whitelist_enabled: true,
+                request_content_logging: crate::worker_admin_types::RequestContentLoggingResponse {
+                    mode: crate::worker_admin_types::RequestContentLoggingMode::Off,
+                    raw_retention_days: 3,
+                },
+                usage_retention: crate::worker_admin_types::UsageRetentionSettings::default(),
+                raw_payload_store: None,
+                stream_delta_batching: crate::db::StreamDeltaBatchingSettings::default(),
+                llm_review_settings: crate::llm_review::LlmReviewSettings::default(),
+                mcp_catalog_cache: crate::mcp::McpCatalogCache::new(),
+                mcp_catalog_service: crate::mcp::McpCatalogService::new(
+                    pool.clone(),
+                    crate::mcp::McpCatalogCache::new(),
+                ),
+                mcp_session_store: None,
+                mcp_allowed_origins: Vec::new(),
+                endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(
+                    std::time::Duration::from_secs(60),
+                ),
+            })
+        }
+
+        fn personal_server() -> crate::db::McpServer {
+            crate::db::McpServer {
+                server_id: uuid::Uuid::new_v4(),
+                source_endpoint_id: None,
+                scope: "user".to_string(),
+                owner_user_id: Some(1),
+                name: "personal".to_string(),
+                aggregate_naming_mode: "qualified_only".to_string(),
+                transport: "http".to_string(),
+                provider_kind: None,
+                url: Some("https://mcp.example.test/mcp".to_string()),
+                command: None,
+                args: serde_json::json!([]),
+                env_json: serde_json::json!({}),
+                bearer_tokens_json: serde_json::json!([]),
+                http_headers_json: serde_json::json!({}),
+                auth_mode: "oauth".to_string(),
+                basic_username: None,
+                basic_password: None,
+                proxy_url: None,
+                has_proxy_url: false,
+                tool_filter_mode: "blacklist".to_string(),
+                allowed_tools: serde_json::json!([]),
+                disabled_tools: serde_json::json!([]),
+                disabled_resources: serde_json::json!([]),
+                enabled: true,
+                timeout_ms: 30_000,
+                lifecycle_policy: "auto".to_string(),
+                lifecycle_manual_protocol_version: None,
+                lifecycle_learned_mode: None,
+                lifecycle_learned_protocol_version: None,
+                lifecycle_learned_for_updated_at: None,
+                lifecycle_learned_at: None,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            }
+        }
+
+        let postgres = WorkerConfig {
+            database_url: "postgres://postgres@localhost/prompt_ferry".to_string(),
+            mcp_oauth_redirect_base: "https://app.example.test".to_string(),
+            ..WorkerConfig::default()
+        };
+        let state = attach_mcp_oauth(lazy_state(test_db_url::lazy_test_pool()), &postgres);
+        let service = state.mcp_oauth.clone().expect("injected OAuth service");
+        assert!(
+            service
+                .disabled_reason()
+                .is_some_and(|reason| reason.contains("WORKER_CONFIG_ENCRYPTION_KEY")),
+            "PG without an explicit shared key must inject the actionable reason"
+        );
+        let error = service
+            .start(&personal_server(), 1, "session")
+            .await
+            .expect_err("PG OAuth without a shared key is disabled");
+        assert!(matches!(
+            error,
+            crate::mcp::oauth::McpOAuthError::Disabled(_)
+        ));
+
+        let sqlite = WorkerConfig {
+            mcp_oauth_redirect_base: "https://app.example.test".to_string(),
+            ..WorkerConfig::default()
+        };
+        let state = attach_mcp_oauth(lazy_state(test_db_url::lazy_test_pool()), &sqlite);
+        let service = state.mcp_oauth.clone().expect("injected OAuth service");
+        assert!(
+            service.disabled_reason().is_none(),
+            "SQLite keeps its persistent key path and is not disabled"
+        );
     }
 
     #[tokio::test]

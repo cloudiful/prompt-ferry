@@ -1,9 +1,11 @@
+#[cfg(test)]
 mod capabilities;
 mod routing;
 mod snapshot;
 mod state;
 mod usage;
 
+#[cfg(test)]
 pub(crate) use capabilities::{
     StandaloneFeature, StandaloneFeatureDiagnostic, diagnostic as standalone_feature_diagnostic,
     diagnostics as standalone_feature_diagnostics,

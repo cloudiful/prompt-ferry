@@ -7,9 +7,44 @@ use anyhow::Context;
 use clap::Parser;
 use std::path::Path;
 use tracing::{debug, info};
-use tracing_subscriber::{EnvFilter, fmt};
+use tracing_subscriber::{
+    EnvFilter, Layer, Registry, filter::FilterFn, fmt, layer::SubscriberExt,
+    util::SubscriberInitExt,
+};
 
 const DEFAULT_LOG_FILTER: &str = "info,rmcp::service=warn";
+
+/// Targets that may log the raw authorization code, token response or other
+/// OAuth material. They are denied at the layer level, so no `RUST_LOG` value
+/// can re-enable them. The personal MCP OAuth backend itself only emits its
+/// own sanitized `category`/`event` fields.
+const DENIED_LOG_TARGET_PREFIXES: &[&str] =
+    &["rmcp::transport::auth", "rmcp::transport::common::auth"];
+
+fn is_denied_log_target(target: &str) -> bool {
+    DENIED_LOG_TARGET_PREFIXES
+        .iter()
+        .any(|prefix| target == *prefix || target.starts_with(&format!("{prefix}::")))
+}
+
+/// Build the effective subscriber filter.
+///
+/// `RUST_LOG` still controls ordinary verbosity, but the OAuth internals stay
+/// off because the deny filter is applied on top of the `EnvFilter` rather than
+/// as another directive it could override.
+fn env_filter(level: &str) -> EnvFilter {
+    EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new(format!("{level},rmcp::service=warn")))
+        .unwrap_or_else(|_| EnvFilter::new(DEFAULT_LOG_FILTER))
+}
+
+fn logging_layer(level: &str) -> impl Layer<Registry> + Send + Sync {
+    fmt::layer()
+        .with_filter(env_filter(level))
+        .with_filter(FilterFn::new(|metadata: &tracing::Metadata<'_>| {
+            !is_denied_log_target(metadata.target())
+        }))
+}
 
 pub async fn run_cli() -> anyhow::Result<()> {
     rustls::crypto::aws_lc_rs::default_provider()
@@ -74,8 +109,98 @@ fn log_dotenv(path: Option<&Path>) {
 }
 
 fn init_logging(level: &str) {
-    let filter = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new(format!("{level},rmcp::service=warn")))
-        .unwrap_or_else(|_| EnvFilter::new(DEFAULT_LOG_FILTER));
-    let _ = fmt().with_env_filter(filter).try_init();
+    // The level is embedded in the default filter so `RUST_LOG` still wins for
+    // ordinary targets; the OAuth deny filter is applied on top of it and can
+    // never be re-enabled from the environment.
+    let _ = tracing_subscriber::registry()
+        .with(logging_layer(level))
+        .try_init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_denied_log_target, logging_layer};
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::fmt::MakeWriter;
+    use tracing_subscriber::layer::SubscriberExt;
+
+    #[derive(Clone, Default)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+
+    impl Capture {
+        fn contents(&self) -> String {
+            String::from_utf8_lossy(&self.0.lock().expect("capture")).to_string()
+        }
+    }
+
+    impl Write for Capture {
+        fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().expect("capture").extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> MakeWriter<'a> for Capture {
+        type Writer = Capture;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    #[test]
+    fn oauth_internal_targets_are_denied_while_service_targets_stay_enabled() {
+        assert!(is_denied_log_target("rmcp::transport::auth"));
+        assert!(is_denied_log_target("rmcp::transport::auth::enterprise"));
+        assert!(is_denied_log_target("rmcp::transport::common::auth"));
+        assert!(!is_denied_log_target("rmcp::service"));
+        assert!(!is_denied_log_target("prompt_ferry::mcp::oauth::flow"));
+    }
+
+    #[test]
+    fn oauth_authorization_material_never_reaches_the_log_even_with_trace_verbosity() {
+        let capture = Capture::default();
+        // Simulate `RUST_LOG=trace`: the deny filter is applied on top of an
+        // allow-everything `EnvFilter`, so the OAuth internals still stay off.
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(capture.clone())
+                .with_filter(tracing_subscriber::filter::EnvFilter::new("trace"))
+                .with_filter(tracing_subscriber::filter::FilterFn::new(
+                    |metadata: &tracing::Metadata<'_>| !is_denied_log_target(metadata.target()),
+                )),
+        );
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::debug!(
+                target: "rmcp::transport::auth",
+                "start exchange code for token: raw-code and vendor-id-token"
+            );
+            tracing::info!(
+                target: "prompt_ferry::mcp::oauth",
+                event = "authorization_started",
+                "personal MCP OAuth authorization started"
+            );
+        });
+        let rendered = capture.contents();
+        assert!(
+            !rendered.contains("raw-code"),
+            "the authorization code must never be logged: {rendered}"
+        );
+        assert!(
+            !rendered.contains("vendor-id-token"),
+            "vendor token material must never be logged: {rendered}"
+        );
+        assert!(
+            rendered.contains("authorization_started"),
+            "sanitized service events stay visible: {rendered}"
+        );
+        let _ = logging_layer("info");
+    }
 }

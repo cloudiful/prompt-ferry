@@ -175,10 +175,8 @@ pub(super) async fn forward_upstream_response(
             let cause = cause.unwrap_or(UpstreamFailureCause::RateLimited);
             feedback.record_failure(if status_is_429 { retry_after } else { None }, cause);
         }
-        if quota_exhausted {
-            if let Some(state) = services.admin_state() {
-                state.token_plan_quota.invalidate(route.route_id).await;
-            }
+        if quota_exhausted && let Some(state) = services.admin_state() {
+            state.token_plan_quota.invalidate(route.route_id).await;
         }
         if status_is_429 || quota_exhausted {
             schedule_quota_refresh(services, route);

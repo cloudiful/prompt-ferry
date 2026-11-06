@@ -159,7 +159,7 @@ export type McpForm = {
   provider_kind: string
   url: string
   command_argv_text: string
-  auth_mode: 'none' | 'bearer' | 'basic'
+  auth_mode: 'none' | 'bearer' | 'basic' | 'oauth'
   bearer_tokens: McpBearerTokenForm[]
   basic_username: string
   basic_password: string

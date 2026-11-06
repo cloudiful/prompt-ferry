@@ -120,6 +120,7 @@ pub(super) struct ServiceInner {
 }
 
 impl ChatGptQuotaService {
+    #[cfg(test)]
     pub(crate) fn new(pool: PgPool, repository: ConfigRepository) -> Self {
         Self::with_fetcher(pool, repository, Arc::new(StoredOAuthQuotaFetcher))
     }
@@ -137,6 +138,7 @@ impl ChatGptQuotaService {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn with_fetcher(
         pool: PgPool,
         repository: ConfigRepository,

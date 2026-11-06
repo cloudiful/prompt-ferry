@@ -212,10 +212,7 @@ async fn an_unknown_write_tool_is_rejected_before_any_attempt() {
         tokio::time::Instant::now() + Duration::from_secs(1),
     )
     .await;
-    assert!(
-        matches!(result, Err(_)),
-        "an unknown tool has no retry plan"
-    );
+    assert!(result.is_err(), "an unknown tool has no retry plan");
 }
 
 #[test]
@@ -262,7 +259,7 @@ fn blocks_ipv6_loopback_private_and_link_local_ranges() {
         ("febf:ffff::", true),
         ("ff00::1", true),
         ("ff02::1", true),
-        ("2001:db8::1", false),
+        ("2001:db8::1", true),
         ("2606:4700:4700::1111", false),
     ];
     for (text, expected) in cases {

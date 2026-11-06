@@ -1,0 +1,209 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT server_id,\n    owner_user_id,\n    connection_id,\n    generation,\n    config_fingerprint,\n    registration_ciphertext,\n    registration_nonce,\n    registration_key_version,\n    credentials_ciphertext,\n    credentials_nonce,\n    credentials_key_version,\n    scopes,\n    expires_at,\n    issuer,\n    created_at,\n    updated_at\nFROM mcp_oauth_credentials\nWHERE server_id = $1\n  AND owner_user_id = $2\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "server_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_credentials",
+            "name": "server_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_credentials",
+            "name": "owner_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "connection_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_credentials",
+            "name": "connection_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "generation",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_credentials",
+            "name": "generation"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "config_fingerprint",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_credentials",
+            "name": "config_fingerprint"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "registration_ciphertext",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_credentials",
+            "name": "registration_ciphertext"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "registration_nonce",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_credentials",
+            "name": "registration_nonce"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "registration_key_version",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_credentials",
+            "name": "registration_key_version"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "credentials_ciphertext",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_credentials",
+            "name": "credentials_ciphertext"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "credentials_nonce",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_credentials",
+            "name": "credentials_nonce"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "credentials_key_version",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_credentials",
+            "name": "credentials_key_version"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "scopes",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_credentials",
+            "name": "scopes"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_credentials",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "issuer",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_credentials",
+            "name": "issuer"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_credentials",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_oauth_credentials",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "3447f7da2e5238ec4be4b1f06d1fd4f9dc6a01ed9ea427f388bf53631ee19f43"
+}

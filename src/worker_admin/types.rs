@@ -13,6 +13,8 @@ mod config_import;
 mod endpoints;
 #[path = "types/mcp.rs"]
 mod mcp;
+#[path = "types/mcp_oauth.rs"]
+mod mcp_oauth;
 mod mcp_provider;
 #[path = "types/model_routes.rs"]
 mod model_routes;
@@ -41,6 +43,7 @@ pub use config_export::*;
 pub use config_import::*;
 pub use endpoints::*;
 pub use mcp::*;
+pub use mcp_oauth::*;
 pub use mcp_provider::*;
 pub use model_routes::*;
 pub use quota_key_observations::*;

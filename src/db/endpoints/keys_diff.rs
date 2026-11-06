@@ -158,10 +158,10 @@ fn resolve_identities(
                     .find(|key| key.key_label == requested.key_label)
                     .map(|key| key.key_id)
             });
-        if let Some(key_id) = key_id {
-            if !claimed.insert(key_id) {
-                bail!("endpoint api key {key_id} is requested twice");
-            }
+        if let Some(key_id) = key_id
+            && !claimed.insert(key_id)
+        {
+            bail!("endpoint api key {key_id} is requested twice");
         }
         if positions.insert(requested.position, ()).is_some() {
             bail!(

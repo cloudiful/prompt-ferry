@@ -159,24 +159,23 @@ impl QuotaObservationCreate {
         if self.key_label.chars().count() > MAX_KEY_LABEL_CHARS {
             bail!("quota observation key_label exceeds {MAX_KEY_LABEL_CHARS} characters");
         }
-        if let Some(error_code) = self.error_code.as_deref() {
-            if error_code.is_empty()
+        if let Some(error_code) = self.error_code.as_deref()
+            && (error_code.is_empty()
                 || error_code.chars().count() > MAX_ERROR_CODE_CHARS
                 || !error_code.chars().all(|char| {
                     char.is_ascii_lowercase()
                         || char.is_ascii_digit()
                         || matches!(char, '_' | ':' | '-')
-                })
-            {
-                bail!(
-                    "quota observation error_code must be a stable code of 1..={MAX_ERROR_CODE_CHARS} [a-z0-9:_-]"
-                );
-            }
+                }))
+        {
+            bail!(
+                "quota observation error_code must be a stable code of 1..={MAX_ERROR_CODE_CHARS} [a-z0-9:_-]"
+            );
         }
-        if let Some(plan_type) = self.plan_type.as_deref() {
-            if plan_type.is_empty() || plan_type.chars().count() > MAX_PLAN_TYPE_CHARS {
-                bail!("quota observation plan_type must be 1..={MAX_PLAN_TYPE_CHARS} characters");
-            }
+        if let Some(plan_type) = self.plan_type.as_deref()
+            && (plan_type.is_empty() || plan_type.chars().count() > MAX_PLAN_TYPE_CHARS)
+        {
+            bail!("quota observation plan_type must be 1..={MAX_PLAN_TYPE_CHARS} characters");
         }
         if !self.ok && !self.windows.is_empty() {
             bail!("failed quota observations must carry empty windows");

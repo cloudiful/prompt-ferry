@@ -1361,6 +1361,7 @@ export const RETAINED_LEGACY_MODULE_NAMES: string[] = [
   'src/admin-mappers/forms/endpoint.test.ts',
   'src/admin-mappers/forms/model-route.test.ts',
   'src/admin-mappers/forms/relay-host.test.ts',
+  'subscription-quota-history.test.ts',
   'subscription-quota-windows.test.ts',
   'table-pagination-labels.test.ts',
   'theme-first-paint.test.ts',
@@ -1830,6 +1831,23 @@ const REPLACED_LEGACY_MODULES: Array<[string, LegacyEvidenceGroup[]]> = [
       reactEvidence(
         'src/react-tests/quota-core.test.ts',
         'keeps duplicate key identities, legend names, theme colors, and hidden series stable',
+      ),
+    ],
+  ],
+  [
+    'subscription-quota-history.test.ts',
+    [
+      reactEvidence(
+        'src/react-tests/endpoints-quota-history.test.tsx',
+        'pages only in list mode, maps All to an omitted API key, retries load-more, and retains pages across mode switches',
+      ),
+      reactEvidence(
+        'src/react-tests/endpoints-quota-history.test.tsx',
+        'retries failed first pages, ignores stale range results, and clears both readers on collapse',
+      ),
+      reactEvidence(
+        'src/react-tests/endpoints-quota-history.test.tsx',
+        'ignores an old list response after the key filter changes',
       ),
     ],
   ],

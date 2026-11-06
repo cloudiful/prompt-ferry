@@ -169,19 +169,21 @@ async fn load_existing_route_carry(
     )
 }
 
-fn carry_from_targets(
-    targets: Vec<(
-        Uuid,
-        Option<String>,
-        Option<String>,
-        Vec<db::ActiveWindow>,
-        Option<i32>,
-    )>,
-) -> (
+type TargetCarryRow = (
+    Uuid,
+    Option<String>,
+    Option<String>,
+    Vec<db::ActiveWindow>,
+    Option<i32>,
+);
+
+type TargetCarryMaps = (
     HashMap<Uuid, Option<String>>,
     HashMap<Uuid, Vec<db::ActiveWindow>>,
     crate::worker_admin_types::DimensionOverrideCarry,
-) {
+);
+
+fn carry_from_targets(targets: Vec<TargetCarryRow>) -> TargetCarryMaps {
     let mut overrides = HashMap::new();
     let mut windows = HashMap::new();
     let mut dimensions = Vec::new();
@@ -387,7 +389,7 @@ async fn probe_model_route_targets(
         .map(|target| target.target_id)
         .collect::<Vec<_>>();
     let deadline = tokio::time::Instant::now() + MODEL_ROUTE_TEST_ACTION_BUDGET;
-    let outcomes = futures::stream::iter(eligible.into_iter())
+    let outcomes = futures::stream::iter(eligible)
         .map(|target| probe_target_within_budget(state, candidate, target, deadline, preferred_id))
         .buffer_unordered(MODEL_ROUTE_TEST_CONCURRENCY)
         .collect::<Vec<_>>()

@@ -78,6 +78,36 @@ pub(super) fn client_for_mcp_server_with_row(
     })
 }
 
+/// Reject any proxy for a personal OAuth MCP server.
+///
+/// A row proxy is refused outright; an environment proxy is refused unless
+/// `NO_PROXY` already bypasses the upstream. The returned message never
+/// includes the proxy value.
+pub(super) fn oauth_proxy_blocked(
+    row_proxy: Option<&str>,
+    upstream_url: &str,
+) -> Result<(), String> {
+    if row_proxy.is_some_and(|proxy| !proxy.trim().is_empty()) {
+        return Err(
+            "personal MCP OAuth does not support a per-server proxy; disable the proxy for this server"
+                .to_string(),
+        );
+    }
+    let get_env = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    };
+    match resolve_mcp_proxy_with_env(upstream_url, &get_env) {
+        Ok(None) => Ok(()),
+        Ok(Some(_)) => Err(
+            "personal MCP OAuth cannot use an environment proxy; unset HTTP_PROXY/HTTPS_PROXY or add the MCP host to NO_PROXY"
+                .to_string(),
+        ),
+        Err(message) => Err(message),
+    }
+}
+
 // Unit-test seam for env-only resolution; production uses the row-aware path.
 #[cfg(test)]
 fn client_for_mcp_server_with_env(

@@ -117,6 +117,9 @@ pub struct AdminState {
     /// Issue #589 P2b: display-only OpenAI organization usage cache.
     pub(crate) openai_org_usage: OpenAiOrgUsageCache,
     pub(crate) chatgpt_quota_service: Option<Arc<ChatGptQuotaService>>,
+    /// Personal MCP OAuth backend. `None` disables personal OAuth only; no
+    /// other auth mode or MCP behavior depends on it.
+    pub(crate) mcp_oauth: Option<Arc<crate::mcp::oauth::McpOAuthService>>,
 }
 
 pub struct AdminStateInit {
@@ -176,6 +179,7 @@ impl AdminState {
             token_plan_quota: TokenPlanQuotaCache::default(),
             openai_org_usage: OpenAiOrgUsageCache::default(),
             chatgpt_quota_service: None,
+            mcp_oauth: None,
         }
     }
 
@@ -216,6 +220,26 @@ impl AdminState {
 
     pub fn with_config_repository(mut self, repository: ConfigRepository) -> Self {
         self.config_repository = repository;
+        self
+    }
+
+    /// Replace the shared catalog service (used to attach the personal MCP
+    /// OAuth backend to owner-triggered refreshes).
+    pub(crate) fn with_mcp_catalog_service(
+        mut self,
+        service: crate::mcp::McpCatalogService,
+    ) -> Self {
+        self.mcp_catalog_service = service;
+        self
+    }
+
+    /// Attach the personal MCP OAuth backend. The builder keeps
+    /// `AdminStateInit` free of mandatory OAuth fields.
+    pub(crate) fn with_mcp_oauth_service(
+        mut self,
+        service: Arc<crate::mcp::oauth::McpOAuthService>,
+    ) -> Self {
+        self.mcp_oauth = Some(service);
         self
     }
 

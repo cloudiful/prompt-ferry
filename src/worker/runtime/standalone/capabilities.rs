@@ -1,4 +1,5 @@
-#[allow(dead_code)]
+#![cfg(test)]
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StandaloneFeature {
     DbBackedUsage,
@@ -19,7 +20,6 @@ pub(crate) struct StandaloneFeatureDiagnostic {
 }
 
 impl StandaloneFeature {
-    #[allow(dead_code)]
     pub(crate) const ALL: [Self; 7] = [
         Self::DbBackedUsage,
         Self::RawPayloadRetention,
@@ -78,7 +78,6 @@ pub(crate) fn diagnostic(feature: StandaloneFeature) -> StandaloneFeatureDiagnos
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn diagnostics() -> [StandaloneFeatureDiagnostic; 7] {
     StandaloneFeature::ALL.map(diagnostic)
 }

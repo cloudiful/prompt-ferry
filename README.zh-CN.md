@@ -98,6 +98,10 @@ Compose 已写入数据的数据库，请先把 Compose 卷中的
 同一个显式 base64 32 字节密钥。已有数据库沿用已有管理员账号——只有在
 尚无管理员的首次创建时才会写入 bootstrap 密码文件。
 
+## 个人 MCP OAuth
+
+个人 HTTP MCP 服务（例如 `https://huggingface.co/mcp?login`）可在管理控制台使用 OAuth，无需静态 Bearer 令牌。将 `PROMPT_FERRY_WORKER__MCP_OAUTH_REDIRECT_BASE` 设为公开的 HTTPS 基地址（回调后缀为 `/api/v1/admin/mcp-servers/{server_id}/oauth/callback`）；PostgreSQL 部署还需显式配置共享的 `PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY`，以便所有 Worker 解密同一份授权。个人 OAuth 仅申请只读 `read-mcp` 权限。单服务代理、明文 HTTP 服务地址、stdio/内置传输、管理员范围或缺少配置时，该服务会停用 OAuth 并给出可操作错误，其他认证方式不受影响。运行期令牌不会导出或显示在界面中，本地断开后需重新连接。
+
 ## 对外暴露前请注意
 
 - 备份 PostgreSQL 与 `<data-root>/prompt-ferry/worker-config.key`；缺少该密钥则已存储的密文无法解密。

@@ -144,6 +144,10 @@ pub struct WorkerArgs {
     pub mcp_warmup: Option<McpWarmupMode>,
     #[arg(long)]
     pub mcp_allowed_origins: Vec<String>,
+    /// Public HTTPS base URL of the admin API used for the personal MCP OAuth
+    /// callback. Empty disables personal MCP OAuth only.
+    #[arg(long)]
+    pub mcp_oauth_redirect_base: Option<String>,
 }
 
 #[derive(Debug, Args, Clone, Default)]

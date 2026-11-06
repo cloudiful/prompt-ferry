@@ -12,7 +12,7 @@ use crate::{
     db::{CompactMode, EndpointProvider, RouteConfig, RouteSelectionReason},
     worker::runtime::{
         WorkerRuntimeState,
-        compaction::run_self_summarize_compact,
+        compaction::{SelfSummarizeInput, run_self_summarize_compact},
         context::{BridgeSender, ResponseLimits, RuntimeServices},
     },
     worker_admin::{
@@ -113,17 +113,17 @@ async fn internal_compact_429_records_the_selected_key_cooldown() {
         None,
     );
 
-    let result = run_self_summarize_compact(
-        &reqwest::Client::new(),
-        &format!("http://{address}/v1/chat/completions"),
-        &route.api_key,
-        NativeApi::Chat,
-        br#"{"model":"gpt-test","input":"summarize this"}"#,
-        Some("gpt-test"),
-        &services,
-        &route,
-        &factory,
-    )
+    let result = run_self_summarize_compact(SelfSummarizeInput {
+        client: &reqwest::Client::new(),
+        summarize_url: &format!("http://{address}/v1/chat/completions"),
+        api_key: &route.api_key,
+        native_api: NativeApi::Chat,
+        request_body: br#"{"model":"gpt-test","input":"summarize this"}"#,
+        model_fallback: Some("gpt-test"),
+        services: &services,
+        route: &route,
+        feedback_factory: &factory,
+    })
     .await;
 
     assert!(
