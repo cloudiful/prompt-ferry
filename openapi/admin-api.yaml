@@ -1375,6 +1375,112 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/McpCatalogResponse'
+  /api/v1/admin/mcp-servers/{server_id}/oauth:
+    get:
+      tags:
+      - mcp
+      operationId: get_mcp_oauth_status
+      parameters:
+      - name: server_id
+        in: path
+        description: MCP server ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Personal MCP OAuth status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpOAuthStatusResponse'
+    post:
+      tags:
+      - mcp
+      operationId: start_mcp_oauth
+      parameters:
+      - name: server_id
+        in: path
+        description: MCP server ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Authorization URL to visit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpOAuthStartResponse'
+    delete:
+      tags:
+      - mcp
+      operationId: disconnect_mcp_oauth
+      parameters:
+      - name: server_id
+        in: path
+        description: MCP server ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Grant, pending states and leases cleared
+  /api/v1/admin/mcp-servers/{server_id}/oauth/callback:
+    get:
+      tags:
+      - mcp
+      operationId: mcp_oauth_callback
+      parameters:
+      - name: server_id
+        in: path
+        description: MCP server ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: state
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: iss
+        in: query
+        description: RFC 9207 authorization response issuer.
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Fixed authorization result page
+  /api/v1/admin/mcp-servers/{server_id}/oauth/refresh:
+    post:
+      tags:
+      - mcp
+      operationId: refresh_mcp_oauth
+      parameters:
+      - name: server_id
+        in: path
+        description: MCP server ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Refreshed grant status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpOAuthRefreshResponse'
   /api/v1/admin/mcp-servers/{server_id}/test:
     post:
       tags:
@@ -5378,6 +5484,63 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/McpCatalogItem'
+    McpOAuthRefreshResponse:
+      type: object
+      required:
+      - status
+      - scopes
+      properties:
+        expires_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        scopes:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          description: '`connected` | `reauth_required`'
+    McpOAuthStartResponse:
+      type: object
+      required:
+      - authorization_url
+      properties:
+        authorization_url:
+          type: string
+          description: The authorization-server URL the owner must visit to grant access.
+    McpOAuthStatusResponse:
+      type: object
+      description: |-
+        Safe status of one personal MCP OAuth grant.
+
+        `status` is one of `connected`, `authorizing`, `reauth_required` or
+        `disconnected`. The response never carries a token, client secret, PKCE
+        verifier or callback code.
+      required:
+      - status
+      - scopes
+      properties:
+        expires_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        reason:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Why personal OAuth is unavailable when the deployment or the server
+            configuration cannot enable it.
+        scopes:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          description: '`connected` | `authorizing` | `reauth_required` | `disconnected`'
     McpProviderDescriptor:
       type: object
       required:
