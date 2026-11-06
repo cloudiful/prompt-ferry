@@ -1707,3 +1707,193 @@ async fn a_blocked_reader_helper_obeys_the_operation_ceiling() {
         "a blocked reader helper did not terminate within the ceiling: {result:?}"
     );
 }
+
+/// A server row with an explicit auth mode, so the scheduling filter can be
+/// exercised without an owner-token network call.
+fn input_with_auth(name: &str, transport: &str, auth_mode: &str) -> McpServerInput {
+    let mut value = input(name, transport);
+    value.auth_mode = auth_mode.to_string();
+    value
+}
+
+/// A real HTTP listener used as a network counter for background scheduling
+/// tests.
+async fn spawn_counting_http(counter: Arc<std::sync::atomic::AtomicUsize>) -> String {
+    use axum::{Router, routing::any};
+    let app = Router::new().route(
+        "/mcp",
+        any(move || {
+            let counter = counter.clone();
+            async move {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                (axum::http::StatusCode::ACCEPTED, "")
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind counting listener");
+    let address = listener.local_addr().expect("counting address");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    format!("http://{address}/mcp")
+}
+
+async fn install_personal_oauth_grant(harness: &Harness, server: &McpServer, owner: i64) {
+    let grant = crate::db::McpOAuthGrant {
+        registration: crate::db::McpOAuthRegistration {
+            snapshot: json!({
+                "client_id": "service-oauth-client",
+                "client_secret": "service-oauth-secret",
+                "client_auth_method": "client_secret_basic",
+                "redirect_uri": "https://app.example.test/api/v1/admin/mcp-servers/x/oauth/callback",
+                "resource": server.url.clone().unwrap_or_default(),
+                "issuer": "https://issuer.example.test",
+                "metadata": {
+                    "authorization_endpoint": "https://issuer.example.test/authorize",
+                    "token_endpoint": "https://issuer.example.test/token"
+                }
+            }),
+        },
+        credentials: crate::db::McpOAuthStoredCredentials {
+            engine: json!({
+                "client_id": "service-oauth-client",
+                "token_response": {
+                    "access_token": "service-oauth-token",
+                    "refresh_token": "service-oauth-refresh",
+                    "token_type": "Bearer",
+                    "expires_in": 3600
+                },
+                "granted_scopes": ["read-mcp"],
+                "token_received_at": 1_760_000_001_i64,
+                "issuer": "https://issuer.example.test"
+            }),
+            scopes: vec!["read-mcp".to_string()],
+            expires_at: Some(Utc::now() + ChronoDuration::hours(1)),
+            issuer: Some("https://issuer.example.test".to_string()),
+        },
+    };
+    harness
+        .repository
+        .install_mcp_oauth_grant(&harness.manager, server.server_id, owner, &grant)
+        .await
+        .expect("install oauth grant");
+}
+
+#[tokio::test]
+async fn a_stale_personal_oauth_read_never_schedules_a_background_refresh() {
+    let harness = Harness::new().await;
+    let oauth_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let oauth_url = spawn_counting_http(oauth_hits.clone()).await;
+    let mut oauth_input = input_with_auth("oauth-probe", "http", "oauth");
+    oauth_input.scope = "user".to_string();
+    oauth_input.owner_user_id = Some(7);
+    oauth_input.url = Some(oauth_url);
+    sqlx::query(
+        "INSERT INTO standalone_users \
+         (user_id, login_name, display_name, password_hash, is_admin, enabled) \
+         VALUES (?1, ?2, ?2, 'hash', 0, 1)",
+    )
+    .bind(7_i64)
+    .bind("service-oauth-7")
+    .execute(harness.store.pool())
+    .await
+    .expect("insert oauth user");
+    let oauth = harness.persist(oauth_input).await;
+    install_personal_oauth_grant(&harness, &oauth, 7).await;
+    harness
+        .cache
+        .put_at(
+            &oauth,
+            snapshot("cached_tool"),
+            Utc::now() - ChronoDuration::seconds(600),
+        )
+        .await;
+    let oauth_service = Arc::new(
+        crate::mcp::oauth::McpOAuthService::new(
+            harness.repository.clone(),
+            Some(harness.manager.clone()),
+            Some("https://app.example.test".to_string()),
+            crate::db::UserStore::sqlite(harness.store.pool().clone()),
+        )
+        .with_private_network(),
+    );
+    let service = harness.service().with_oauth_service(oauth_service.clone());
+
+    // Positive control through the actual guarded OAuth transport: the same
+    // row, grant, service and listener can receive an owner request.
+    let transport_storage =
+        crate::mcp::McpRuntimeStorage::from_repository(harness.repository.clone())
+            .with_oauth_service(oauth_service.clone());
+    let _ = crate::mcp::transport::call_with_storage(
+        Some(&transport_storage),
+        &oauth,
+        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        None,
+        None,
+    )
+    .await;
+    for _ in 0..50 {
+        if oauth_hits.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        oauth_hits.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        "the eligible OAuth owner path must reach the real listener"
+    );
+    oauth_hits.store(0, std::sync::atomic::Ordering::SeqCst);
+
+    let acquired = service.acquire(&oauth).await.expect("stale catalog");
+    assert_eq!(acquired.freshness, CatalogFreshness::Stale);
+    assert!(!acquired.refreshed);
+    assert_eq!(acquired.snapshot.tools[0]["name"], "cached_tool");
+
+    // A background spawn for the same row is refused for the same reason.
+    service.spawn_refresh(oauth.clone());
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        oauth_hits.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "a stale personal OAuth read must not send a background request"
+    );
+    let after = harness
+        .cache
+        .raw_snapshot(&oauth)
+        .await
+        .expect("the stale snapshot stays cached");
+    assert_eq!(
+        after.tools[0]["name"], "cached_tool",
+        "a stale personal OAuth read must not publish a refresh"
+    );
+
+    // The same harness does observe a refresh for a non-OAuth server, so the
+    // assertion above is not vacuous.
+    let plain_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let plain_url = spawn_counting_http(plain_hits.clone()).await;
+    let mut plain_input = input("plain-probe", "http");
+    plain_input.url = Some(plain_url);
+    let plain = harness.persist(plain_input).await;
+    harness
+        .cache
+        .put_at(
+            &plain,
+            snapshot("cached_tool"),
+            Utc::now() - ChronoDuration::seconds(600),
+        )
+        .await;
+    service.spawn_refresh(plain.clone());
+    for _ in 0..50 {
+        if plain_hits.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        plain_hits.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        "the non-OAuth positive control must reach the listener"
+    );
+}

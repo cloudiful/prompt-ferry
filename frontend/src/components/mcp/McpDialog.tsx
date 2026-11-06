@@ -3,12 +3,14 @@ import { ArrowLeft, Globe, Info, LoaderCircle } from 'lucide-react'
 import type {
   McpCatalogResponse,
   McpProviderDescriptor,
+  McpServer,
   User,
 } from '@/generated/admin-api'
 import type { McpForm } from '@/models'
 import { McpBearerTokensEditor } from '@/components/mcp/McpBearerTokensEditor'
 import { McpCatalogMultiSelect } from '@/components/mcp/McpCatalogMultiSelect'
 import { McpEnvironmentEditor } from '@/components/mcp/McpEnvironmentEditor'
+import { McpOAuthPanel } from '@/components/mcp/McpOAuthPanel'
 import { ProxySettingsFields } from '@/components/shared/ProxySettingsFields'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -40,6 +42,10 @@ type McpDialogProps = {
   header: string
   isAdmin: boolean
   onChange: (form: McpForm) => void
+  onOAuthConnect: (server: McpServer) => void
+  onOAuthDisconnect: (server: McpServer) => void
+  oauthPending: boolean
+  oauthServer: McpServer | null
   onOpenChange: (open: boolean) => void
   onRefreshCatalog: () => void
   onSave: () => void
@@ -59,6 +65,10 @@ export function McpDialog({
   header,
   isAdmin,
   onChange,
+  onOAuthConnect,
+  onOAuthDisconnect,
+  oauthPending,
+  oauthServer,
   onOpenChange,
   onRefreshCatalog,
   onSave,
@@ -468,9 +478,29 @@ export function McpDialog({
                             <SelectItem value="basic">
                               {t('authModeBasic')}
                             </SelectItem>
+                            {form.transport === 'http' &&
+                            form.scope === 'user' &&
+                            !hostedPreset ? (
+                              <SelectItem value="oauth">
+                                {t('authModeOAuth')}
+                              </SelectItem>
+                            ) : null}
                           </SelectContent>
                         </Select>
                       </Field>
+                    ) : null}
+                    {form.auth_mode === 'oauth' && oauthServer ? (
+                      <McpOAuthPanel
+                        onConnect={onOAuthConnect}
+                        onDisconnect={onOAuthDisconnect}
+                        pending={oauthPending}
+                        server={oauthServer}
+                      />
+                    ) : null}
+                    {form.auth_mode === 'oauth' && !oauthServer ? (
+                      <p className="text-xs text-muted-foreground">
+                        {t('oauthHint')}
+                      </p>
                     ) : null}
                     {form.auth_mode === 'bearer' ? (
                       <McpBearerTokensEditor

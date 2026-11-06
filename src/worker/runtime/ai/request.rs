@@ -83,7 +83,6 @@ pub(in crate::worker::runtime) async fn process_request(
     let (mut route, quota_probe) =
         match Box::pin(resolve_route(&request, config, services, &request_ctx)).await {
             Ok(RouteResolution::Ready { route, quota_probe }) => (*route, quota_probe),
-            Ok(RouteResolution::Responded) => return Ok(()),
             Err(err) => {
                 if err
                     .downcast_ref::<super::super::routing::QuotaUnavailableError>()

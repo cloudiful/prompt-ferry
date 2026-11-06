@@ -281,14 +281,12 @@ pub(super) async fn connect_once(
     if let Some(state) = standalone_state.as_ref() {
         state.set_bridge_sender(&relay.relay_key, None).await;
     }
-    if runtime_state.control.is_shutting_down() {
-        if !out_tx.flush(BRIDGE_FLUSH_ALLOWANCE).await {
-            warn!(
-                relay_url = %relay.relay_url,
-                allowance_ms = BRIDGE_FLUSH_ALLOWANCE.as_millis() as u64,
-                "bridge flush did not complete before the session closed"
-            );
-        }
+    if runtime_state.control.is_shutting_down() && !out_tx.flush(BRIDGE_FLUSH_ALLOWANCE).await {
+        warn!(
+            relay_url = %relay.relay_url,
+            allowance_ms = BRIDGE_FLUSH_ALLOWANCE.as_millis() as u64,
+            "bridge flush did not complete before the session closed"
+        );
     }
     drop(out_tx);
     reap_write_task(&mut write_task).await;

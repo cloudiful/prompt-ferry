@@ -18,7 +18,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use serde_json::Value;
 
 use super::json_scalars::{truncate_message, value_as_f64, value_as_i64, value_as_string};
-use super::quota_canonical::glm_observation;
+use super::quota_canonical::{GlmRow, glm_observation};
 use crate::worker_admin_types::{
     CanonicalQuotaWindow, CanonicalQuotaWindowKind, GlmWindowUsage, TokenPlanKeyUsage,
 };
@@ -166,16 +166,16 @@ fn parse_window_row(row: &Value) -> Option<(GlmWindowKind, GlmWindowUsage, Canon
         GlmWindowKind::FiveHour => ("glm:five_hour", CanonicalQuotaWindowKind::FiveHour),
         GlmWindowKind::Weekly => ("glm:weekly", CanonicalQuotaWindowKind::Weekly),
     };
-    let observation = glm_observation(
+    let observation = glm_observation(GlmRow {
         slot,
-        canonical_kind,
-        row_type.as_deref(),
-        raw_current,
-        raw_limit,
-        raw_remaining,
+        kind: canonical_kind,
+        row_type: row_type.as_deref(),
+        current: raw_current,
+        limit: raw_limit,
+        remaining: raw_remaining,
         percentage,
-        next_reset_at,
-    );
+        reset_at: next_reset_at,
+    });
     Some((kind, window, observation))
 }
 

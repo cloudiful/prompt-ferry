@@ -79,6 +79,10 @@ pub struct WorkerConfig {
     /// carrying an `Origin` header must match one of these entries (RFC 6454);
     /// missing `Origin` always passes. Empty keeps Origin validation disabled.
     pub mcp_allowed_origins: Vec<String>,
+    /// Public HTTPS base URL of the admin API, used to build the personal MCP
+    /// OAuth callback (`<base>/api/v1/admin/mcp-servers/<id>/oauth/callback`).
+    /// Empty disables personal OAuth only; nothing else changes.
+    pub mcp_oauth_redirect_base: String,
 }
 
 impl Default for WorkerConfig {
@@ -123,6 +127,7 @@ impl Default for WorkerConfig {
             raw_object_store_path_style: true,
             raw_object_store_local_dir: String::new(),
             mcp_allowed_origins: Vec::new(),
+            mcp_oauth_redirect_base: String::new(),
         }
     }
 }
@@ -146,6 +151,13 @@ impl WorkerConfig {
         } else {
             StorageBackend::Postgres
         }
+    }
+
+    /// PostgreSQL personal MCP OAuth needs an explicitly configured shared
+    /// encryption key so every worker can decrypt the same grants; the
+    /// persisted file-local fallback must never be silently used for it.
+    pub(crate) fn mcp_oauth_shared_key_missing(&self) -> bool {
+        self.storage_backend().is_postgres() && self.effective_encryption_key().trim().is_empty()
     }
 
     pub(crate) fn storage_contract(&self) -> StorageContract {
@@ -237,6 +249,9 @@ impl WorkerConfig {
         if !args.mcp_allowed_origins.is_empty() {
             self.mcp_allowed_origins = args.mcp_allowed_origins;
         }
+        if let Some(base) = args.mcp_oauth_redirect_base {
+            self.mcp_oauth_redirect_base = base;
+        }
         self
     }
 }
@@ -291,5 +306,38 @@ mod tests {
 
         let config = WorkerConfig::default();
         assert_eq!(config.effective_encryption_key(), "");
+    }
+
+    #[test]
+    fn mcp_oauth_requires_a_shared_key_only_for_postgres() {
+        let sqlite = WorkerConfig::default();
+        assert!(!sqlite.mcp_oauth_shared_key_missing());
+
+        let postgres = WorkerConfig {
+            database_url: "postgres://localhost/prompt_ferry".to_string(),
+            ..WorkerConfig::default()
+        };
+        assert!(postgres.mcp_oauth_shared_key_missing());
+
+        let postgres_current = WorkerConfig {
+            database_url: "postgres://localhost/prompt_ferry".to_string(),
+            worker_config_encryption_key: KEY_A.to_string(),
+            ..WorkerConfig::default()
+        };
+        assert!(!postgres_current.mcp_oauth_shared_key_missing());
+
+        let postgres_legacy = WorkerConfig {
+            database_url: "postgres://localhost/prompt_ferry".to_string(),
+            relay_secret_master_key: KEY_B.to_string(),
+            ..WorkerConfig::default()
+        };
+        assert!(!postgres_legacy.mcp_oauth_shared_key_missing());
+
+        let postgres_blank_current = WorkerConfig {
+            database_url: "postgres://localhost/prompt_ferry".to_string(),
+            worker_config_encryption_key: "   ".to_string(),
+            ..WorkerConfig::default()
+        };
+        assert!(postgres_blank_current.mcp_oauth_shared_key_missing());
     }
 }

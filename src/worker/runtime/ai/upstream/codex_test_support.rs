@@ -50,12 +50,14 @@ pub(super) fn codex_request(
     auth: &CodexAuth,
 ) -> reqwest::Request {
     build_codex_upstream_request(
-        &Client::new(),
-        &Method::POST,
-        "https://chatgpt.com/backend-api/codex/responses",
-        &openai_responses_route(),
-        "/v1/responses",
-        &PreparedRequestBody::BufferedBytes(body.to_vec()),
+        UpstreamRequestTarget {
+            client: &Client::new(),
+            method: &Method::POST,
+            url: "https://chatgpt.com/backend-api/codex/responses",
+            route: &openai_responses_route(),
+            path: "/v1/responses",
+            body: &PreparedRequestBody::BufferedBytes(body.to_vec()),
+        },
         auth,
         headers,
     )

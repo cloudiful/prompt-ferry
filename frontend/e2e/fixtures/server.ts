@@ -51,6 +51,7 @@ type RequestLog = {
 const port = Number.parseInt(process.env.FIXTURE_PORT ?? '8789', 10)
 let state: FixtureState = createState()
 let faults: Fault[] = []
+let oauthOpenerProbe: unknown = null
 const requestLog: RequestLog[] = []
 
 const CONTROL_HEADERS = {
@@ -79,8 +80,51 @@ async function handleControl(
   if (url.pathname === '/__fixtures/reset' && request.method === 'POST') {
     state = createState()
     faults = []
+    oauthOpenerProbe = null
     requestLog.length = 0
     return control({ reset: true })
+  }
+
+  if (
+    url.pathname === '/__fixtures/mcp-oauth/authorize' &&
+    request.method === 'GET'
+  ) {
+    return new Response(
+      `<!doctype html><meta charset="utf-8"><title>Mock OAuth authorization</title><body>Mock OAuth authorization<script>
+(async () => {
+  const report = { hasOpener: window.opener != null, navigated: false, blocked: false }
+  try {
+    if (window.opener) {
+      window.opener.location.href = 'https://example.test/phishing'
+      report.navigated = true
+    }
+  } catch {
+    report.blocked = true
+  }
+  await fetch('/__fixtures/mcp-oauth/opener-probe', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(report),
+  })
+  document.body.textContent = 'Mock OAuth authorization complete'
+})()
+</script></body>`,
+      {
+        headers: {
+          'content-type': 'text/html; charset=utf-8',
+          'cache-control': 'no-store',
+        },
+        status: 200,
+      },
+    )
+  }
+
+  if (url.pathname === '/__fixtures/mcp-oauth/opener-probe') {
+    if (request.method === 'POST') {
+      oauthOpenerProbe = await request.json()
+      return control({ probe: oauthOpenerProbe })
+    }
+    return control({ probe: oauthOpenerProbe })
   }
 
   if (url.pathname === '/__fixtures/faults') {
@@ -104,6 +148,25 @@ async function handleControl(
   if (url.pathname === '/__fixtures/log' && request.method === 'GET') {
     const limit = Number.parseInt(url.searchParams.get('limit') ?? '50', 10)
     return control({ requests: requestLog.slice(-limit) })
+  }
+
+  if (
+    url.pathname === '/__fixtures/mcp-oauth/complete' &&
+    request.method === 'POST'
+  ) {
+    const body = (await request.json()) as {
+      serverId?: string
+      status?: string
+      reason?: string | null
+    }
+    if (!body.serverId) return control({ error: 'serverId is required' }, 400)
+    state.mcpOAuthStatus[body.serverId] = {
+      status: body.status ?? 'connected',
+      scopes: ['read-mcp'],
+      expires_at: '2026-11-06T01:00:00.000Z',
+      reason: body.reason ?? null,
+    }
+    return control(state.mcpOAuthStatus[body.serverId])
   }
 
   if (url.pathname === '/__fixtures/summary' && request.method === 'GET') {

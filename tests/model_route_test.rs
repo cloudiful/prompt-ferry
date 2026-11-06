@@ -1046,7 +1046,10 @@ async fn every_enabled_active_target_is_tested_once() {
     assert_eq!(results[1]["ok"], false);
     assert_eq!(results[0]["model"], "gpt-5");
     assert!(
-        results[1]["message"].as_str().unwrap_or_default().len() > 0,
+        !results[1]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .is_empty(),
         "a failed target reports a message"
     );
     // The preferred target is metadata, never a filter: at most one outcome

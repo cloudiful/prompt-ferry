@@ -537,8 +537,7 @@ async fn durable_summary(
         .into_iter()
         // The request family writes its admission row first and the settlement
         // row last, so the newest row of the request is the settled one.
-        .filter(|record| record.request_id == wanted && record.event_kind == "request")
-        .next_back()
+        .rfind(|record| record.request_id == wanted && record.event_kind == "request")
         .expect("the request is recorded in the durable usage ledger")
 }
 
@@ -989,29 +988,29 @@ async fn the_streaming_settlement_records_the_key_selected_after_the_response_st
 
     // The actual submitted terminal log: everything the request-log model can
     // carry, including the final slot SQLite has no column for.
-    let logs = submitted
-        .lock()
-        .expect("the submitted log list is not poisoned");
-    let terminal = logs
-        .iter()
-        .filter(|log| log.request_id == request_id)
-        .next_back()
-        .expect("the settlement submitted one log for this request");
-    assert_eq!(terminal.state, crate::db::RequestRecordState::Failed);
-    assert_eq!(terminal.ok, Some(false));
-    assert_eq!(terminal.endpoint_key_id, Some(keys.second.0));
-    assert_eq!(terminal.endpoint_key_label.as_deref(), Some("second"));
-    assert_eq!(
-        terminal.token_slot,
-        Some(2),
-        "the settlement submits the tracker's final slot, not the captured one"
-    );
-    assert_eq!(terminal.error_code.as_deref(), Some("mcp_quota_exhausted"));
-    assert_eq!(
-        terminal.error_message.as_deref(),
-        Some("the provider reported an exhausted plan quota (2056)")
-    );
-    drop(logs);
+    {
+        let logs = submitted
+            .lock()
+            .expect("the submitted log list is not poisoned");
+        let terminal = logs
+            .iter()
+            .rfind(|log| log.request_id == request_id)
+            .expect("the settlement submitted one log for this request");
+        assert_eq!(terminal.state, crate::db::RequestRecordState::Failed);
+        assert_eq!(terminal.ok, Some(false));
+        assert_eq!(terminal.endpoint_key_id, Some(keys.second.0));
+        assert_eq!(terminal.endpoint_key_label.as_deref(), Some("second"));
+        assert_eq!(
+            terminal.token_slot,
+            Some(2),
+            "the settlement submits the tracker's final slot, not the captured one"
+        );
+        assert_eq!(terminal.error_code.as_deref(), Some("mcp_quota_exhausted"));
+        assert_eq!(
+            terminal.error_message.as_deref(),
+            Some("the provider reported an exhausted plan quota (2056)")
+        );
+    }
 
     // The durable ledger stores the same state, key, code and message; it has
     // no slot column, so the slot proof is the submitted log above.

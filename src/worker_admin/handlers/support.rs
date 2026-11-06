@@ -257,7 +257,7 @@ pub(super) async fn resolve_endpoint_input(
             api_keys.push(db::EndpointApiKeyCreate {
                 key_label: existing.key_label.clone(),
                 api_key: existing.api_key.clone(),
-                position: i32::try_from(existing.position).unwrap_or(i32::MAX),
+                position: existing.position,
                 enabled: existing.enabled,
                 key_id: Some(existing.key_id),
             });

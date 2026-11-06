@@ -277,7 +277,8 @@ impl OwnedFixtures {
     }
 
     async fn cleanup_owned(&self) -> anyhow::Result<()> {
-        for endpoint_id in Self::lock_ids(&self.endpoint_ids).iter() {
+        let endpoint_ids = Self::lock_ids(&self.endpoint_ids).clone();
+        for endpoint_id in endpoint_ids.iter() {
             let charges: i64 = sqlx::query_scalar(
                 "SELECT COUNT(*) FROM usage_charges AS charge \
                  JOIN request_records AS record ON record.event_id = charge.event_id \
@@ -298,7 +299,7 @@ impl OwnedFixtures {
         // remover error cannot strand the rest; failures aggregate.
         let deleter = *self.deleter.lock().expect("owned deleter stays lockable");
         let mut failures: Vec<String> = Vec::new();
-        for endpoint_id in Self::lock_ids(&self.endpoint_ids).iter() {
+        for endpoint_id in endpoint_ids.iter() {
             if let Err(error) = cleanup_owned_endpoint(&self.pool, *endpoint_id, deleter).await {
                 failures.push(format!("cleanup of {endpoint_id} failed: {error:#}"));
             }
@@ -347,9 +348,7 @@ where
     F: FnOnce(OwnedFixtures) -> Fut,
     Fut: Future<Output = anyhow::Result<()>>,
 {
-    let Some(pool) = test_pool().await else {
-        return None;
-    };
+    let pool = test_pool().await?;
     let fixtures = OwnedFixtures {
         pool,
         endpoint_ids: Arc::new(std::sync::Mutex::new(Vec::new())),

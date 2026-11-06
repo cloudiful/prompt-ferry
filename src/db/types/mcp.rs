@@ -12,10 +12,14 @@ pub struct McpBearerToken {
 pub const MCP_AUTH_MODE_NONE: &str = "none";
 pub const MCP_AUTH_MODE_BEARER: &str = "bearer";
 pub const MCP_AUTH_MODE_BASIC: &str = "basic";
-pub const MCP_AUTH_MODES: [&str; 3] = [
+/// Personal OAuth. Only a user-scoped HTTP server owned by the caller may use
+/// it; the phase that enables it validates that combination explicitly.
+pub use super::mcp_oauth::MCP_OAUTH_AUTH_MODE as MCP_AUTH_MODE_OAUTH;
+pub const MCP_AUTH_MODES: [&str; 4] = [
     MCP_AUTH_MODE_NONE,
     MCP_AUTH_MODE_BEARER,
     MCP_AUTH_MODE_BASIC,
+    MCP_AUTH_MODE_OAUTH,
 ];
 
 /// Canonical MCP provider preset ids (issue #296 Phase 1).
@@ -225,6 +229,7 @@ impl McpServer {
         }
         match mode {
             MCP_AUTH_MODE_BEARER | MCP_AUTH_MODE_BASIC | MCP_AUTH_MODE_NONE => mode,
+            MCP_AUTH_MODE_OAUTH => MCP_AUTH_MODE_OAUTH,
             _ => {
                 if !self.bearer_tokens().is_empty() {
                     MCP_AUTH_MODE_BEARER
@@ -267,7 +272,20 @@ pub fn effective_provider_kind(value: Option<&str>) -> &'static str {
 }
 
 pub fn is_valid_auth_mode(value: &str) -> bool {
-    matches!(value, "none" | "bearer" | "basic")
+    matches!(value, "none" | "bearer" | "basic" | "oauth")
+}
+
+/// Whether `owner_user_id` is the owner of a personal server that may use
+/// personal OAuth credentials.
+///
+/// This is the pure owner defence shared by the admin API, the targeting path
+/// and the OAuth backend: admin status never grants use of someone else's
+/// grant.
+pub fn oauth_owner_matches(server: &McpServer, owner_user_id: i64) -> bool {
+    server.scope == crate::db::MCP_OAUTH_SUPPORTED_SCOPE
+        && server.owner_user_id == Some(owner_user_id)
+        && server.auth_mode == MCP_AUTH_MODE_OAUTH
+        && server.transport == crate::db::MCP_OAUTH_SUPPORTED_TRANSPORT
 }
 
 #[cfg(test)]

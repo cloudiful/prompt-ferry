@@ -427,6 +427,100 @@ impl McpServerRequest {
                 "transport must be http, stdio, or builtin_minimax",
             ));
         }
+        // Personal OAuth is only valid for one personal, owner-managed HTTPS
+        // HTTP server. Admin-scope rows, stdio/builtin transports, provider
+        // presets and proxies are rejected explicitly instead of silently
+        // falling back to another auth mode.
+        let explicit_auth_mode = self
+            .auth_mode
+            .as_deref()
+            .map(str::trim)
+            .filter(|mode| !mode.is_empty());
+        let other_existing_mode = match (explicit_auth_mode, existing_server_id) {
+            (None, Some(id)) => state
+                .config_repository
+                .get_mcp_server(id)
+                .await
+                .map_err(|err| ApiError::internal(state, err))?
+                .map(|server| server.effective_auth_mode().to_string()),
+            _ => None,
+        };
+        let effective_auth_mode = explicit_auth_mode
+            .map(str::to_string)
+            .or(other_existing_mode);
+        if effective_auth_mode.as_deref() == Some(db::MCP_AUTH_MODE_OAUTH) {
+            let (scope, owner_user_id) = if user.is_admin {
+                let scope = self
+                    .scope
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|scope| !scope.is_empty())
+                    .unwrap_or("admin")
+                    .to_string();
+                (scope, self.owner_user_id)
+            } else {
+                ("user".to_string(), Some(user.user_id))
+            };
+            if scope != "user" || owner_user_id != Some(user.user_id) {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_auth_mode",
+                    "personal MCP OAuth requires a user-scoped server owned by the caller",
+                ));
+            }
+            if self.transport != "http" {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_auth_mode",
+                    "personal MCP OAuth supports only the http transport",
+                ));
+            }
+            if self
+                .proxy_url
+                .as_deref()
+                .is_some_and(|proxy| !proxy.trim().is_empty())
+            {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_auth_mode",
+                    "personal MCP OAuth does not support a per-server proxy",
+                ));
+            }
+            if self
+                .provider_kind
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|kind| !kind.is_empty() && kind != db::MCP_PROVIDER_GENERIC)
+            {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_auth_mode",
+                    "personal MCP OAuth does not support a provider preset",
+                ));
+            }
+            let url = self
+                .url
+                .as_deref()
+                .map(str::trim)
+                .filter(|url| !url.is_empty())
+                .ok_or_else(|| {
+                    ApiError::new(
+                        StatusCode::BAD_REQUEST,
+                        "invalid_auth_mode",
+                        "personal MCP OAuth requires an HTTPS server URL",
+                    )
+                })?;
+            let https = reqwest::Url::parse(url)
+                .map(|url| url.scheme() == "https")
+                .unwrap_or(false);
+            if !https {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_auth_mode",
+                    "personal MCP OAuth requires an HTTPS server URL",
+                ));
+            }
+        }
         // Issue #375 Phase F: per-row proxy scheme whitelist (reuse #368).
         // Empty/omitted means inherit/clear; non-empty must be
         // http/https/socks5/socks5h with a host. Errors never echo userinfo.

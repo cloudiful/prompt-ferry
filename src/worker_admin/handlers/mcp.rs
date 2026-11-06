@@ -191,6 +191,18 @@ pub(super) async fn test_mcp_server(
     let Some(server) = server else {
         return error(StatusCode::NOT_FOUND, "not_found", "mcp server not found");
     };
+    // A personal OAuth server may only be exercised by its owner, before any
+    // network request is made; admin status never borrows another owner's
+    // grant.
+    if server.auth_mode == db::MCP_AUTH_MODE_OAUTH
+        && !db::oauth_owner_matches(&server, user.user_id)
+    {
+        return error(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "only the server owner may test personal MCP OAuth",
+        );
+    }
     if !server.enabled {
         return Json(McpTestResponse {
             ok: false,
@@ -213,12 +225,11 @@ pub(super) async fn test_mcp_server(
         transport = %server.transport,
         "admin MCP test requested"
     );
-    let (server, _) = match state
-        .mcp_catalog_service
-        .refresh_server_by_id(server_id)
-        .await
-    {
-        Ok(result) => result,
+    // Refresh the row that was already authorized above instead of reloading
+    // by id: a reload could observe a different owner and borrow the new
+    // owner's grant, and the per-send guard rejects any change since this row.
+    match state.mcp_catalog_service.refresh_server(&server).await {
+        Ok(_) => {}
         Err(err) => {
             let summary = summarize_error(&err);
             tracing::warn!(
@@ -308,6 +319,15 @@ pub(super) async fn get_mcp_catalog(
     let Some(server) = server else {
         return error(StatusCode::NOT_FOUND, "not_found", "mcp server not found");
     };
+    if server.auth_mode == db::MCP_AUTH_MODE_OAUTH
+        && !db::oauth_owner_matches(&server, user.user_id)
+    {
+        return error(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "only the server owner may read a personal MCP OAuth catalog",
+        );
+    }
     if !server.enabled {
         return Json(McpCatalogResponse {
             tools: Vec::new(),

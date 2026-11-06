@@ -25,6 +25,7 @@ pub mod endpoints_map;
 pub mod endpoints_sqlite;
 pub mod import;
 pub mod mcp;
+pub mod mcp_oauth;
 pub mod model_routes;
 pub mod model_routes_map;
 pub mod relays;

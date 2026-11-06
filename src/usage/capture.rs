@@ -92,15 +92,13 @@ impl UsageCapture {
         let had_output = self.saw_output;
         if self.is_sse {
             self.observe_sse_chunk(chunk);
-        } else if !self.embedding_response {
-            if !self.json_body_truncated {
-                const MAX_JSON_CAPTURE: usize = 1024 * 1024;
-                if self.json_body.len().saturating_add(chunk.len()) <= MAX_JSON_CAPTURE {
-                    self.json_body.extend_from_slice(chunk);
-                } else {
-                    self.json_body.clear();
-                    self.json_body_truncated = true;
-                }
+        } else if !self.embedding_response && !self.json_body_truncated {
+            const MAX_JSON_CAPTURE: usize = 1024 * 1024;
+            if self.json_body.len().saturating_add(chunk.len()) <= MAX_JSON_CAPTURE {
+                self.json_body.extend_from_slice(chunk);
+            } else {
+                self.json_body.clear();
+                self.json_body_truncated = true;
             }
         }
         !had_output && self.saw_output

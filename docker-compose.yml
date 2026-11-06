@@ -104,6 +104,7 @@ services:
       # <data-root>/prompt-ferry/worker-config.key; back it up or stored secrets
       # become unreadable.
       PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY: ${PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY:-}
+      PROMPT_FERRY_WORKER__MCP_OAUTH_REDIRECT_BASE: ${PROMPT_FERRY_WORKER__MCP_OAUTH_REDIRECT_BASE:-}
       PROMPT_FERRY_WORKER__UPSTREAM_API_KEY: ${PROMPT_FERRY_WORKER__UPSTREAM_API_KEY:-}
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
       # Storage endpoints are service names on the Compose network. The

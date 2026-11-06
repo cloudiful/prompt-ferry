@@ -193,7 +193,7 @@ impl StandaloneUsageBuffer {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn snapshot(&self) -> Vec<StandaloneUsageSummary> {
         self.entries
             .lock()

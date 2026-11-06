@@ -132,6 +132,28 @@ async page => {
     return page.getByRole('dialog')
   }
 
+  async function revealRow(serverId) {
+    await page.locator('[data-mcp-server-row]').first().waitFor({ state: 'visible' })
+    const row = page.locator(`[data-mcp-server-row="${serverId}"]`)
+    for (let pageIndex = 0; pageIndex < 4; pageIndex += 1) {
+      if (await row.isVisible().catch(() => false)) return row
+      const nextPage = page.waitForResponse(response => {
+        const url = new URL(response.url())
+        return (
+          response.request().method() === 'GET' &&
+          url.pathname === '/api/v1/admin/mcp-servers' &&
+          url.searchParams.get('first') !== '0'
+        )
+      })
+      const next = page.getByRole('button', { name: /Next page|下一页/ })
+      if (!(await next.isEnabled().catch(() => false))) break
+      await next.click()
+      await nextPage
+    }
+    await row.waitFor({ state: 'visible' })
+    return row
+  }
+
   async function waitForStableDialogLayout(width) {
     await page.waitForFunction(expected => window.innerWidth === expected, width)
     await page.evaluate(() => new Promise(resolve => {
@@ -959,6 +981,291 @@ async page => {
     report.checks.localeThemeRendering = localized
   })
 
+  await segment('oauth-controls', async () => {
+    await page.keyboard.press('Escape')
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.evaluate(() => {
+      localStorage.setItem('prompt-ferry:locale', 'en-US')
+      localStorage.setItem('prompt-ferry:theme-mode', 'light')
+    })
+    const created = await page.evaluate(async body => {
+      const response = await fetch('/api/v1/admin/mcp-servers', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      return { status: response.status, body: await response.json() }
+    }, {
+      scope: 'user',
+      owner_user_id: 1,
+      name: 'Personal OAuth Fixture',
+      aggregate_naming_mode: 'qualified_only',
+      transport: 'http',
+      provider_kind: 'generic',
+      url: 'https://huggingface.co/mcp?login',
+      command: null,
+      args: [],
+      env_json: {},
+      bearer_tokens: [],
+      http_headers_json: {},
+      auth_mode: 'oauth',
+      basic_username: null,
+      basic_password: null,
+      proxy_url: null,
+      tool_filter_mode: 'blacklist',
+      allowed_tools: [],
+      disabled_tools: [],
+      disabled_resources: [],
+      enabled: true,
+      timeout_ms: 30000,
+      lifecycle_policy: 'auto',
+      lifecycle_manual_protocol_version: null,
+    })
+    assert(created.status === 200, `OAuth fixture create failed: ${JSON.stringify(created)}`)
+    const serverId = created.body.server_id
+    assert(typeof serverId === 'string' && serverId.length > 0, 'OAuth fixture server id missing')
+
+    await enterMcp()
+    const row = await revealRow(serverId)
+    await row.getByRole('button', { name: 'Manage OAuth' }).click()
+    const dialog = page.getByRole('dialog')
+    await dialog.waitFor({ state: 'visible' })
+    await dialog.getByRole('button', { name: 'Connect', exact: true }).waitFor({ state: 'visible' })
+    assert(await dialog.getByText('read-mcp').isVisible(), 'OAuth panel did not expose the read-mcp scope')
+
+    await page.route('https://example.test/**', route => route.abort())
+    const popupPromise = page.waitForEvent('popup')
+    await dialog.getByRole('button', { name: 'Connect', exact: true }).click()
+    const popup = await popupPromise
+    assert(popup != null, 'OAuth connect did not open an authorization window')
+    await popup.route('https://example.test/**', route => route.abort())
+    let openerProbe = null
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const result = await fixture('/__fixtures/mcp-oauth/opener-probe')
+      if (result?.probe && typeof result.probe.hasOpener === 'boolean') {
+        openerProbe = result.probe
+        break
+      }
+      await page.waitForTimeout(100)
+    }
+    assert(openerProbe != null, 'OAuth opener probe did not report')
+    assert(
+      openerProbe.hasOpener === false && openerProbe.navigated === false,
+      `OAuth popup retained its opener or navigated the admin tab: ${JSON.stringify(openerProbe)}`,
+    )
+    assert(
+      new URL(page.url()).pathname === '/mcp',
+      `OAuth popup changed the admin tab: ${page.url()}`,
+    )
+    await popup.close()
+    await dialog.getByText('Waiting for authorization').waitFor({ state: 'visible' })
+
+    await fixture('/__fixtures/mcp-oauth/complete', 'POST', { serverId })
+    await page.bringToFront()
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await dialog.getByText('Connected').waitFor({ state: 'visible' })
+
+    await fixture('/__fixtures/mcp-oauth/complete', 'POST', {
+      serverId,
+      status: 'reauth_required',
+    })
+    await page.keyboard.press('Escape')
+    await dialog.waitFor({ state: 'hidden' })
+    await row.getByRole('button', { name: 'Manage OAuth' }).click()
+    await dialog.waitFor({ state: 'visible' })
+    await dialog.getByText('Reauthorization required').waitFor({ state: 'visible' })
+    await dialog.getByRole('button', { name: 'Reconnect', exact: true }).click()
+    await dialog.getByText('Waiting for authorization').waitFor({ state: 'visible' })
+
+    await dialog.getByRole('button', { name: 'Disconnect', exact: true }).click()
+    await dialog.getByText('Not connected').waitFor({ state: 'visible' })
+
+    await fixture('/__fixtures/mcp-oauth/complete', 'POST', {
+      serverId,
+      status: 'disconnected',
+      reason: 'mcp_oauth_redirect_base is not configured',
+    })
+    await page.keyboard.press('Escape')
+    await dialog.waitFor({ state: 'hidden' })
+    await row.getByRole('button', { name: 'Manage OAuth' }).click()
+    await dialog.waitFor({ state: 'visible' })
+    await dialog.getByText(/OAuth is unavailable/).waitFor({ state: 'visible' })
+    assert(
+      await dialog.getByRole('button', { name: 'Connect', exact: true }).isDisabled(),
+      'unavailable OAuth configuration left Connect enabled',
+    )
+    await capture('mcp-oauth-panel')
+
+    const oauthStatusPath = `/api/v1/admin/mcp-servers/${serverId}/oauth`
+    const panelShots = []
+    async function openOAuthPanel(locale, theme, width, height) {
+      await page.setViewportSize({ width, height })
+      await page.evaluate(({ locale, theme }) => {
+        localStorage.setItem('prompt-ferry:locale', locale)
+        localStorage.setItem('prompt-ferry:theme-mode', theme)
+      }, { locale, theme })
+      await page.reload()
+      await waitForRoute()
+      const currentRow = await revealRow(serverId)
+      await currentRow.getByRole('button', { name: /OAuth/ }).click()
+      const panelDialog = page.getByRole('dialog')
+      await panelDialog.waitFor({ state: 'visible' })
+      return panelDialog
+    }
+
+    await fixture('/__fixtures/mcp-oauth/complete', 'POST', { serverId })
+    const panelMatrix = [
+      ['en-US', 'light', 1440, 900, 'en-light-1440'],
+      ['en-US', 'dark', 1440, 900, 'en-dark-1440'],
+      ['zh-CN', 'light', 1440, 900, 'zh-light-1440'],
+      ['zh-CN', 'dark', 1440, 900, 'zh-dark-1440'],
+      ['en-US', 'light', 390, 844, 'en-light-390'],
+      ['en-US', 'dark', 390, 844, 'en-dark-390'],
+      ['zh-CN', 'light', 390, 844, 'zh-light-390'],
+      ['zh-CN', 'dark', 390, 844, 'zh-dark-390'],
+    ]
+    for (const [locale, theme, width, height, suffix] of panelMatrix) {
+      const panelDialog = await openOAuthPanel(locale, theme, width, height)
+      await panelDialog
+        .getByText(locale === 'zh-CN' ? '已连接' : 'Connected')
+        .waitFor({ state: 'visible' })
+      const name = `mcp-oauth-panel-${suffix}`
+      await capture(name)
+      panelShots.push(name)
+      await page.keyboard.press('Escape')
+      await panelDialog.waitFor({ state: 'hidden' })
+    }
+
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.evaluate(() => {
+      localStorage.setItem('prompt-ferry:locale', 'en-US')
+      localStorage.setItem('prompt-ferry:theme-mode', 'light')
+    })
+    await fixture('/__fixtures/mcp-oauth/complete', 'POST', { serverId })
+
+    await fixture('/__fixtures/faults', 'POST', {
+      pathPrefix: oauthStatusPath,
+      method: 'GET',
+      status: 503,
+      count: 1,
+    })
+    expectedFailures.push({ method: 'GET', path: oauthStatusPath, status: 503 })
+    await page.reload()
+    await waitForRoute()
+    let statusRow = await revealRow(serverId)
+    await statusRow.getByRole('button', { name: /OAuth/ }).click()
+    await dialog.waitFor({ state: 'visible' })
+    await dialog.getByText(/OAuth status unavailable/).waitFor({ state: 'visible' })
+    assert(
+      await dialog.getByRole('button', { name: 'Connect', exact: true }).isDisabled(),
+      'a failed status read left Connect enabled',
+    )
+    assert(
+      !(await dialog.getByRole('button', { name: 'Disconnect', exact: true }).isDisabled()),
+      'a failed status read blocked owner disconnect cleanup',
+    )
+    assert(
+      (await dialog.getByText('Not connected').count()) === 0,
+      'a failed status read was presented as disconnected',
+    )
+    await capture('mcp-oauth-panel-error-en-light-1440')
+    panelShots.push('mcp-oauth-panel-error-en-light-1440')
+    await dialog.getByRole('button', { name: 'Retry status', exact: true }).click()
+    await dialog.getByText('Connected').waitFor({ state: 'visible' })
+    assert(
+      (await dialog.getByText(/OAuth status unavailable/).count()) === 0,
+      'a successful status retry did not clear the error',
+    )
+
+    await fixture('/__fixtures/faults', 'POST', {
+      pathPrefix: oauthStatusPath,
+      method: 'GET',
+      status: 503,
+      count: 1,
+    })
+    expectedFailures.push({ method: 'GET', path: oauthStatusPath, status: 503 })
+    await page.keyboard.press('Escape')
+    await dialog.waitFor({ state: 'hidden' })
+    statusRow = await revealRow(serverId)
+    await statusRow.getByRole('button', { name: /OAuth/ }).click()
+    await dialog.waitFor({ state: 'visible' })
+    await dialog.getByText(/OAuth status unavailable/).waitFor({ state: 'visible' })
+    await dialog.getByRole('button', { name: 'Disconnect', exact: true }).click()
+    await dialog.getByText('Not connected').waitFor({ state: 'visible' })
+
+    const otherOwner = await page.evaluate(async body => {
+      const response = await fetch('/api/v1/admin/mcp-servers', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      return { status: response.status, body: await response.json() }
+    }, {
+      scope: 'user',
+      owner_user_id: 2,
+      name: 'Other Owner OAuth Fixture',
+      aggregate_naming_mode: 'qualified_only',
+      transport: 'http',
+      provider_kind: 'generic',
+      url: 'https://huggingface.co/mcp?login',
+      command: null,
+      args: [],
+      env_json: {},
+      bearer_tokens: [],
+      http_headers_json: {},
+      auth_mode: 'oauth',
+      basic_username: null,
+      basic_password: null,
+      proxy_url: null,
+      tool_filter_mode: 'blacklist',
+      allowed_tools: [],
+      disabled_tools: [],
+      disabled_resources: [],
+      enabled: true,
+      timeout_ms: 30000,
+      lifecycle_policy: 'auto',
+      lifecycle_manual_protocol_version: null,
+    })
+    assert(otherOwner.status === 200, `other-owner OAuth fixture create failed: ${JSON.stringify(otherOwner)}`)
+    await page.keyboard.press('Escape')
+    await dialog.waitFor({ state: 'hidden' })
+    await enterMcp()
+    const otherRow = await revealRow(otherOwner.body.server_id)
+    await otherRow.getByRole('button', { name: 'Manage OAuth' }).click()
+    await dialog.waitFor({ state: 'visible' })
+    await dialog.getByText('Only the owner can authorize this MCP server.').waitFor({ state: 'visible' })
+    assert(
+      await dialog.getByRole('button', { name: 'Connect', exact: true }).isDisabled(),
+      'another owner could start a personal OAuth grant',
+    )
+    assert(
+      await dialog.getByRole('button', { name: 'Disconnect', exact: true }).isDisabled(),
+      'another owner could disconnect a personal OAuth grant',
+    )
+
+    await page.evaluate(async id => {
+      await fetch(`/api/v1/admin/mcp-servers/${id}`, { method: 'DELETE' })
+    }, serverId)
+    await page.evaluate(async id => {
+      await fetch(`/api/v1/admin/mcp-servers/${id}`, { method: 'DELETE' })
+    }, otherOwner.body.server_id)
+    report.checks.oauthControls = {
+      connected: true,
+      disconnected: true,
+      reconnected: true,
+      otherOwnerRestricted: true,
+      configReason: true,
+      popupOpened: true,
+      scopesReadOnly: true,
+      statusFailure: true,
+      statusRetry: true,
+      disconnectAfterStatusFailure: true,
+      openerIsolated: true,
+      openerProbe,
+      panelShots,
+    }
+  })
+
   const currentFixtureLog = (await fixture('/__fixtures/log?limit=500')).requests
   const finalRequestRecordCalls = currentFixtureLog.filter(request => request.path.includes('/request-records')).length
   assert(finalRequestRecordCalls === 0, `MCP management reached a request-record endpoint ${finalRequestRecordCalls} times`)
@@ -977,11 +1284,24 @@ async page => {
   ))
   assert(unexpectedApiFailures.length === 0, `unexpected API failures: ${JSON.stringify(unexpectedApiFailures)}`)
   assert(pageErrors.length === 0, `browser page errors: ${JSON.stringify(pageErrors)}`)
-  assert(consoleErrors.length === 0, `browser console errors: ${JSON.stringify(consoleErrors)}`)
+  const benignOpenerNavigations =
+    report.checks.oauthControls?.openerProbe?.hasOpener === false
+      ? consoleErrors.filter(message =>
+          message.includes('Unsafe attempt to initiate navigation') &&
+          message.includes('/__fixtures/mcp-oauth/authorize'),
+        )
+      : []
+  const remainingConsoleErrors = consoleErrors.filter(
+    message => !benignOpenerNavigations.includes(message),
+  )
+  assert(
+    remainingConsoleErrors.length === 0,
+    `browser console errors: ${JSON.stringify(remainingConsoleErrors)}`,
+  )
 
   report.checks.expectedApiFailures = actualExpectedFailures.map(({ method, path, status }) => ({ method, path, status }))
   report.checks.apiFailures = unexpectedApiFailures
-  report.checks.consoleErrors = consoleErrors
+  report.checks.consoleErrors = remainingConsoleErrors
   report.checks.pageErrors = pageErrors
   report.checks.secretSafety = {
     fixtureCredentialValuesExcluded: !JSON.stringify(report).includes(fixtureTokens.context7) &&
@@ -1004,6 +1324,12 @@ async page => {
     'mutation-delete': checks.pagination?.deleteCancelledWrites === 0 && checks.pagination?.deleteSuccesses >= 2,
     'mutation-failure-draft': checks.failureDraftRetry?.draftRetained === true && checks.failureDraftRetry?.sameBodyRetry === true,
     'long-values': checks.responsiveContainment?.length === 4 && checks.ownerRole?.updateScope === 'user',
+    'oauth-connect': checks.oauthControls?.connected === true && checks.oauthControls?.popupOpened === true,
+    'oauth-disconnect': checks.oauthControls?.disconnected === true,
+    'oauth-reconnect': checks.oauthControls?.reconnected === true,
+    'oauth-other-owner': checks.oauthControls?.otherOwnerRestricted === true,
+    'oauth-config-missing': checks.oauthControls?.configReason === true,
+    'oauth-status-error': checks.oauthControls?.statusFailure === true && checks.oauthControls?.statusRetry === true && checks.oauthControls?.disconnectAfterStatusFailure === true,
   }
   assert(Object.values(checks.scenarioCoverage).every(Boolean), `MCP scenario coverage incomplete: ${JSON.stringify(checks.scenarioCoverage)}`)
   report.finishedAt = new Date().toISOString()

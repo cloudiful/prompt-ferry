@@ -150,8 +150,8 @@ async fn reviewer_expired_replica_lease_is_recovered_without_relocking_self() {
         error
             .downcast_ref::<sqlx::Error>()
             .and_then(|sqlx_error| sqlx_error.as_database_error())
-            .and_then(|database_error| sqlx::error::DatabaseError::code(database_error))
-            .map(|code| code.to_string())
+            .and_then(sqlx::error::DatabaseError::code)
+            .map(std::borrow::Cow::into_owned)
             .unwrap_or_else(|| "unknown".to_string())
     };
     let timestamp = |value: Option<chrono::DateTime<Utc>>| -> String {
@@ -469,7 +469,8 @@ async fn owned_fixtures_are_removed_after_a_successful_body() {
         return;
     };
     outcome.unwrap();
-    assert_pool_fixture_gone(stashed.lock().expect("stash stays lockable").unwrap()).await;
+    let stashed_endpoint = stashed.lock().expect("stash stays lockable").unwrap();
+    assert_pool_fixture_gone(stashed_endpoint).await;
 }
 
 #[tokio::test]
@@ -493,7 +494,8 @@ async fn owned_fixtures_are_removed_when_the_body_fails() {
         error.to_string().contains("simulated body failure"),
         "the original failure must survive cleanup: {error:#}"
     );
-    assert_pool_fixture_gone(stashed.lock().expect("stash stays lockable").unwrap()).await;
+    let stashed_endpoint = stashed.lock().expect("stash stays lockable").unwrap();
+    assert_pool_fixture_gone(stashed_endpoint).await;
 }
 
 #[tokio::test]
@@ -516,7 +518,8 @@ async fn owned_fixtures_are_removed_when_the_body_panics() {
         caught.is_err(),
         "the body panic must resume after cleanup instead of being swallowed"
     );
-    assert_pool_fixture_gone(stashed.lock().expect("stash stays lockable").unwrap()).await;
+    let stashed_endpoint = stashed.lock().expect("stash stays lockable").unwrap();
+    assert_pool_fixture_gone(stashed_endpoint).await;
 }
 
 #[tokio::test]
@@ -541,7 +544,8 @@ async fn partially_created_fixture_still_cleans_up_safely() {
         return;
     };
     outcome.expect_err("the partial-creation failure must propagate after cleanup");
-    assert_pool_fixture_gone(stashed.lock().expect("stash stays lockable").unwrap()).await;
+    let stashed_endpoint = stashed.lock().expect("stash stays lockable").unwrap();
+    assert_pool_fixture_gone(stashed_endpoint).await;
 }
 
 #[tokio::test]
@@ -636,7 +640,8 @@ async fn owned_worker_panic_still_joins_all_workers_and_cleans_up() {
         second_finished.load(Ordering::SeqCst),
         "the surviving worker must be joined, not detached"
     );
-    assert_pool_fixture_gone(stashed.lock().expect("stash stays lockable").unwrap()).await;
+    let stashed_endpoint = stashed.lock().expect("stash stays lockable").unwrap();
+    assert_pool_fixture_gone(stashed_endpoint).await;
 }
 
 #[tokio::test]
@@ -664,7 +669,8 @@ async fn failure_between_endpoint_and_oauth_writes_cleans_up_safely() {
             .contains("simulated between-write failure"),
         "the original failure must survive cleanup: {error:#}"
     );
-    assert_pool_fixture_gone(stashed.lock().expect("stash stays lockable").unwrap()).await;
+    let stashed_endpoint = stashed.lock().expect("stash stays lockable").unwrap();
+    assert_pool_fixture_gone(stashed_endpoint).await;
 }
 
 /// Controlled remover error: no DB schema or permission is tampered with; the

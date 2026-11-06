@@ -2251,7 +2251,13 @@ static STANDALONE_MIGRATIONS: sqlx::migrate::Migrator = sqlx::migrate!("./migrat
 const PRE_EMBEDDING_SCHEMA_VERSION: i64 = 36;
 
 /// Issue #1032 P0: the schema version that carries the embeddings capability.
+/// Kept at 37 for the historical 36->37 upgrade coverage; the current store
+/// schema version is newer and is tracked separately.
 const EMBEDDING_SCHEMA_VERSION: i64 = 37;
+
+/// Issue #1208 P2: the current standalone schema version, after the personal
+/// MCP OAuth tables were added.
+const LATEST_SCHEMA_VERSION: i64 = 38;
 
 /// Issue #1032 P0: canonical text projection of every row the 0037 upgrade
 /// must leave byte-identical. The projection deliberately skips the new
@@ -2412,8 +2418,30 @@ async fn the_standalone_upgrade_from_36_keeps_seeded_rows_and_links() {
         version, PRE_EMBEDDING_SCHEMA_VERSION,
         "the fixture must start at the pre-embeddings schema version"
     );
+
+    // First exercise only the historical embedding migration (36 -> 37) and
+    // prove it keeps every seeded row, link and encrypted envelope intact.
+    STANDALONE_MIGRATIONS
+        .run_to(EMBEDDING_SCHEMA_VERSION, &pool)
+        .await
+        .expect("apply the standalone migrations up to schema 37");
+    let at_embedding: i64 = sqlx::query_scalar("SELECT schema_version FROM standalone_schema_meta")
+        .fetch_one(&pool)
+        .await
+        .expect("read the embedding schema version");
+    assert_eq!(
+        at_embedding, EMBEDDING_SCHEMA_VERSION,
+        "schema 37 must be the embeddings migration"
+    );
+    let after_embedding = snapshot_preserved_rows(&pool).await;
+    assert_eq!(
+        before, after_embedding,
+        "the 37 embedding migration must not change any stored row, link or envelope"
+    );
     pool.close().await;
 
+    // The store then upgrades 37 -> the current schema; the same byte identity
+    // assertions must hold at the latest version too.
     let store = StandaloneConfigStore::open(&path)
         .await
         .expect("open the upgraded store");
@@ -2422,13 +2450,13 @@ async fn the_standalone_upgrade_from_36_keeps_seeded_rows_and_links() {
         .await
         .expect("read the upgraded schema version");
     assert_eq!(
-        upgraded, EMBEDDING_SCHEMA_VERSION,
+        upgraded, LATEST_SCHEMA_VERSION,
         "the standalone migration and the store version must agree"
     );
     let after = snapshot_preserved_rows(store.pool()).await;
     assert_eq!(
         before, after,
-        "the upgrade must not change any stored row, link or encrypted envelope"
+        "the latest upgrade must not change any stored row, link or encrypted envelope"
     );
     cleanup(store, path).await;
 }
@@ -2565,7 +2593,7 @@ async fn a_fresh_standalone_store_carries_the_embeddings_capability() {
         .fetch_one(store.pool())
         .await
         .expect("read the schema version");
-    assert_eq!(version, EMBEDDING_SCHEMA_VERSION);
+    assert_eq!(version, LATEST_SCHEMA_VERSION);
 
     sqlx::query(
         r#"INSERT INTO standalone_provider_endpoints

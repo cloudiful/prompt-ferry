@@ -296,6 +296,20 @@ fn api_router(state: AdminState) -> Router<AdminState> {
             get(get_mcp_catalog),
         )
         .route("/admin/mcp-servers/{server_id}/test", post(test_mcp_server))
+        .route(
+            "/admin/mcp-servers/{server_id}/oauth",
+            get(get_mcp_oauth_status)
+                .post(start_mcp_oauth)
+                .delete(disconnect_mcp_oauth),
+        )
+        .route(
+            "/admin/mcp-servers/{server_id}/oauth/callback",
+            get(mcp_oauth_callback),
+        )
+        .route(
+            "/admin/mcp-servers/{server_id}/oauth/refresh",
+            post(refresh_mcp_oauth),
+        )
         .route("/admin/request-records/summary", get(usage_summary))
         .route("/admin/request-records/overview", get(usage_overview))
         .route("/admin/request-records", get(usage_events))

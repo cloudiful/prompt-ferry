@@ -85,6 +85,14 @@ pub struct AcquiredCatalog {
     pub refreshed: bool,
 }
 
+/// Whether a background catalog task may touch this server.
+///
+/// Personal OAuth servers are resolved on demand for their owner only; a
+/// background pass has no owner and must never borrow one.
+fn background_catalog_refresh_allowed(server: &db::McpServer) -> bool {
+    server.effective_auth_mode() != crate::db::MCP_AUTH_MODE_OAUTH
+}
+
 #[derive(Clone)]
 pub struct McpCatalogService {
     inner: Arc<McpCatalogServiceInner>,
@@ -94,6 +102,9 @@ struct McpCatalogServiceInner {
     repository: crate::db::ConfigRepository,
     cache: McpCatalogCache,
     policy: CatalogRefreshPolicy,
+    /// Personal MCP OAuth backend. Refreshes triggered by the owner need it to
+    /// resolve that owner's token; background refreshes skip such servers.
+    oauth: Option<std::sync::Arc<crate::mcp::oauth::McpOAuthService>>,
 }
 
 impl McpCatalogService {
@@ -112,6 +123,7 @@ impl McpCatalogService {
                 repository,
                 cache,
                 policy,
+                oauth: None,
             }),
         }
     }
@@ -122,7 +134,25 @@ impl McpCatalogService {
         storage: &crate::mcp::McpRuntimeStorage,
         cache: &McpCatalogCache,
     ) -> Self {
-        Self::new_with_repository(storage.repository().clone(), cache.clone())
+        let service = Self::new_with_repository(storage.repository().clone(), cache.clone());
+        match storage.oauth() {
+            Some(oauth) => service.with_oauth_service(oauth.clone()),
+            None => service,
+        }
+    }
+
+    /// A service that can resolve personal MCP OAuth credentials.
+    pub(crate) fn with_oauth_service(
+        mut self,
+        oauth: std::sync::Arc<crate::mcp::oauth::McpOAuthService>,
+    ) -> Self {
+        self.inner = Arc::new(McpCatalogServiceInner {
+            repository: self.inner.repository.clone(),
+            cache: self.inner.cache.clone(),
+            policy: self.inner.policy,
+            oauth: Some(oauth),
+        });
+        self
     }
 
     /// Replace the refresh bounds.
@@ -138,6 +168,7 @@ impl McpCatalogService {
             repository: self.inner.repository.clone(),
             cache: self.inner.cache.clone(),
             policy,
+            oauth: self.inner.oauth.clone(),
         });
         self
     }
@@ -245,7 +276,13 @@ impl McpCatalogService {
     }
 
     /// Refresh one server in the background through the shared coordinator.
+    ///
+    /// A personal OAuth server is never refreshed by a background task: its
+    /// catalog needs the owner's token, so the owner triggers it explicitly.
     pub fn spawn_refresh(&self, server: db::McpServer) {
+        if !background_catalog_refresh_allowed(&server) {
+            return;
+        }
         self.spawn_reserved_refresh(server);
     }
 
@@ -285,7 +322,10 @@ impl McpCatalogService {
             }
         };
         drop(activity);
-        let enabled = servers.into_iter().filter(|server| server.enabled);
+        let enabled = servers
+            .into_iter()
+            .filter(|server| server.enabled)
+            .filter(background_catalog_refresh_allowed);
         stream::iter(enabled)
             .for_each_concurrent(self.inner.policy.concurrency, |server| async move {
                 if let Err(err) = self.acquire(&server).await {
@@ -328,7 +368,10 @@ impl McpCatalogService {
             }
         };
         drop(activity);
-        let enabled = servers.into_iter().filter(|server| server.enabled);
+        let enabled = servers
+            .into_iter()
+            .filter(|server| server.enabled)
+            .filter(background_catalog_refresh_allowed);
         stream::iter(enabled)
             .for_each_concurrent(self.inner.policy.concurrency, |server| async move {
                 let Some(activity) = self.coordinator().admit() else {
@@ -595,7 +638,7 @@ impl McpCatalogService {
         let baseline = self
             .bounded(deadline, self.inner.cache.baseline(server))
             .await??;
-        let snapshot = self.fetch(server, deadline).await?;
+        let snapshot = Box::pin(self.fetch(server, deadline)).await?;
         self.publish(server, snapshot, &baseline, deadline).await
     }
 
@@ -711,10 +754,14 @@ impl McpCatalogService {
         server: &db::McpServer,
         deadline: Instant,
     ) -> anyhow::Result<ServerCatalogSnapshot> {
-        let storage = crate::mcp::McpRuntimeStorage::from_repository(self.inner.repository.clone());
+        let mut storage =
+            crate::mcp::McpRuntimeStorage::from_repository(self.inner.repository.clone());
+        if let Some(oauth) = self.inner.oauth.clone() {
+            storage = storage.with_oauth_service(oauth);
+        }
         self.bounded(
             deadline,
-            fetch_server_snapshot_with_storage(Some(&storage), server),
+            Box::pin(fetch_server_snapshot_with_storage(Some(&storage), server)),
         )
         .await?
         .map_err(|err| {
@@ -733,7 +780,7 @@ impl McpCatalogService {
         let baseline = self
             .bounded(deadline, self.inner.cache.baseline(server))
             .await??;
-        let snapshot = self.fetch(server, deadline).await?;
+        let snapshot = Box::pin(self.fetch(server, deadline)).await?;
         self.publish(server, snapshot, &baseline, deadline).await
     }
 
@@ -820,7 +867,14 @@ impl McpCatalogService {
     }
 
     /// Schedule one bounded, coalesced background refresh.
+    ///
+    /// The personal-OAuth exclusion is enforced here so every current and
+    /// future caller inherits it: a stale read of an owner-scoped OAuth catalog
+    /// must never schedule work that has no owner to authenticate as.
     fn schedule_refresh(&self, server: &db::McpServer) {
+        if !background_catalog_refresh_allowed(server) {
+            return;
+        }
         self.spawn_reserved_refresh(server.clone());
     }
 

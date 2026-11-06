@@ -138,10 +138,22 @@ pub async fn load_visible_server(
     user_id: Option<i64>,
     server_name: &str,
 ) -> anyhow::Result<Option<McpServer>> {
-    storage
+    let server = storage
         .repository()
         .get_visible_mcp_server(user_id, server_name)
-        .await
+        .await?;
+    // A personal OAuth server is bound to its owner. The visibility predicate
+    // already scopes user rows, and this assertion makes the named-targeting
+    // path fail closed even if that predicate ever widens.
+    if let Some(server) = &server
+        && server.effective_auth_mode() == crate::db::MCP_AUTH_MODE_OAUTH
+        && !user_id
+            .map(|user_id| crate::db::oauth_owner_matches(server, user_id))
+            .unwrap_or(false)
+    {
+        return Ok(None);
+    }
+    Ok(server)
 }
 
 #[cfg(test)]

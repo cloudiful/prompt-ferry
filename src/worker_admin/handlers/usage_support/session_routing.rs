@@ -224,6 +224,22 @@ fn affinity_status_for_binding(
     }
 }
 
+async fn peek_binding(
+    store: &ResponseAffinityStore,
+    route_user_id: i64,
+    rule_id: uuid::Uuid,
+    stable_identity: &str,
+) -> Option<ResponseAffinityBinding> {
+    let cache_key = ResponseAffinityStore::cache_key(route_user_id, rule_id, stable_identity);
+    match store.peek(&cache_key).await {
+        Ok(binding) => binding,
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to peek session affinity binding");
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,21 +304,5 @@ mod tests {
             affinity_status_for_binding(Some(&disabled), None, &binding).state,
             SessionAffinityState::StaleEndpoint
         ));
-    }
-}
-
-async fn peek_binding(
-    store: &ResponseAffinityStore,
-    route_user_id: i64,
-    rule_id: uuid::Uuid,
-    stable_identity: &str,
-) -> Option<ResponseAffinityBinding> {
-    let cache_key = ResponseAffinityStore::cache_key(route_user_id, rule_id, stable_identity);
-    match store.peek(&cache_key).await {
-        Ok(binding) => binding,
-        Err(err) => {
-            tracing::warn!(error = %err, "failed to peek session affinity binding");
-            None
-        }
     }
 }

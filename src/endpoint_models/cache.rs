@@ -1255,19 +1255,20 @@ mod tests {
             .await;
         }
 
-        let state = cache.lock();
-        assert_eq!(state.flights.len(), 1, "the pending state keeps one flight");
-        assert_eq!(
-            state
-                .flights
-                .values()
-                .next()
-                .expect("the flight")
-                .live_followers,
-            0,
-            "a cancelled reader frees its slot immediately"
-        );
-        drop(state);
+        {
+            let state = cache.lock();
+            assert_eq!(state.flights.len(), 1, "the pending state keeps one flight");
+            assert_eq!(
+                state
+                    .flights
+                    .values()
+                    .next()
+                    .expect("the flight")
+                    .live_followers,
+                0,
+                "a cancelled reader frees its slot immediately"
+            );
+        }
         release.notify_waiters();
         let _ = leader.await;
     }

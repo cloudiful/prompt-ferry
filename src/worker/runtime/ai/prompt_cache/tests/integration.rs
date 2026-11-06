@@ -9,18 +9,22 @@ use serde_json::Value;
 use super::super::*;
 use super::support::{openrouter_route, targeted_route};
 use crate::{
-    config::NativeApi, db::EndpointProvider, upstream_adapter::PreparedRequestBody,
-    worker::runtime::ai::upstream::build_upstream_request,
+    config::NativeApi,
+    db::EndpointProvider,
+    upstream_adapter::PreparedRequestBody,
+    worker::runtime::ai::upstream::{UpstreamRequestTarget, build_upstream_request},
 };
 
 fn forwarded_body(route: &RouteConfig, path: &str, body: &[u8]) -> Value {
     let request = build_upstream_request(
-        &reqwest::Client::new(),
-        &reqwest::Method::POST,
-        "https://openrouter.ai/api/v1/responses",
-        route,
-        path,
-        &PreparedRequestBody::BufferedBytes(body.to_vec()),
+        UpstreamRequestTarget {
+            client: &reqwest::Client::new(),
+            method: &reqwest::Method::POST,
+            url: "https://openrouter.ai/api/v1/responses",
+            route,
+            path,
+            body: &PreparedRequestBody::BufferedBytes(body.to_vec()),
+        },
         &[],
         None,
         uuid::Uuid::new_v4(),
@@ -49,12 +53,14 @@ fn the_prepared_path_decides_whether_the_builder_injects() {
             PreparedRequestBody::PassthroughStream(body.to_vec()),
         ] {
             let request = build_upstream_request(
-                &reqwest::Client::new(),
-                &reqwest::Method::POST,
-                "https://openrouter.ai/api/v1/responses",
-                &route,
-                path,
-                &prepared,
+                UpstreamRequestTarget {
+                    client: &reqwest::Client::new(),
+                    method: &reqwest::Method::POST,
+                    url: "https://openrouter.ai/api/v1/responses",
+                    route: &route,
+                    path,
+                    body: &prepared,
+                },
                 &[],
                 None,
                 uuid::Uuid::new_v4(),

@@ -869,6 +869,43 @@ export type McpCatalogResponse = {
     tools: Array<McpCatalogItem>;
 };
 
+export type McpOAuthRefreshResponse = {
+    expires_at?: string | null;
+    scopes: Array<string>;
+    /**
+     * `connected` | `reauth_required`
+     */
+    status: string;
+};
+
+export type McpOAuthStartResponse = {
+    /**
+     * The authorization-server URL the owner must visit to grant access.
+     */
+    authorization_url: string;
+};
+
+/**
+ * Safe status of one personal MCP OAuth grant.
+ *
+ * `status` is one of `connected`, `authorizing`, `reauth_required` or
+ * `disconnected`. The response never carries a token, client secret, PKCE
+ * verifier or callback code.
+ */
+export type McpOAuthStatusResponse = {
+    expires_at?: string | null;
+    /**
+     * Why personal OAuth is unavailable when the deployment or the server
+     * configuration cannot enable it.
+     */
+    reason?: string | null;
+    scopes: Array<string>;
+    /**
+     * `connected` | `authorizing` | `reauth_required` | `disconnected`
+     */
+    status: string;
+};
+
 export type McpProviderDescriptor = {
     /**
      * `none` or `bearer`.
@@ -3568,6 +3605,116 @@ export type GetMcpCatalogResponses = {
 };
 
 export type GetMcpCatalogResponse = GetMcpCatalogResponses[keyof GetMcpCatalogResponses];
+
+export type DisconnectMcpOauthData = {
+    body?: never;
+    path: {
+        /**
+         * MCP server ID
+         */
+        server_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/mcp-servers/{server_id}/oauth';
+};
+
+export type DisconnectMcpOauthResponses = {
+    /**
+     * Grant, pending states and leases cleared
+     */
+    204: void;
+};
+
+export type DisconnectMcpOauthResponse = DisconnectMcpOauthResponses[keyof DisconnectMcpOauthResponses];
+
+export type GetMcpOauthStatusData = {
+    body?: never;
+    path: {
+        /**
+         * MCP server ID
+         */
+        server_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/mcp-servers/{server_id}/oauth';
+};
+
+export type GetMcpOauthStatusResponses = {
+    /**
+     * Personal MCP OAuth status
+     */
+    200: McpOAuthStatusResponse;
+};
+
+export type GetMcpOauthStatusResponse = GetMcpOauthStatusResponses[keyof GetMcpOauthStatusResponses];
+
+export type StartMcpOauthData = {
+    body?: never;
+    path: {
+        /**
+         * MCP server ID
+         */
+        server_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/mcp-servers/{server_id}/oauth';
+};
+
+export type StartMcpOauthResponses = {
+    /**
+     * Authorization URL to visit
+     */
+    200: McpOAuthStartResponse;
+};
+
+export type StartMcpOauthResponse = StartMcpOauthResponses[keyof StartMcpOauthResponses];
+
+export type McpOauthCallbackData = {
+    body?: never;
+    path: {
+        /**
+         * MCP server ID
+         */
+        server_id: string;
+    };
+    query?: {
+        code?: string;
+        state?: string;
+        /**
+         * RFC 9207 authorization response issuer.
+         */
+        iss?: string;
+    };
+    url: '/api/v1/admin/mcp-servers/{server_id}/oauth/callback';
+};
+
+export type McpOauthCallbackResponses = {
+    /**
+     * Fixed authorization result page
+     */
+    200: unknown;
+};
+
+export type RefreshMcpOauthData = {
+    body?: never;
+    path: {
+        /**
+         * MCP server ID
+         */
+        server_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/mcp-servers/{server_id}/oauth/refresh';
+};
+
+export type RefreshMcpOauthResponses = {
+    /**
+     * Refreshed grant status
+     */
+    200: McpOAuthRefreshResponse;
+};
+
+export type RefreshMcpOauthResponse = RefreshMcpOauthResponses[keyof RefreshMcpOauthResponses];
 
 export type TestMcpServerData = {
     body?: never;

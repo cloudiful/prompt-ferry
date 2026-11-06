@@ -10,6 +10,16 @@ use std::borrow::Cow;
 
 use crate::worker_admin::chatgpt_backend::{self, CodexAuth};
 
+/// One upstream request target shared by the platform and Codex builders.
+pub(super) struct UpstreamRequestTarget<'a> {
+    pub(super) client: &'a Client,
+    pub(super) method: &'a Method,
+    pub(super) url: &'a str,
+    pub(super) route: &'a db::RouteConfig,
+    pub(super) path: &'a str,
+    pub(super) body: &'a PreparedRequestBody,
+}
+
 #[cfg(test)]
 pub(super) async fn send_upstream_request(
     client: &Client,
@@ -20,12 +30,14 @@ pub(super) async fn send_upstream_request(
     body: &PreparedRequestBody,
 ) -> Result<reqwest::Response, reqwest::Error> {
     build_upstream_request(
-        client,
-        method,
-        url,
-        route,
-        path,
-        body,
+        UpstreamRequestTarget {
+            client,
+            method,
+            url,
+            route,
+            path,
+            body,
+        },
         &[],
         None,
         uuid::Uuid::new_v4(),
@@ -35,16 +47,19 @@ pub(super) async fn send_upstream_request(
 }
 
 pub(super) fn build_upstream_request(
-    client: &Client,
-    method: &Method,
-    url: &str,
-    route: &db::RouteConfig,
-    path: &str,
-    body: &PreparedRequestBody,
+    target: UpstreamRequestTarget<'_>,
     request_headers: &[(String, String)],
     conversation_id: Option<uuid::Uuid>,
     request_id: uuid::Uuid,
 ) -> reqwest::RequestBuilder {
+    let UpstreamRequestTarget {
+        client,
+        method,
+        url,
+        route,
+        path,
+        body,
+    } = target;
     let request_builder = client
         .request(method.clone(), url)
         .header(header::CONTENT_TYPE, "application/json");
@@ -82,15 +97,18 @@ pub(super) fn build_upstream_request(
 /// `session-id` plus the token's compute-residency claim. The platform builder
 /// above is untouched.
 pub(super) fn build_codex_upstream_request(
-    client: &Client,
-    method: &Method,
-    url: &str,
-    route: &db::RouteConfig,
-    path: &str,
-    body: &PreparedRequestBody,
+    target: UpstreamRequestTarget<'_>,
     auth: &CodexAuth,
     request_headers: &[(String, String)],
 ) -> reqwest::RequestBuilder {
+    let UpstreamRequestTarget {
+        client,
+        method,
+        url,
+        route,
+        path,
+        body,
+    } = target;
     let raw = match body {
         PreparedRequestBody::PassthroughStream(bytes)
         | PreparedRequestBody::BufferedBytes(bytes) => bytes.as_slice(),
@@ -539,12 +557,14 @@ mod tests {
             has_oauth_token: false,
         };
         let request = build_upstream_request(
-            &Client::new(),
-            &Method::POST,
-            "https://example.test/v1/messages",
-            &route,
-            "/v1/messages",
-            &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            UpstreamRequestTarget {
+                client: &Client::new(),
+                method: &Method::POST,
+                url: "https://example.test/v1/messages",
+                route: &route,
+                path: "/v1/messages",
+                body: &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            },
             &[
                 ("anthropic-version".to_string(), "2024-10-22".to_string()),
                 ("anthropic-beta".to_string(), "tools-2024-04-04".to_string()),
@@ -625,12 +645,14 @@ mod tests {
         let conversation_id =
             uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
         let request = build_upstream_request(
-            &Client::new(),
-            &Method::POST,
-            "https://api.opencode.ai/v1/responses",
-            &route,
-            "/v1/responses",
-            &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            UpstreamRequestTarget {
+                client: &Client::new(),
+                method: &Method::POST,
+                url: "https://api.opencode.ai/v1/responses",
+                route: &route,
+                path: "/v1/responses",
+                body: &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            },
             &[
                 (
                     "x-opencode-session".to_string(),
@@ -688,12 +710,14 @@ mod tests {
         let conversation_id =
             uuid::Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
         let request = build_upstream_request(
-            &Client::new(),
-            &Method::POST,
-            "https://opencode.ai/zen/go/v1/responses",
-            &route,
-            "/v1/responses",
-            &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            UpstreamRequestTarget {
+                client: &Client::new(),
+                method: &Method::POST,
+                url: "https://opencode.ai/zen/go/v1/responses",
+                route: &route,
+                path: "/v1/responses",
+                body: &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            },
             &[],
             Some(conversation_id),
             uuid::Uuid::new_v4(),
@@ -749,12 +773,14 @@ mod tests {
         let conversation_id =
             uuid::Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
         let request = build_upstream_request(
-            &Client::new(),
-            &Method::POST,
-            "https://opencode.ai/v1/responses",
-            &route,
-            "/v1/responses",
-            &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            UpstreamRequestTarget {
+                client: &Client::new(),
+                method: &Method::POST,
+                url: "https://opencode.ai/v1/responses",
+                route: &route,
+                path: "/v1/responses",
+                body: &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            },
             &[
                 ("x-opencode-session".to_string(), "   ".to_string()),
                 ("user-agent".to_string(), "".to_string()),
@@ -805,12 +831,14 @@ mod tests {
             ..generic_route()
         };
         build_upstream_request(
-            &Client::new(),
-            &Method::POST,
-            &format!("{base_url}{path}"),
-            &route,
-            path,
-            &PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
+            UpstreamRequestTarget {
+                client: &Client::new(),
+                method: &Method::POST,
+                url: &format!("{base_url}{path}"),
+                route: &route,
+                path,
+                body: &PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
+            },
             request_headers,
             conversation_id,
             request_id,
@@ -840,12 +868,14 @@ mod tests {
             ..generic_route()
         };
         let request = build_upstream_request(
-            &Client::new(),
-            &Method::POST,
-            "http://127.0.0.1:9/v1/responses",
-            &route,
-            "/v1/responses",
-            &PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
+            UpstreamRequestTarget {
+                client: &Client::new(),
+                method: &Method::POST,
+                url: "http://127.0.0.1:9/v1/responses",
+                route: &route,
+                path: "/v1/responses",
+                body: &PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
+            },
             &[],
             None,
             request_id,
@@ -869,12 +899,14 @@ mod tests {
             ..generic_route()
         };
         let request = build_upstream_request(
-            &Client::new(),
-            &Method::POST,
-            "http://127.0.0.1:9/v1/responses",
-            &route,
-            "/v1/responses",
-            &PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
+            UpstreamRequestTarget {
+                client: &Client::new(),
+                method: &Method::POST,
+                url: "http://127.0.0.1:9/v1/responses",
+                route: &route,
+                path: "/v1/responses",
+                body: &PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
+            },
             &[],
             None,
             request_id,
@@ -1082,12 +1114,14 @@ mod tests {
         let conversation_id =
             uuid::Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
         let request = build_upstream_request(
-            &Client::new(),
-            &Method::POST,
-            "https://api.openai.com/v1/chat/completions",
-            &route,
-            "/v1/chat/completions",
-            &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            UpstreamRequestTarget {
+                client: &Client::new(),
+                method: &Method::POST,
+                url: "https://api.openai.com/v1/chat/completions",
+                route: &route,
+                path: "/v1/chat/completions",
+                body: &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            },
             &[
                 (
                     "x-opencode-session".to_string(),
@@ -1144,12 +1178,14 @@ mod tests {
         let conversation_id =
             uuid::Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
         let request = build_upstream_request(
-            &Client::new(),
-            &Method::POST,
-            "https://api.example.com/v1/chat/completions",
-            &route,
-            "/v1/chat/completions",
-            &PreparedRequestBody::BufferedBytes(br#"{"model":"opencode"}"#.to_vec()),
+            UpstreamRequestTarget {
+                client: &Client::new(),
+                method: &Method::POST,
+                url: "https://api.example.com/v1/chat/completions",
+                route: &route,
+                path: "/v1/chat/completions",
+                body: &PreparedRequestBody::BufferedBytes(br#"{"model":"opencode"}"#.to_vec()),
+            },
             &[],
             Some(conversation_id),
             uuid::Uuid::new_v4(),
@@ -1186,12 +1222,14 @@ mod tests {
             has_oauth_token: false,
         };
         let request = build_upstream_request(
-            &Client::new(),
-            &Method::POST,
-            "https://API.OpEnCoDe.AI/v1/responses",
-            &route,
-            "/v1/responses",
-            &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            UpstreamRequestTarget {
+                client: &Client::new(),
+                method: &Method::POST,
+                url: "https://API.OpEnCoDe.AI/v1/responses",
+                route: &route,
+                path: "/v1/responses",
+                body: &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            },
             &[
                 (
                     "X-OPENCODE-SESSION".to_string(),
@@ -1448,12 +1486,14 @@ mod tests {
             PreparedRequestBody::PassthroughStream(br#"{"model":"deepseek-flash"}"#.to_vec()),
         ] {
             let request = build_upstream_request(
-                &Client::new(),
-                &Method::POST,
-                "https://api.deepseek.com/v1/chat/completions",
-                &route,
-                "/v1/chat/completions",
-                &body,
+                UpstreamRequestTarget {
+                    client: &Client::new(),
+                    method: &Method::POST,
+                    url: "https://api.deepseek.com/v1/chat/completions",
+                    route: &route,
+                    path: "/v1/chat/completions",
+                    body: &body,
+                },
                 &[],
                 None,
                 uuid::Uuid::new_v4(),
@@ -1480,12 +1520,14 @@ mod tests {
             PreparedRequestBody::PassthroughStream(downgraded.clone()),
         ] {
             let request = build_upstream_request(
-                &Client::new(),
-                &Method::POST,
-                "https://api.deepseek.com/v1/chat/completions",
-                &route,
-                "/v1/chat/completions",
-                &body,
+                UpstreamRequestTarget {
+                    client: &Client::new(),
+                    method: &Method::POST,
+                    url: "https://api.deepseek.com/v1/chat/completions",
+                    route: &route,
+                    path: "/v1/chat/completions",
+                    body: &body,
+                },
                 &[],
                 None,
                 uuid::Uuid::new_v4(),
@@ -1555,12 +1597,14 @@ mod tests {
                 PreparedRequestBody::PassthroughStream(body.to_vec()),
             ] {
                 let request = build_upstream_request(
-                    &Client::new(),
-                    &Method::POST,
-                    "https://api.minimaxi.com/v1/chat/completions",
-                    &route,
-                    "/v1/chat/completions",
-                    &prepared,
+                    UpstreamRequestTarget {
+                        client: &Client::new(),
+                        method: &Method::POST,
+                        url: "https://api.minimaxi.com/v1/chat/completions",
+                        route: &route,
+                        path: "/v1/chat/completions",
+                        body: &prepared,
+                    },
                     &[],
                     None,
                     uuid::Uuid::new_v4(),
@@ -1592,12 +1636,14 @@ mod tests {
             PreparedRequestBody::PassthroughStream(br#"{"model":"m"}"#.to_vec()),
         ] {
             let request = build_upstream_request(
-                &Client::new(),
-                &Method::POST,
-                "https://api.minimaxi.com/v1/chat/completions",
-                &route,
-                "/v1/chat/completions",
-                &body,
+                UpstreamRequestTarget {
+                    client: &Client::new(),
+                    method: &Method::POST,
+                    url: "https://api.minimaxi.com/v1/chat/completions",
+                    route: &route,
+                    path: "/v1/chat/completions",
+                    body: &body,
+                },
                 &[],
                 None,
                 uuid::Uuid::new_v4(),
@@ -1624,12 +1670,14 @@ mod tests {
                 PreparedRequestBody::PassthroughStream(raw.to_vec()),
             ] {
                 let request = build_upstream_request(
-                    &Client::new(),
-                    &Method::POST,
-                    "https://api.minimaxi.com/v1/chat/completions",
-                    &route,
-                    "/v1/chat/completions",
-                    &body,
+                    UpstreamRequestTarget {
+                        client: &Client::new(),
+                        method: &Method::POST,
+                        url: "https://api.minimaxi.com/v1/chat/completions",
+                        route: &route,
+                        path: "/v1/chat/completions",
+                        body: &body,
+                    },
                     &[],
                     None,
                     uuid::Uuid::new_v4(),
@@ -1647,12 +1695,14 @@ mod tests {
 
         let generic = generic_route();
         let request = build_upstream_request(
-            &Client::new(),
-            &Method::POST,
-            "https://api.minimaxi.com/v1/chat/completions",
-            &generic,
-            "/v1/chat/completions",
-            &PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
+            UpstreamRequestTarget {
+                client: &Client::new(),
+                method: &Method::POST,
+                url: "https://api.minimaxi.com/v1/chat/completions",
+                route: &generic,
+                path: "/v1/chat/completions",
+                body: &PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
+            },
             &[],
             None,
             uuid::Uuid::new_v4(),
@@ -1667,12 +1717,14 @@ mod tests {
         assert!(value.get("reasoning_split").is_none());
 
         let request = build_upstream_request(
-            &Client::new(),
-            &Method::POST,
-            "https://api.minimaxi.com/v1/chat/completions",
-            &route,
-            "/v1/chat/completions",
-            &PreparedRequestBody::BufferedBytes(b"not-json".to_vec()),
+            UpstreamRequestTarget {
+                client: &Client::new(),
+                method: &Method::POST,
+                url: "https://api.minimaxi.com/v1/chat/completions",
+                route: &route,
+                path: "/v1/chat/completions",
+                body: &PreparedRequestBody::BufferedBytes(b"not-json".to_vec()),
+            },
             &[],
             None,
             uuid::Uuid::new_v4(),

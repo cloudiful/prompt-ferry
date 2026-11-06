@@ -120,7 +120,7 @@ fn classify_upstream_body(body: &str) -> Option<UpstreamFailureCause> {
     // let `{"zipcode":2056}` reach the fallback, so the fallback is reserved
     // for a body that never parsed at all.
     let parsed = serde_json::from_str::<Value>(body).ok();
-    let structured = parsed.as_ref().map(|value| structured_codes(value));
+    let structured = parsed.as_ref().map(structured_codes);
     let mentions = |wanted: u32| match &structured {
         Some(codes) => mentions_structured_code(codes, wanted),
         None => mentions_free_text_code(&folded, wanted),

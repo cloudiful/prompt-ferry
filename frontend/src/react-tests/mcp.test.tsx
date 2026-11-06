@@ -25,10 +25,13 @@ import { useSessionStore } from '@/lib/session'
 const api = vi.hoisted(() => ({
   createMcpServer: vi.fn(),
   deleteMcpServer: vi.fn(),
+  disconnectMcpOauth: vi.fn(),
   getMcpCatalog: vi.fn(),
+  getMcpOauthStatus: vi.fn(),
   listMcpProviders: vi.fn(),
   listMcpServers: vi.fn(),
   listUserOptions: vi.fn(),
+  startMcpOauth: vi.fn(),
   testMcpServer: vi.fn(),
   updateMcpServer: vi.fn(),
 }))
@@ -36,10 +39,13 @@ const api = vi.hoisted(() => ({
 vi.mock('@/generated/admin-api', () => ({
   createMcpServer: api.createMcpServer,
   deleteMcpServer: api.deleteMcpServer,
+  disconnectMcpOauth: api.disconnectMcpOauth,
   getMcpCatalog: api.getMcpCatalog,
+  getMcpOauthStatus: api.getMcpOauthStatus,
   listMcpProviders: api.listMcpProviders,
   listMcpServers: api.listMcpServers,
   listUserOptions: api.listUserOptions,
+  startMcpOauth: api.startMcpOauth,
   testMcpServer: api.testMcpServer,
   updateMcpServer: api.updateMcpServer,
 }))

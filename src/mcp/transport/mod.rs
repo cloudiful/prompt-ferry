@@ -1,4 +1,5 @@
 mod client;
+pub(crate) mod pinning;
 pub(crate) mod proxy;
 mod token_selection;
 mod tool_headers;
@@ -127,6 +128,8 @@ pub(super) async fn call_with_storage(
         // Basic and none transports use a single credential; bearer uses token
         // balancing with retry on 401/403/429.
         if server.effective_auth_mode() != crate::db::MCP_AUTH_MODE_BEARER {
+            // Personal OAuth obtains its token per send inside the guarded
+            // client; nothing is resolved or cached here.
             let selected = SelectedToken {
                 value: None,
                 index: None,

@@ -34,30 +34,42 @@ fn known(remaining_percent: Option<f64>) -> SubscriptionWindowAvailability {
     }
 }
 
-fn window_row(
-    source_id: &str,
+struct WindowIdentity<'a> {
+    source_id: &'a str,
     kind: CanonicalQuotaWindowKind,
     source_model: Option<String>,
     unit: Option<String>,
     duration_seconds: Option<i64>,
     is_default_scope: bool,
+}
+
+struct WindowAmounts {
     remaining_percent: Option<f64>,
     current: Option<f64>,
     limit: Option<f64>,
     remaining: Option<f64>,
     reset_at: Option<DateTime<Utc>>,
-) -> CanonicalQuotaWindow {
+}
+
+fn window_row(identity: WindowIdentity<'_>, amounts: WindowAmounts) -> CanonicalQuotaWindow {
+    let WindowAmounts {
+        remaining_percent,
+        current,
+        limit,
+        remaining,
+        reset_at,
+    } = amounts;
     let remaining_percent = finite(remaining_percent);
     let current = finite(current);
     let limit = finite(limit);
     let remaining = finite(remaining);
     CanonicalQuotaWindow {
-        source_id: source_id.to_string(),
-        kind,
-        source_model,
-        unit,
-        duration_seconds,
-        is_default_scope,
+        source_id: identity.source_id.to_string(),
+        kind: identity.kind,
+        source_model: identity.source_model,
+        unit: identity.unit,
+        duration_seconds: identity.duration_seconds,
+        is_default_scope: identity.is_default_scope,
         availability: if remaining_percent.is_some() {
             SubscriptionWindowAvailability::Known
         } else {
@@ -153,33 +165,39 @@ pub(crate) fn glm_fallback_observations(key: &TokenPlanKeyUsage) -> Vec<Canonica
 /// GLM presence-aware observation for one winning row (built at parse time
 /// before `0.0` defaults erase absence). `row_type` selects the documented
 /// unit (`TOKENS_LIMIT` → `tokens`, `CREDIT_LIMIT` → `credits`).
-pub(crate) fn glm_observation(
-    slot: &str,
-    kind: CanonicalQuotaWindowKind,
-    row_type: Option<&str>,
-    current: Option<f64>,
-    limit: Option<f64>,
-    remaining: Option<f64>,
-    percentage: Option<f64>,
-    reset_at: Option<DateTime<Utc>>,
-) -> CanonicalQuotaWindow {
-    let unit = match row_type {
+pub(crate) struct GlmRow<'a> {
+    pub(crate) slot: &'a str,
+    pub(crate) kind: CanonicalQuotaWindowKind,
+    pub(crate) row_type: Option<&'a str>,
+    pub(crate) current: Option<f64>,
+    pub(crate) limit: Option<f64>,
+    pub(crate) remaining: Option<f64>,
+    pub(crate) percentage: Option<f64>,
+    pub(crate) reset_at: Option<DateTime<Utc>>,
+}
+
+pub(crate) fn glm_observation(row: GlmRow<'_>) -> CanonicalQuotaWindow {
+    let unit = match row.row_type {
         Some("TOKENS_LIMIT") => Some("tokens".to_string()),
         Some("CREDIT_LIMIT") => Some("credits".to_string()),
         _ => None,
     };
     window_row(
-        slot,
-        kind,
-        None,
-        unit,
-        None,
-        true,
-        remaining_from_used(percentage),
-        current,
-        limit,
-        remaining,
-        reset_at,
+        WindowIdentity {
+            source_id: row.slot,
+            kind: row.kind,
+            source_model: None,
+            unit,
+            duration_seconds: None,
+            is_default_scope: true,
+        },
+        WindowAmounts {
+            remaining_percent: remaining_from_used(row.percentage),
+            current: row.current,
+            limit: row.limit,
+            remaining: row.remaining,
+            reset_at: row.reset_at,
+        },
     )
 }
 
@@ -205,17 +223,21 @@ fn command_code_window_observations(key: &TokenPlanKeyUsage) -> Vec<CanonicalQuo
                 _ => None,
             };
             rows.push(window_row(
-                slot,
-                kind,
-                None,
-                Some("currency".to_string()),
-                None,
-                true,
-                window.remaining_percent,
-                current,
-                cap,
-                derived_remaining,
-                window.reset_at,
+                WindowIdentity {
+                    source_id: slot,
+                    kind,
+                    source_model: None,
+                    unit: Some("currency".to_string()),
+                    duration_seconds: None,
+                    is_default_scope: true,
+                },
+                WindowAmounts {
+                    remaining_percent: window.remaining_percent,
+                    current,
+                    limit: cap,
+                    remaining: derived_remaining,
+                    reset_at: window.reset_at,
+                },
             ));
         }
     }
@@ -256,17 +278,21 @@ fn opencode_go_observations(key: &TokenPlanKeyUsage) -> Vec<CanonicalQuotaWindow
     ] {
         if let Some(window) = window {
             rows.push(window_row(
-                slot,
-                kind,
-                None,
-                None,
-                None,
-                true,
-                window.percent.map(|used| 100.0 - used),
-                None,
-                None,
-                None,
-                window.resets_at,
+                WindowIdentity {
+                    source_id: slot,
+                    kind,
+                    source_model: None,
+                    unit: None,
+                    duration_seconds: None,
+                    is_default_scope: true,
+                },
+                WindowAmounts {
+                    remaining_percent: window.percent.map(|used| 100.0 - used),
+                    current: None,
+                    limit: None,
+                    remaining: None,
+                    reset_at: window.resets_at,
+                },
             ));
         }
     }
@@ -385,17 +411,21 @@ fn minimax_observations(key: &TokenPlanKeyUsage) -> Vec<CanonicalQuotaWindow> {
                     _ => None,
                 };
                 rows.push(window_row(
-                    &format!("minimax:{}:{slot}", model.model_name),
-                    kind,
-                    Some(model.model_name.clone()),
-                    Some("tokens".to_string()),
-                    None,
-                    default_scope,
-                    window.remaining_percent,
-                    finite(current),
-                    finite(limit),
-                    finite(derived_remaining),
-                    window.end_at,
+                    WindowIdentity {
+                        source_id: &format!("minimax:{}:{slot}", model.model_name),
+                        kind,
+                        source_model: Some(model.model_name.clone()),
+                        unit: Some("tokens".to_string()),
+                        duration_seconds: None,
+                        is_default_scope: default_scope,
+                    },
+                    WindowAmounts {
+                        remaining_percent: window.remaining_percent,
+                        current: finite(current),
+                        limit: finite(limit),
+                        remaining: finite(derived_remaining),
+                        reset_at: window.end_at,
+                    },
                 ));
             }
         }
@@ -411,17 +441,21 @@ fn subscription_observations(key: &TokenPlanKeyUsage) -> Vec<CanonicalQuotaWindo
         };
         for window in windows {
             rows.push(window_row(
-                &format!("subscription:{}", window.source_window),
-                CanonicalQuotaWindowKind::Custom,
-                Some(model.model_name.clone()),
-                None,
-                window.window_seconds,
-                true,
-                window.remaining_percent,
-                None,
-                None,
-                None,
-                window.reset_at,
+                WindowIdentity {
+                    source_id: &format!("subscription:{}", window.source_window),
+                    kind: CanonicalQuotaWindowKind::Custom,
+                    source_model: Some(model.model_name.clone()),
+                    unit: None,
+                    duration_seconds: window.window_seconds,
+                    is_default_scope: true,
+                },
+                WindowAmounts {
+                    remaining_percent: window.remaining_percent,
+                    current: None,
+                    limit: None,
+                    remaining: None,
+                    reset_at: window.reset_at,
+                },
             ));
         }
     }
@@ -547,32 +581,32 @@ mod tests {
     fn glm_presence_zero_cap_and_nonfinite_stay_honest() {
         // Real present zero current with a positive cap derives through the
         // presence-aware constructor.
-        let row = glm_observation(
-            "glm:five_hour",
-            CanonicalQuotaWindowKind::FiveHour,
-            Some("TOKENS_LIMIT"),
-            Some(0.0),
-            Some(2000.0),
-            Some(2000.0),
-            Some(0.0),
-            None,
-        );
+        let row = glm_observation(GlmRow {
+            slot: "glm:five_hour",
+            kind: CanonicalQuotaWindowKind::FiveHour,
+            row_type: Some("TOKENS_LIMIT"),
+            current: Some(0.0),
+            limit: Some(2000.0),
+            remaining: Some(2000.0),
+            percentage: Some(0.0),
+            reset_at: None,
+        });
         assert_eq!(row.remaining_percent, Some(100.0));
         assert_eq!(row.current, Some(0.0));
         assert_eq!(row.unit.as_deref(), Some("tokens"));
         assert_eq!(row.availability, SubscriptionWindowAvailability::Known);
 
         // Zero cap keeps a known zero amount but cannot derive a percent.
-        let row = glm_observation(
-            "glm:weekly",
-            CanonicalQuotaWindowKind::Weekly,
-            Some("CREDIT_LIMIT"),
-            Some(0.0),
-            Some(0.0),
-            Some(0.0),
-            None,
-            None,
-        );
+        let row = glm_observation(GlmRow {
+            slot: "glm:weekly",
+            kind: CanonicalQuotaWindowKind::Weekly,
+            row_type: Some("CREDIT_LIMIT"),
+            current: Some(0.0),
+            limit: Some(0.0),
+            remaining: Some(0.0),
+            percentage: None,
+            reset_at: None,
+        });
         assert_eq!(row.limit, Some(0.0));
         assert!(row.remaining_percent.is_none());
         // Amounts were observed, so the row is known even without a share.
@@ -580,30 +614,30 @@ mod tests {
         assert_eq!(row.unit.as_deref(), Some("credits"));
 
         // Non-finite totals never manufacture a share.
-        let row = glm_observation(
-            "glm:five_hour",
-            CanonicalQuotaWindowKind::FiveHour,
-            Some("TOKENS_LIMIT"),
-            Some(10.0),
-            Some(f64::INFINITY),
-            Some(f64::INFINITY),
-            None,
-            None,
-        );
+        let row = glm_observation(GlmRow {
+            slot: "glm:five_hour",
+            kind: CanonicalQuotaWindowKind::FiveHour,
+            row_type: Some("TOKENS_LIMIT"),
+            current: Some(10.0),
+            limit: Some(f64::INFINITY),
+            remaining: Some(f64::INFINITY),
+            percentage: None,
+            reset_at: None,
+        });
         assert!(row.limit.is_none());
         assert!(row.remaining_percent.is_none());
 
         // Missing current with a positive cap stays unknown.
-        let row = glm_observation(
-            "glm:five_hour",
-            CanonicalQuotaWindowKind::FiveHour,
-            Some("TOKENS_LIMIT"),
-            None,
-            Some(100.0),
-            None,
-            None,
-            None,
-        );
+        let row = glm_observation(GlmRow {
+            slot: "glm:five_hour",
+            kind: CanonicalQuotaWindowKind::FiveHour,
+            row_type: Some("TOKENS_LIMIT"),
+            current: None,
+            limit: Some(100.0),
+            remaining: None,
+            percentage: None,
+            reset_at: None,
+        });
         assert!(row.remaining_percent.is_none());
     }
 
@@ -843,16 +877,16 @@ mod tests {
         // A fresh valid GLM typed window (used 25 -> remaining 75) projects
         // to the same remaining share the legacy percent math reports.
         let typed_remaining = 100.0 - 25.0;
-        let row = glm_observation(
-            "glm:five_hour",
-            CanonicalQuotaWindowKind::FiveHour,
-            Some("TOKENS_LIMIT"),
-            Some(25.0),
-            Some(100.0),
-            Some(75.0),
-            Some(25.0),
-            None,
-        );
+        let row = glm_observation(GlmRow {
+            slot: "glm:five_hour",
+            kind: CanonicalQuotaWindowKind::FiveHour,
+            row_type: Some("TOKENS_LIMIT"),
+            current: Some(25.0),
+            limit: Some(100.0),
+            remaining: Some(75.0),
+            percentage: Some(25.0),
+            reset_at: None,
+        });
         assert_eq!(row.remaining_percent, Some(typed_remaining));
     }
 }

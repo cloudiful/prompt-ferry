@@ -239,7 +239,8 @@ async fn reviewer_truncated_embedding_response_never_delivers_partial_body() {
         loop {
             let (mut socket, _) = listener.accept().await.expect("accept");
             let mut request = [0; 8192];
-            socket.read(&mut request).await.expect("request");
+            let read = socket.read(&mut request).await.expect("request");
+            assert!(read > 0, "the client sent a non-empty request");
             socket
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000\r\nConnection: close\r\n\r\n{\"data\":[")
                 .await

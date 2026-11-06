@@ -5,6 +5,10 @@ import {
   canRemoveMcpBearerToken,
   createMcpWorkspaceView,
 } from '@/models/mcp'
+import {
+  mcpFormToRequest,
+  mcpServerToForm,
+} from '@/admin-mappers/forms/mcp'
 
 function server(overrides: Partial<McpServer> = {}): McpServer {
   return {
@@ -109,5 +113,25 @@ describe('MCP view and bearer-token predicates', () => {
     ]
     expect(canRemoveMcpBearerToken(disabledAlternate, 0)).toBe(false)
     expect(canDisableMcpBearerToken(disabledAlternate, 0)).toBe(false)
+  })
+})
+
+describe('personal MCP OAuth form mapping', () => {
+  it('round-trips oauth without token or basic credential fields', () => {
+    const form = mcpServerToForm(
+      server({
+        auth_mode: 'oauth',
+        scope: 'user',
+        owner_user_id: 2,
+        url: 'https://huggingface.co/mcp?login',
+      }),
+    )
+    expect(form.auth_mode).toBe('oauth')
+    const request = mcpFormToRequest(form)
+    expect(request.auth_mode).toBe('oauth')
+    expect(request.bearer_tokens).toBeNull()
+    expect(request.basic_username).toBeNull()
+    expect(request.basic_password).toBeNull()
+    expect(request.url).toBe('https://huggingface.co/mcp?login')
   })
 })

@@ -141,23 +141,40 @@ pub fn assemble_compaction_response(tail: &[Value], summary: &str, model: &str) 
     })
 }
 
+/// The inputs of one same-route summarize call.
+pub(super) struct SummarizeCall<'a> {
+    pub(super) client: &'a reqwest::Client,
+    pub(super) summarize_url: &'a str,
+    pub(super) api_key: &'a str,
+    pub(super) native_api: NativeApi,
+    pub(super) head: &'a [Value],
+    pub(super) history: &'a [Value],
+    pub(super) model: &'a str,
+    pub(super) services: &'a RuntimeServices,
+    pub(super) route: &'a RouteConfig,
+    pub(super) feedback_factory: &'a AttemptFeedbackFactory,
+}
+
 /// Run one same-route summarize call against the upstream and return the
 /// plaintext summary text. Chat-native targets use `/v1/chat/completions`;
 /// Anthropic targets use `/v1/messages`; Responses targets never reach here
 /// (they passthrough natively). Never sends `context_management` and never
 /// posts to `/v1/responses/compact`, so compact never recurses.
 pub(super) async fn self_compact_via_upstream(
-    client: &reqwest::Client,
-    summarize_url: &str,
-    api_key: &str,
-    native_api: NativeApi,
-    head: &[Value],
-    history: &[Value],
-    model: &str,
-    services: &RuntimeServices,
-    route: &RouteConfig,
-    feedback_factory: &AttemptFeedbackFactory,
+    call: SummarizeCall<'_>,
 ) -> anyhow::Result<(String, AttemptFeedback)> {
+    let SummarizeCall {
+        client,
+        summarize_url,
+        api_key,
+        native_api,
+        head,
+        history,
+        model,
+        services,
+        route,
+        feedback_factory,
+    } = call;
     let input = build_summarize_input(head, history);
     let (body, is_chat) = match native_api {
         NativeApi::Chat => (

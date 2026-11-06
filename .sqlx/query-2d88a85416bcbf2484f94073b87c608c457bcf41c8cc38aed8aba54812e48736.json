@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM mcp_oauth_credentials\nWHERE server_id = $1\n  AND owner_user_id = $2\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2d88a85416bcbf2484f94073b87c608c457bcf41c8cc38aed8aba54812e48736"
+}

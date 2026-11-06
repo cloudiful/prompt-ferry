@@ -59,6 +59,15 @@ export type FixtureState = {
   modelRoutes: ModelEndpointRule[]
   mcpProviders: McpProviderDescriptor[]
   mcpServers: McpServer[]
+  mcpOAuthStatus: Record<
+    string,
+    {
+      status: string
+      scopes: string[]
+      expires_at?: string | null
+      reason?: string | null
+    }
+  >
   relays: ManagedRelay[]
   bridge: BridgeStatus
   approvals: ApprovalRequest[]
@@ -1669,6 +1678,7 @@ export function createState(): FixtureState {
       },
     ],
     mcpServers: [...mcpServers, ...extraMcpServers],
+    mcpOAuthStatus: {},
     relays: [relayConnected, relayDisconnected, ...extraRelays],
     bridge: {
       configured_relays: 2,

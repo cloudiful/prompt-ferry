@@ -102,6 +102,7 @@ impl TokenPlanQuotaCache {
         observation::quota_observation_now(self, endpoint_id, key_id, Instant::now())
     }
 
+    #[cfg(test)]
     pub(crate) fn key_remaining_percent_now(
         &self,
         endpoint_id: Uuid,
@@ -132,6 +133,7 @@ impl TokenPlanQuotaCache {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn key_weight_percent_now(
         &self,
         endpoint_id: Uuid,

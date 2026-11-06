@@ -267,15 +267,9 @@ async fn resolve_realtime_route(
     };
     let InitializedRequest { request_ctx, .. } =
         super::request_init::initialize_request(&fake_request, services).await?;
-    let (mut route, quota_probe) =
-        match resolve_route(&fake_request, config, services, &request_ctx).await? {
-            super::request_routes::RouteResolution::Ready { route, quota_probe } => {
-                (*route, quota_probe)
-            }
-            super::request_routes::RouteResolution::Responded => {
-                return Err(anyhow!("realtime route was unexpectedly resolved"));
-            }
-        };
+    let super::request_routes::RouteResolution::Ready { route, quota_probe } =
+        resolve_route(&fake_request, config, services, &request_ctx).await?;
+    let (mut route, quota_probe) = (*route, quota_probe);
     super::request::resolve_auto_protocol(&mut route, &request.path)
         .map_err(|err| anyhow!("{}: {}", err.code, err.message))?;
     let supports_realtime = route.native_api == NativeApi::Realtime;

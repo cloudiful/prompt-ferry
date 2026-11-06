@@ -79,7 +79,7 @@ pub(super) async fn spawn_managed_relay_supervisor(
                 }
             }
         }
-        join_relay_handles(tasks.into_iter().map(|(_, task)| task.handle)).await;
+        join_relay_handles(tasks.into_values().map(|task| task.handle)).await;
     });
     Ok(())
 }
@@ -290,7 +290,7 @@ pub(super) async fn spawn_standalone_relay_supervisor(
                 }
             }
         }
-        join_relay_handles(tasks.into_iter().map(|(_, task)| task.handle)).await;
+        join_relay_handles(tasks.into_values().map(|task| task.handle)).await;
     });
     Ok(())
 }

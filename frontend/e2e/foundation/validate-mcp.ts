@@ -40,6 +40,12 @@ if (existsSync(reportPath)) {
     'mutation-delete',
     'mutation-failure-draft',
     'long-values',
+    'oauth-connect',
+    'oauth-disconnect',
+    'oauth-reconnect',
+    'oauth-other-owner',
+    'oauth-config-missing',
+    'oauth-status-error',
   ]
   const scenarioCoverage = checks.scenarioCoverage ?? {}
   const startedAt = Date.parse(report.startedAt ?? '')
@@ -62,7 +68,7 @@ if (existsSync(reportPath)) {
   )
   assert(
     report.segments?.map((segment) => segment.name).join(',') ===
-      'owner-role,admin-paging-delete,catalog-editor,guarded-mutations,create-secrets-responsive',
+      'owner-role,admin-paging-delete,catalog-editor,guarded-mutations,create-secrets-responsive,oauth-controls',
     'focused MCP run did not include every serial callback segment',
   )
   for (const scenario of requiredScenarios) {
@@ -71,6 +77,33 @@ if (existsSync(reportPath)) {
       `current-run MCP scenario is missing or false: ${scenario}`,
     )
   }
+
+  const oauthControls = checks.oauthControls ?? {}
+  assert(
+    oauthControls.connected === true &&
+      oauthControls.disconnected === true &&
+      oauthControls.reconnected === true &&
+      oauthControls.otherOwnerRestricted === true &&
+      oauthControls.configReason === true &&
+      oauthControls.popupOpened === true &&
+      oauthControls.scopesReadOnly === true &&
+      oauthControls.statusFailure === true &&
+      oauthControls.statusRetry === true &&
+      oauthControls.disconnectAfterStatusFailure === true &&
+      oauthControls.openerIsolated === true &&
+      oauthControls.openerProbe?.hasOpener === false &&
+      oauthControls.openerProbe?.navigated === false &&
+      Array.isArray(oauthControls.panelShots) &&
+      oauthControls.panelShots.length >= 8 &&
+      oauthControls.panelShots.every(
+        (name: unknown) =>
+          typeof name === 'string' &&
+          report.screenshots?.includes(
+            `e2e/foundation/screenshots/${name}.png`,
+          ),
+      ),
+    'personal MCP OAuth browser evidence is incomplete',
+  )
 
   const owner = checks.ownerRole ?? {}
   assert(

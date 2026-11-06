@@ -251,6 +251,7 @@ impl QuotaFeedbackStore {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn reserve_probe(&self, scope: QuotaFeedbackScope, now: Instant) -> bool {
         !matches!(
             self.reserve_probe_if_required(scope, now),
@@ -265,10 +266,10 @@ impl QuotaFeedbackStore {
         now: Instant,
     ) {
         self.with(now, |state| {
-            if let Some(entry) = state.feedback.get_mut(&scope) {
-                if entry.probe == Some(attempt_start) {
-                    entry.probe = None;
-                }
+            if let Some(entry) = state.feedback.get_mut(&scope)
+                && entry.probe == Some(attempt_start)
+            {
+                entry.probe = None;
             }
             // Only the guard that registered this token removes it, so a
             // newer successor claim is never released by an older one.

@@ -82,16 +82,26 @@ async fn clear_previous_fixtures(pool: &PgPool, user_id: i64) {
         .expect("clear previous mcp server fixture");
 }
 
-async fn insert_record(
-    pool: &PgPool,
+struct RecordFixture<'a> {
     request_id: Uuid,
     user_id: i64,
     request_category: RequestRecordCategory,
-    path: &str,
+    path: &'a str,
     mcp_server_id: Option<Uuid>,
-    mcp_server_name: Option<&str>,
+    mcp_server_name: Option<&'a str>,
     created_at: DateTime<Utc>,
-) {
+}
+
+async fn insert_record(pool: &PgPool, fixture: RecordFixture<'_>) {
+    let RecordFixture {
+        request_id,
+        user_id,
+        request_category,
+        path,
+        mcp_server_id,
+        mcp_server_name,
+        created_at,
+    } = fixture;
     sqlx::query(
         "INSERT INTO request_records \
          (request_id, user_id, path, request_category, mcp_server_id, mcp_server_name, \
@@ -137,68 +147,80 @@ async fn insert_fixtures(pool: &PgPool, user_id: i64) -> Fixture {
 
     insert_record(
         pool,
-        service_with_name,
-        user_id,
-        RequestRecordCategory::Mcp,
-        "/mcp",
-        Some(server_id),
-        Some("scope-fixture-server"),
-        created_at,
+        RecordFixture {
+            request_id: service_with_name,
+            user_id,
+            request_category: RequestRecordCategory::Mcp,
+            path: "/mcp",
+            mcp_server_id: Some(server_id),
+            mcp_server_name: Some("scope-fixture-server"),
+            created_at,
+        },
     )
     .await;
     insert_record(
         pool,
-        service_name_only,
-        user_id,
-        RequestRecordCategory::Mcp,
-        "/mcp",
-        None,
-        Some("scope-fixture-server"),
-        created_at,
+        RecordFixture {
+            request_id: service_name_only,
+            user_id,
+            request_category: RequestRecordCategory::Mcp,
+            path: "/mcp",
+            mcp_server_id: None,
+            mcp_server_name: Some("scope-fixture-server"),
+            created_at,
+        },
     )
     .await;
     insert_record(
         pool,
-        service_id_only,
-        user_id,
-        RequestRecordCategory::Mcp,
-        "/mcp",
-        Some(deleted_server_id),
-        None,
-        created_at,
+        RecordFixture {
+            request_id: service_id_only,
+            user_id,
+            request_category: RequestRecordCategory::Mcp,
+            path: "/mcp",
+            mcp_server_id: Some(deleted_server_id),
+            mcp_server_name: None,
+            created_at,
+        },
     )
     .await;
     insert_record(
         pool,
-        service_named_unknown,
-        user_id,
-        RequestRecordCategory::Mcp,
-        "/mcp",
-        None,
-        Some("(unknown)"),
-        created_at,
+        RecordFixture {
+            request_id: service_named_unknown,
+            user_id,
+            request_category: RequestRecordCategory::Mcp,
+            path: "/mcp",
+            mcp_server_id: None,
+            mcp_server_name: Some("(unknown)"),
+            created_at,
+        },
     )
     .await;
     insert_record(
         pool,
-        gateway,
-        user_id,
-        RequestRecordCategory::Mcp,
-        "/mcp",
-        None,
-        None,
-        created_at,
+        RecordFixture {
+            request_id: gateway,
+            user_id,
+            request_category: RequestRecordCategory::Mcp,
+            path: "/mcp",
+            mcp_server_id: None,
+            mcp_server_name: None,
+            created_at,
+        },
     )
     .await;
     insert_record(
         pool,
-        ai_record,
-        user_id,
-        RequestRecordCategory::Ai,
-        "/v1/responses",
-        None,
-        None,
-        created_at,
+        RecordFixture {
+            request_id: ai_record,
+            user_id,
+            request_category: RequestRecordCategory::Ai,
+            path: "/v1/responses",
+            mcp_server_id: None,
+            mcp_server_name: None,
+            created_at,
+        },
     )
     .await;
 

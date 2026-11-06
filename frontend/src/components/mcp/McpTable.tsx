@@ -1,4 +1,4 @@
-import { LoaderCircle, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { KeyRound, LoaderCircle, Pencil, RefreshCw, Trash2 } from 'lucide-react'
 import {
   TestResultPopover,
   testResultKey,
@@ -30,6 +30,7 @@ type McpTableProps = {
   items: McpServerListItemView[]
   onDelete: (server: McpServer) => void
   onEdit: (server: McpServer) => void
+  onOAuth?: (server: McpServer) => void
   onPageChange: (change: TablePageChange) => void
   onResultOpenChange: (key: string, open: boolean) => void
   onTest: (server: McpServer, surface: TestResultSurface) => void
@@ -46,6 +47,7 @@ export function McpTable({
   items,
   onDelete,
   onEdit,
+  onOAuth,
   onPageChange,
   onResultOpenChange,
   onTest,
@@ -170,6 +172,19 @@ export function McpTable({
                           )}
                         </Button>
                       </TestResultPopover>
+                      {item.server.auth_mode === 'oauth' ? (
+                        <Button
+                          aria-label={t('oauthManage')}
+                          disabled={Boolean(action)}
+                          onClick={() => onOAuth?.(item.server)}
+                          size="icon-sm"
+                          title={t('oauthManage')}
+                          type="button"
+                          variant="ghost"
+                        >
+                          <KeyRound />
+                        </Button>
+                      ) : null}
                       <Button
                         aria-label={t('edit')}
                         disabled={Boolean(action)}

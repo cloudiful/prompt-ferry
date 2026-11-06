@@ -150,7 +150,7 @@ pub(super) async fn run_cycle<'a>(
 ) -> RefreshCompletion {
     loop {
         match attempt().await {
-            RefreshAttempt::Completed(completion) => return completion,
+            RefreshAttempt::Completed(completion) => return *completion,
             RefreshAttempt::LeaseLost => match wait().await {
                 ReplicaWait::Completed(completion) | ReplicaWait::InProgress(completion) => {
                     return completion;

@@ -52,6 +52,10 @@ function renderDialog(initial: McpForm, locale: 'zh-CN' | 'en-US' = 'en-US') {
             header="MCP"
             isAdmin
             onChange={onChange}
+            onOAuthConnect={() => {}}
+            onOAuthDisconnect={() => {}}
+            oauthPending={false}
+            oauthServer={null}
             onOpenChange={() => {}}
             onRefreshCatalog={() => {}}
             onSave={() => {}}
