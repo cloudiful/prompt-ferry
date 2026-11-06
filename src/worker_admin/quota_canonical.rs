@@ -676,6 +676,55 @@ mod tests {
     }
 
     #[test]
+    fn captured_monthly_pool_row_survives_the_canonical_projection() {
+        // The parser-captured vector is authoritative: the projection keeps the
+        // issued monthly pool row untouched and never adds a second one.
+        let mut cc = key();
+        cc.balances = Some(CommandCodeBalances {
+            monthly_credits: 0.0637246611,
+            purchased_credits: 0.0,
+            free_credits: 0.0,
+            remaining_credits: 0.0637246611,
+        });
+        cc.quota_windows = Some(vec![CanonicalQuotaWindow {
+            source_id: "command_code:monthly".into(),
+            kind: CanonicalQuotaWindowKind::Monthly,
+            source_model: None,
+            unit: Some("currency".into()),
+            duration_seconds: None,
+            is_default_scope: true,
+            availability: SubscriptionWindowAvailability::Known,
+            remaining_percent: Some(0.09103523),
+            current: Some(69.9362753389),
+            limit: Some(70.0),
+            remaining: Some(0.0637246611),
+            reset_at: None,
+        }]);
+        populate_key_observations(EndpointProvider::CommandCode, &mut cc);
+        let rows = cc.quota_windows.expect("cc rows");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].source_id, "command_code:monthly");
+        assert_eq!(rows[0].kind, CanonicalQuotaWindowKind::Monthly);
+        assert_eq!(rows[0].limit, Some(70.0));
+        assert_eq!(rows[0].remaining, Some(0.0637246611));
+        // The fallback projection of a key without captured rows never invents
+        // a monthly pool.
+        let mut fallback = key();
+        fallback.balances = Some(CommandCodeBalances {
+            monthly_credits: 80.0,
+            purchased_credits: 0.0,
+            free_credits: 0.0,
+            remaining_credits: 80.0,
+        });
+        populate_key_observations(EndpointProvider::CommandCode, &mut fallback);
+        let rows = fallback.quota_windows.expect("fallback rows");
+        assert!(
+            rows.iter()
+                .all(|row| row.kind != CanonicalQuotaWindowKind::Monthly)
+        );
+    }
+
+    #[test]
     fn opencode_go_nonfinite_percent_is_unknown() {
         let mut go = key();
         go.opencodego_rolling = Some(OpencodeGoWindowUsage {

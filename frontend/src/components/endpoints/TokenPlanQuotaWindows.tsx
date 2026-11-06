@@ -55,6 +55,7 @@ export function quotaWindowLabel(row: CanonicalQuotaRow, t: Translate): string {
     return t('tokenPlanDurationWindow', { duration: formatDuration(duration) })
   }
   if (row.sourceId.startsWith('command_code:')) {
+    if (row.kind === 'monthly') return t('tokenPlanMonthly')
     return row.kind === 'weekly'
       ? t('tokenPlanWeeklyUsd')
       : t('tokenPlanFiveHour')

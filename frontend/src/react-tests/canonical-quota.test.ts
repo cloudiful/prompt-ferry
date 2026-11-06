@@ -305,6 +305,65 @@ describe('canonical quota windows', () => {
     ).toBe(null)
   })
 
+  it('keeps the command code monthly pool out of the band aggregation', () => {
+    const rows = toCanonicalQuotaRows(
+      key({
+        quota_windows: [
+          observation({
+            source_id: 'command_code:five_hour',
+            kind: 'five_hour',
+            unit: 'currency',
+            remaining_percent: 42,
+          }),
+          observation({
+            source_id: 'command_code:weekly',
+            kind: 'weekly',
+            unit: 'currency',
+            remaining_percent: 30,
+          }),
+          observation({
+            source_id: 'command_code:monthly',
+            kind: 'monthly',
+            unit: 'currency',
+            remaining_percent: 0.09103523,
+            current: 69.9362753389,
+            limit: 70,
+            remaining: 0.0637246611,
+            reset_at: FUTURE,
+          }),
+        ],
+      }),
+      NOW,
+    )
+    // The pool stays a visible row of its own.
+    expect(rows).toHaveLength(3)
+    const monthly = rows.find((row) => row.sourceId === 'command_code:monthly')
+    expect(monthly?.kind).toBe('monthly')
+    expect(monthly?.limit).toBe(70)
+    expect(monthly?.remaining).toBe(0.0637246611)
+    expect(canonicalQuantityCaption(monthly!)).toBe('69.94 / 70.00')
+    // It never binds the generic bands: the weekly window still reports the
+    // long share and the five-hour window the short one.
+    expect(canonicalBandPercent(rows, 'short')).toBe(42)
+    expect(canonicalBandPercent(rows, 'long')).toBe(30)
+  })
+
+  it('keeps other providers monthly rows in the long band', () => {
+    const rows = toCanonicalQuotaRows(
+      key({
+        quota_windows: [
+          observation({
+            source_id: 'opencode_go:monthly',
+            kind: 'monthly',
+            remaining_percent: 55,
+          }),
+        ],
+      }),
+      NOW,
+    )
+    expect(canonicalBandPercent(rows, 'long')).toBe(55)
+  })
+
   it('subscription rows band by their real duration', () => {
     const rows = toCanonicalQuotaRows(
       key({

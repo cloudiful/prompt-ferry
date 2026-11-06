@@ -4,7 +4,10 @@ use chrono::{DateTime, TimeZone, Utc};
 use serde_json::Value;
 
 use super::json_scalars::{truncate_message, value_as_f64, value_as_i64, value_as_string};
-use crate::worker_admin_types::{CommandCodeWindowUsage, TokenPlanKeyUsage};
+use crate::worker_admin_types::{
+    CanonicalQuotaWindow, CanonicalQuotaWindowKind, CommandCodeWindowUsage,
+    SubscriptionWindowAvailability, TokenPlanKeyUsage,
+};
 
 // Monthly pool by plan: Go 10, GOAT 70, Pro 80, Max10x 150, Max20x 300,
 // TeamPro 40, Provider 0. Unknown → None (fallback to credits field).
@@ -119,6 +122,10 @@ pub(crate) struct ParsedCredits {
     pub(crate) free: Option<f64>,
     pub(crate) premium_monthly: Option<f64>,
     pub(crate) opensource_monthly: Option<f64>,
+    /// Explicitly issued monthly credit capacity. It only completes a
+    /// monthly pool together with a reported remaining amount; on its own it
+    /// says nothing about a balance.
+    pub(crate) monthly_granted: Option<f64>,
     pub(crate) windows: Value,
 }
 
@@ -131,6 +138,7 @@ pub(crate) fn parse_credits_section(body: &Value) -> Option<ParsedCredits> {
     let opensource_monthly = credits
         .get("opensourceMonthlyCredits")
         .and_then(value_as_f64);
+    let monthly_granted = credits.get("monthlyCreditsGranted").and_then(value_as_f64);
     if monthly.is_none()
         && purchased.is_none()
         && free.is_none()
@@ -146,7 +154,50 @@ pub(crate) fn parse_credits_section(body: &Value) -> Option<ParsedCredits> {
         free,
         premium_monthly,
         opensource_monthly,
+        monthly_granted,
         windows,
+    })
+}
+
+/// Actual billing-period end of a subscription body. Only a real reported
+/// value is accepted; a missing or unparsable one stays unknown instead of a
+/// synthetic reset date.
+pub(crate) fn parse_subscription_period_end(body: &Value) -> Option<DateTime<Utc>> {
+    let data = body.get("data")?.as_object()?;
+    data.get("currentPeriodEnd").and_then(normalize_reset_at)
+}
+
+/// Monthly issued-credit pool of a CommandCode key, built only from the
+/// amounts the provider actually reported: the granted capacity and the
+/// still-available part of it. A missing, invalid or out-of-range pair
+/// produces no window at all — never a zero row and never a plan-table cap.
+pub(crate) fn command_code_monthly_window(
+    monthly_remaining: Option<f64>,
+    monthly_granted: Option<f64>,
+    reset_at: Option<DateTime<Utc>>,
+) -> Option<CanonicalQuotaWindow> {
+    let granted = monthly_granted?;
+    let remaining = monthly_remaining?;
+    if !granted.is_finite() || granted <= 0.0 {
+        return None;
+    }
+    if !remaining.is_finite() || remaining < 0.0 || remaining > granted {
+        return None;
+    }
+    let remaining_percent = (remaining / granted * 100.0).clamp(0.0, 100.0);
+    Some(CanonicalQuotaWindow {
+        source_id: "command_code:monthly".to_string(),
+        kind: CanonicalQuotaWindowKind::Monthly,
+        source_model: None,
+        unit: Some("currency".to_string()),
+        duration_seconds: None,
+        is_default_scope: true,
+        availability: SubscriptionWindowAvailability::Known,
+        remaining_percent: Some(remaining_percent),
+        current: Some(granted - remaining),
+        limit: Some(granted),
+        remaining: Some(remaining),
+        reset_at,
     })
 }
 
@@ -431,6 +482,76 @@ mod tests {
             Some(0.0)
         );
         assert!(build_window_usage(1.0, 0.0, None).used_percent.is_none());
+    }
+
+    #[test]
+    fn reported_monthly_pair_builds_one_issued_pool_window() {
+        // The reported pair is the only source of a monthly pool: the granted
+        // capacity and the still-available part of it.
+        let reset = normalize_reset_at(&json!("2026-11-23T02:21:09.000Z"));
+        let window =
+            command_code_monthly_window(Some(0.0637246611), Some(70.0), reset).expect("monthly");
+        assert_eq!(window.source_id, "command_code:monthly");
+        assert_eq!(window.kind, CanonicalQuotaWindowKind::Monthly);
+        assert_eq!(window.source_model, None);
+        assert_eq!(window.unit.as_deref(), Some("currency"));
+        assert_eq!(window.duration_seconds, None);
+        assert!(window.is_default_scope);
+        assert_eq!(window.availability, SubscriptionWindowAvailability::Known);
+        assert_eq!(window.limit, Some(70.0));
+        assert_eq!(window.remaining, Some(0.0637246611));
+        let current = window.current.expect("current");
+        assert!((current - 69.9362753389).abs() < 1e-9, "current {current}");
+        assert_eq!(window.reset_at, reset);
+        let percent = window.remaining_percent.expect("percent");
+        assert!((percent - 0.09103523).abs() < 1e-8, "percent {percent}");
+    }
+
+    #[test]
+    fn monthly_pair_boundaries_emit_no_window() {
+        // A missing, invalid, negative or over-granted pair produces no row
+        // at all: never a zero window and never a plan-derived cap.
+        assert!(command_code_monthly_window(None, Some(70.0), None).is_none());
+        assert!(command_code_monthly_window(Some(1.0), None, None).is_none());
+        assert!(command_code_monthly_window(Some(1.0), Some(0.0), None).is_none());
+        assert!(command_code_monthly_window(Some(1.0), Some(-70.0), None).is_none());
+        assert!(command_code_monthly_window(Some(-1.0), Some(70.0), None).is_none());
+        assert!(command_code_monthly_window(Some(70.1), Some(70.0), None).is_none());
+        assert!(command_code_monthly_window(Some(f64::NAN), Some(70.0), None).is_none());
+        assert!(command_code_monthly_window(Some(1.0), Some(f64::INFINITY), None).is_none());
+        // Both extremes of a valid pair stay valid rows.
+        let empty = command_code_monthly_window(Some(0.0), Some(70.0), None).expect("empty");
+        assert_eq!(empty.remaining, Some(0.0));
+        assert_eq!(empty.current, Some(70.0));
+        assert_eq!(empty.remaining_percent, Some(0.0));
+        let full = command_code_monthly_window(Some(70.0), Some(70.0), None).expect("full");
+        assert_eq!(full.remaining, Some(70.0));
+        assert_eq!(full.current, Some(0.0));
+        assert_eq!(full.remaining_percent, Some(100.0));
+    }
+
+    #[test]
+    fn granted_amount_is_read_without_creating_a_credits_section() {
+        let body = json!({"credits": {"monthlyCredits": 5, "monthlyCreditsGranted": 70}});
+        let parsed = parse_credits_section(&body).expect("credits");
+        assert_eq!(parsed.monthly_granted, Some(70.0));
+        assert_eq!(parsed.monthly, Some(5.0));
+        // A granted amount alone never becomes a credits section.
+        assert!(
+            parse_credits_section(&json!({"credits": {"monthlyCreditsGranted": 70}})).is_none()
+        );
+    }
+
+    #[test]
+    fn subscription_period_end_uses_only_reported_values() {
+        let body = json!({"data": {"currentPeriodEnd": "2026-11-23T02:21:09.000Z"}});
+        let end = parse_subscription_period_end(&body).expect("period end");
+        assert_eq!(end.to_rfc3339(), "2026-11-23T02:21:09+00:00");
+        assert!(parse_subscription_period_end(&json!({"data": {}})).is_none());
+        assert!(
+            parse_subscription_period_end(&json!({"data": {"currentPeriodEnd": "soon"}})).is_none()
+        );
+        assert!(parse_subscription_period_end(&json!({})).is_none());
     }
 
     #[test]
