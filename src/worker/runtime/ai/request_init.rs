@@ -33,26 +33,9 @@ pub(super) async fn initialize_request(
     let request_id =
         uuid::Uuid::parse_str(&request.request_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
     let request_model = model_from_body(&request.body);
-    let (client_key_id, client_key_label, client_key_user_id) =
-        if let (Some(state), Some(key_hash)) = (
-            services.standalone_state(),
-            request.client_key_hash.as_deref(),
-        ) {
-            state
-                .client_key_identity(key_hash)
-                .await
-                .map(|identity| (None, Some(identity.label), Some(identity.user_id)))
-                .unwrap_or_default()
-        } else if let (Some(state), Some(key_hash)) =
-            (services.admin_state(), request.client_key_hash.as_deref())
-        {
-            crate::db::get_client_key_identity_by_hash(&state.pool, key_hash)
-                .await?
-                .map(|identity| (Some(identity.key_id), Some(identity.label), None))
-                .unwrap_or_default()
-        } else {
-            (None, None, None)
-        };
+    let (client_key_id, client_key_label, client_key_user_id) = services
+        .client_key_identity(request.client_key_hash.as_deref())
+        .await?;
     let user_id = client_key_user_id.or(request.user_id.filter(|id| *id > 0));
     let request_content_logging = if let Some(state) = services.admin_state() {
         state.request_content_logging.read().await.clone()

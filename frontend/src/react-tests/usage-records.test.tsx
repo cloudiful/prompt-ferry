@@ -232,8 +232,6 @@ describe('request records table: columns', () => {
       'user',
       'client_key',
       'target',
-      'provider_kind',
-      'mcp_method',
       'mcp_operation',
       'request_state',
       'duration_ms',
@@ -351,13 +349,14 @@ describe('request records table: sortable headers', () => {
     expect(header('model').getAttribute('aria-sort')).toBe('none')
   })
 
-  it('does not add a button to the non-sortable MCP provider kind header', () => {
+  it('omits the removed MCP provider and method columns and keeps the operation sortable', () => {
     renderTable({
       category: 'mcp',
       records: [record({ request_category: 'mcp' })],
     })
-    expect(within(header('provider_kind')).queryByRole('button')).toBeNull()
-    expect(within(header('mcp_method')).getByRole('button')).toBeTruthy()
+    expect(header('provider_kind')).toBeNull()
+    expect(header('mcp_method')).toBeNull()
+    expect(within(header('mcp_operation')).getByRole('button')).toBeTruthy()
   })
 })
 
@@ -703,8 +702,6 @@ describe('request records table: cells', () => {
       ],
     })
     expect(cellText('target')).toBe('filesystem')
-    expect(cellText('provider_kind')).toBe('context7')
-    expect(cellText('mcp_method')).toBe('tools/call')
     expect(cellText('mcp_operation')).toBe('tools/call')
 
     fireEvent.click(
@@ -717,20 +714,16 @@ describe('request records table: cells', () => {
     expect(onOpenDetail).toHaveBeenCalledTimes(2)
   })
 
-  it('dashes an unknown MCP provider kind and empty method', () => {
+  it('dashes an unknown MCP operation', () => {
     renderTable({
       category: 'mcp',
       records: [
         record({
           mcp_operation_name: null,
-          mcp_protocol_method: null,
           request_category: 'mcp',
-          server_provider_kind: null,
         }),
       ],
     })
-    expect(cellText('provider_kind')).toBe('-')
-    expect(cellText('mcp_method')).toBe('-')
     expect(cellText('mcp_operation')).toBe('-')
   })
 })
@@ -1062,29 +1055,25 @@ describe('usage range picker', () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: 0 } },
     })
-    rangeApi.listRequestRecords
-      .mockReset()
-      .mockResolvedValue({
-        data: {
-          first: 0,
-          rows: 10,
-          total: 1,
-          records: [record({ request_id: 'updated-record' })],
-        },
-      })
+    rangeApi.listRequestRecords.mockReset().mockResolvedValue({
+      data: {
+        first: 0,
+        rows: 10,
+        total: 1,
+        records: [record({ request_id: 'updated-record' })],
+      },
+    })
     rangeApi.requestRecordFacets
       .mockReset()
       .mockResolvedValue({ data: { dates: [], users: [], models: [] } })
-    rangeApi.requestRecordOverview
-      .mockReset()
-      .mockResolvedValue({
-        data: {
-          breakdown: [],
-          summary: {},
-          trend: [],
-          trend_granularity: 'hour',
-        },
-      })
+    rangeApi.requestRecordOverview.mockReset().mockResolvedValue({
+      data: {
+        breakdown: [],
+        summary: {},
+        trend: [],
+        trend_granularity: 'hour',
+      },
+    })
     useUsageStore.getState().resetIdentity({ user_id: 2, is_admin: false })
     useUsageStore.setState({
       range: 'custom',

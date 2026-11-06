@@ -170,6 +170,7 @@ mod tests {
             headers: Vec::new(),
             body: br#"{"method":"tools/call"}"#.to_vec(),
             user_id: Some(7),
+            client_key_hash: None,
             http_request_content_encoding: None,
             http_request_compressed: false,
             http_request_compressed_bytes: None,
@@ -382,5 +383,56 @@ mod tests {
         assert_eq!(log.request_state, db::RequestRecordState::Completed);
         assert_eq!(log.ok, Some(true));
         assert!(log.endpoint_key_id.is_none());
+    }
+
+    #[test]
+    fn the_context_key_identity_reaches_the_usage_log() {
+        let services = services();
+        let request = request();
+        let request_ctx = crate::worker::runtime::RequestExecutionContext::for_mcp(
+            uuid::Uuid::new_v4(),
+            std::time::Instant::now(),
+            Some(7),
+            uuid::Uuid::new_v4(),
+            crate::worker::runtime::prompt_log::RequestPromptLog::default(),
+        )
+        .with_client_key_identity(Some(42), Some("managed".to_string()));
+        let metadata = crate::mcp::targeting::McpRequestMetadata {
+            server_name: Some("minimax-mcp".to_string()),
+            protocol_method: Some("tools/call".to_string()),
+            operation_name: Some("web_search".to_string()),
+            selected_token_slot: None,
+            request_raw_json: None,
+        };
+        let request_content_logging = crate::worker_admin_types::RequestContentLoggingResponse {
+            mode: crate::worker_admin_types::RequestContentLoggingMode::Off,
+            raw_retention_days: 3,
+        };
+        let context = McpResponseContext {
+            request: &request,
+            request_ctx: &request_ctx,
+            metadata: &metadata,
+            request_content_logging: &request_content_logging,
+            redact_content: false,
+            upstream_redacted_request_json: None,
+            upstream_restore_session: None,
+            selected_token_slot: None,
+            tracker: None,
+            server: None,
+            services: &services,
+        };
+
+        let log = mcp_request_log(&context, failure(StatusCode::OK));
+
+        assert_eq!(log.client_key_id, Some(42));
+        assert_eq!(log.client_key_label.as_deref(), Some("managed"));
+    }
+
+    #[test]
+    fn a_legacy_request_without_a_key_hash_keeps_null_key_identity() {
+        let log = request_log(None, StatusCode::OK);
+
+        assert!(log.client_key_id.is_none());
+        assert!(log.client_key_label.is_none());
     }
 }

@@ -132,6 +132,30 @@ impl RuntimeServices {
         self
     }
 
+    /// Resolve the managed request-key identity from an authenticated key hash
+    /// with the same standalone/admin policy for the AI and MCP paths.
+    pub(super) async fn client_key_identity(
+        &self,
+        client_key_hash: Option<&str>,
+    ) -> anyhow::Result<(Option<i64>, Option<String>, Option<i64>)> {
+        if let (Some(state), Some(key_hash)) = (self.standalone_state(), client_key_hash) {
+            return Ok(state
+                .client_key_identity(key_hash)
+                .await
+                .map(|identity| (None, Some(identity.label), Some(identity.user_id)))
+                .unwrap_or_default());
+        }
+        if let (Some(state), Some(key_hash)) = (self.admin_state(), client_key_hash) {
+            return Ok(
+                crate::db::get_client_key_identity_by_hash(&state.pool, key_hash)
+                    .await?
+                    .map(|identity| (Some(identity.key_id), Some(identity.label), None))
+                    .unwrap_or_default(),
+            );
+        }
+        Ok((None, None, None))
+    }
+
     pub(super) async fn record_usage_event(&self, log: UsageLog) -> Option<i64> {
         #[cfg(test)]
         if let Some(observer) = &self.submitted_logs {
@@ -219,6 +243,16 @@ impl RequestExecutionContext {
     /// the same day partition.
     pub(super) fn with_created_at(mut self, created_at: DateTime<Utc>) -> Self {
         self.created_at = created_at;
+        self
+    }
+
+    pub(super) fn with_client_key_identity(
+        mut self,
+        client_key_id: Option<i64>,
+        client_key_label: Option<String>,
+    ) -> Self {
+        self.client_key_id = client_key_id;
+        self.client_key_label = client_key_label;
         self
     }
 

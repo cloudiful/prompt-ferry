@@ -36,7 +36,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1.0.104"
 argon2 = "0.6.0"
-async-openai = { version = "0.41.3", default-features = false, features = ["realtime-types"] }
+async-openai = { version = "0.43.0", default-features = false, features = ["realtime-types"] }
 async-trait = "0.1.92"
 async-stream = "0.3.6"
 axum = { version = "0.8.9", features = ["json", "macros", "ws"] }

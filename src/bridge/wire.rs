@@ -10,9 +10,10 @@ use crate::protocol::BridgeMessage;
 /// changes; peers reject envelopes with other versions. A bump forces a joint
 /// rollout of relay and worker: a pinned relay cannot talk to a bumped worker
 /// (or vice versa), so a worker-only roll may keep the relay pinned ONLY while
-/// this value is unchanged. New pipeline fields in [`payload`] must be optional
-/// (`#[serde(default)]`) so mixed-version peers keep decoding.
-pub const BRIDGE_WIRE_VERSION: u8 = 4;
+/// this value is unchanged. bincode 1.x serializes fields in declaration order
+/// and cannot default a missing trailing field, so a payload schema change is
+/// never mixed-version compatible and requires this bump.
+pub const BRIDGE_WIRE_VERSION: u8 = 5;
 pub const PUBLIC_API_BODY_LIMIT_BYTES: usize = 256 * 1024 * 1024;
 pub const BRIDGE_WS_MAX_MESSAGE_BYTES: usize = PUBLIC_API_BODY_LIMIT_BYTES + 1024 * 1024;
 pub const BRIDGE_WS_MAX_FRAME_BYTES: usize = BRIDGE_WS_MAX_MESSAGE_BYTES;
@@ -96,7 +97,7 @@ fn encode_message_with_limit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{BridgeRequestStart, ResponseChunk};
+    use crate::protocol::{BridgeRequestStart, McpRequestStart, ResponseChunk};
 
     #[test]
     fn messages_round_trip_with_bincode_wire() {
@@ -113,6 +114,24 @@ mod tests {
             http_request_content_encoding: Some("gzip".to_string()),
             http_request_compressed: true,
             http_request_compressed_bytes: Some(1024),
+        });
+        let encoded = encode_message(&message).unwrap();
+        assert_eq!(decode_message(&encoded).unwrap(), message);
+    }
+
+    #[test]
+    fn managed_mcp_request_start_round_trips_with_client_key_hash() {
+        let message = BridgeMessage::McpRequestStart(McpRequestStart {
+            request_id: "mcp-req".to_string(),
+            server_name: Some("catalog".to_string()),
+            method: "POST".to_string(),
+            path: "/mcp".to_string(),
+            headers: vec![("content-type".to_string(), "application/json".to_string())],
+            user_id: Some(7),
+            client_key_hash: Some("hash".to_string()),
+            http_request_content_encoding: None,
+            http_request_compressed: false,
+            http_request_compressed_bytes: None,
         });
         let encoded = encode_message(&message).unwrap();
         assert_eq!(decode_message(&encoded).unwrap(), message);

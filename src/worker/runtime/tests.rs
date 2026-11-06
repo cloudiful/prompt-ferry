@@ -184,6 +184,7 @@ fn mcp_usage_log_respects_request_content_logging_mode() {
         headers: Vec::new(),
         body: br#"{"method":"tools/call"}"#.to_vec(),
         user_id: Some(7),
+        client_key_hash: None,
         http_request_content_encoding: None,
         http_request_compressed: false,
         http_request_compressed_bytes: None,

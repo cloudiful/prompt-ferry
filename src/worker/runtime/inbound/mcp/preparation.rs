@@ -10,6 +10,7 @@ use crate::worker::runtime::lifecycle::RequestLeaseGuard;
 use crate::worker::runtime::{
     RequestExecutionContext, mcp_support::McpResponseContext, record_mcp_request_event,
     redaction_enabled, request_assembly::BufferedMcpRequest, resolve_mcp_conversation_log,
+    safe_error,
 };
 use crate::{
     db, mcp,
@@ -152,13 +153,43 @@ pub(super) async fn build_request_context(
         &request.headers,
         &request.body,
     );
+    let (client_key_id, client_key_label, client_key_user_id) = match services
+        .client_key_identity(request.client_key_hash.as_deref())
+        .await
+    {
+        Ok(identity) => identity,
+        Err(err) => {
+            let body = serde_json::json!({
+                "error": {
+                    "code": "mcp_error",
+                    "message": safe_error(
+                        &err,
+                        redaction_enabled(services.admin_state()),
+                        request.user_id.filter(|id| *id > 0),
+                    ),
+                }
+            })
+            .to_string();
+            send_mcp_response(
+                services,
+                &request.request_id,
+                StatusCode::BAD_GATEWAY.as_u16(),
+                Some("application/json".to_string()),
+                Vec::new(),
+                body.into_bytes(),
+            )
+            .await;
+            return None;
+        }
+    };
     let request_ctx = RequestExecutionContext::for_mcp(
         uuid::Uuid::parse_str(&request.request_id).unwrap_or_else(|_| uuid::Uuid::new_v4()),
         started,
-        request.user_id.filter(|id| *id > 0),
+        client_key_user_id.or(request.user_id.filter(|id| *id > 0)),
         services.runtime_state.worker_instance_id(),
         resolve_mcp_conversation_log(),
-    );
+    )
+    .with_client_key_identity(client_key_id, client_key_label);
     let request_lease = services.runtime_state.spawn_request_lease_guard(
         services.admin_state(),
         services.standalone_state(),

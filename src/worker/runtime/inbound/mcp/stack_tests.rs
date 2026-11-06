@@ -38,6 +38,7 @@ fn minimal_request() -> BufferedMcpRequest {
         headers: Vec::new(),
         body: br#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#.to_vec(),
         user_id: Some(1),
+        client_key_hash: None,
         http_request_content_encoding: None,
         http_request_compressed: false,
         http_request_compressed_bytes: None,
@@ -160,6 +161,18 @@ async fn sqlite_services(
     PathBuf,
     tokio::sync::mpsc::Receiver<super::super::super::bridge::BridgeData>,
 ) {
+    sqlite_services_with_config(name, StandaloneConfig::default()).await
+}
+
+async fn sqlite_services_with_config(
+    name: &str,
+    standalone_config: StandaloneConfig,
+) -> (
+    RuntimeServices,
+    StandaloneRuntimeState,
+    PathBuf,
+    tokio::sync::mpsc::Receiver<super::super::super::bridge::BridgeData>,
+) {
     let _redaction_guard = crate::redact_test_support::lock_async().await;
     let path = database_path();
     let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
@@ -183,7 +196,7 @@ async fn sqlite_services(
         catalog_cache,
     )
     .await;
-    let standalone = StandaloneRuntimeState::new(store, manager, StandaloneConfig::default())
+    let standalone = StandaloneRuntimeState::new(store, manager, standalone_config)
         .with_mcp_runtime(mcp_runtime);
     let (out_tx, _control_rx, _data_rx) = BridgeSender::channel();
     let services = RuntimeServices::new(
@@ -236,6 +249,65 @@ async fn sqlite_mcp_request_uses_unified_server_configuration() {
     assert!(summary.error_code.is_none(), "{summary:?}");
 
     drop(execution);
+    let _ = std::fs::remove_file(path);
+}
+
+// ---------------------------------------------------------------------------
+// Issue #1215 P1: a managed MCP request records its key identity on both the
+// admission and the settlement row, and never persists the key or its hash.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn managed_mcp_request_records_key_identity_on_admission_and_settlement() {
+    let secret = "pfy-managed-standalone-secret";
+    let key_hash = crate::keys::hash_client_key(secret);
+    let mut standalone_config = StandaloneConfig::default();
+    standalone_config
+        .client_keys
+        .push(crate::standalone_config::ClientKeyConfig {
+            key_id: uuid::Uuid::new_v4(),
+            user_id: 41,
+            key_prefix: secret.chars().take(12).collect(),
+            label: "managed desktop".to_string(),
+            secret: secret.to_string(),
+            enabled: true,
+        });
+    let (services, _standalone, path, _data_rx) =
+        sqlite_services_with_config("local", standalone_config).await;
+    let mut request = minimal_request();
+    request.server_name = Some("local".to_string());
+    request.client_key_hash = Some(key_hash.clone());
+    let request_id = uuid::Uuid::parse_str(&request.request_id).expect("request ID");
+
+    handle_mcp_request(request, &services).await;
+
+    let store = StandaloneConfigStore::open(&path)
+        .await
+        .expect("reopen the durable store");
+    let rows: Vec<_> = store
+        .list_usage_summaries(1024)
+        .await
+        .expect("read the durable usage ledger")
+        .into_iter()
+        .filter(|record| record.request_id == request_id && record.event_kind == "request")
+        .collect();
+    assert_eq!(
+        rows.len(),
+        2,
+        "the admission and settlement rows must both be recorded: {rows:?}"
+    );
+    for row in &rows {
+        assert_eq!(row.client_key_label.as_deref(), Some("managed desktop"));
+        assert_eq!(
+            row.client_key_id, None,
+            "standalone mode has no PostgreSQL key id: {row:?}"
+        );
+        assert_eq!(row.user_id, Some(41), "the key owner user wins: {row:?}");
+        let debug = format!("{row:?}");
+        assert!(!debug.contains(secret), "{debug}");
+        assert!(!debug.contains(&key_hash), "{debug}");
+    }
+
     let _ = std::fs::remove_file(path);
 }
 

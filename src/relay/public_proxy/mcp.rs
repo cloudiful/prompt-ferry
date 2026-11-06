@@ -148,6 +148,7 @@ async fn proxy_mcp_request(
     );
     let worker = selection.sender;
     let request_headers = forwardable_mcp_headers(&headers);
+    let client_key_hash = route.as_ref().map(|route| route.key_hash.clone());
     let start = McpRequestStart {
         request_id: request_id.clone(),
         server_name: server_name.clone(),
@@ -155,6 +156,7 @@ async fn proxy_mcp_request(
         path: request_path.clone(),
         headers: request_headers,
         user_id: route.map(|route| route.user_id),
+        client_key_hash,
         http_request_content_encoding: compression.content_encoding.clone(),
         http_request_compressed: compression.compressed,
         http_request_compressed_bytes: compression.compressed_bytes,
@@ -441,10 +443,15 @@ async fn send_mcp_request_end(
 mod tests {
     use super::*;
     use crate::{
-        protocol::{BridgeMessage, McpResponseChunk, McpResponseStart, ResponseError},
+        protocol::{
+            BridgeMessage, ClientRoute, McpResponseChunk, McpResponseEnd, McpResponseStart,
+            ResponseError,
+        },
         relay::{
             request_compression::HttpRequestCompressionContext,
-            response_forward::{handle_mcp_response_error, handle_mcp_response_start},
+            response_forward::{
+                handle_mcp_response_end, handle_mcp_response_error, handle_mcp_response_start,
+            },
             state::test_state,
         },
     };
@@ -643,5 +650,82 @@ mod tests {
             worker.await.unwrap(),
             "the worker must be told to cancel the oversized request"
         );
+    }
+
+    #[tokio::test]
+    async fn managed_mcp_route_forwards_its_key_hash_to_the_worker() {
+        let mut state = test_state();
+        state.config.client_token = "test-token".to_string();
+
+        let token = "pfy-managed-client-key";
+        let key_hash = crate::keys::hash_client_key(token);
+        state.inner.routes.lock().await.insert(
+            key_hash.clone(),
+            ClientRoute {
+                key_hash: key_hash.clone(),
+                key_prefix: token.chars().take(12).collect(),
+                user_id: 7,
+                route_id: "route-managed".to_string(),
+            },
+        );
+
+        let (worker_tx, mut worker_rx) = mpsc::channel(8);
+        state.inner.workers.lock().await.insert(1, worker_tx);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {token}").parse().unwrap(),
+        );
+        headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
+
+        let state_for_proxy = state.clone();
+        let proxy = tokio::spawn(async move {
+            proxy_mcp_request(
+                state_for_proxy,
+                "127.0.0.1".parse().unwrap(),
+                headers,
+                HttpRequestCompressionContext::default(),
+                Method::POST,
+                None,
+                Body::from(br#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#.to_vec()),
+            )
+            .await
+        });
+
+        let start = loop {
+            match worker_rx.recv().await.expect("the worker stays connected") {
+                BridgeMessage::McpRequestStart(start) => break start,
+                _ => continue,
+            }
+        };
+        assert_eq!(start.user_id, Some(7));
+        assert_eq!(start.client_key_hash.as_deref(), Some(key_hash.as_str()));
+        assert!(
+            !start
+                .headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("authorization")),
+            "the authenticated credential must not reach the worker"
+        );
+
+        handle_mcp_response_start(
+            &state,
+            McpResponseStart {
+                request_id: start.request_id.clone(),
+                status: StatusCode::OK.as_u16(),
+                content_type: Some("application/json".to_string()),
+                headers: Vec::new(),
+            },
+        )
+        .await;
+        handle_mcp_response_end(
+            &state,
+            McpResponseEnd {
+                request_id: start.request_id,
+            },
+        )
+        .await;
+        assert_eq!(proxy.await.unwrap().status(), StatusCode::OK);
     }
 }
