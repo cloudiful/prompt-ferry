@@ -1,14 +1,16 @@
 //! CommandCode alpha billing fetcher (issue #184 P3): whoami→orgId→credits+
 //! subscriptions+usage/summary with the endpoint Bearer key.
 
+use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde_json::Value;
 use uuid::Uuid;
 
 use super::command_code_parsing::{
-    build_window_usage, command_code_business_error, effective_monthly_credits,
-    effective_remaining_credits, parse_credits_section, parse_subscription_plan,
-    parse_summary_present, parse_whoami_org_id, parse_window_entry,
+    ParsedCredits, build_window_usage, command_code_business_error, command_code_monthly_window,
+    effective_monthly_credits, effective_remaining_credits, parse_credits_section,
+    parse_subscription_period_end, parse_subscription_plan, parse_summary_present,
+    parse_whoami_org_id, parse_window_entry,
 };
 use super::json_scalars::{failed_key, truncate_message, value_as_string};
 use crate::worker_admin_types::{
@@ -139,6 +141,9 @@ pub(crate) async fn fetch_command_code_key_usage(
         .as_ref()
         .and_then(parse_subscription_plan)
         .flatten();
+    let subscription_period_end = subscriptions_body
+        .as_ref()
+        .and_then(parse_subscription_period_end);
     let summary_result = get_alpha_json(
         &client,
         with_org_query(base, "/alpha/usage/summary", org),
@@ -196,73 +201,12 @@ pub(crate) async fn fetch_command_code_key_usage(
     // Canonical rows from the valid tuples above (not the defaulted DTO):
     // windows keep finite used/cap presence, balances only when at least one
     // raw credit amount was observed (never invented from plan fallback alone).
-    let mut quota_rows: Vec<CanonicalQuotaWindow> = Vec::new();
-    if let Some(parsed) = parsed_credits.as_ref() {
-        for (slot, kind, key) in [
-            (
-                "command_code:five_hour",
-                CanonicalQuotaWindowKind::FiveHour,
-                "fiveHour",
-            ),
-            (
-                "command_code:weekly",
-                CanonicalQuotaWindowKind::Weekly,
-                "weekly",
-            ),
-        ] {
-            if let Some((used, cap, reset_at)) = parse_window_entry(&parsed.windows, key) {
-                let remaining_percent = if cap > 0.0 {
-                    Some((100.0 - (used / cap * 100.0)).clamp(0.0, 100.0))
-                } else {
-                    None
-                };
-                quota_rows.push(CanonicalQuotaWindow {
-                    source_id: slot.to_string(),
-                    kind,
-                    source_model: None,
-                    unit: Some("currency".to_string()),
-                    duration_seconds: None,
-                    is_default_scope: true,
-                    availability: if remaining_percent.is_some()
-                        || used.is_finite() && cap.is_finite()
-                    {
-                        SubscriptionWindowAvailability::Known
-                    } else {
-                        SubscriptionWindowAvailability::Unknown
-                    },
-                    remaining_percent,
-                    current: Some(used),
-                    limit: Some(cap),
-                    remaining: Some(cap - used),
-                    reset_at,
-                });
-            }
-        }
-        let raw_seen = [parsed.monthly, parsed.purchased, parsed.free]
-            .into_iter()
-            .any(|v| v.is_some_and(|amount| amount.is_finite()));
-        if raw_seen
-            && let Some(balances) = balances.as_ref()
-            && balances.remaining_credits.is_finite()
-        {
-            let limit =
-                balances.monthly_credits + balances.purchased_credits + balances.free_credits;
-            quota_rows.push(CanonicalQuotaWindow {
-                source_id: "command_code:balances".to_string(),
-                kind: CanonicalQuotaWindowKind::Balance,
-                source_model: None,
-                unit: Some("credits".to_string()),
-                duration_seconds: None,
-                is_default_scope: true,
-                availability: SubscriptionWindowAvailability::Known,
-                remaining_percent: None,
-                current: Some(balances.remaining_credits),
-                limit: finite_limit(limit),
-                remaining: Some(balances.remaining_credits),
-                reset_at: None,
-            });
-        }
-    }
+    let quota_rows = parsed_credits
+        .as_ref()
+        .map(|parsed| {
+            command_code_canonical_rows(parsed, balances.as_ref(), subscription_period_end)
+        })
+        .unwrap_or_default();
     TokenPlanKeyUsage {
         key_id,
         key_label,
@@ -289,4 +233,191 @@ pub(crate) async fn fetch_command_code_key_usage(
 
 fn finite_limit(value: f64) -> Option<f64> {
     value.is_finite().then_some(value)
+}
+
+/// Canonical rows of one CommandCode key, assembled from the reported
+/// payload only: the five-hour and weekly windows, the credit balance row
+/// and — when the payload itself reports the issued monthly capacity
+/// together with its remaining part — the monthly issued-credit pool.
+///
+/// The monthly pool is built from the raw reported remaining amount, never
+/// from the plan-table fallback and never from the summary totals, so a
+/// missing or invalid pair produces no row at all instead of a synthetic
+/// zero or a plan-derived cap.
+fn command_code_canonical_rows(
+    parsed: &ParsedCredits,
+    balances: Option<&CommandCodeBalances>,
+    subscription_period_end: Option<DateTime<Utc>>,
+) -> Vec<CanonicalQuotaWindow> {
+    let mut quota_rows: Vec<CanonicalQuotaWindow> = Vec::new();
+    for (slot, kind, key) in [
+        (
+            "command_code:five_hour",
+            CanonicalQuotaWindowKind::FiveHour,
+            "fiveHour",
+        ),
+        (
+            "command_code:weekly",
+            CanonicalQuotaWindowKind::Weekly,
+            "weekly",
+        ),
+    ] {
+        if let Some((used, cap, reset_at)) = parse_window_entry(&parsed.windows, key) {
+            let remaining_percent = if cap > 0.0 {
+                Some((100.0 - (used / cap * 100.0)).clamp(0.0, 100.0))
+            } else {
+                None
+            };
+            quota_rows.push(CanonicalQuotaWindow {
+                source_id: slot.to_string(),
+                kind,
+                source_model: None,
+                unit: Some("currency".to_string()),
+                duration_seconds: None,
+                is_default_scope: true,
+                availability: if remaining_percent.is_some() || used.is_finite() && cap.is_finite()
+                {
+                    SubscriptionWindowAvailability::Known
+                } else {
+                    SubscriptionWindowAvailability::Unknown
+                },
+                remaining_percent,
+                current: Some(used),
+                limit: Some(cap),
+                remaining: Some(cap - used),
+                reset_at,
+            });
+        }
+    }
+    let raw_seen = [parsed.monthly, parsed.purchased, parsed.free]
+        .into_iter()
+        .any(|v| v.is_some_and(|amount| amount.is_finite()));
+    if raw_seen
+        && let Some(balances) = balances
+        && balances.remaining_credits.is_finite()
+    {
+        let limit = balances.monthly_credits + balances.purchased_credits + balances.free_credits;
+        quota_rows.push(CanonicalQuotaWindow {
+            source_id: "command_code:balances".to_string(),
+            kind: CanonicalQuotaWindowKind::Balance,
+            source_model: None,
+            unit: Some("credits".to_string()),
+            duration_seconds: None,
+            is_default_scope: true,
+            availability: SubscriptionWindowAvailability::Known,
+            remaining_percent: None,
+            current: Some(balances.remaining_credits),
+            limit: finite_limit(limit),
+            remaining: Some(balances.remaining_credits),
+            reset_at: None,
+        });
+    }
+    if let Some(monthly) = command_code_monthly_window(
+        parsed.monthly,
+        parsed.monthly_granted,
+        subscription_period_end,
+    ) {
+        quota_rows.push(monthly);
+    }
+    quota_rows
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn balances(monthly: f64, purchased: f64, free: f64) -> CommandCodeBalances {
+        CommandCodeBalances {
+            monthly_credits: monthly,
+            purchased_credits: purchased,
+            free_credits: free,
+            remaining_credits: monthly + purchased + free,
+        }
+    }
+
+    fn monthly_rows(rows: &[CanonicalQuotaWindow]) -> Vec<&CanonicalQuotaWindow> {
+        rows.iter()
+            .filter(|row| row.source_id == "command_code:monthly")
+            .collect()
+    }
+
+    #[test]
+    fn alpha_shaped_credits_without_granted_fields_keep_the_existing_rows() {
+        // A payload that reports the remaining monthly amount but no granted
+        // capacity produces no monthly pool at all: the five-hour/weekly and
+        // balance rows stay exactly as before.
+        let body = json!({
+            "credits": {
+                "monthlyCredits": 0.0637246611,
+                "purchasedCredits": 0,
+                "freeCredits": 0
+            },
+            "windowLimits": {
+                "fiveHour": {"used": 0.06, "cap": 0.06, "resetAt": "2026-11-06T12:00:00Z"},
+                "weekly": {"used": 1.0, "cap": 10.0, "resetAt": "2026-11-09T12:00:00Z"}
+            }
+        });
+        let parsed = parse_credits_section(&body).expect("credits");
+        let rows =
+            command_code_canonical_rows(&parsed, Some(&balances(0.0637246611, 0.0, 0.0)), None);
+        assert!(monthly_rows(&rows).is_empty());
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].source_id, "command_code:five_hour");
+        assert_eq!(rows[1].source_id, "command_code:weekly");
+        assert_eq!(rows[2].source_id, "command_code:balances");
+    }
+
+    #[test]
+    fn reported_granted_pair_appends_exactly_one_monthly_row() {
+        let body = json!({
+            "credits": {
+                "monthlyCredits": 0.0637246611,
+                "monthlyCreditsGranted": 70,
+                "purchasedCredits": 0,
+                "freeCredits": 0
+            }
+        });
+        let parsed = parse_credits_section(&body).expect("credits");
+        let reset = parse_subscription_period_end(&json!({
+            "data": {"currentPeriodEnd": "2026-11-23T02:21:09.000Z"}
+        }));
+        let rows =
+            command_code_canonical_rows(&parsed, Some(&balances(0.0637246611, 0.0, 0.0)), reset);
+        let monthly = monthly_rows(&rows);
+        assert_eq!(monthly.len(), 1);
+        let monthly = monthly[0];
+        assert_eq!(monthly.kind, CanonicalQuotaWindowKind::Monthly);
+        assert_eq!(monthly.unit.as_deref(), Some("currency"));
+        assert_eq!(monthly.limit, Some(70.0));
+        assert_eq!(monthly.remaining, Some(0.0637246611));
+        let current = monthly.current.expect("current");
+        assert!((current - 69.9362753389).abs() < 1e-9, "current {current}");
+        let percent = monthly.remaining_percent.expect("percent");
+        assert!((percent - 0.09103523).abs() < 1e-8, "percent {percent}");
+        assert_eq!(monthly.reset_at, reset);
+        // The balance row keeps its own semantics beside the new pool.
+        let balance = rows
+            .iter()
+            .find(|row| row.source_id == "command_code:balances")
+            .expect("balance");
+        assert_eq!(balance.kind, CanonicalQuotaWindowKind::Balance);
+        assert_eq!(balance.remaining_percent, None);
+    }
+
+    #[test]
+    fn monthly_pool_is_never_derived_from_the_plan_table_or_the_summary() {
+        // A granted capacity without a reported remaining amount yields no
+        // pool: the plan-table fallback and the summary totals never complete
+        // the pair.
+        let body = json!({"credits": {"monthlyCreditsGranted": 70}});
+        assert!(parse_credits_section(&body).is_none());
+        let body = json!({"credits": {"purchasedCredits": 5, "monthlyCreditsGranted": 70}});
+        let parsed = parse_credits_section(&body).expect("credits");
+        assert_eq!(parsed.monthly, None);
+        let rows = command_code_canonical_rows(&parsed, Some(&balances(70.0, 5.0, 0.0)), None);
+        assert!(monthly_rows(&rows).is_empty());
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].source_id, "command_code:balances");
+    }
 }

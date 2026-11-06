@@ -499,6 +499,13 @@ function customBand(durationSeconds: number | null): CanonicalQuotaBand | null {
 // detail models never bind the pool), and `custom` rows band by their real
 // duration with the same default-scope guard. `balance`/`unlimited` rows
 // never report a percentage.
+//
+// The CommandCode issued-monthly pool is excluded from the generic band
+// aggregation by its exact source id: it is an issued credit capacity that
+// sits beside the weekly window, not a second weekly band, so it must not
+// lower the weekly long badge or read as a depleted pool while paid credit
+// remains. The row itself stays in the canonical rows, the dialog and the
+// observation history.
 export function canonicalBandPercent(
   rows: readonly CanonicalQuotaRow[],
   band: CanonicalQuotaBand,
@@ -513,7 +520,11 @@ export function canonicalBandPercent(
         if (band === 'short') values.push(row.remainingPercent)
         break
       case 'weekly':
+        if (row.sourceModel != null && !row.isDefaultScope) continue
+        if (band === 'long') values.push(row.remainingPercent)
+        break
       case 'monthly':
+        if (row.sourceId === 'command_code:monthly') continue
         if (row.sourceModel != null && !row.isDefaultScope) continue
         if (band === 'long') values.push(row.remainingPercent)
         break

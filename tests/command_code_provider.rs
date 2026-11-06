@@ -15,7 +15,10 @@
 use prompt_ferry::{
     db::{EndpointProvider, EndpointRegion},
     standalone_config,
-    worker_admin_types::{CommandCodeBalances, CommandCodeWindowUsage, TokenPlanKeyUsage},
+    worker_admin_types::{
+        CanonicalQuotaWindow, CanonicalQuotaWindowKind, CommandCodeBalances,
+        CommandCodeWindowUsage, SubscriptionWindowAvailability, TokenPlanKeyUsage,
+    },
 };
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -268,6 +271,43 @@ fn alpha_fixture_shapes_hold() {
     assert_eq!(rejected["code"].as_i64(), Some(401));
     let failed_flag: Value = json!({"success": false, "message": "nope"});
     assert_eq!(failed_flag["success"].as_bool(), Some(false));
+}
+
+#[test]
+fn monthly_pool_row_keeps_its_public_wire_contract() {
+    // The issued monthly pool travels through the admin API as a canonical
+    // window: the `monthly` kind, the currency unit, the granted limit, the
+    // remaining part and the derived share. The frontend renders exactly this
+    // shape, so the wire values are part of the provider contract.
+    let row = CanonicalQuotaWindow {
+        source_id: "command_code:monthly".into(),
+        kind: CanonicalQuotaWindowKind::Monthly,
+        source_model: None,
+        unit: Some("currency".into()),
+        duration_seconds: None,
+        is_default_scope: true,
+        availability: SubscriptionWindowAvailability::Known,
+        remaining_percent: Some(0.09103523),
+        current: Some(69.9362753389),
+        limit: Some(70.0),
+        remaining: Some(0.0637246611),
+        reset_at: None,
+    };
+    let value = serde_json::to_value(&row).expect("serialize monthly row");
+    assert_eq!(value["source_id"], json!("command_code:monthly"));
+    assert_eq!(value["kind"], json!("monthly"));
+    assert_eq!(value["unit"], json!("currency"));
+    assert_eq!(value["is_default_scope"], json!(true));
+    assert_eq!(value["availability"], json!("known"));
+    assert_eq!(value["limit"], json!(70.0));
+    assert_eq!(value["remaining"], json!(0.0637246611));
+    assert_eq!(value["current"], json!(69.9362753389));
+    // A monthly window carries no model scope and no synthetic duration.
+    assert!(value.get("source_model").is_none());
+    assert!(value.get("duration_seconds").is_none());
+    let back: CanonicalQuotaWindow =
+        serde_json::from_value(value).expect("deserialize monthly row");
+    assert_eq!(back, row);
 }
 
 #[test]

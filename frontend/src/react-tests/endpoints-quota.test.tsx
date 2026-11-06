@@ -448,7 +448,7 @@ describe('React quota usage dialog', () => {
     clearInterval.mockRestore()
   })
 
-  it('renders OpenRouter and CommandCode balance details without changing zero or unlimited formatting', async () => {
+  it('renders OpenRouter balance details and only real CommandCode windows', async () => {
     const openRouterKey: TokenPlanKeyUsage = {
       key_id: 'openrouter-key',
       key_label: 'OpenRouter balance key',
@@ -484,17 +484,236 @@ describe('React quota usage dialog', () => {
     openRouterView.unmount()
     __resetTokenPlanCacheForTests()
 
-    const commandCodeKey: TokenPlanKeyUsage = {
-      key_id: 'command-key',
-      key_label: 'CommandCode balance key',
+    const assertOnlyRealCommandCodeWindows = (disclosure: HTMLElement) => {
+      expect(
+        disclosure.querySelector('[data-quota-row="command_code:balances"]'),
+      ).toBeNull()
+      expect(disclosure.textContent).not.toContain('7.25')
+      for (const removed of [
+        'Credit balances',
+        'Monthly credits',
+        'Purchased credits',
+        'Free credits',
+        'Remaining credits',
+        'PAYG account has no fixed windows',
+      ]) {
+        expect(disclosure.textContent).not.toContain(removed)
+      }
+      expect(within(disclosure).getByTitle('5-hour window (USD)')).toBeTruthy()
+      expect(disclosure.textContent).toContain('8.00 / 16.00 USD')
+      expect(within(disclosure).getByTitle('Weekly window (USD)')).toBeTruthy()
+      expect(disclosure.textContent).toContain('4.00 / 16.00 USD')
+      expect(
+        disclosure
+          .querySelector(
+            '[data-quota-row="command_code:five_hour"] [role="progressbar"]',
+          )
+          ?.getAttribute('aria-valuenow'),
+      ).toBe('50')
+      expect(
+        disclosure
+          .querySelector(
+            '[data-quota-row="command_code:weekly"] [role="progressbar"]',
+          )
+          ?.getAttribute('aria-valuenow'),
+      ).toBe('75')
+    }
+
+    const legacyCommandCodeKey: TokenPlanKeyUsage = {
+      key_id: 'command-key-legacy',
+      key_label: 'CommandCode legacy key',
+      ok: true,
+      model_remains: [],
+      five_hour: {
+        cap: 16,
+        used: 8,
+        remaining_percent: 50,
+        reset_at: '2026-10-24T01:00:00.000Z',
+      },
+      weekly: {
+        cap: 16,
+        used: 4,
+        remaining_percent: 75,
+        reset_at: '2026-10-28T00:00:00.000Z',
+      },
+      balances: {
+        monthly_credits: 10,
+        purchased_credits: 2,
+        free_credits: 1,
+        remaining_credits: 7.25,
+      },
+    }
+    sdkMock.tokenPlanUsage.mockResolvedValueOnce({
+      data: {
+        keys: [legacyCommandCodeKey],
+        provider: 'command_code',
+        provider_region: null,
+      },
+    })
+    const legacyView = renderDialog('endpoint-commandcode-legacy')
+    const legacyDisclosure = (
+      await screen.findByText('CommandCode legacy key')
+    ).closest('[data-quota-key]') as HTMLElement
+    assertOnlyRealCommandCodeWindows(legacyDisclosure)
+    legacyView.unmount()
+    __resetTokenPlanCacheForTests()
+
+    const canonicalCommandCodeKey: TokenPlanKeyUsage = {
+      key_id: 'command-key-canonical',
+      key_label: 'CommandCode canonical key',
       ok: true,
       model_remains: [],
       balances: {
         monthly_credits: 10,
         purchased_credits: 2,
         free_credits: 1,
-        remaining_credits: 0,
+        remaining_credits: 7.25,
       },
+      quota_windows: [
+        quotaWindow({
+          source_id: 'command_code:five_hour',
+          kind: 'five_hour',
+          unit: 'currency',
+          current: 8,
+          limit: 16,
+          remaining: 8,
+          remaining_percent: 50,
+          reset_at: '2026-10-24T01:00:00.000Z',
+        }),
+        quotaWindow({
+          source_id: 'command_code:weekly',
+          kind: 'weekly',
+          unit: 'currency',
+          current: 4,
+          limit: 16,
+          remaining: 12,
+          remaining_percent: 75,
+          reset_at: '2026-10-28T00:00:00.000Z',
+        }),
+        quotaWindow({
+          source_id: 'command_code:balances',
+          kind: 'balance',
+          unit: 'credits',
+          current: 7.25,
+          limit: 13,
+          remaining: 7.25,
+        }),
+      ],
+    }
+    sdkMock.tokenPlanUsage.mockResolvedValueOnce({
+      data: {
+        keys: [canonicalCommandCodeKey],
+        provider: 'command_code',
+        provider_region: null,
+      },
+    })
+    const canonicalView = renderDialog('endpoint-commandcode-canonical')
+    const canonicalDisclosure = (
+      await screen.findByText('CommandCode canonical key')
+    ).closest('[data-quota-key]') as HTMLElement
+    assertOnlyRealCommandCodeWindows(canonicalDisclosure)
+    canonicalView.unmount()
+    __resetTokenPlanCacheForTests()
+
+    const paygCommandCodeKey: TokenPlanKeyUsage = {
+      key_id: 'command-key-payg',
+      key_label: 'CommandCode PAYG key',
+      ok: true,
+      model_remains: [],
+      quota_status: {
+        state: 'exhausted',
+        scope: 'text_inference',
+        observed_at: '2026-10-24T00:00:00.000Z',
+        cooldown_until: null,
+        refresh_failed: false,
+      },
+      balances: {
+        monthly_credits: 10,
+        purchased_credits: 2,
+        free_credits: 1,
+        remaining_credits: 7.25,
+      },
+    }
+    sdkMock.tokenPlanUsage.mockResolvedValueOnce({
+      data: {
+        keys: [paygCommandCodeKey],
+        provider: 'command_code',
+        provider_region: null,
+      },
+    })
+    const paygView = renderDialog('endpoint-commandcode-payg')
+    const paygDisclosure = (
+      await screen.findByText('CommandCode PAYG key')
+    ).closest('[data-quota-key]') as HTMLElement
+    expect(
+      paygDisclosure.querySelector('[data-quota-key-status="exhausted"]'),
+    ).toBeTruthy()
+    expect(
+      paygDisclosure.querySelector('[data-quota-row^="command_code:"]'),
+    ).toBeNull()
+    expect(paygDisclosure.textContent).not.toContain('7.25')
+    for (const removed of [
+      'Credit balances',
+      'Monthly credits',
+      'PAYG account has no fixed windows',
+    ]) {
+      expect(paygDisclosure.textContent).not.toContain(removed)
+    }
+    paygView.unmount()
+  })
+
+  it('renders the issued monthly pool beside the five-hour and weekly windows', async () => {
+    const commandCodeKey: TokenPlanKeyUsage = {
+      key_id: 'command-key-monthly',
+      key_label: 'CommandCode monthly key',
+      ok: true,
+      model_remains: [],
+      balances: {
+        monthly_credits: 0.0637246611,
+        purchased_credits: 0,
+        free_credits: 0,
+        remaining_credits: 0.0637246611,
+      },
+      quota_windows: [
+        quotaWindow({
+          source_id: 'command_code:five_hour',
+          kind: 'five_hour',
+          unit: 'currency',
+          current: 0.06,
+          limit: 0.06,
+          remaining: 0,
+          remaining_percent: 0,
+          reset_at: '2026-10-24T01:00:00.000Z',
+        }),
+        quotaWindow({
+          source_id: 'command_code:weekly',
+          kind: 'weekly',
+          unit: 'currency',
+          current: 4,
+          limit: 16,
+          remaining: 12,
+          remaining_percent: 75,
+          reset_at: '2026-10-28T00:00:00.000Z',
+        }),
+        quotaWindow({
+          source_id: 'command_code:monthly',
+          kind: 'monthly',
+          unit: 'currency',
+          current: 69.9362753389,
+          limit: 70,
+          remaining: 0.0637246611,
+          remaining_percent: 0.09103523,
+          reset_at: '2026-11-23T02:21:09.000Z',
+        }),
+        quotaWindow({
+          source_id: 'command_code:balances',
+          kind: 'balance',
+          unit: 'credits',
+          current: 0.0637246611,
+          limit: 0.0637246611,
+          remaining: 0.0637246611,
+        }),
+      ],
     }
     sdkMock.tokenPlanUsage.mockResolvedValueOnce({
       data: {
@@ -503,17 +722,48 @@ describe('React quota usage dialog', () => {
         provider_region: null,
       },
     })
-    const commandCodeView = renderDialog('endpoint-commandcode-balances')
-    const commandCodeDisclosure = (
-      await screen.findByText('CommandCode balance key')
+    const view = renderDialog('endpoint-commandcode-monthly')
+    const disclosure = (
+      await screen.findByText('CommandCode monthly key')
     ).closest('[data-quota-key]') as HTMLElement
-    expect(commandCodeDisclosure.textContent).toContain(
-      'Remaining credits: 0.00',
-    )
-    expect(commandCodeDisclosure.textContent).toContain(
-      'Monthly credits: 10.00',
-    )
-    commandCodeView.unmount()
+
+    // The monthly pool is its own window with the granted capacity and the
+    // still-available part of it.
+    const monthly = disclosure.querySelector(
+      '[data-quota-row="command_code:monthly"]',
+    ) as HTMLElement
+    expect(monthly).toBeTruthy()
+    expect(
+      disclosure.querySelectorAll('[data-quota-row="command_code:monthly"]'),
+    ).toHaveLength(1)
+    expect(within(monthly).getByTitle('Monthly window')).toBeTruthy()
+    expect(monthly.textContent).toContain('69.94 / 70.00 USD')
+    expect(
+      monthly
+        .querySelector('[role="progressbar"]')
+        ?.getAttribute('aria-valuenow'),
+    ).toBe('0.09103523')
+    // The reported period end drives the reset countdown.
+    expect(monthly.textContent).not.toContain('-')
+
+    // The five-hour and weekly windows stay untouched beside it.
+    expect(within(disclosure).getByTitle('5-hour window (USD)')).toBeTruthy()
+    expect(within(disclosure).getByTitle('Weekly window (USD)')).toBeTruthy()
+
+    // No second balance card or fact appears beside the monthly pool.
+    expect(
+      disclosure.querySelector('[data-quota-row="command_code:balances"]'),
+    ).toBeNull()
+    for (const removed of [
+      'Credit balances',
+      'Monthly credits',
+      'Purchased credits',
+      'Free credits',
+      'Remaining credits',
+    ]) {
+      expect(disclosure.textContent).not.toContain(removed)
+    }
+    view.unmount()
   })
 
   it('mutes every window of a blocked key while available and unknown keys stay colored', async () => {

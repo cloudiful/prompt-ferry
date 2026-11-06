@@ -92,16 +92,12 @@ function factRows(key: TokenPlanKeyUsage, nowMs: number): CanonicalQuotaRow[] {
   return toCanonicalQuotaRows(key, nowMs).filter(
     (row) =>
       row.sourceModel === null &&
+      row.sourceId !== 'command_code:balances' &&
       (row.kind === 'balance' || row.kind === 'unlimited'),
   )
 }
 
 function topLevelLabel(row: CanonicalQuotaRow, t: Translate): string {
-  if (row.sourceId.startsWith('command_code:')) {
-    return row.kind === 'weekly'
-      ? t('tokenPlanWeeklyUsd')
-      : t('tokenPlanFiveHour')
-  }
   if (row.sourceId.startsWith('glm:')) {
     return row.kind === 'weekly' ? t('tokenPlanWeekly') : t('tokenPlanInterval')
   }
@@ -276,37 +272,6 @@ export function TokenPlanUsageDialog({
                         </p>
                       ) : (
                         <>
-                          {key.balances ? (
-                            <section className="grid min-w-0 gap-1 rounded-md border p-3">
-                              <h3
-                                className={
-                                  muted
-                                    ? 'break-words font-medium text-muted-foreground'
-                                    : 'break-words font-medium text-foreground'
-                                }
-                              >
-                                {t('tokenPlanBalances')}
-                              </h3>
-                              <div className="flex min-w-0 flex-wrap gap-x-4 gap-y-1">
-                                {keyedValue(
-                                  t('tokenPlanMonthlyCredits'),
-                                  key.balances.monthly_credits.toFixed(2),
-                                )}
-                                {keyedValue(
-                                  t('tokenPlanPurchasedCredits'),
-                                  key.balances.purchased_credits.toFixed(2),
-                                )}
-                                {keyedValue(
-                                  t('tokenPlanFreeCredits'),
-                                  key.balances.free_credits.toFixed(2),
-                                )}
-                                {keyedValue(
-                                  t('tokenPlanRemainingCredits'),
-                                  key.balances.remaining_credits.toFixed(2),
-                                )}
-                              </div>
-                            </section>
-                          ) : null}
                           {key.openrouter_balance ? (
                             <section className="grid min-w-0 gap-1 rounded-md border p-3">
                               <h3
@@ -462,11 +427,6 @@ export function TokenPlanUsageDialog({
                               row={row}
                             />
                           ))}
-                          {key.balances && !key.five_hour && !key.weekly ? (
-                            <p className="text-muted-foreground">
-                              {t('tokenPlanPaygNoWindow')}
-                            </p>
-                          ) : null}
                           <TokenPlanQuotaWindows
                             keyUsage={key}
                             muted={muted}

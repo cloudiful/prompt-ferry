@@ -11,9 +11,10 @@ use crate::{
         quota_reset::subscription_windows_state,
     },
     worker_admin_types::{
-        CommandCodeBalances, CommandCodeWindowUsage, DeepSeekBalance, GlmWindowUsage,
-        OpenRouterBalance, OpencodeGoWindowUsage, SubscriptionQuotaObservation,
-        SubscriptionWindowAvailability, SubscriptionWindowUsage, TokenPlanModelUsage,
+        CanonicalQuotaWindow, CanonicalQuotaWindowKind, CommandCodeBalances,
+        CommandCodeWindowUsage, DeepSeekBalance, GlmWindowUsage, OpenRouterBalance,
+        OpencodeGoWindowUsage, SubscriptionQuotaObservation, SubscriptionWindowAvailability,
+        SubscriptionWindowUsage, TokenPlanModelUsage,
         TokenPlanQuotaState::{
             Available, Cooling, Exhausted, RateLimited, Unknown, UpstreamUnavailable,
         },
@@ -207,6 +208,52 @@ fn command_code_positive_native_balance_is_available() {
     assert_eq!(
         provider_state(EndpointProvider::CommandCode, &command_code, now),
         Available
+    );
+}
+
+#[test]
+fn command_code_monthly_pool_does_not_gate_the_quota_state() {
+    let now = Utc::now();
+    // An exhausted issued monthly pool beside remaining paid credit keeps the
+    // key available: the monthly row is a capacity beside the windows, not a
+    // new gate.
+    let mut command_code = key(Uuid::new_v4());
+    command_code.balances = Some(CommandCodeBalances {
+        monthly_credits: 0.0,
+        purchased_credits: 5.0,
+        free_credits: 0.0,
+        remaining_credits: 5.0,
+    });
+    command_code.quota_windows = Some(vec![CanonicalQuotaWindow {
+        source_id: "command_code:monthly".into(),
+        kind: CanonicalQuotaWindowKind::Monthly,
+        source_model: None,
+        unit: Some("currency".into()),
+        duration_seconds: None,
+        is_default_scope: true,
+        availability: SubscriptionWindowAvailability::Known,
+        remaining_percent: Some(0.0),
+        current: Some(70.0),
+        limit: Some(70.0),
+        remaining: Some(0.0),
+        reset_at: Some(now + ChronoDuration::days(1)),
+    }]);
+    assert_eq!(
+        provider_state(EndpointProvider::CommandCode, &command_code, now),
+        Available
+    );
+    // The prior exhaustion behavior stays untouched: a key whose remaining
+    // credits are gone is still exhausted.
+    let mut exhausted = command_code.clone();
+    exhausted.balances = Some(CommandCodeBalances {
+        monthly_credits: 0.0,
+        purchased_credits: 0.0,
+        free_credits: 0.0,
+        remaining_credits: 0.0,
+    });
+    assert_eq!(
+        provider_state(EndpointProvider::CommandCode, &exhausted, now),
+        Exhausted
     );
 }
 
