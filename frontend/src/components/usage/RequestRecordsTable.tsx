@@ -236,24 +236,6 @@ export function RequestRecordsTable({
       sortField: USAGE_SORT_FIELDS.target,
     },
     {
-      id: 'provider_kind',
-      header: t('providerKind'),
-      render: (record) =>
-        record.server_provider_kind ? (
-          <Badge variant="secondary">{record.server_provider_kind}</Badge>
-        ) : (
-          '-'
-        ),
-    },
-    {
-      id: 'mcp_method',
-      header: t('mcpMethod'),
-      render: (record) => (
-        <span className="font-mono">{record.mcp_protocol_method || '-'}</span>
-      ),
-      sortField: USAGE_SORT_FIELDS.mcp_method,
-    },
-    {
       id: 'mcp_operation',
       header: t('mcpOperation'),
       render: (record) => (

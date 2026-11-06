@@ -446,6 +446,7 @@ mod tests {
             path: "/mcp".to_string(),
             headers: Vec::new(),
             user_id: None,
+            client_key_hash: None,
             http_request_content_encoding: None,
             http_request_compressed: false,
             http_request_compressed_bytes: None,

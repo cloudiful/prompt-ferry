@@ -124,6 +124,7 @@ pub(super) struct BufferedMcpRequest {
     pub(super) headers: Vec<(String, String)>,
     pub(super) body: Vec<u8>,
     pub(super) user_id: Option<i64>,
+    pub(super) client_key_hash: Option<String>,
     pub(super) http_request_content_encoding: Option<String>,
     pub(super) http_request_compressed: bool,
     pub(super) http_request_compressed_bytes: Option<i64>,
@@ -161,6 +162,7 @@ impl BufferedMcpRequest {
             headers: start.headers,
             body,
             user_id: start.user_id,
+            client_key_hash: start.client_key_hash,
             http_request_content_encoding: start.http_request_content_encoding,
             http_request_compressed: start.http_request_compressed,
             http_request_compressed_bytes: compressed_bytes,
@@ -262,6 +264,27 @@ pub(super) async fn send_worker_shutdown_mcp_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn buffered_mcp_request_keeps_the_authenticated_key_hash() {
+        let start = McpRequestStart {
+            request_id: "mcp-1".to_string(),
+            server_name: Some("catalog".to_string()),
+            method: "POST".to_string(),
+            path: "/mcp".to_string(),
+            headers: Vec::new(),
+            user_id: Some(7),
+            client_key_hash: Some("hash".to_string()),
+            http_request_content_encoding: None,
+            http_request_compressed: false,
+            http_request_compressed_bytes: None,
+        };
+
+        let request =
+            BufferedMcpRequest::from_parts(start, Vec::new(), RequestTransferStats::default());
+
+        assert_eq!(request.client_key_hash.as_deref(), Some("hash"));
+    }
 
     #[tokio::test]
     async fn collect_request_chunks_stops_at_limit_without_buffering_more() {

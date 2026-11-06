@@ -132,6 +132,8 @@ pub struct McpRequestStart {
     #[serde(default)]
     pub user_id: Option<i64>,
     #[serde(default)]
+    pub client_key_hash: Option<String>,
+    #[serde(default)]
     pub http_request_content_encoding: Option<String>,
     #[serde(default)]
     pub http_request_compressed: bool,
