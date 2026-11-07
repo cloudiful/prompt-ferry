@@ -21,7 +21,10 @@ import {
   webhookHeadersFromText,
   webhookHeadersToText,
 } from '@/admin-mappers/forms/misc'
-import type { PendingActions } from './async-action'
+import {
+  settingsRefreshGateBlocked,
+  type SettingsRefreshGate,
+} from './settings-refresh'
 import { settingKey } from './settings-keys'
 
 export type LlmReviewForm = {
@@ -182,18 +185,6 @@ export function llmReviewDirtyFields(
  * Whether a scoped refresh is safe: loaded, no read or save in flight, no
  * unsaved draft, and no failed save the operator has not retried.
  */
-export function llmReviewRefreshBlocked(input: {
-  pendingActions: PendingActions
-  dirty: boolean
-  failed: boolean
-  loading: boolean
-  loaded: boolean
-}): boolean {
-  return (
-    !input.loaded ||
-    input.loading ||
-    input.dirty ||
-    input.failed ||
-    Object.hasOwn(input.pendingActions, LLM_REVIEW_KEY)
-  )
+export function llmReviewRefreshBlocked(input: SettingsRefreshGate): boolean {
+  return settingsRefreshGateBlocked(input, LLM_REVIEW_KEY)
 }

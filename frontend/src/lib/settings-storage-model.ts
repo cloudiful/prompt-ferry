@@ -19,7 +19,10 @@ import type {
   RawObjectStoreSettingsRequest,
   RawObjectStoreSettingsResponse,
 } from '@/generated/admin-api'
-import type { PendingActions } from './async-action'
+import {
+  settingsRefreshGateBlocked,
+  type SettingsRefreshGate,
+} from './settings-refresh'
 import { settingKey } from './settings-keys'
 
 /** The form as the tab shows it, including the two write-only drafts. */
@@ -219,20 +222,8 @@ export function rawObjectStoreDirty(
  * Whether a scoped refresh is safe: loaded, idle, clean and without an
  * unrecovered save failure.
  */
-export function storageRefreshBlocked(input: {
-  pendingActions: PendingActions
-  dirty: boolean
-  failed: boolean
-  loading: boolean
-  loaded: boolean
-}): boolean {
-  return (
-    !input.loaded ||
-    input.loading ||
-    input.dirty ||
-    input.failed ||
-    Object.hasOwn(input.pendingActions, STORAGE_KEY)
-  )
+export function storageRefreshBlocked(input: SettingsRefreshGate): boolean {
+  return settingsRefreshGateBlocked(input, STORAGE_KEY)
 }
 
 /**

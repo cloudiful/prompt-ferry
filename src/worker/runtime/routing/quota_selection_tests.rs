@@ -1,6 +1,7 @@
 use super::select_route_for_candidate;
 use super::selection::materialize_route_api_key_selection_with_quota;
 use super::session_affinity_tests::request_context;
+use super::test_support::{command_code_window, endpoint_key, window};
 use crate::{
     db,
     replay_cache::ReplayCache,
@@ -9,11 +10,9 @@ use crate::{
     worker::runtime::tests::{querying_test_services, session_affinity_candidate},
     worker_admin::token_plan_cache::TokenPlanQuotaCache,
     worker_admin_types::{
-        CommandCodeBalances, CommandCodeWindowUsage, TokenPlanKeyUsage, TokenPlanModelUsage,
-        TokenPlanUsageResponse, TokenPlanWindowUsage,
+        CommandCodeBalances, TokenPlanKeyUsage, TokenPlanModelUsage, TokenPlanUsageResponse,
     },
 };
-use chrono::Utc;
 
 #[tokio::test]
 async fn quota_key_lb_skips_a_key_with_no_remaining_window() {
@@ -90,24 +89,6 @@ async fn quota_key_lb_skips_a_key_with_no_remaining_window() {
     assert_eq!(selected.selection.key_label.as_deref(), Some("available"));
 }
 
-fn endpoint_key(
-    endpoint_id: uuid::Uuid,
-    key_id: uuid::Uuid,
-    key_label: &str,
-    position: i32,
-) -> db::EndpointApiKey {
-    db::EndpointApiKey {
-        key_id,
-        endpoint_id,
-        key_label: key_label.to_string(),
-        api_key: format!("{key_label}-key"),
-        position,
-        enabled: true,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-    }
-}
-
 fn token_plan_key_usage(
     key_id: uuid::Uuid,
     key_label: &str,
@@ -143,32 +124,9 @@ fn token_plan_key_usage(
     }
 }
 
-fn window(remaining_percent: f64) -> TokenPlanWindowUsage {
-    TokenPlanWindowUsage {
-        status: Some(1),
-        remaining_percent: Some(remaining_percent),
-        total_count: None,
-        usage_count: None,
-        boost_permille: None,
-        start_at: None,
-        end_at: None,
-        remains_time_ms: None,
-    }
-}
-
 // CommandCode routing consumption (issue #184 P5): keys carry no
 // `model_remains`; the quota cache weights them by the tighter of the
 // 5-hour/weekly USD windows instead.
-fn command_code_window(remaining_percent: f64) -> CommandCodeWindowUsage {
-    CommandCodeWindowUsage {
-        used: 10.0 - remaining_percent / 10.0,
-        cap: 10.0,
-        used_percent: Some(100.0 - remaining_percent),
-        remaining_percent: Some(remaining_percent),
-        reset_at: None,
-    }
-}
-
 fn command_code_key_usage(
     key_id: uuid::Uuid,
     key_label: &str,

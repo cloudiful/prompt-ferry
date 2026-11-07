@@ -26,6 +26,7 @@ import { getRawObjectStore, setRawObjectStore } from '@/generated/admin-api'
 import { expectData, withData } from '@/api'
 import { capturePayload } from '@/stores/record-action-types'
 import { runAsyncAction, type AsyncActionOutcome } from './async-action'
+import { fetchFreshSetting, formatEnvelopeCause } from './settings-refresh'
 import {
   STORAGE_KEY,
   clearSavedSecretDrafts,
@@ -128,18 +129,10 @@ export function disposeSettingsStorage(): void {
 async function fetchFresh(
   queryClient: QueryClient,
 ): Promise<RawObjectStoreSettingsResponse> {
-  await queryClient.cancelQueries({
+  return fetchFreshSetting(queryClient, {
     queryKey: RAW_OBJECT_STORE_QUERY_KEY,
-    exact: true,
-  })
-  await queryClient.invalidateQueries({
-    queryKey: SETTINGS_STORAGE_NAMESPACE,
-    refetchType: 'none',
-  })
-  return queryClient.fetchQuery({
-    queryKey: RAW_OBJECT_STORE_QUERY_KEY,
-    queryFn: async () => expectData(await getRawObjectStore<true>(withData())),
-    staleTime: 0,
+    namespace: SETTINGS_STORAGE_NAMESPACE,
+    load: async () => expectData(await getRawObjectStore<true>(withData())),
   })
 }
 
@@ -215,7 +208,9 @@ export const useSettingsStorageStore = create<SettingsStorageState>(
           loading: false,
           loadError: true,
           unavailable,
-          unavailableMessage: unavailable ? formatCause(cause) : '',
+          unavailableMessage: unavailable
+            ? (formatEnvelopeCause(cause) ?? '')
+            : '',
         })
       }
     },
@@ -288,20 +283,4 @@ export class StorageBucketRequiredError extends Error {
     super('S3 bucket is required')
     this.name = 'StorageBucketRequiredError'
   }
-}
-
-/** A capability answer's own text, without any request payload. */
-function formatCause(cause: unknown): string {
-  if (cause && typeof cause === 'object' && 'error' in cause) {
-    const envelope = (cause as { error?: unknown }).error
-    if (envelope && typeof envelope === 'object') {
-      const code = (envelope as { code?: unknown }).code
-      const message = (envelope as { message?: unknown }).message
-      if (typeof code === 'string' && typeof message === 'string') {
-        return `${code}: ${message}`
-      }
-      if (typeof message === 'string') return message
-    }
-  }
-  return ''
 }

@@ -31,6 +31,7 @@ import {
 import { expectData, withData } from '@/api'
 import { capturePayload } from '@/stores/record-action-types'
 import { runAsyncAction, type AsyncActionOutcome } from './async-action'
+import { fetchFreshSetting, formatEnvelopeCause } from './settings-refresh'
 import {
   CACHE_ALERT_KEY,
   cacheAlertDirty,
@@ -139,19 +140,10 @@ export function disposeSettingsCacheAlert(): void {
 async function fetchFresh(
   queryClient: QueryClient,
 ): Promise<CacheAlertSettingsResponse> {
-  await queryClient.cancelQueries({
+  return fetchFreshSetting(queryClient, {
     queryKey: CACHE_ALERT_QUERY_KEY,
-    exact: true,
-  })
-  await queryClient.invalidateQueries({
-    queryKey: SETTINGS_CACHE_ALERT_NAMESPACE,
-    refetchType: 'none',
-  })
-  return queryClient.fetchQuery({
-    queryKey: CACHE_ALERT_QUERY_KEY,
-    queryFn: async () =>
-      expectData(await getCacheAlertSetting<true>(withData())),
-    staleTime: 0,
+    namespace: SETTINGS_CACHE_ALERT_NAMESPACE,
+    load: async () => expectData(await getCacheAlertSetting<true>(withData())),
   })
 }
 
@@ -224,7 +216,9 @@ export const useSettingsCacheAlertStore = create<SettingsCacheAlertState>(
           loading: false,
           loadError: true,
           unavailable,
-          unavailableMessage: unavailable ? formatCause(cause) : '',
+          unavailableMessage: unavailable
+            ? (formatEnvelopeCause(cause) ?? '')
+            : '',
         })
       }
     },
@@ -298,19 +292,3 @@ export const useSettingsCacheAlertStore = create<SettingsCacheAlertState>(
     },
   }),
 )
-
-/** A capability answer's own text, without any request payload. */
-function formatCause(cause: unknown): string {
-  if (cause && typeof cause === 'object' && 'error' in cause) {
-    const envelope = (cause as { error?: unknown }).error
-    if (envelope && typeof envelope === 'object') {
-      const code = (envelope as { code?: unknown }).code
-      const message = (envelope as { message?: unknown }).message
-      if (typeof code === 'string' && typeof message === 'string') {
-        return `${code}: ${message}`
-      }
-      if (typeof message === 'string') return message
-    }
-  }
-  return ''
-}

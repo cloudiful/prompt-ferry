@@ -34,6 +34,7 @@ import {
   runAsyncAction,
   type AsyncActionOutcome,
 } from './async-action'
+import { formatEnvelopeCause } from './settings-refresh'
 import {
   CONFIG_ARCHIVE_AUDIT_DEFAULT_ROWS,
   CONFIG_ARCHIVE_EXPORT_KEY,
@@ -596,17 +597,7 @@ export const useSettingsConfigArchiveStore = create<SettingsConfigArchiveState>(
 
 /** An error's own code and message, without any request payload. */
 function formatCause(cause: unknown): string {
-  if (cause && typeof cause === 'object' && 'error' in cause) {
-    const envelope = (cause as { error?: unknown }).error
-    if (envelope && typeof envelope === 'object') {
-      const code = (envelope as { code?: unknown }).code
-      const message = (envelope as { message?: unknown }).message
-      if (typeof code === 'string' && typeof message === 'string') {
-        return `${code}: ${message}`
-      }
-      if (typeof message === 'string') return message
-    }
-  }
-  if (cause instanceof Error) return cause.message
-  return ''
+  return (
+    formatEnvelopeCause(cause) ?? (cause instanceof Error ? cause.message : '')
+  )
 }

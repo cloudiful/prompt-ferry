@@ -32,7 +32,10 @@ import {
   type CacheAlertSmtpForm,
   type CacheAlertSmtpLeaf,
 } from '@/admin-mappers/forms/cache-alert'
-import type { PendingActions } from './async-action'
+import {
+  settingsRefreshGateBlocked,
+  type SettingsRefreshGate,
+} from './settings-refresh'
 import { settingKey } from './settings-keys'
 
 export {
@@ -240,20 +243,8 @@ export function cacheAlertDirty(
  * Whether a scoped refresh is safe: loaded, idle, clean and without an
  * unrecovered save failure.
  */
-export function cacheAlertRefreshBlocked(input: {
-  pendingActions: PendingActions
-  dirty: boolean
-  failed: boolean
-  loading: boolean
-  loaded: boolean
-}): boolean {
-  return (
-    !input.loaded ||
-    input.loading ||
-    input.dirty ||
-    input.failed ||
-    Object.hasOwn(input.pendingActions, CACHE_ALERT_KEY)
-  )
+export function cacheAlertRefreshBlocked(input: SettingsRefreshGate): boolean {
+  return settingsRefreshGateBlocked(input, CACHE_ALERT_KEY)
 }
 
 /**

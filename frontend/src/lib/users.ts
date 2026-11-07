@@ -13,6 +13,7 @@ import type {
   UserUpdate,
 } from '@/generated/admin-api'
 import { expectData, withData } from '@/api'
+import { refreshPagedQuery } from './paged-query'
 
 const usersPageRoot = ['users', 'page'] as const
 
@@ -64,33 +65,15 @@ export async function refreshUsersPage(
   first: number,
   rows: number,
 ): Promise<UserPageResponse> {
-  const currentPageKey = usersPageQueryKey(first, rows)
-  await queryClient.cancelQueries({ queryKey: currentPageKey, exact: true })
-  await queryClient.invalidateQueries({
-    queryKey: usersPagesQueryKey(),
-    refetchType: 'none',
-  })
-
-  let requestedFirst = first
-  while (true) {
-    const page = await queryClient.fetchQuery({
-      queryKey: usersPageQueryKey(requestedFirst, rows),
-      queryFn: () => listUsersPage(requestedFirst, rows),
-      staleTime: 0,
-    })
-    const pageRows = page.rows > 0 ? page.rows : rows
-    if (
-      pageRows > 0 &&
-      page.users.length === 0 &&
-      requestedFirst >= page.total
-    ) {
-      const correctedFirst =
-        page.total > 0 ? Math.floor((page.total - 1) / pageRows) * pageRows : 0
-      if (correctedFirst !== requestedFirst) {
-        requestedFirst = correctedFirst
-        continue
-      }
-    }
-    return page
-  }
+  return refreshPagedQuery<UserPageResponse, User>(
+    queryClient,
+    {
+      queryKey: usersPageQueryKey,
+      namespaceKey: usersPagesQueryKey(),
+      fetchPage: listUsersPage,
+      items: (page) => page.users,
+    },
+    first,
+    rows,
+  )
 }

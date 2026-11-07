@@ -22,7 +22,10 @@ import {
   relayFormToRequest,
   relayPolicyToForm,
 } from '@/admin-mappers/forms/misc'
-import type { PendingActions } from './async-action'
+import {
+  settingsRefreshGateBlocked,
+  type SettingsRefreshGate,
+} from './settings-refresh'
 import { settingKey } from './settings-keys'
 
 /** The two lists, as the operator types them. */
@@ -96,18 +99,8 @@ export function relayWhitelistDirtyFields(
  * flight, while either textarea holds an unsaved draft, or while a previous save
  * or read failed and the operator has not retried yet.
  */
-export function relayWhitelistRefreshBlocked(input: {
-  pendingActions: PendingActions
-  dirty: boolean
-  failed: boolean
-  loading: boolean
-  loaded: boolean
-}): boolean {
-  return (
-    !input.loaded ||
-    input.loading ||
-    input.dirty ||
-    input.failed ||
-    Object.hasOwn(input.pendingActions, RELAY_IP_WHITELIST_KEY)
-  )
+export function relayWhitelistRefreshBlocked(
+  input: SettingsRefreshGate,
+): boolean {
+  return settingsRefreshGateBlocked(input, RELAY_IP_WHITELIST_KEY)
 }

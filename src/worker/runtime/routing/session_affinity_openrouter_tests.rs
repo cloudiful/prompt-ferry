@@ -4,58 +4,14 @@
 use super::select_route_for_candidate;
 use super::session_affinity_quota_tests::{bind_key, request};
 use super::session_affinity_tests::request_context;
+use super::test_support::openrouter_key;
 use crate::{
     db,
     replay_cache::ReplayCache,
     worker::runtime::prompt_log::RequestPromptLog,
-    worker_admin_types::{
-        OpenRouterBalance, OpenRouterSpend, TokenPlanKeyUsage, TokenPlanUsageResponse,
-    },
+    worker_admin_types::{TokenPlanKeyUsage, TokenPlanUsageResponse},
 };
 use uuid::Uuid;
-
-fn openrouter_key(
-    key_id: Uuid,
-    label: &str,
-    limit: Option<f64>,
-    remaining: Option<f64>,
-    spend: bool,
-) -> TokenPlanKeyUsage {
-    TokenPlanKeyUsage {
-        key_id,
-        key_label: label.to_string(),
-        ok: true,
-        status: Some(200),
-        error_code: None,
-        error_message: None,
-        quota_status: None,
-        model_remains: Vec::new(),
-        balances: None,
-        five_hour: None,
-        weekly: None,
-        opencodego_rolling: None,
-        opencodego_weekly: None,
-        opencodego_monthly: None,
-        openrouter_balance: Some(OpenRouterBalance {
-            limit,
-            limit_remaining: remaining,
-            limit_reset: None,
-            is_free_tier: false,
-            total_credits: None,
-            total_usage: None,
-        }),
-        openrouter_spend: spend.then_some(OpenRouterSpend {
-            usage: 1.0,
-            daily: 0.5,
-            weekly: 0.75,
-            monthly: 1.0,
-        }),
-        glm_five_hour: None,
-        glm_weekly: None,
-        deepseek_balance: None,
-        quota_windows: None,
-    }
-}
 
 fn openrouter_usage(keys: Vec<TokenPlanKeyUsage>) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {

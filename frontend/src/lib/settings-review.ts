@@ -21,6 +21,7 @@ import { getLlmReviewSetting, setLlmReviewSetting } from '@/generated/admin-api'
 import { expectData, withData } from '@/api'
 import { capturePayload } from '@/stores/record-action-types'
 import { runAsyncAction, type AsyncActionOutcome } from './async-action'
+import { fetchFreshSetting } from './settings-refresh'
 import {
   LLM_REVIEW_KEY,
   createLlmReviewForm,
@@ -114,19 +115,10 @@ export function disposeSettingsReview(): void {
 async function fetchFresh(
   queryClient: QueryClient,
 ): Promise<LlmReviewSettings> {
-  await queryClient.cancelQueries({
+  return fetchFreshSetting(queryClient, {
     queryKey: LLM_REVIEW_QUERY_KEY,
-    exact: true,
-  })
-  await queryClient.invalidateQueries({
-    queryKey: SETTINGS_REVIEW_NAMESPACE,
-    refetchType: 'none',
-  })
-  return queryClient.fetchQuery({
-    queryKey: LLM_REVIEW_QUERY_KEY,
-    queryFn: async () =>
-      expectData(await getLlmReviewSetting<true>(withData())),
-    staleTime: 0,
+    namespace: SETTINGS_REVIEW_NAMESPACE,
+    load: async () => expectData(await getLlmReviewSetting<true>(withData())),
   })
 }
 
