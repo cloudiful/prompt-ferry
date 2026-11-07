@@ -7,6 +7,8 @@ mod quota_probe;
 mod quota_unavailable;
 mod route_key_eligibility;
 mod session_quota_selection;
+#[cfg(test)]
+mod test_support;
 pub(in crate::worker::runtime) use quota_probe::QuotaProbePermit;
 pub(in crate::worker::runtime) use quota_unavailable::QuotaUnavailableError;
 #[cfg(test)]

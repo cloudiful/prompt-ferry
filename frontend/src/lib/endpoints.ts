@@ -16,6 +16,7 @@ import {
 } from '@/stores/endpoints-api'
 import type { EndpointRequest } from '@/generated/admin-api'
 import { MODEL_ROUTE_CACHE_NAMESPACE } from '@/models/endpoints'
+import { refreshPagedQuery } from './paged-query'
 
 const endpointPagesNamespace = ['endpoints-page'] as const
 const endpointRecordsNamespace = ['endpoint-records'] as const
@@ -107,35 +108,17 @@ export async function refreshEndpointsPage(
   first: number,
   rows: number,
 ): Promise<EndpointPageResponse> {
-  const currentPageKey = endpointsPageQueryKey(first, rows)
-  await queryClient.cancelQueries({ queryKey: currentPageKey, exact: true })
-  await queryClient.invalidateQueries({
-    queryKey: endpointsPagesQueryKey(),
-    refetchType: 'none',
-  })
-
-  let requestedFirst = first
-  while (true) {
-    const page = await queryClient.fetchQuery({
-      queryKey: endpointsPageQueryKey(requestedFirst, rows),
-      queryFn: () => fetchEndpointsPage(requestedFirst, rows),
-      staleTime: 0,
-    })
-    const pageRows = page.rows > 0 ? page.rows : rows
-    if (
-      pageRows > 0 &&
-      page.endpoints.length === 0 &&
-      requestedFirst >= page.total
-    ) {
-      const correctedFirst =
-        page.total > 0 ? Math.floor((page.total - 1) / pageRows) * pageRows : 0
-      if (correctedFirst !== requestedFirst) {
-        requestedFirst = correctedFirst
-        continue
-      }
-    }
-    return page
-  }
+  return refreshPagedQuery<EndpointPageResponse, ProviderEndpoint>(
+    queryClient,
+    {
+      queryKey: endpointsPageQueryKey,
+      namespaceKey: endpointsPagesQueryKey(),
+      fetchPage: fetchEndpointsPage,
+      items: (page) => page.endpoints,
+    },
+    first,
+    rows,
+  )
 }
 
 export function patchEndpointPages(

@@ -9,7 +9,7 @@ use crate::worker_admin;
 async fn import_endpoints_require_an_admin_session() {
     let (state, store, path) = test_state().await;
     attach_session(&state, "import-non-admin", false).await;
-    let archive = export_archive(&state).await;
+    let archive = export_archive(&state, PASSPHRASE).await;
     let app = worker_admin::router(state.clone());
 
     for uri in [

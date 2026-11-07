@@ -1,71 +1,15 @@
 //! OpenRouter quota-selection routing consumption (issue #203 P4).
 //! Balance-weighted arms exercising the real production quota cache.
 use super::selection::materialize_route_api_key_selection_with_quota;
+use super::test_support::{endpoint_key, openrouter_key};
 use crate::{
     db,
     worker::runtime::prompt_log::RequestPromptLog,
     worker::runtime::request_assembly::BufferedBridgeRequest,
     worker_admin::token_plan_cache::TokenPlanQuotaCache,
-    worker_admin_types::{
-        OpenRouterBalance, OpenRouterSpend, TokenPlanKeyUsage, TokenPlanUsageResponse,
-    },
+    worker_admin_types::{TokenPlanKeyUsage, TokenPlanUsageResponse},
 };
 use uuid::Uuid;
-fn endpoint_key(endpoint_id: Uuid, key_id: Uuid, label: &str, pos: i32) -> db::EndpointApiKey {
-    db::EndpointApiKey {
-        key_id,
-        endpoint_id,
-        key_label: label.to_string(),
-        api_key: format!("{label}-key"),
-        position: pos,
-        enabled: true,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    }
-}
-
-fn openrouter_key(
-    key_id: Uuid,
-    label: &str,
-    limit: Option<f64>,
-    remaining: Option<f64>,
-    spend: bool,
-) -> TokenPlanKeyUsage {
-    TokenPlanKeyUsage {
-        key_id,
-        key_label: label.to_string(),
-        ok: true,
-        status: Some(200),
-        error_code: None,
-        error_message: None,
-        quota_status: None,
-        model_remains: Vec::new(),
-        balances: None,
-        five_hour: None,
-        weekly: None,
-        opencodego_rolling: None,
-        opencodego_weekly: None,
-        opencodego_monthly: None,
-        openrouter_balance: Some(OpenRouterBalance {
-            limit,
-            limit_remaining: remaining,
-            limit_reset: None,
-            is_free_tier: false,
-            total_credits: None,
-            total_usage: None,
-        }),
-        openrouter_spend: spend.then_some(OpenRouterSpend {
-            usage: 1.0,
-            daily: 0.5,
-            weekly: 0.75,
-            monthly: 1.0,
-        }),
-        glm_five_hour: None,
-        glm_weekly: None,
-        deepseek_balance: None,
-        quota_windows: None,
-    }
-}
 
 fn usage(keys: Vec<TokenPlanKeyUsage>) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {

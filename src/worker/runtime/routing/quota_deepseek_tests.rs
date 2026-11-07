@@ -2,6 +2,7 @@
 //! `is_available=false` maps to weight 0 so the key is excluded; an available
 //! key carries full weight. Exercises the real production quota cache.
 use super::selection::materialize_route_api_key_selection_with_quota;
+use super::test_support::endpoint_key;
 use crate::{
     db,
     worker::runtime::prompt_log::RequestPromptLog,
@@ -12,19 +13,6 @@ use crate::{
     },
 };
 use uuid::Uuid;
-
-fn endpoint_key(endpoint_id: Uuid, key_id: Uuid, label: &str, pos: i32) -> db::EndpointApiKey {
-    db::EndpointApiKey {
-        key_id,
-        endpoint_id,
-        key_label: label.to_string(),
-        api_key: format!("{label}-key"),
-        position: pos,
-        enabled: true,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    }
-}
 
 fn deepseek_key(key_id: Uuid, label: &str, is_available: bool) -> TokenPlanKeyUsage {
     TokenPlanKeyUsage {

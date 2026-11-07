@@ -12,7 +12,7 @@ const IMPORT_URI: &str = "/api/v1/admin/config-import";
 async fn import_restores_configuration_into_a_fresh_instance() {
     let (source, source_store, source_path) = test_state().await;
     seed_configuration(&source).await;
-    let archive = export_archive(&source).await;
+    let archive = export_archive(&source, PASSPHRASE).await;
     let source_snapshot = decode(&archive);
 
     let (target, target_store, target_path) = test_state().await;
@@ -116,7 +116,7 @@ async fn import_restores_configuration_into_a_fresh_instance() {
 async fn import_rolls_back_when_a_write_fails() {
     let (source, source_store, source_path) = test_state().await;
     seed_configuration(&source).await;
-    let mut snapshot = decode(&export_archive(&source).await);
+    let mut snapshot = decode(&export_archive(&source, PASSPHRASE).await);
     // A duplicate login violates the users unique constraint after the
     // transaction has already deleted and re-inserted rows, so the whole
     // import must roll back.

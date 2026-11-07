@@ -76,7 +76,7 @@ async fn audit_trail_records_failures_and_never_a_secret() {
     assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
     let rejected_audit_id = audit_page(&state).await.entries[0].audit_id;
 
-    let archive = export_archive(&state).await;
+    let archive = export_archive(&state, PASSPHRASE).await;
     let archive_base64 = STANDARD.encode(&archive);
 
     // The read-only preview must not write anything.

@@ -14,7 +14,7 @@ const IMPORT_URI: &str = "/api/v1/admin/config-import";
 async fn preview_is_read_only_and_reports_domain_differences() {
     let (source, source_store, source_path) = test_state().await;
     seed_configuration(&source).await;
-    let archive = export_archive(&source).await;
+    let archive = export_archive(&source, PASSPHRASE).await;
 
     let (target, target_store, target_path) = test_state().await;
     attach_session(&target, "preview-admin", true).await;
@@ -65,7 +65,7 @@ async fn preview_is_read_only_and_reports_domain_differences() {
 #[tokio::test]
 async fn preview_rejects_a_wrong_passphrase_and_a_tampered_archive() {
     let (source, source_store, source_path) = test_state().await;
-    let archive = export_archive(&source).await;
+    let archive = export_archive(&source, PASSPHRASE).await;
     let (target, target_store, target_path) = test_state().await;
     attach_session(&target, "preview-admin", true).await;
     let app = worker_admin::router(target.clone());
@@ -107,7 +107,7 @@ async fn preview_rejects_a_wrong_passphrase_and_a_tampered_archive() {
 #[tokio::test]
 async fn preview_rejects_a_backend_mismatch_and_unknown_request_fields() {
     let (source, source_store, source_path) = test_state().await;
-    let mut snapshot = decode(&export_archive(&source).await);
+    let mut snapshot = decode(&export_archive(&source, PASSPHRASE).await);
     snapshot.manifest.backend_kind = ConfigBackendKind::Postgres;
     let postgres_archive = seal(snapshot, ConfigBackendKind::Postgres);
 
@@ -156,7 +156,7 @@ async fn preview_rejects_a_backend_mismatch_and_unknown_request_fields() {
 #[tokio::test]
 async fn import_rejects_an_unsupported_sqlite_domain() {
     let (source, source_store, source_path) = test_state().await;
-    let mut snapshot = decode(&export_archive(&source).await);
+    let mut snapshot = decode(&export_archive(&source, PASSPHRASE).await);
     // SQLite cannot store per-user redaction rules; a payload that carries
     // them must be rejected rather than silently dropped.
     snapshot.domains.user_redaction_configs =

@@ -4,8 +4,10 @@ use super::super::{
     tests::{querying_test_services, session_affinity_candidate},
 };
 use super::{
-    select_route_for_candidate, session_affinity_quota::quota_failover_selection,
+    select_route_for_candidate,
+    session_affinity_quota::quota_failover_selection,
     session_affinity_tests::request_context,
+    test_support::{command_code_window, window},
 };
 use crate::{
     db,
@@ -13,8 +15,8 @@ use crate::{
     response_affinity::{ResponseAffinityBinding, ResponseAffinityStore, api_key_fingerprint},
     worker_admin::token_plan_cache::TokenPlanQuotaCache,
     worker_admin_types::{
-        CommandCodeBalances, CommandCodeWindowUsage, TokenPlanKeyUsage, TokenPlanModelUsage,
-        TokenPlanUsageResponse, TokenPlanWindowUsage,
+        CommandCodeBalances, TokenPlanKeyUsage, TokenPlanModelUsage, TokenPlanUsageResponse,
+        TokenPlanWindowUsage,
     },
 };
 use chrono::Utc;
@@ -237,32 +239,9 @@ fn usage_with_keys(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUsageResponse {
     }
 }
 
-fn window(remaining_percent: f64) -> TokenPlanWindowUsage {
-    TokenPlanWindowUsage {
-        status: Some(1),
-        remaining_percent: Some(remaining_percent),
-        total_count: None,
-        usage_count: None,
-        boost_permille: None,
-        start_at: None,
-        end_at: None,
-        remains_time_ms: None,
-    }
-}
-
 // CommandCode session-affinity consumption (issue #184 P5): the bound key
 // is gated on the tighter USD window; PAYG keys without windows stay
 // honored (no quota signal means no exhaustion).
-fn command_code_window(remaining_percent: f64) -> CommandCodeWindowUsage {
-    CommandCodeWindowUsage {
-        used: 10.0 - remaining_percent / 10.0,
-        cap: 10.0,
-        used_percent: Some(100.0 - remaining_percent),
-        remaining_percent: Some(remaining_percent),
-        reset_at: None,
-    }
-}
-
 fn command_code_key(
     key_id: uuid::Uuid,
     key_label: &str,
