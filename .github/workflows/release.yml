@@ -31,7 +31,7 @@ jobs:
             release_suffix: ""
             msvc_arch: ""
           - target: aarch64-apple-darwin
-            runner: macos-14
+            runner: macos-latest
             executable: prompt-ferry
             release_suffix: ""
             msvc_arch: ""
