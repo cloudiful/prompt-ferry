@@ -317,14 +317,31 @@ describe('AI detail: context', () => {
     expect(contextValue(copy.reasoningEffort)).toBe('low → high')
   })
 
-  it('ignores the override on the Anthropic messages path', () => {
+  it.each([
+    '/v1/responses',
+    '/v1/chat/completions',
+    '/v1/responses/compact',
+    '/v1/messages',
+  ])('shows the override without a caller effort on %s', (path) => {
     renderDialog({
       detail: detail({
+        request_raw_json: { model: 'm' },
+        applied_thinking_effort_override: 'medium',
+        path,
+      }),
+    })
+    expect(contextValue(copy.reasoningEffort)).toBe('medium')
+  })
+
+  it('shows the Anthropic caller effort and override', () => {
+    renderDialog({
+      detail: detail({
+        request_raw_json: { output_config: { effort: 'low' } },
         applied_thinking_effort_override: 'high',
         path: '/v1/messages',
       }),
     })
-    expect(contextValue(copy.reasoningEffort)).toBe('low')
+    expect(contextValue(copy.reasoningEffort)).toBe('low → high')
   })
 
   it('extracts reasoning from the request-full payload when the detail has none', () => {
