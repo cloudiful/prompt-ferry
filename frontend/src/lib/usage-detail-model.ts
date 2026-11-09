@@ -118,16 +118,21 @@ export function extractReasoningEffort(value: unknown): string | null {
       return effort.trim()
     }
   }
+  const outputConfig = record['output_config']
+  if (
+    outputConfig &&
+    typeof outputConfig === 'object' &&
+    !Array.isArray(outputConfig)
+  ) {
+    const effort = (outputConfig as Record<string, unknown>)['effort']
+    if (typeof effort === 'string' && effort.trim().length > 0) {
+      return effort.trim()
+    }
+  }
   return null
 }
 
-/**
- * The reasoning-effort label, or `null` when neither payload names it.
- *
- * The caller value is shown as stored; the applied route-target override is
- * rendered as `caller → override` by the shared pure helper, which also keeps
- * the Anthropic `/v1/messages` path untouched.
- */
+/** The request-time override takes precedence over the stored caller effort. */
 export function usageReasoningEffortDisplay(
   detail: ReasoningCarrier | null,
   requestFull: ReasoningCarrier | null,
@@ -136,7 +141,6 @@ export function usageReasoningEffortDisplay(
   const effort =
     extractReasoningEffort(detail.request_raw_json) ??
     extractReasoningEffort(requestFull?.request_raw_json)
-  if (!effort) return null
   const withOverride = detail as ReasoningCarrier & {
     applied_thinking_effort_override?: string | null
     path?: string | null
