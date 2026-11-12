@@ -22,9 +22,9 @@ WORKFLOW_PATH = (
     Path(__file__).resolve().parents[2] / ".forgejo" / "workflows" / "docker-publish.yml"
 )
 
-RUST_ACTION = "https://forgejo.cloud1ful.com/actions/workflows/actions/build-rust-artifacts@v0.4.1"
-TARGETS_ACTION = "https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-targets@v0.4.1"
-MANIFESTS_ACTION = "https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-manifests@v0.4.1"
+RUST_ACTION = "https://forgejo.cloud1ful.com/actions/workflows/actions/build-rust-artifacts@v0.4.3"
+TARGETS_ACTION = "https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-targets@v0.4.3"
+MANIFESTS_ACTION = "https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-manifests@v0.4.3"
 PINNED_ACTIONS = (RUST_ACTION, TARGETS_ACTION, MANIFESTS_ACTION)
 
 PUBLISH_LATEST_LINE = 'publish_latest: "false"'
