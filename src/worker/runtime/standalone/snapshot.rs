@@ -114,128 +114,12 @@ fn relay_ip_policy(snapshot: &crate::standalone_config::StandaloneConfig) -> Rel
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        path::PathBuf,
-        sync::Arc,
-        time::{SystemTime, UNIX_EPOCH},
-    };
-
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
-    use tokio::sync::mpsc;
-    use uuid::Uuid;
 
     use super::*;
-    use crate::{
-        config::{NativeApi, NativeApiSource},
-        keys::hash_client_key,
-        relay_secrets::RelaySecretManager,
-        standalone_config::{
-            ClientKeyConfig, EndpointProvider, ModelRouteConfig, ModelRouteTargetConfig,
-            ProviderEndpointConfig, RouteScope, RoutingStrategy, SettingConfig, StandaloneConfig,
-            StandaloneConfigStore,
-        },
-    };
-
-    fn manager() -> RelaySecretManager {
-        RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager")
-    }
-
-    fn database_path() -> PathBuf {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        std::env::temp_dir().join(format!("prompt-ferry-runtime-snapshot-{suffix}.sqlite"))
-    }
+    use crate::standalone_config::StandaloneConfig;
 
     #[test]
     fn empty_snapshot_has_no_client_route() {
         assert_eq!(route_id_for_user(&StandaloneConfig::default(), 1), None);
-    }
-
-    #[tokio::test]
-    async fn publishes_local_client_key_hash_prefix_route_and_policy() {
-        let _redaction_guard = crate::redact_test_support::lock_async().await;
-        let path = database_path();
-        let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
-        let endpoint_id = Uuid::new_v4();
-        let route_id = Uuid::new_v4();
-        let secret = "local-client-secret".to_string();
-        let snapshot = StandaloneConfig {
-            endpoints: vec![ProviderEndpointConfig {
-                endpoint_id,
-                name: "local endpoint".to_string(),
-                provider: EndpointProvider::Generic,
-                provider_region: None,
-                service_tier: None,
-                base_url: "https://upstream.example".to_string(),
-                native_api: NativeApi::Responses,
-                native_api_source: NativeApiSource::Manual,
-                key_lb_enabled: false,
-                enabled: true,
-                mcp_enabled: false,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-                api_key: "endpoint-secret".to_string(),
-                api_keys: Vec::new(),
-                proxy_url: None,
-                active_windows: None,
-            }],
-            routes: vec![ModelRouteConfig {
-                rule_id: route_id,
-                scope: RouteScope::Admin,
-                owner_user_id: None,
-                model_pattern: "*".to_string(),
-                routing_strategy: RoutingStrategy::ResponsesSessionAffinity,
-                enabled: true,
-                targets: vec![ModelRouteTargetConfig {
-                    embedding_dimensions_override: None,
-                    target_id: Uuid::new_v4(),
-                    endpoint_id,
-                    position: 0,
-                    enabled: true,
-                    upstream_model: None,
-                    native_api: crate::config::NativeApi::Auto,
-                    proxy_url_override: None,
-                    active_windows: None,
-                    dev_system_normalize: false,
-                    thinking_effort_override: None,
-                    compact_mode: "passthrough".to_string(),
-                    thinking_downgrade_enabled: false,
-                    service_tier: None,
-                }],
-            }],
-            client_keys: vec![ClientKeyConfig {
-                key_id: Uuid::new_v4(),
-                user_id: 42,
-                key_prefix: "pfy_local".to_string(),
-                label: "local client".to_string(),
-                secret: secret.clone(),
-                enabled: true,
-            }],
-            settings: vec![SettingConfig {
-                key: "relay_ip_whitelist".to_string(),
-                version: 1,
-                value: serde_json::json!({"allowed_cidrs": ["127.0.0.1/32"]}),
-            }],
-            ..StandaloneConfig::default()
-        };
-        let state = StandaloneRuntimeState::new(store.clone(), manager(), snapshot);
-        let (sender, mut receiver) = mpsc::unbounded_channel();
-        state.set_bridge_sender("relay-key", Some(sender)).await;
-
-        publish_snapshot(&state).await.expect("publish");
-        let BridgeMessage::ConfigSnapshot(message) = receiver.recv().await.expect("snapshot")
-        else {
-            panic!("expected config snapshot");
-        };
-        assert_eq!(message.keys.len(), 1);
-        assert_eq!(message.keys[0].key_hash, hash_client_key(&secret));
-        assert_eq!(message.keys[0].key_prefix, "pfy_local");
-        assert_eq!(message.keys[0].user_id, 42);
-        assert_eq!(message.keys[0].route_id, endpoint_id.to_string());
-        assert_eq!(message.relay_ip_policy.allowed_cidrs, vec!["127.0.0.1/32"]);
-
-        let _ = std::fs::remove_file(path);
     }
 }

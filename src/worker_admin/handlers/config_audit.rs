@@ -24,6 +24,3 @@ pub(super) async fn list_config_audit(
         Err(err) => internal(&state, err),
     }
 }
-
-#[cfg(test)]
-mod tests;

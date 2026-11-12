@@ -23,6 +23,8 @@ pub mod realtime;
 #[cfg(test)]
 mod redaction_budget_tests;
 pub(crate) mod redaction_timing;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub use prompt_ferry_redact as redact;
 #[cfg(test)]
 pub(crate) use prompt_ferry_redact::test_support as redact_test_support;

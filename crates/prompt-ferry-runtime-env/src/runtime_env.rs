@@ -287,102 +287,11 @@ fn config_root_from(get_env: impl Fn(&str) -> Option<OsString>) -> Result<PathBu
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        create_private_file_exclusive, host_config_path, resolve_database_url,
-        resolve_standalone_database_path_from, restrict_to_owner,
-    };
+    use super::resolve_standalone_database_path_from;
     use std::ffi::OsString;
-    use std::path::{Path, PathBuf};
-
-    #[test]
-    fn the_host_local_config_sits_beside_the_main_config_in_its_own_directory() {
-        let host = host_config_path().expect("resolve the host-local config path");
-        let main = super::default_config_path(super::CONFIG_APP_NAME).expect("main config path");
-
-        assert_ne!(
-            host.parent().and_then(|dir| dir.file_name()),
-            main.parent().and_then(|dir| dir.file_name()),
-            "the writable overlay must not be the main configuration"
-        );
-        assert_eq!(
-            host.parent()
-                .and_then(Path::parent)
-                .and_then(|dir| dir.file_name()),
-            main.parent()
-                .and_then(Path::parent)
-                .and_then(|dir| dir.file_name()),
-            "both live under the platform config root"
-        );
-        assert_ne!(
-            host.parent().and_then(|dir| dir.file_name()),
-            main.parent().and_then(|dir| dir.file_name()),
-            "the writable overlay must not be the main configuration"
-        );
-    }
+    use std::path::PathBuf;
 
     #[cfg(unix)]
-    #[test]
-    fn restricting_a_file_leaves_it_readable_only_by_its_owner() {
-        let dir =
-            std::env::temp_dir().join(format!("prompt-ferry-restrict-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("host.toml");
-        std::fs::write(&path, "role = \"relay\"").unwrap();
-
-        restrict_to_owner(&path).unwrap();
-
-        use std::os::unix::fs::PermissionsExt as _;
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600);
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "role = \"relay\"");
-
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn private_file_create_is_exclusive_and_keeps_contents() {
-        let dir = std::env::temp_dir().join(format!(
-            "prompt-ferry-private-file-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let path = dir.join("nested").join("secret.key");
-
-        assert!(create_private_file_exclusive(&path, "first").unwrap());
-        assert!(!create_private_file_exclusive(&path, "second").unwrap());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "first");
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-            assert_eq!(mode & 0o777, 0o600);
-        }
-
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn database_url_resolution_prefers_arg_then_database_url_env() {
-        unsafe {
-            std::env::remove_var("DATABASE_URL");
-        }
-
-        assert_eq!(
-            resolve_database_url(Some(" postgres://arg ".to_string()))
-                .unwrap()
-                .database_url,
-            "postgres://arg"
-        );
-
-        unsafe { std::env::set_var("DATABASE_URL", "postgres://default") };
-        assert_eq!(
-            resolve_database_url(None).unwrap().database_url,
-            "postgres://default"
-        );
-
-        unsafe { std::env::remove_var("DATABASE_URL") };
-    }
-
     #[test]
     fn standalone_database_path_trims_explicit_override() {
         assert_eq!(

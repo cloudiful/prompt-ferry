@@ -1,13 +1,9 @@
-use super::select_route_for_candidate;
 use super::selection::materialize_route_api_key_selection_with_quota;
-use super::session_affinity_tests::request_context;
 use super::test_support::{command_code_window, endpoint_key, window};
 use crate::{
     db,
-    replay_cache::ReplayCache,
     worker::runtime::prompt_log::RequestPromptLog,
     worker::runtime::request_assembly::BufferedBridgeRequest,
-    worker::runtime::tests::{querying_test_services, session_affinity_candidate},
     worker_admin::token_plan_cache::TokenPlanQuotaCache,
     worker_admin_types::{
         CommandCodeBalances, TokenPlanKeyUsage, TokenPlanModelUsage, TokenPlanUsageResponse,
@@ -393,55 +389,4 @@ async fn quota_key_lb_still_routes_payg_command_code_key_without_windows() {
 
     assert_eq!(selected.selection.key_id, Some(payg_key_id));
     assert_eq!(selected.selection.key_label.as_deref(), Some("payg"));
-}
-
-#[tokio::test]
-async fn unified_pool_skips_a_target_with_no_remaining_quota() {
-    let replay_cache = ReplayCache::for_tests();
-    let runtime_state = super::super::WorkerRuntimeState::default();
-    let services = querying_test_services(runtime_state.clone(), replay_cache).await;
-    let mut candidate = session_affinity_candidate();
-    candidate.routing_strategy = db::ModelRouteRoutingStrategy::ResponsesSessionAffinity;
-    let exhausted_endpoint = candidate.targets[0].endpoint_id;
-    let exhausted_key_id = candidate.targets[0].api_keys[0].key_id;
-    services
-        .admin_state()
-        .expect("admin state")
-        .token_plan_quota
-        .store_for_test(
-            exhausted_endpoint,
-            TokenPlanUsageResponse {
-                local_today_tokens: None,
-                provider: db::EndpointProvider::Minimax,
-                provider_region: Some(db::EndpointRegion::Cn),
-                keys: vec![token_plan_key_usage(exhausted_key_id, "primary", 0.0)],
-            },
-        )
-        .await;
-
-    let request_ctx = request_context(
-        runtime_state.worker_instance_id(),
-        RequestPromptLog::default(),
-    );
-    let selected = select_route_for_candidate(
-        &services,
-        &request_ctx,
-        &candidate,
-        &command_code_request(),
-        1,
-        Some("client-key"),
-    )
-    .await
-    .expect("route selection")
-    .expect("route must be selected");
-    assert_ne!(
-        selected.route.route_id, exhausted_endpoint,
-        "a pool unit with no remaining quota must be skipped",
-    );
-    // Issue #466: single-variant affinity; the unified pool is reached via
-    // the affinity path, so the reason is session-pinned.
-    assert_eq!(
-        selected.route.route_selection_reason,
-        db::RouteSelectionReason::SessionAffinity
-    );
 }

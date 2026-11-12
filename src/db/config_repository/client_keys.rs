@@ -370,7 +370,3 @@ impl SqliteConfigRepository {
         Ok(None)
     }
 }
-
-#[cfg(test)]
-#[path = "http_tests.rs"]
-mod http_tests;

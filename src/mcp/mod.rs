@@ -33,8 +33,6 @@ pub use crate::db::{
     effective_provider_kind, is_known_mcp_provider, mcp_provider_info,
 };
 pub(crate) use builtin::MiniMaxTransport;
-#[cfg(test)]
-pub(crate) use builtin::{MiniMaxRequest, MiniMaxResponse};
 pub use service::{
     AcquiredCatalog, CATALOG_REFRESH_DRAIN_TIMEOUT, CatalogRefreshPolicy, McpCatalogService,
 };
@@ -115,18 +113,6 @@ impl McpRuntimeStorage {
     pub(crate) fn with_tracker(&self, tracker: McpCallTracker) -> Self {
         Self {
             tracker,
-            ..self.clone()
-        }
-    }
-
-    /// A storage that drives the builtin provider through the given transport.
-    #[cfg(test)]
-    pub(crate) fn with_builtin_transport(
-        &self,
-        transport: std::sync::Arc<dyn MiniMaxTransport>,
-    ) -> Self {
-        Self {
-            builtin_transport: Some(transport),
             ..self.clone()
         }
     }

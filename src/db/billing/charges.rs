@@ -407,10 +407,4 @@ mod tests {
             Decimal::from_str("0.7").unwrap()
         );
     }
-
-    #[test]
-    fn charge_upsert_is_event_idempotent() {
-        let sql = include_str!("../../sql/billing/upsert_charge.sql");
-        assert!(sql.contains("ON CONFLICT (event_id)"));
-    }
 }

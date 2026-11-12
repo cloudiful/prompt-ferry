@@ -4,8 +4,6 @@
 
 use chrono::Utc;
 
-use super::super::prompt_log::RequestPromptLog;
-use super::{select_route_for_candidate, session_affinity_tests::request_context};
 use crate::{
     db,
     worker::runtime::request_assembly::BufferedBridgeRequest,
@@ -75,52 +73,6 @@ pub(super) fn opencode_go_usage(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUs
 
 /// One OpencodeGo key whose windows carry explicit reset deltas, so the
 /// urgency factor has real `resets_in_seconds` data to work with.
-pub(super) fn opencode_go_urgent_key(
-    key_id: uuid::Uuid,
-    key_label: &str,
-    rolling: Option<(f64, chrono::Duration)>,
-    weekly: Option<(f64, chrono::Duration)>,
-    monthly: Option<(f64, chrono::Duration)>,
-) -> TokenPlanKeyUsage {
-    let window = |value: Option<(f64, chrono::Duration)>| {
-        value.map(|(used, resets_in)| OpencodeGoWindowUsage {
-            status: None,
-            percent: Some(used),
-            resets_at: Some(Utc::now() + resets_in),
-        })
-    };
-    TokenPlanKeyUsage {
-        key_id,
-        key_label: key_label.to_string(),
-        ok: true,
-        status: Some(200),
-        error_code: None,
-        error_message: None,
-        quota_status: None,
-        model_remains: Vec::new(),
-        balances: None,
-        five_hour: None,
-        weekly: None,
-        opencodego_rolling: window(rolling),
-        opencodego_weekly: window(weekly),
-        opencodego_monthly: window(monthly),
-        openrouter_balance: None,
-        openrouter_spend: None,
-        glm_five_hour: None,
-        glm_weekly: None,
-        deepseek_balance: None,
-        quota_windows: None,
-    }
-}
-
-pub(super) fn opencode_go_urgent_usage(keys: Vec<TokenPlanKeyUsage>) -> TokenPlanUsageResponse {
-    TokenPlanUsageResponse {
-        local_today_tokens: None,
-        provider: db::EndpointProvider::OpencodeGo,
-        provider_region: None,
-        keys,
-    }
-}
 
 pub(super) fn target(
     endpoint_id: uuid::Uuid,
@@ -189,28 +141,4 @@ pub(super) fn request(client_key: &str) -> BufferedBridgeRequest {
         http_request_decompressed_bytes: None,
         http_request_compression_ratio: None,
     }
-}
-
-pub(super) async fn route_selected_endpoint(
-    services: &crate::worker::runtime::context::RuntimeServices,
-    candidate: &db::ModelRouteCandidate,
-    client_key: &str,
-) -> (uuid::Uuid, Option<uuid::Uuid>, String) {
-    let request_ctx = request_context(uuid::Uuid::new_v4(), RequestPromptLog::default());
-    let selected = select_route_for_candidate(
-        services,
-        &request_ctx,
-        candidate,
-        &request(client_key),
-        1,
-        Some(client_key),
-    )
-    .await
-    .expect("route selection")
-    .expect("route must be selected");
-    (
-        selected.route.route_id,
-        selected.route.endpoint_key_id,
-        selected.route.api_key,
-    )
 }

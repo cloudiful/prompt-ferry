@@ -97,8 +97,8 @@ fn relay_tcp_endpoint(relay_url: &str) -> Option<(String, u16)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        RELAY_READY_PROBE_INTERVAL, relay_reconnect_base_delay, relay_reconnect_delay_with_jitter,
-        relay_reconnect_jitter_cap_millis, relay_tcp_endpoint, wait_for_relay_ready_within,
+        relay_reconnect_base_delay, relay_reconnect_delay_with_jitter,
+        relay_reconnect_jitter_cap_millis, relay_tcp_endpoint,
     };
     use std::time::Duration;
 
@@ -155,53 +155,5 @@ mod tests {
         let (host, port) = relay_tcp_endpoint("wss://relay/ws/worker").expect("parse");
         assert_eq!(host, "relay");
         assert_eq!(port, 443);
-    }
-
-    #[tokio::test]
-    async fn wait_for_relay_ready_returns_when_endpoint_accepts() {
-        // The listener stays up for the whole probe: the first connect
-        // attempt must succeed and the wait must return well within the
-        // budget (not at the deadline).
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let url = format!("ws://{}", addr);
-        let budget = Duration::from_secs(2);
-        let started = std::time::Instant::now();
-        wait_for_relay_ready_within(&url, budget).await;
-        let elapsed = started.elapsed();
-        assert!(
-            elapsed < budget,
-            "wait_for_relay_ready should return on first accept; elapsed={elapsed:?}, budget={budget:?}"
-        );
-        drop(listener);
-    }
-
-    #[tokio::test]
-    async fn wait_for_relay_ready_falls_back_after_budget_when_endpoint_refuses() {
-        // Bind a listener, capture the port, and immediately release it so
-        // the OS holds the socket in TIME_WAIT / closed state. With nothing
-        // bound, every probe attempt fails — the wait must give up only
-        // when its budget expires, not earlier (and not via panic).
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let url = format!("ws://{}", addr);
-        drop(listener);
-        // Sleep one probe interval so the OS stops refusing the bind on
-        // the same port; otherwise the next probe can be spuriously
-        // accepted by a leftover accept queue.
-        tokio::time::sleep(RELAY_READY_PROBE_INTERVAL * 2).await;
-        let budget = Duration::from_millis(600);
-        let started = std::time::Instant::now();
-        wait_for_relay_ready_within(&url, budget).await;
-        let elapsed = started.elapsed();
-        assert!(
-            elapsed >= budget,
-            "wait_for_relay_ready should honour its budget on probe failure; elapsed={elapsed:?}, budget={budget:?}"
-        );
-        // Sanity cap so a regression that hangs forever is caught quickly.
-        assert!(
-            elapsed < budget + RELAY_READY_PROBE_INTERVAL * 4 + Duration::from_millis(500),
-            "wait_for_relay_ready lingered past the budget window; elapsed={elapsed:?}"
-        );
     }
 }

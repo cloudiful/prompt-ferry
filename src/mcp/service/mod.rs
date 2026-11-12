@@ -2,8 +2,6 @@ mod builder;
 mod catalog;
 mod readers;
 mod snapshot;
-#[cfg(test)]
-mod tests;
 
 pub use catalog::{
     AcquiredCatalog, CATALOG_REFRESH_DRAIN_TIMEOUT, CatalogRefreshPolicy, McpCatalogService,

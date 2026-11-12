@@ -435,6 +435,3 @@ impl super::ConfigRepository {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

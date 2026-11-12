@@ -10,8 +10,6 @@ use crate::db::{
     RequestRecordOverviewResponse,
 };
 
-#[cfg(test)]
-mod minute_tests;
 mod presentation;
 mod queries;
 

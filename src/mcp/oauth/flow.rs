@@ -124,20 +124,6 @@ pub(crate) struct McpOAuthService {
     /// Deployment-level reason personal OAuth is unavailable, surfaced by the
     /// status API and every operation instead of using an unsafe fallback.
     disabled_reason: Option<String>,
-    /// Test-only injection for a loopback mock authorization server. Compiled
-    /// only for tests; no deployment flag can enable it.
-    #[cfg(test)]
-    allow_private_network: bool,
-    /// Test-only short timeout cap for the bounded-time regression.
-    #[cfg(test)]
-    oauth_timeout: Option<std::time::Duration>,
-    /// Test-only whole-operation budget, defaulting to the production 30s cap.
-    #[cfg(test)]
-    operation_timeout: Option<std::time::Duration>,
-    /// Test-only switch that keeps discovery on loopback while applying the
-    /// strict production browser-endpoint policy under test.
-    #[cfg(test)]
-    strict_browser_policy: bool,
 }
 
 struct Settings {
@@ -160,52 +146,11 @@ impl McpOAuthService {
             redirect_base: redirect_base.filter(|value| !value.trim().is_empty()),
             user_store,
             disabled_reason: None,
-            #[cfg(test)]
-            allow_private_network: false,
-            #[cfg(test)]
-            oauth_timeout: None,
-            #[cfg(test)]
-            operation_timeout: None,
-            #[cfg(test)]
-            strict_browser_policy: false,
         }
     }
 
-    /// Test-only: allow the loopback mock authorization server.
-    #[cfg(test)]
-    pub(crate) fn with_private_network(mut self) -> Self {
-        self.allow_private_network = true;
-        self
-    }
-
-    /// Test-only: same loopback mock, with a short timeout cap.
-    #[cfg(test)]
-    pub(crate) fn with_short_timeout(mut self, timeout: std::time::Duration) -> Self {
-        self.allow_private_network = true;
-        self.oauth_timeout = Some(timeout);
-        self
-    }
-
-    #[cfg(test)]
-    pub(crate) fn with_operation_timeout(mut self, timeout: std::time::Duration) -> Self {
-        self.operation_timeout = Some(timeout);
-        self
-    }
-
-    #[cfg(test)]
-    pub(crate) fn with_strict_browser_policy(mut self) -> Self {
-        self.strict_browser_policy = true;
-        self
-    }
-
     fn operation_budget(&self) -> std::time::Duration {
-        #[cfg(test)]
-        let budget = self
-            .operation_timeout
-            .unwrap_or(std::time::Duration::from_secs(30));
-        #[cfg(not(test))]
-        let budget = std::time::Duration::from_secs(30);
-        budget
+        std::time::Duration::from_secs(30)
     }
 
     /// Mark personal OAuth unavailable for a deployment-level reason while
@@ -215,24 +160,7 @@ impl McpOAuthService {
         self
     }
 
-    #[cfg(test)]
-    pub(crate) fn disabled_reason(&self) -> Option<&str> {
-        self.disabled_reason.as_deref()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn allows_test_network(&self) -> bool {
-        self.allow_private_network
-    }
-
     fn http_client(&self) -> Arc<PinnedOAuthHttpClient> {
-        #[cfg(test)]
-        if self.allow_private_network {
-            return Arc::new(match self.oauth_timeout {
-                Some(timeout) => PinnedOAuthHttpClient::for_test_with_timeout(timeout),
-                None => PinnedOAuthHttpClient::for_test(),
-            });
-        }
         Arc::new(PinnedOAuthHttpClient::new())
     }
 
@@ -286,11 +214,7 @@ impl McpOAuthService {
         let parsed = reqwest::Url::parse(server_url).map_err(|_| {
             McpOAuthError::Disabled("the MCP server URL is not a valid URL".to_string())
         })?;
-        #[cfg(not(test))]
-        let require_https = true;
-        #[cfg(test)]
-        let require_https = !self.allow_private_network;
-        if require_https && parsed.scheme() != "https" {
+        if parsed.scheme() != "https" {
             return Err(McpOAuthError::Disabled(
                 "personal MCP OAuth requires an HTTPS server URL".to_string(),
             ));
@@ -330,30 +254,14 @@ impl McpOAuthService {
     }
 
     /// Validate an authorization-server browser destination before it is used
-    /// or handed to the owner. Production requires a public HTTPS endpoint and
-    /// resolves every address once; the test-only loopback seam still rejects
-    /// credentials, fragments and non-HTTP(S) schemes.
+    /// or handed to the owner. It must be a public HTTPS endpoint with no
+    /// credentials or fragment.
     async fn validate_browser_endpoint(&self, url: &str) -> Result<(), McpOAuthError> {
         let parsed = reqwest::Url::parse(url).map_err(|_| {
             McpOAuthError::Disabled(
                 "the authorization server authorization endpoint is not a valid URL".to_string(),
             )
         })?;
-        #[cfg(test)]
-        if self.allow_private_network && !self.strict_browser_policy {
-            if !matches!(parsed.scheme(), "http" | "https")
-                || !parsed.username().is_empty()
-                || parsed.password().is_some()
-                || parsed.fragment().is_some()
-                || parsed.host_str().filter(|host| !host.is_empty()).is_none()
-            {
-                return Err(McpOAuthError::Disabled(
-                    "the authorization server authorization endpoint must be an HTTPS public endpoint"
-                        .to_string(),
-                ));
-            }
-            return Ok(());
-        }
         crate::mcp::transport::pinning::validate_https_url(&parsed).map_err(|error| {
             McpOAuthError::Disabled(format!(
                 "the authorization server authorization endpoint must be a public HTTPS endpoint: {error}"

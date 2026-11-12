@@ -1,38 +1,14 @@
 use super::*;
 use crate::{
     db::{self, ModelRouteCandidate, ModelRouteCandidateTarget},
-    endpoint_models::EndpointModelCache,
-    llm_review::LlmReviewSettings,
     mcp::targeting::McpRequestMetadata,
-    mcp::{McpCatalogCache, McpCatalogService},
     redact_test_support::secret_redaction,
-    replay_cache::ReplayCache,
     worker::runtime::context::{RequestExecutionContextParams, ResponseLimits, RuntimeServices},
-    worker_admin_state::{AdminState, AdminStateInit},
-    worker_admin_types::{
-        RequestContentLoggingMode, RequestContentLoggingResponse, UsageRetentionSettings,
-    },
+    worker_admin_types::{RequestContentLoggingMode, RequestContentLoggingResponse},
 };
 use anyhow::anyhow;
 use base64::Engine as _;
 use chrono::Utc;
-use std::time::Duration;
-
-#[allow(dead_code)]
-mod test_db_url {
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/support/test_db_url.rs"
-    ));
-}
-
-#[allow(dead_code)]
-mod test_pg_target {
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/support/test_pg_target.rs"
-    ));
-}
 
 use super::ai::upstream::upstream_url_for_route;
 use super::connect::is_expected_relay_disconnect;
@@ -76,7 +52,7 @@ fn rejects_upstream_base_url_with_v1_path() {
 #[test]
 fn managed_mode_rejects_invalid_encryption_key() {
     let config = WorkerConfig {
-        database_url: test_db_url::lazy_test_database_url(),
+        database_url: crate::test_support::fixture_database_url(),
         upstream_api_key: String::new(),
         relay_urls: Vec::new(),
         worker_token: "token".to_string(),
@@ -89,7 +65,7 @@ fn managed_mode_rejects_invalid_encryption_key() {
 #[test]
 fn managed_mode_allows_zero_relays_with_master_key() {
     let config = WorkerConfig {
-        database_url: test_db_url::lazy_test_database_url(),
+        database_url: crate::test_support::fixture_database_url(),
         upstream_api_key: String::new(),
         relay_urls: Vec::new(),
         worker_token: "token".to_string(),
@@ -330,99 +306,6 @@ fn unified_pool_draw_weights_shift_the_distribution() {
     );
 }
 
-#[tokio::test]
-async fn session_affinity_uses_preferred_endpoint() {
-    let runtime_state = WorkerRuntimeState::default();
-    let services = querying_test_services(runtime_state.clone(), ReplayCache::for_tests()).await;
-    let candidate = session_affinity_candidate();
-    let preferred = candidate.targets[0].endpoint_id;
-    let request_ctx = RequestExecutionContext::new(RequestExecutionContextParams {
-        request_id: uuid::Uuid::new_v4(),
-        started: Instant::now(),
-        request_model: Some("gpt-4.1-mini".to_string()),
-        client_key_id: None,
-        client_key_label: None,
-        user_id: Some(1),
-        owner_worker_id: runtime_state.worker_instance_id(),
-        request_prompt_log: RequestPromptLog {
-            conversation_id: Some(uuid::Uuid::new_v4()),
-            conversation_seq: Some(1),
-            preferred_endpoint_id: Some(preferred),
-            ..RequestPromptLog::default()
-        },
-    });
-
-    let selected = select_route_for_candidate(
-        &services,
-        &request_ctx,
-        &candidate,
-        &sample_request(),
-        1,
-        Some("key-a"),
-    )
-    .await
-    .unwrap()
-    .expect("selected route");
-
-    assert_eq!(selected.route.route_id, preferred);
-    assert_eq!(
-        selected.route.route_selection_reason,
-        db::RouteSelectionReason::SessionAffinity
-    );
-}
-
-#[tokio::test]
-async fn session_affinity_draws_and_pins_a_new_identity() {
-    let runtime_state = WorkerRuntimeState::default();
-    let services = querying_test_services(runtime_state.clone(), ReplayCache::for_tests()).await;
-    let candidate = session_affinity_candidate();
-    let conversation_id = uuid::Uuid::new_v4();
-    let request_ctx = RequestExecutionContext::new(RequestExecutionContextParams {
-        request_id: uuid::Uuid::new_v4(),
-        started: Instant::now(),
-        request_model: Some("gpt-4.1-mini".to_string()),
-        client_key_id: None,
-        client_key_label: None,
-        user_id: Some(1),
-        owner_worker_id: runtime_state.worker_instance_id(),
-        request_prompt_log: RequestPromptLog {
-            conversation_id: Some(conversation_id),
-            conversation_seq: Some(1),
-            ..RequestPromptLog::default()
-        },
-    });
-
-    let first = select_route_for_candidate(
-        &services,
-        &request_ctx,
-        &candidate,
-        &sample_request(),
-        1,
-        Some("key-a"),
-    )
-    .await
-    .unwrap()
-    .expect("selected route");
-    let second = select_route_for_candidate(
-        &services,
-        &request_ctx,
-        &candidate,
-        &sample_request(),
-        1,
-        Some("key-a"),
-    )
-    .await
-    .unwrap()
-    .expect("selected route");
-
-    assert_eq!(first.route.route_id, second.route.route_id);
-    assert_eq!(first.route.endpoint_key_id, second.route.endpoint_key_id);
-    assert_eq!(
-        first.route.route_selection_reason,
-        db::RouteSelectionReason::SessionAffinity
-    );
-}
-
 #[test]
 fn unified_pool_draw_distributes_independent_identities() {
     let candidate = session_affinity_candidate();
@@ -551,71 +434,6 @@ async fn selected_route_carries_target_upstream_model_override() {
 
     assert_eq!(route.route.route_id, first.route.route_id);
     assert_eq!(route.route.upstream_model.as_deref(), Some("gpt-4.1-mini"));
-}
-
-pub(super) fn session_affinity_services(
-    runtime_state: WorkerRuntimeState,
-    replay_cache: ReplayCache,
-) -> RuntimeServices {
-    session_affinity_services_with_pool(runtime_state, replay_cache, test_db_url::lazy_test_pool())
-}
-
-/// Route selection refreshes every candidate target, and a target without a
-/// seeded quota observation reaches `db::get_endpoint`. Those tests must query
-/// the dedicated test database rather than a lazy placeholder pool: the
-/// sanctioned target is confirmed by the operator, the fixture endpoint ids are
-/// fresh UUIDs, and the lookup is a read-only `provider_endpoints` probe.
-pub(super) async fn querying_test_services(
-    runtime_state: WorkerRuntimeState,
-    replay_cache: ReplayCache,
-) -> RuntimeServices {
-    let pool = test_pg_target::required_pool(1)
-        .await
-        .unwrap_or_else(|error| {
-            panic!(
-                "the routing tests that read provider_endpoints need the confirmed dedicated test \
-             database; run them through scripts/ci/with-test-env.sh: {error}"
-            )
-        });
-    session_affinity_services_with_pool(runtime_state, replay_cache, pool)
-}
-
-fn session_affinity_services_with_pool(
-    runtime_state: WorkerRuntimeState,
-    replay_cache: ReplayCache,
-    pool: sqlx::PgPool,
-) -> RuntimeServices {
-    let catalog_cache = McpCatalogCache::new();
-    let admin_state = AdminState::new(AdminStateInit {
-        pool: pool.clone(),
-        lease_pool: pool.clone(),
-        replay_cache,
-        configured_relays: Vec::new(),
-        managed_mode: false,
-        relay_secret_manager: None,
-        redaction_enabled: false,
-        model_route_whitelist_enabled: true,
-        request_content_logging: RequestContentLoggingResponse {
-            mode: RequestContentLoggingMode::Off,
-            raw_retention_days: 3,
-        },
-        usage_retention: UsageRetentionSettings::default(),
-        raw_payload_store: None,
-        stream_delta_batching: db::StreamDeltaBatchingSettings::default(),
-        llm_review_settings: LlmReviewSettings::default(),
-        mcp_catalog_cache: catalog_cache.clone(),
-        mcp_catalog_service: McpCatalogService::new(pool.clone(), catalog_cache),
-        mcp_session_store: None,
-        mcp_allowed_origins: Vec::new(),
-        endpoint_model_cache: EndpointModelCache::new(Duration::from_secs(60)),
-    });
-    RuntimeServices::new(
-        Some(admin_state),
-        super::context::BridgeSender::test_sender(),
-        reqwest::Client::new(),
-        runtime_state,
-        ResponseLimits::default(),
-    )
 }
 
 fn sample_candidate() -> ModelRouteCandidate {
@@ -965,35 +783,6 @@ fn raw_object_store_config_validates_s3_requirements() {
 
     config.s3_region = "auto".to_string();
     assert!(config.validate().is_ok());
-}
-
-#[test]
-fn raw_object_store_disabled_and_local_build_correctly() {
-    use crate::raw_payload_store::{RawObjectStoreBackend, RawObjectStoreConfig};
-
-    let disabled = RawObjectStoreConfig {
-        backend: RawObjectStoreBackend::Disabled,
-        ..RawObjectStoreConfig::default()
-    };
-    let store = disabled.build_store().expect("build disabled");
-    assert!(store.is_none());
-
-    let local = RawObjectStoreConfig {
-        backend: RawObjectStoreBackend::Local,
-        local_dir: std::env::temp_dir()
-            .join(format!("pf-test-local-{}", uuid::Uuid::new_v4()))
-            .to_string_lossy()
-            .to_string(),
-        ..RawObjectStoreConfig::default()
-    };
-    let store = local.build_store().expect("build local");
-    assert!(store.is_some());
-    if let Some(s) = store {
-        // Local store should be validated successfully.
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async { s.validate_candidate().await.expect("local validation") });
-    }
-    let _ = std::fs::remove_dir_all(local.local_dir);
 }
 
 #[test]

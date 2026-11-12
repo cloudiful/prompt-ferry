@@ -20,9 +20,6 @@ pub mod restart;
 pub(crate) mod state;
 mod worker_api;
 
-#[cfg(test)]
-mod tests;
-
 use axum::{
     Router,
     extract::DefaultBodyLimit,

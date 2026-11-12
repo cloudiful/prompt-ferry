@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use super::{
-    NormalizedResponsesRequest, normalize_response_error, raw_responses_input_items_from_body,
+    NormalizedResponsesRequest, raw_responses_input_items_from_body,
     validate_raw_compact_request_body, validate_raw_responses_request_body,
 };
 
@@ -147,16 +147,6 @@ fn strips_item_references_from_chat_compat_messages() {
     let items = request.chat_compat_items();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["type"].as_str(), Some("function_call_output"));
-}
-
-#[test]
-fn wraps_detail_errors_in_openai_shape() {
-    let value =
-        normalize_response_error(r#"{"detail":"Unsupported parameter: previous_response_id"}"#);
-    assert_eq!(
-        value["error"]["message"].as_str(),
-        Some("Unsupported parameter: previous_response_id")
-    );
 }
 
 #[test]

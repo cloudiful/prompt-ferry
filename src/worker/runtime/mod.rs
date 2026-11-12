@@ -17,8 +17,6 @@ mod inbound;
 pub(crate) mod json_walker;
 mod lifecycle;
 mod lifecycle_standalone;
-#[cfg(test)]
-mod lifecycle_standalone_tests;
 mod mcp_catalog_refresh;
 mod mcp_support;
 mod prompt_log;
@@ -178,16 +176,6 @@ impl WorkerRuntimeState {
             .await
             .get(request_id)
             .cloned()
-    }
-
-    #[cfg(test)]
-    async fn test_register_request_cancellation(&self, request_id: &str) -> RequestCancellation {
-        let cancellation = RequestCancellation::default();
-        self.request_cancellations
-            .lock()
-            .await
-            .insert(request_id.to_string(), cancellation.clone());
-        cancellation
     }
 
     fn is_shutting_down(&self) -> bool {

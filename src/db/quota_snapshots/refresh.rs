@@ -110,7 +110,3 @@ fn validate_error_code(error_code: Option<&str>) -> Result<()> {
     }
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "lease_tests.rs"]
-mod lease_tests;

@@ -60,3 +60,5 @@ impl CompatError {
         }
     }
 }
+#[cfg(test)]
+mod stateless_fallback_tests;

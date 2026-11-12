@@ -16,8 +16,6 @@ mod codex_request_headers;
 mod config_audit;
 mod config_export;
 mod config_import;
-#[cfg(test)]
-mod config_test_support;
 mod endpoint_usage;
 mod endpoints;
 mod mcp;

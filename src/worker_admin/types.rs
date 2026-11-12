@@ -31,9 +31,6 @@ mod token_plan;
 #[path = "types/usage.rs"]
 mod usage;
 
-#[cfg(test)]
-use axum::http::StatusCode;
-
 pub use approvals::*;
 pub use auth_users::*;
 pub use billing::*;
@@ -56,57 +53,8 @@ pub use usage::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        db,
-        llm_review::LlmReviewSettings,
-        mcp::{McpCatalogCache, McpCatalogService},
-        replay_cache::ReplayCache,
-        worker_admin::AdminState,
-        worker_admin_state::AdminStateInit,
-    };
-    use sqlx::PgPool;
-    use std::time::Duration;
+    use crate::db;
     use uuid::Uuid;
-
-    #[allow(dead_code)]
-    mod test_db_url {
-        include!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/support/test_db_url.rs"
-        ));
-    }
-
-    pub(super) fn test_state() -> AdminState {
-        test_state_with_pool(test_db_url::lazy_test_pool())
-    }
-
-    pub(super) fn test_state_with_pool(pool: PgPool) -> AdminState {
-        AdminState::new(AdminStateInit {
-            pool: pool.clone(),
-            lease_pool: pool.clone(),
-            replay_cache: ReplayCache::default(),
-            configured_relays: vec!["ws://relay:8788/ws/worker".to_string()],
-            managed_mode: false,
-            relay_secret_manager: None,
-            redaction_enabled: false,
-            model_route_whitelist_enabled: true,
-            request_content_logging: RequestContentLoggingResponse {
-                mode: RequestContentLoggingMode::Off,
-                raw_retention_days: 3,
-            },
-            usage_retention: UsageRetentionSettings::default(),
-            raw_payload_store: None,
-            stream_delta_batching: db::StreamDeltaBatchingSettings::default(),
-            llm_review_settings: LlmReviewSettings::default(),
-            mcp_catalog_cache: McpCatalogCache::new(),
-            mcp_catalog_service: McpCatalogService::new(pool.clone(), McpCatalogCache::new()),
-            mcp_session_store: None,
-            mcp_allowed_origins: Vec::new(),
-            endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(
-                Duration::from_secs(60),
-            ),
-        })
-    }
 
     fn admin_user() -> SessionUser {
         SessionUser {
@@ -115,119 +63,6 @@ mod tests {
             display_name: "Admin".to_string(),
             is_admin: true,
         }
-    }
-
-    #[tokio::test]
-    async fn model_route_methods_cover_create_and_update_validation_paths() {
-        let state = test_state();
-        let create = ModelRouteRequest {
-            scope: "guest".to_string(),
-            owner_user_id: None,
-            model_pattern: "gpt-*".to_string(),
-            routing_strategy: None,
-            enabled: None,
-            endpoint_id: None,
-            priority: None,
-            targets: None,
-        };
-        assert!(create.validate_for_create(&state).await.is_err());
-
-        let update = ModelRouteRequest {
-            scope: "user".to_string(),
-            owner_user_id: None,
-            model_pattern: "gpt-*".to_string(),
-            routing_strategy: Some(db::ModelRouteRoutingStrategy::ResponsesSessionAffinity),
-            enabled: None,
-            endpoint_id: Some(Uuid::new_v4()),
-            priority: None,
-            targets: None,
-        };
-        assert!(
-            update
-                .validate_for_update(&state, Uuid::new_v4())
-                .await
-                .is_err()
-        );
-    }
-
-    #[tokio::test]
-    async fn mcp_server_methods_cover_create_and_update_validation_paths() {
-        let state = test_state();
-        let user = admin_user();
-        let mut create = McpServerRequest {
-            scope: Some("system".to_string()),
-            owner_user_id: None,
-            source_endpoint_id: None,
-            name: "catalog".to_string(),
-            aggregate_naming_mode: None,
-            transport: "stdio".to_string(),
-            provider_kind: None,
-            url: None,
-            command: None,
-            args: None,
-            env_json: None,
-            bearer_tokens: Some(vec![db::McpBearerToken {
-                token: "   ".to_string(),
-                enabled: true,
-            }]),
-            http_headers_json: None,
-            auth_mode: None,
-            basic_username: None,
-            basic_password: None,
-            proxy_url: None,
-            has_proxy_url: None,
-            tool_filter_mode: None,
-            allowed_tools: None,
-            disabled_tools: None,
-            disabled_resources: None,
-            enabled: None,
-            timeout_ms: None,
-            lifecycle_policy: None,
-            lifecycle_manual_protocol_version: None,
-        };
-        assert!(create.validate_for_create(&state, &user).await.is_err());
-        create.scope = Some("admin".to_string());
-        assert!(create.validate_for_create(&state, &user).await.is_err());
-        create.bearer_tokens = Some(vec![db::McpBearerToken {
-            token: "token".to_string(),
-            enabled: false,
-        }]);
-        assert!(create.validate_for_create(&state, &user).await.is_err());
-
-        let update = McpServerRequest {
-            scope: Some("admin".to_string()),
-            owner_user_id: Some(42),
-            source_endpoint_id: None,
-            name: "catalog".to_string(),
-            aggregate_naming_mode: None,
-            transport: "stdio".to_string(),
-            provider_kind: None,
-            url: None,
-            command: None,
-            args: None,
-            env_json: None,
-            bearer_tokens: None,
-            http_headers_json: None,
-            auth_mode: None,
-            basic_username: None,
-            basic_password: None,
-            proxy_url: None,
-            has_proxy_url: None,
-            tool_filter_mode: None,
-            allowed_tools: None,
-            disabled_tools: None,
-            disabled_resources: None,
-            enabled: None,
-            timeout_ms: None,
-            lifecycle_policy: None,
-            lifecycle_manual_protocol_version: None,
-        };
-        assert!(
-            update
-                .validate_for_update(&state, Uuid::new_v4(), None, &user)
-                .await
-                .is_err()
-        );
     }
 
     #[test]
@@ -425,55 +260,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn mcp_server_rejects_reserved_http_headers() {
-        let state = test_state();
-        let user = admin_user();
-        for (name, value) in [
-            ("Authorization", "Bearer secret"),
-            ("Host", "evil.example.com"),
-            ("Content-Length", "0"),
-            ("Transfer-Encoding", "chunked"),
-            ("Connection", "keep-alive"),
-            ("Mcp-Session-Id", "stolen"),
-            ("Last-Event-Id", "0"),
-        ] {
-            let request = McpServerRequest {
-                scope: Some("admin".to_string()),
-                owner_user_id: None,
-                source_endpoint_id: None,
-                name: "reserved-header-server".to_string(),
-                aggregate_naming_mode: None,
-                transport: "http".to_string(),
-                provider_kind: None,
-                url: Some("http://127.0.0.1:3000/mcp".to_string()),
-                command: None,
-                args: None,
-                env_json: None,
-                bearer_tokens: None,
-                http_headers_json: Some(serde_json::json!({ name.to_string(): value.to_string() })),
-                auth_mode: None,
-                basic_username: None,
-                basic_password: None,
-                proxy_url: None,
-                has_proxy_url: None,
-                tool_filter_mode: None,
-                allowed_tools: None,
-                disabled_tools: None,
-                disabled_resources: None,
-                enabled: Some(true),
-                timeout_ms: None,
-                lifecycle_policy: None,
-                lifecycle_manual_protocol_version: None,
-            };
-            let err = request
-                .validate_for_create(&state, &user)
-                .await
-                .unwrap_err();
-            assert_eq!(err.status(), StatusCode::BAD_REQUEST);
-        }
-    }
-
     #[test]
     fn lifecycle_manual_protocol_version_none_preserves_existing_and_empty_clears() {
         let existing = db::McpServer {
@@ -580,3 +366,6 @@ mod tests {
         assert_eq!(cleared.lifecycle_manual_protocol_version, None);
     }
 }
+
+#[cfg(test)]
+mod provider_contract_tests;

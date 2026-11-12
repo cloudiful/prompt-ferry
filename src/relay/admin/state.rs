@@ -94,17 +94,6 @@ impl RelayAdminState {
         }
     }
 
-    /// A state that answers reads but refuses every save.
-    #[cfg(test)]
-    pub(super) fn read_only(relay_config: crate::config::RelayConfig, token: &str) -> Self {
-        let mut relay_config = relay_config;
-        relay_config.admin_token = token.to_string();
-        let (relay, handle) = crate::relay::test_handle(relay_config.clone());
-        let mut state = Self::new(&relay_config, HostRole::Relay, relay, handle);
-        state.writable = false;
-        state
-    }
-
     /// The token every route on this listener is compared against.
     pub(super) fn admin_token(&self) -> String {
         self.admin_token.clone()

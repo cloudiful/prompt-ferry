@@ -17,18 +17,6 @@ large_futures = "deny"
 [lib]
 name = "prompt_ferry"
 
-[[bench]]
-name = "stream_delta_batcher"
-harness = false
-
-[[bench]]
-name = "redaction_pipeline"
-harness = false
-
-[[bench]]
-name = "redaction_restore"
-harness = false
-
 [[bin]]
 name = "prompt-ferry"
 path = "src/main.rs"
@@ -91,7 +79,4 @@ zstd = "0.14.0"
 include_dir = "0.7.4"
 
 [dev-dependencies]
-criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
-flate2 = "1.1.10"
 proptest = "1.11.0"
-sqlx = { version = "0.9.0", features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "postgres", "sqlite", "chrono", "uuid", "json", "macros", "migrate", "sqlx-toml"] }

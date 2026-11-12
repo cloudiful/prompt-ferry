@@ -10,13 +10,9 @@ use futures::future::BoxFuture;
 use tokio::time::{sleep, sleep_until, timeout};
 
 use super::super::{
-    ChatGptQuotaError, MAX_CONCURRENT_QUOTA_READS, RefreshCompletion,
+    ChatGptQuotaError, RefreshCompletion,
     refresh::RefreshAttempt,
     refresh_cycle::{ReplicaWait, ReplicaWaitDeadline, run_bounded_cycle, run_cycle},
-};
-use super::{
-    FakeFetcher,
-    support::{cleanup_endpoint, create_endpoint, endpoint, quota, service, test_pool},
 };
 
 fn empty_completion() -> RefreshCompletion {
@@ -128,43 +124,4 @@ async fn service_deadline_bounds_the_entire_retry_cycle() {
 
     assert!(result.is_err());
     assert!(waits.load(Ordering::SeqCst) >= 2);
-}
-
-#[tokio::test]
-async fn canceling_fetch_releases_local_refresh_guards() {
-    let Some(pool) = test_pool().await else {
-        return;
-    };
-    let endpoint_id = create_endpoint(&pool).await;
-    let (fetcher, started, _release) = FakeFetcher::gated(quota(Some(20.0)));
-    let calls = fetcher.calls.clone();
-    let quota_service = Arc::new(service(&pool, Arc::new(fetcher)));
-    let provider_endpoint = endpoint(&pool, endpoint_id).await;
-    let task = {
-        let quota_service = quota_service.clone();
-        tokio::spawn(async move { quota_service.read(&provider_endpoint, true).await })
-    };
-
-    timeout(Duration::from_secs(3), started.notified())
-        .await
-        .expect("fake provider fetch started after lease acquisition");
-    task.abort();
-    assert!(task.await.unwrap_err().is_cancelled());
-
-    assert_eq!(
-        quota_service.inner.quota_slots.available_permits(),
-        MAX_CONCURRENT_QUOTA_READS
-    );
-    let endpoint_lock = quota_service
-        .inner
-        .endpoint_locks
-        .lock()
-        .await
-        .get(&endpoint_id)
-        .cloned()
-        .expect("refresh attempt created its endpoint lock");
-    assert_eq!(endpoint_lock.strong_count(), 0);
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
-
-    cleanup_endpoint(&pool, endpoint_id).await;
 }

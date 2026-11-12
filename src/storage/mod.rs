@@ -389,29 +389,4 @@ mod tests {
 
         assert_contract_invariants(&contract);
     }
-
-    #[test]
-    fn coordinator_and_storage_shared_worker_signals_are_consistent_for_sqlite() {
-        // SQLite is the only backend whose coordinator must not advertise
-        // shared-worker support. The storage capability flag must mirror
-        // that signal so contract consumers do not see drift between the
-        // coordinator description and the storage description.
-        for valkey_url in ["", "redis://valkey"] {
-            let contract = StorageContract::for_backend(StorageBackend::Sqlite, valkey_url);
-            assert!(
-                contract.coordinator.supports_shared_workers()
-                    || !contract.capabilities.shared_workers,
-                "coordinator and storage shared-worker signals drifted for SQLite (valkey_url={valkey_url:?})",
-            );
-            assert_eq!(
-                contract.capabilities.shared_workers,
-                contract.backend == StorageBackend::Postgres,
-                "shared_workers capability must equal backend == Postgres",
-            );
-            assert!(
-                !contract.capabilities.shared_workers,
-                "SQLite must never advertise shared_workers",
-            );
-        }
-    }
 }

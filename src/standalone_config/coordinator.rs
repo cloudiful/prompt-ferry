@@ -144,25 +144,6 @@ impl StandaloneCoordinatorStore {
         }))
     }
 
-    #[cfg(test)]
-    pub(crate) async fn refresh_lease(
-        &self,
-        key: &str,
-        owner: &str,
-        ttl_seconds: u64,
-    ) -> anyhow::Result<bool> {
-        let now = unix_seconds();
-        let result = standalone_query!("src/sql/standalone/coordinator_refresh_lease.sql")
-            .bind(now.saturating_add(ttl_seconds.max(1) as i64))
-            .bind(now)
-            .bind(key)
-            .bind(owner)
-            .bind(now)
-            .execute(&self.pool)
-            .await?;
-        Ok(result.rows_affected() == 1)
-    }
-
     pub(crate) async fn release_lease(&self, key: &str, owner: &str) -> anyhow::Result<()> {
         standalone_query!("src/sql/standalone/coordinator_release_lease.sql")
             .bind(key)

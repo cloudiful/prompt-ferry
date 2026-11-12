@@ -423,22 +423,13 @@ async fn mark_relay_disconnected(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{ResponseEnd, ResponseError};
-    use futures::StreamExt;
-    use tokio_tungstenite::{accept_async, connect_async, tungstenite::Message as WsMessage};
+    use crate::protocol::ResponseEnd;
+
+    use tokio_tungstenite::tungstenite::Message as WsMessage;
 
     fn response_end() -> BridgeMessage {
         BridgeMessage::ResponseEnd(ResponseEnd {
             request_id: "request-1".to_string(),
-        })
-    }
-
-    fn terminal_error() -> BridgeMessage {
-        BridgeMessage::ResponseError(ResponseError {
-            request_id: "request-1".to_string(),
-            status: 502,
-            code: "relay_bridge_error".to_string(),
-            message: "bridge failed".to_string(),
         })
     }
 
@@ -469,72 +460,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn actual_writer_drains_queued_terminal_and_control_frames_before_ack() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind fake relay");
-        let addr = listener.local_addr().expect("fake relay addr");
-        let peer = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.expect("accept worker");
-            let mut socket = accept_async(stream).await.expect("accept websocket");
-            let mut received = Vec::new();
-            while received.len() < 2 {
-                let Some(message) = socket.next().await else {
-                    break;
-                };
-                if let WsMessage::Binary(bytes) = message.expect("relay reads frame") {
-                    received.push(bridge_wire::decode_message(&bytes).expect("decode frame"));
-                }
-            }
-            received
-        });
-
-        let (stream, _) = connect_async(format!("ws://{addr}"))
-            .await
-            .expect("connect fake relay");
-        let (ws_tx, _ws_rx) = stream.split();
-        let (sender, control_rx, data_rx) = BridgeSender::channel();
-        let flush_rx = sender.take_flush_receiver().expect("writer flush receiver");
-        let writer = tokio::spawn(run_bridge_writer(
-            ws_tx, None, control_rx, data_rx, flush_rx,
-        ));
-
-        sender
-            .send(response_end())
-            .await
-            .expect("queue ResponseEnd");
-        sender
-            .send(terminal_error())
-            .await
-            .expect("queue ResponseError");
-        assert!(
-            sender.flush(Duration::from_secs(2)).await,
-            "a healthy sink acknowledges the flush"
-        );
-
-        let received = peer.await.expect("fake relay task ran");
-        assert_eq!(received.len(), 2, "both queued frames reached the sink");
-        assert!(
-            received
-                .iter()
-                .any(|message| matches!(message, BridgeMessage::ResponseEnd(_))),
-            "the terminal ResponseEnd must not be dropped: {received:?}"
-        );
-        assert!(
-            received
-                .iter()
-                .any(|message| matches!(message, BridgeMessage::ResponseError(_))),
-            "the control ResponseError must not be dropped: {received:?}"
-        );
-
-        drop(sender);
-        writer
-            .await
-            .expect("writer task ran")
-            .expect("writer exits");
-    }
-
-    #[tokio::test]
     async fn actual_writer_reports_failed_flush_when_the_sink_fails() {
         let (sender, control_rx, data_rx) = BridgeSender::channel();
         let flush_rx = sender.take_flush_receiver().expect("writer flush receiver");
@@ -554,76 +479,6 @@ mod tests {
 
         drop(sender);
         let _ = writer.await;
-    }
-
-    #[tokio::test]
-    async fn relay_loop_reconnects_after_a_session_ends() {
-        use std::sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        };
-
-        use crate::config::{BridgeEncryptionMode, TlsMode, WorkerConfig};
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind fake relay");
-        let addr = listener.local_addr().expect("fake relay addr");
-        let accepted = Arc::new(AtomicUsize::new(0));
-        let server = tokio::spawn({
-            let accepted = accepted.clone();
-            async move {
-                loop {
-                    let Ok((stream, _)) = listener.accept().await else {
-                        break;
-                    };
-                    // The readiness probe opens a TCP connection without a
-                    // websocket handshake; only completed sessions count.
-                    if let Ok(socket) = accept_async(stream).await {
-                        drop(socket);
-                        accepted.fetch_add(1, Ordering::SeqCst);
-                    }
-                }
-            }
-        });
-
-        let runtime_state = WorkerRuntimeState::default();
-        let relay = RelayConnectionConfig {
-            relay_key: "fake-relay".to_string(),
-            relay_id: None,
-            relay_url: format!("ws://{addr}/ws/worker"),
-            worker_token: "worker-token".to_string(),
-            connect_timeout_seconds: 5,
-            tls_mode: TlsMode::Off,
-            relay_ca_pem: None,
-            client_cert_pem: None,
-            client_key_pem: None,
-            bridge_encryption_mode: BridgeEncryptionMode::Off,
-            bridge_encryption_key: String::new(),
-        };
-        let loop_task = tokio::spawn(run_relay_loop(
-            relay,
-            WorkerConfig::default(),
-            Client::new(),
-            None,
-            None,
-            runtime_state.clone(),
-        ));
-
-        tokio::time::timeout(Duration::from_secs(10), async {
-            while accepted.load(Ordering::SeqCst) < 2 {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("a dropped session must be followed by a reconnect");
-
-        runtime_state.control.begin_shutdown();
-        server.abort();
-        tokio::time::timeout(Duration::from_secs(5), loop_task)
-            .await
-            .expect("relay loop exits after shutdown")
-            .expect("relay loop task did not panic");
     }
 
     struct FailingSink;

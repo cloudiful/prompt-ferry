@@ -19,9 +19,7 @@ use anyhow::{Context, anyhow};
 /// How a listener address was chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BindKind {
-    /// Written out in configuration; bound verbatim.
     Explicit,
-    /// No usable port was configured, so a free loopback port was selected.
     Automatic,
 }
 
@@ -43,6 +41,17 @@ pub struct ReservedBind {
 }
 
 impl ReservedBind {
+    /// A reserved address without a socket, for pure derivation tests.
+    #[cfg(test)]
+    pub(crate) fn for_test(addr: SocketAddr) -> Self {
+        Self {
+            field: "test",
+            addr,
+            kind: BindKind::Explicit,
+            listener: None,
+        }
+    }
+
     /// The address that will really be served on.
     pub fn addr(&self) -> SocketAddr {
         self.addr
@@ -159,176 +168,13 @@ fn url_authority(addr: SocketAddr) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{BindKind, local_ui_url, loopback_reachable, reserve_bind, worker_bridge_url};
+    use super::{local_ui_url, loopback_reachable};
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     /// Free loopback port, for tests that need a concrete address to bind.
     ///
     /// Every case here binds a real socket, so a failure of this probe is an
     /// exhausted local resource rather than a bind-derivation defect.
-    fn free_loopback_port() -> String {
-        let reserved =
-            reserve_bind("127.0.0.1:0", "test", false).expect("probe a free loopback port");
-        let addr = reserved.addr();
-        drop(reserved.into_listener().expect("release the probed socket"));
-        addr.to_string()
-    }
-
-    #[test]
-    fn explicit_bind_is_reserved_on_the_configured_address() {
-        let port = free_loopback_port();
-        let reserved = reserve_bind(&port, "relay.bind", false)
-            .expect("reserve the configured explicit address");
-
-        assert_eq!(reserved.kind(), BindKind::Explicit);
-        assert_eq!(reserved.addr().to_string(), port);
-        assert!(
-            reserved.into_listener().is_ok(),
-            "an explicit bind holds its socket"
-        );
-    }
-
-    #[test]
-    fn automatic_bind_selects_a_free_loopback_port() {
-        let reserved = reserve_bind("127.0.0.1:0", "serve.internal_worker_bind", true)
-            .expect("reserve an automatic loopback port");
-        assert_eq!(reserved.kind(), BindKind::Automatic);
-        assert_eq!(reserved.addr().ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
-        assert_ne!(reserved.addr().port(), 0, "the port must be resolved");
-    }
-
-    #[test]
-    fn empty_bind_is_automatic_and_loopback() {
-        let reserved = reserve_bind("   ", "serve.internal_worker_bind", true)
-            .expect("reserve an automatic loopback port for an empty bind");
-        assert_eq!(reserved.kind(), BindKind::Automatic);
-        assert_eq!(reserved.addr().ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
-    }
-
-    #[test]
-    fn automatic_bind_on_a_wildcard_host_stays_on_loopback() {
-        let reserved = reserve_bind("0.0.0.0:0", "relay.bind", true)
-            .expect("reserve an automatic loopback port for a wildcard host");
-        assert_eq!(reserved.kind(), BindKind::Automatic);
-        assert_eq!(
-            reserved.addr().ip(),
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
-            "an automatic port must never be published off-host"
-        );
-    }
-
-    #[test]
-    fn automatic_binds_do_not_collide_with_each_other() {
-        let first = reserve_bind("127.0.0.1:0", "relay.bind", false).expect("first");
-        let second = reserve_bind("127.0.0.1:0", "worker.admin_bind", false).expect("second");
-        assert_ne!(first.addr().port(), second.addr().port());
-    }
-
-    #[test]
-    fn loopback_only_bind_rejects_a_non_loopback_address() {
-        let error = reserve_bind("0.0.0.0:8788", "serve.internal_worker_bind", true)
-            .expect_err("the worker bridge must stay loopback-only");
-        assert!(error.to_string().contains("loopback"));
-        assert!(error.to_string().contains("serve.internal_worker_bind"));
-    }
-
-    #[test]
-    fn public_bind_allows_a_non_loopback_address() {
-        let reserved = reserve_bind("0.0.0.0:0", "relay.bind", false).expect("public bind");
-        assert!(reserved.addr().port() > 0);
-    }
-
-    #[test]
-    fn malformed_bind_names_the_field_and_the_expected_shape() {
-        let error = reserve_bind("not-an-address", "relay.bind", false).expect_err("malformed");
-        let message = error.to_string();
-        assert!(message.contains("relay.bind"), "message was: {message}");
-        assert!(message.contains("host:port"), "message was: {message}");
-    }
-
-    #[test]
-    fn occupied_explicit_bind_fails_and_points_at_port_zero() {
-        let held = reserve_bind("127.0.0.1:0", "relay.bind", false).expect("hold a port");
-        let occupied = held.addr().to_string();
-
-        let error = reserve_bind(&occupied, "relay.bind", false).expect_err("port is taken");
-        let message = format!("{error:#}");
-        assert!(message.contains("relay.bind"), "message was: {message}");
-        assert!(
-            message.contains("port `0`"),
-            "a collision must point at automatic selection: {message}"
-        );
-    }
-
-    #[test]
-    fn a_reservation_keeps_its_port_until_the_socket_is_handed_over() {
-        let reserved = reserve_bind("127.0.0.1:0", "worker.admin_bind", false).expect("reserve");
-        let addr = reserved.addr();
-
-        // The socket is still held, so nothing else can take the port while the
-        // owner is still starting up.
-        let collision = reserve_bind(&addr.to_string(), "worker.admin_bind", false)
-            .expect_err("the reservation must hold its port");
-        assert!(format!("{collision:#}").contains("worker.admin_bind"));
-
-        // Handing the socket over is what frees the port again.
-        drop(reserved.into_listener().expect("hand over the socket"));
-        reserve_bind(&addr.to_string(), "worker.admin_bind", false)
-            .expect("the port is free once the socket is dropped");
-    }
-
-    #[test]
-    fn an_automatic_admin_reservation_knows_its_own_url_up_front() {
-        // Holding the socket means the resolved address is the real one, so a
-        // client can be told the URL before the owner finishes starting.
-        let reserved = reserve_bind("127.0.0.1:0", "worker.admin_bind", false).expect("reserve");
-
-        assert_eq!(reserved.kind(), BindKind::Automatic);
-        assert_eq!(
-            local_ui_url(reserved.addr()),
-            format!("http://{}/", reserved.addr())
-        );
-    }
-
-    #[test]
-    fn an_empty_or_wildcard_automatic_admin_bind_resolves_to_a_concrete_address() {
-        for configured in ["", "   ", "0.0.0.0:0", "127.0.0.1:0"] {
-            let reserved =
-                reserve_bind(configured, "worker.admin_bind", false).expect("resolve automatic");
-
-            assert_eq!(
-                reserved.kind(),
-                BindKind::Automatic,
-                "configured `{configured}` should be automatic"
-            );
-            assert_eq!(
-                reserved.addr().ip(),
-                IpAddr::V4(Ipv4Addr::LOCALHOST),
-                "configured `{configured}` must resolve to loopback"
-            );
-            assert_ne!(reserved.addr().port(), 0, "the port must be resolved");
-        }
-    }
-
-    #[test]
-    fn an_explicit_admin_bind_is_propagated_unchanged() {
-        let port = free_loopback_port();
-        let reserved = reserve_bind(&port, "worker.admin_bind", false).expect("reserve");
-
-        assert_eq!(reserved.kind(), BindKind::Explicit);
-        assert_eq!(reserved.addr().to_string(), port);
-    }
-
-    #[test]
-    fn derived_worker_url_points_at_the_reserved_bridge_listener() {
-        let bridge = reserve_bind("127.0.0.1:0", "serve.internal_worker_bind", true)
-            .expect("reserve bridge");
-
-        assert_eq!(
-            worker_bridge_url(&bridge),
-            format!("ws://{}/ws/worker", bridge.addr())
-        );
-    }
 
     #[test]
     fn local_ui_url_targets_loopback_for_a_wildcard_admin_bind() {

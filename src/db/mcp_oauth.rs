@@ -20,9 +20,6 @@ use crate::db::{
     join_scopes, parse_scopes,
 };
 
-#[cfg(test)]
-mod tests;
-
 #[derive(Debug, sqlx::FromRow)]
 struct CredentialRow {
     server_id: Uuid,

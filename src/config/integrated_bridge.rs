@@ -62,20 +62,15 @@ pub fn bridge_connected_configs(
 #[cfg(test)]
 mod tests {
     use super::bridge_connected_configs;
-    use crate::config::{
-        AppConfig, BridgeEncryptionMode, TlsMode, WorkerTlsMode, binds::reserve_bind,
-    };
+    use crate::config::binds::ReservedBind;
+    use crate::config::{AppConfig, BridgeEncryptionMode, TlsMode, WorkerTlsMode};
 
-    /// Two reserved loopback listeners; the addresses are free ports.
-    fn reserved_pair() -> (
-        crate::config::binds::ReservedBind,
-        crate::config::binds::ReservedBind,
-    ) {
-        let bridge = reserve_bind("127.0.0.1:0", "serve.internal_worker_bind", true)
-            .expect("reserve a bridge");
-        let admin =
-            reserve_bind("127.0.0.1:0", "worker.admin_bind", false).expect("reserve an admin bind");
-        (bridge, admin)
+    /// Two loopback addresses that never touch the operating system.
+    fn reserved_pair() -> (ReservedBind, ReservedBind) {
+        (
+            ReservedBind::for_test("127.0.0.1:41001".parse().expect("bridge address")),
+            ReservedBind::for_test("127.0.0.1:41002".parse().expect("admin address")),
+        )
     }
 
     #[test]

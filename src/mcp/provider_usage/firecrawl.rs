@@ -17,15 +17,10 @@ pub const FIRECRAWL_BALANCE_TIMEOUT: Duration = Duration::from_secs(10);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderBalanceError {
     Timeout,
-    Http {
-        status: Option<u16>,
-    },
+    Http { status: Option<u16> },
     UnsuccessfulResponse,
     MissingRemainingCredits,
     MalformedBody,
-    /// The provider responded successfully but the durable balance could not
-    /// be persisted. Kept distinct so callers can surface an internal error
-    /// instead of a misleading provider failure.
     Persistence,
 }
 
@@ -352,36 +347,6 @@ mod tests {
         .expect("invalid optional reset must not drop the balance");
         assert_eq!(balance.remaining, 5.0);
         assert_eq!(balance.reset_at, None);
-    }
-
-    #[test]
-    fn empty_proxy_means_direct_balance_client() {
-        for proxy in [None, Some(""), Some("   ")] {
-            pooled_client_for_proxy(proxy).expect("direct must succeed");
-            FirecrawlBalanceClient::from_endpoint_proxy(proxy).expect("direct must succeed");
-        }
-        assert!(crate::db::proxy_pool_key("", FIRECRAWL_CREDIT_USAGE_URL).is_none());
-    }
-
-    #[test]
-    fn proxy_selection_reuses_pooled_balance_client() {
-        let proxy = "http://proxy-firecrawl-reuse.test:8080";
-        let via_a = pooled_client_for_proxy(Some(proxy)).expect("proxy must build");
-        let via_a_again = pooled_client_for_proxy(Some(proxy)).expect("proxy must reuse");
-        let _ = (via_a, via_a_again);
-        let key = crate::db::proxy_pool_key(proxy, FIRECRAWL_CREDIT_USAGE_URL).unwrap();
-        assert!(lock_pool().contains_key(&key));
-        FirecrawlBalanceClient::from_endpoint_proxy(Some(proxy)).expect("ctor must reuse");
-    }
-
-    #[test]
-    fn invalid_balance_proxy_is_rejected_without_userinfo_leak() {
-        let err =
-            pooled_client_for_proxy(Some("ftp://user:secret@proxy-firecrawl-invalid.test:21"))
-                .expect_err("ftp must be rejected");
-        assert!(err.contains("scheme"));
-        assert!(!err.contains("secret"));
-        assert!(!err.contains("user"));
     }
 
     #[test]

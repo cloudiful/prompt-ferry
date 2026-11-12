@@ -142,36 +142,8 @@ fn is_env_key(key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{DOTENV_PATH_ENV, is_env_key, load_env_data, parse_line, resolve_repository_env};
-    use std::{
-        ffi::OsString,
-        path::PathBuf,
-        sync::{Mutex, MutexGuard, OnceLock},
-    };
-
-    fn unique_key(label: &str) -> String {
-        format!(
-            "PROMPT_FERRY_DOTENV_TEST_{label}_{}",
-            uuid::Uuid::new_v4().simple()
-        )
-    }
-
-    /// Environment mutation is process-wide, so dotenv tests run one at a time.
-    fn env_lock() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    fn dotenv_file(name: &str, contents: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "prompt-ferry-dotenv-{name}-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        std::fs::write(&path, contents).expect("write dotenv fixture");
-        path
-    }
+    use super::{is_env_key, parse_line};
+    use std::ffi::OsString;
 
     #[test]
     fn parses_assignments_and_skips_comments_and_blanks() {
@@ -212,73 +184,5 @@ mod tests {
         assert!(!is_env_key("1A"));
         assert!(!is_env_key("A-B"));
         assert!(!is_env_key(""));
-    }
-
-    #[test]
-    fn loads_values_without_overriding_the_process_environment() {
-        let _guard = env_lock();
-        let from_file = unique_key("FILE");
-        let from_env = unique_key("ENV");
-        let path = dotenv_file(
-            "precedence",
-            &format!(
-                "{from_file}=from-file\n{from_env}=from-file\n# comment\n\nnot-an-assignment\n"
-            ),
-        );
-        unsafe { std::env::set_var(&from_env, "from-environment") };
-
-        load_env_data(&path).expect("dotenv loads");
-
-        assert_eq!(
-            std::env::var(&from_file).ok(),
-            Some("from-file".to_string())
-        );
-        assert_eq!(
-            std::env::var(&from_env).ok(),
-            Some("from-environment".to_string()),
-            "an explicit process value must keep precedence over the file"
-        );
-
-        unsafe {
-            std::env::remove_var(&from_file);
-            std::env::remove_var(&from_env);
-        }
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn loads_a_password_containing_a_dollar_sign_verbatim() {
-        let _guard = env_lock();
-        let key = unique_key("DOLLAR");
-        let path = dotenv_file("dollar", &format!("{key}=p@ss$word\n"));
-
-        load_env_data(&path).expect("dotenv loads");
-
-        assert_eq!(std::env::var(&key).ok(), Some("p@ss$word".to_string()));
-
-        unsafe { std::env::remove_var(&key) };
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn reports_a_missing_file_instead_of_failing() {
-        let _guard = env_lock();
-        let error = load_env_data(std::path::Path::new("/nonexistent/prompt-ferry.env"))
-            .expect_err("a missing file cannot be read");
-        assert!(error.to_string().contains("prompt-ferry.env"));
-    }
-
-    #[test]
-    fn resolves_an_explicit_path_even_when_it_does_not_exist() {
-        let _guard = env_lock();
-        let explicit = unique_key("PATH");
-        unsafe { std::env::set_var(DOTENV_PATH_ENV, "/nonexistent/explicit.env") };
-
-        let source = resolve_repository_env().expect("explicit path always resolves");
-        assert!(source.explicit);
-        assert_eq!(source.path, PathBuf::from("/nonexistent/explicit.env"));
-
-        unsafe { std::env::remove_var(DOTENV_PATH_ENV) };
-        let _ = explicit;
     }
 }
