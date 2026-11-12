@@ -22,23 +22,11 @@ mod quota_selection;
 mod quota_selection_tests;
 mod selection;
 mod session_affinity;
-#[cfg(test)]
-mod session_affinity_opencode_go_tests;
-#[cfg(test)]
-mod session_affinity_openrouter_tests;
 mod session_affinity_quota;
 #[cfg(test)]
 mod session_affinity_quota_tests;
 #[cfg(test)]
-mod session_affinity_recovery_tests;
-#[cfg(test)]
-mod session_affinity_tests;
-#[cfg(test)]
-mod unified_pool_failover_tests;
-#[cfg(test)]
 mod unified_pool_fixtures;
-#[cfg(test)]
-mod unified_pool_selection_tests;
 
 #[cfg(test)]
 pub(in crate::worker::runtime) use selection::materialize_route_api_key_selection;

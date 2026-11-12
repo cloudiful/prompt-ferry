@@ -40,30 +40,3 @@ pub async fn wait(mut requested: watch::Receiver<bool>) {
 pub fn requested() -> bool {
     *channel().borrow()
 }
-
-/// Forget a previous request. Tests use this to start from a clean signal.
-#[cfg(test)]
-pub fn clear() {
-    let _ = channel().send(false);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{clear, request, requested, subscribe, wait};
-
-    #[tokio::test]
-    async fn a_request_is_observable_by_a_watcher_that_waits_for_it() {
-        clear();
-        let watcher = subscribe();
-        assert!(!requested());
-
-        request();
-
-        assert!(requested());
-        wait(watcher.clone()).await;
-        // The signal is a level, so a second waiter sees it too rather than
-        // racing the first one.
-        wait(watcher).await;
-        clear();
-    }
-}

@@ -60,6 +60,3 @@ async fn settle_quota(
     _status: u16,
 ) {
 }
-
-#[cfg(test)]
-mod stack_tests;

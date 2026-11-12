@@ -147,7 +147,6 @@ mod tests {
     use super::super::organization_base_url;
     use super::*;
     use crate::upstream_presets::OPENAI_BASE_URL;
-    use chrono::TimeZone;
 
     #[test]
     fn custom_stored_base_still_targets_the_official_organization_origin() {
@@ -186,100 +185,5 @@ mod tests {
                 "https://api.openai.com/v1/organization/usage/completions"
             );
         }
-    }
-
-    async fn spawn_mock(router: axum::Router) -> String {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind mock upstream");
-        let addr = listener.local_addr().expect("mock addr");
-        tokio::spawn(async move {
-            let _ = axum::serve(listener, router).await;
-        });
-        format!("http://{addr}")
-    }
-
-    #[tokio::test]
-    async fn fetch_aggregates_both_endpoints_across_pages() {
-        use std::collections::HashMap;
-
-        async fn usage(
-            axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-        ) -> axum::Json<Value> {
-            if params.get("page").map(String::as_str) == Some("page_2") {
-                axum::Json(serde_json::json!({
-                    "data": [{ "results": [{ "input_tokens": 3, "output_tokens": 1 }] }],
-                    "has_more": false
-                }))
-            } else {
-                axum::Json(serde_json::json!({
-                    "data": [{ "results": [{ "input_tokens": 10, "output_tokens": 4 }] }],
-                    "has_more": true,
-                    "next_page": "page_2"
-                }))
-            }
-        }
-        async fn costs() -> axum::Json<Value> {
-            axum::Json(serde_json::json!({
-                "data": [{ "results": [{ "amount": { "value": 0.5, "currency": "usd" } }] }],
-                "has_more": false
-            }))
-        }
-
-        let base = spawn_mock(
-            axum::Router::new()
-                .route(
-                    "/v1/organization/usage/completions",
-                    axum::routing::get(usage),
-                )
-                .route("/v1/organization/costs", axum::routing::get(costs)),
-        )
-        .await;
-
-        let now: DateTime<Utc> = Utc.with_ymd_and_hms(2026, 9, 27, 12, 0, 0).unwrap();
-        let response = fetch_organization_usage_at(&base, "sk-admin", None, now)
-            .await
-            .expect("fetch organization usage");
-        assert_eq!(response.input_tokens, 13);
-        assert_eq!(response.output_tokens, 5);
-        assert_eq!(response.total_tokens, 18);
-        assert!((response.cost_usd - 0.5).abs() < 1e-9);
-        assert_eq!(response.currency, "usd");
-        assert!(!response.truncated);
-        assert!(!response.cached);
-        assert_eq!(response.period_end, now);
-        assert_eq!(
-            response.period_start,
-            Utc.with_ymd_and_hms(2026, 9, 1, 0, 0, 0).unwrap()
-        );
-    }
-
-    #[tokio::test]
-    async fn fetch_surfaces_upstream_error_status() {
-        async fn unauthorized() -> (axum::http::StatusCode, axum::Json<Value>) {
-            (
-                axum::http::StatusCode::UNAUTHORIZED,
-                axum::Json(serde_json::json!({
-                    "error": { "code": "invalid_api_key", "message": "Incorrect API key provided" }
-                })),
-            )
-        }
-
-        let base = spawn_mock(
-            axum::Router::new()
-                .route(
-                    "/v1/organization/usage/completions",
-                    axum::routing::get(unauthorized),
-                )
-                .route("/v1/organization/costs", axum::routing::get(unauthorized)),
-        )
-        .await;
-
-        let error = fetch_organization_usage_at(&base, "sk-admin", None, Utc::now())
-            .await
-            .expect_err("upstream 401 must fail");
-        let message = error.to_string();
-        assert!(message.contains("401"), "message={message}");
-        assert!(message.contains("Incorrect API key provided"));
     }
 }

@@ -20,32 +20,6 @@ pub(super) struct UpstreamRequestTarget<'a> {
     pub(super) body: &'a PreparedRequestBody,
 }
 
-#[cfg(test)]
-pub(super) async fn send_upstream_request(
-    client: &Client,
-    method: &Method,
-    url: &str,
-    path: &str,
-    route: &db::RouteConfig,
-    body: &PreparedRequestBody,
-) -> Result<reqwest::Response, reqwest::Error> {
-    build_upstream_request(
-        UpstreamRequestTarget {
-            client,
-            method,
-            url,
-            route,
-            path,
-            body,
-        },
-        &[],
-        None,
-        uuid::Uuid::new_v4(),
-    )
-    .send()
-    .await
-}
-
 pub(super) fn build_upstream_request(
     target: UpstreamRequestTarget<'_>,
     request_headers: &[(String, String)],
@@ -463,73 +437,6 @@ mod tests {
         session_affinity::{is_opencode_host, resolve_session_affinity},
         worker::runtime::ai::thinking_downgrade,
     };
-    use axum::{Router, http::StatusCode, routing::post};
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
-
-    #[tokio::test]
-    async fn bad_gateway_is_returned_without_retry() {
-        let request_count = Arc::new(AtomicUsize::new(0));
-        let counter = request_count.clone();
-        let app = Router::new().route(
-            "/v1/responses",
-            post(move || {
-                let counter = counter.clone();
-                async move {
-                    counter.fetch_add(1, Ordering::SeqCst);
-                    StatusCode::BAD_GATEWAY
-                }
-            }),
-        );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind mock upstream");
-        let address = listener.local_addr().expect("mock upstream address");
-        tokio::spawn(async move {
-            axum::serve(listener, app)
-                .await
-                .expect("serve mock upstream");
-        });
-
-        let route = RouteConfig {
-            embedding_dimensions_override: None,
-            route_id: uuid::Uuid::new_v4(),
-            user_id: 1,
-            model_route_rule_id: None,
-            base_url: format!("http://{address}"),
-            api_key: "test-key".to_string(),
-            endpoint_key_id: None,
-            endpoint_key_label: None,
-            api_keys: Vec::new(),
-            key_lb_enabled: false,
-            native_api: NativeApi::Responses,
-            upstream_model: None,
-            route_selection_reason: RouteSelectionReason::Default,
-            provider: crate::db::EndpointProvider::Generic,
-            service_tier: None,
-            proxy_url: None,
-            dev_system_normalize: false,
-            thinking_effort_override: None,
-            compact_mode: crate::db::CompactMode::Passthrough,
-            thinking_downgrade_enabled: false,
-            has_oauth_token: false,
-        };
-        let response = send_upstream_request(
-            &Client::new(),
-            &Method::POST,
-            &format!("http://{address}/v1/responses"),
-            "/v1/responses",
-            &route,
-            &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
-        )
-        .await
-        .expect("upstream response");
-
-        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-        assert_eq!(request_count.load(Ordering::SeqCst), 1);
-    }
 
     #[test]
     fn forwards_anthropic_version_and_beta_without_forwarding_client_key() {

@@ -364,28 +364,6 @@ impl RawPayloadStore {
     /// Build the managed raw payload store: S3-compatible backend when a
     /// bucket is configured, otherwise a local filesystem directory. There is
     /// no PostgreSQL fallback; upload failures warn and drop that payload.
-    #[cfg(test)]
-    pub(crate) fn from_config(config: &WorkerConfig) -> Result<Self> {
-        let bucket = config.raw_object_store_bucket.trim();
-        let store: Arc<dyn ObjectStore> = if bucket.is_empty() {
-            let dir = crate::runtime_env::resolve_raw_object_store_local_dir(
-                &config.raw_object_store_local_dir,
-            )?;
-            std::fs::create_dir_all(&dir).with_context(|| {
-                format!(
-                    "failed to create local raw payload directory {}",
-                    dir.display()
-                )
-            })?;
-            Arc::new(object_store::local::LocalFileSystem::new_with_prefix(&dir)?)
-        } else {
-            Arc::new(build_s3_store(config, bucket)?)
-        };
-        Ok(Self {
-            store,
-            prefix: normalize_prefix(&config.raw_object_store_prefix),
-        })
-    }
 
     #[cfg(test)]
     pub(crate) fn new_for_test(store: Arc<dyn ObjectStore>, prefix: impl Into<String>) -> Self {
@@ -489,29 +467,6 @@ impl RawPayloadStore {
         }
         Ok(payload)
     }
-}
-
-#[cfg(test)]
-fn build_s3_store(config: &WorkerConfig, bucket: &str) -> Result<object_store::aws::AmazonS3> {
-    let mut builder = AmazonS3Builder::new()
-        .with_bucket_name(bucket)
-        .with_region(config.raw_object_store_region.trim())
-        .with_virtual_hosted_style_request(!config.raw_object_store_path_style);
-    if !config.raw_object_store_endpoint.trim().is_empty() {
-        builder = builder.with_endpoint(config.raw_object_store_endpoint.trim());
-    }
-    if !config.raw_object_store_access_key.trim().is_empty() {
-        builder = builder.with_access_key_id(config.raw_object_store_access_key.trim());
-    }
-    if !config.raw_object_store_secret_key.trim().is_empty() {
-        builder = builder.with_secret_access_key(config.raw_object_store_secret_key.trim());
-    }
-    if config.raw_object_store_allow_http {
-        builder = builder.with_allow_http(true);
-    }
-    builder
-        .build()
-        .context("failed to build raw payload object store")
 }
 
 fn build_s3_store_from_config(
@@ -758,26 +713,4 @@ mod tests {
         let error = store.get(key, None).await.expect_err("must fail");
         assert!(format!("{error:#}").contains("format version"), "{error:#}");
     }
-
-    #[test]
-    fn local_store_is_selected_without_bucket() {
-        use crate::config::WorkerConfig;
-        let dir = std::env::temp_dir().join(format!("pf-raw-store-{}", uuid::Uuid::new_v4()));
-        let config = WorkerConfig {
-            raw_object_store_local_dir: dir.to_string_lossy().to_string(),
-            ..WorkerConfig::default()
-        };
-        let store = RawPayloadStore::from_config(&config).expect("local store");
-        assert_eq!(
-            store.prefix,
-            normalize_prefix(&config.raw_object_store_prefix)
-        );
-        let _ = std::fs::remove_dir_all(dir);
-    }
 }
-
-/// Real S3 integration tests over the production store builder. The module
-/// only exists in test builds; see `s3_tests.rs` for the guard, fixtures,
-/// and per-run prefix discipline.
-#[cfg(test)]
-mod s3_tests;

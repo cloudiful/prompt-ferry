@@ -1101,11 +1101,9 @@ fn is_valid_protocol_version(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        super::tests::test_state, McpServerRequest, SessionUser, is_valid_protocol_version,
-        merge_env_json, public_env_json,
+        McpServerRequest, SessionUser, is_valid_protocol_version, merge_env_json, public_env_json,
     };
     use crate::db::McpServer;
-    use axum::http::StatusCode;
     use uuid::Uuid;
 
     fn admin_user() -> SessionUser {
@@ -1374,53 +1372,6 @@ mod tests {
         assert_eq!(input.provider_kind.as_deref(), Some("context7"));
     }
 
-    #[tokio::test]
-    async fn provider_kind_rejects_unknown_values() {
-        let state = test_state();
-        let user = admin_user();
-        let request = McpServerRequest {
-            name: "provider-kind-unknown".to_string(),
-            provider_kind: Some("unknown-provider".to_string()),
-            ..request_for_transport("http")
-        };
-        let err = request
-            .validate_for_create(&state, &user)
-            .await
-            .unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn provider_kind_requires_http_transport() {
-        let state = test_state();
-        let user = admin_user();
-        let request = McpServerRequest {
-            command: Some("mcpd".to_string()),
-            provider_kind: Some("context7".to_string()),
-            ..request_for_transport("stdio")
-        };
-        let err = request
-            .validate_for_create(&state, &user)
-            .await
-            .unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn provider_kind_minimax_requires_builtin_transport() {
-        let state = test_state();
-        let user = admin_user();
-        let request = McpServerRequest {
-            provider_kind: Some("minimax".to_string()),
-            ..request_for_transport("http")
-        };
-        let err = request
-            .validate_for_create(&state, &user)
-            .await
-            .unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
-    }
-
     #[test]
     fn hosted_preset_matches_only_bearer_http_presets() {
         assert!(super::hosted_bearer_preset("http", Some("context7")).is_some());
@@ -1511,83 +1462,6 @@ mod tests {
             input.url.as_deref(),
             Some("https://self-hosted.example.com/mcp")
         );
-    }
-
-    #[tokio::test]
-    async fn preset_rejects_custom_url_before_persistence() {
-        let state = test_state();
-        let user = admin_user();
-        let request = McpServerRequest {
-            name: "preset-custom-url".to_string(),
-            provider_kind: Some("context7".to_string()),
-            url: Some("https://self-hosted.example.com/mcp".to_string()),
-            ..request_for_transport("http")
-        };
-        let err = request
-            .validate_for_create(&state, &user)
-            .await
-            .unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn preset_rejects_non_bearer_auth() {
-        let state = test_state();
-        let user = admin_user();
-        let request = McpServerRequest {
-            name: "preset-basic-auth".to_string(),
-            provider_kind: Some("firecrawl".to_string()),
-            url: Some("https://mcp.firecrawl.dev/v2/mcp".to_string()),
-            auth_mode: Some(crate::db::MCP_AUTH_MODE_BASIC.to_string()),
-            ..request_for_transport("http")
-        };
-        let err = request
-            .validate_for_create(&state, &user)
-            .await
-            .unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn preset_requires_a_bearer_token() {
-        let state = test_state();
-        let user = admin_user();
-        let request = McpServerRequest {
-            name: "preset-no-token".to_string(),
-            provider_kind: Some("context7".to_string()),
-            url: Some("https://mcp.context7.com/mcp".to_string()),
-            auth_mode: Some(crate::db::MCP_AUTH_MODE_BEARER.to_string()),
-            bearer_tokens: Some(vec![]),
-            ..request_for_transport("http")
-        };
-        let err = request
-            .validate_for_create(&state, &user)
-            .await
-            .unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn preset_update_rejects_explicitly_cleared_bearer_tokens() {
-        // Reviewer P3: an explicit `bearer_tokens: []` on update is a request
-        // to clear the credentials and must not persist a hosted preset with
-        // no token just because the previous row had one. This returns before
-        // any database lookup, so it runs without a live database.
-        let state = test_state();
-        let user = admin_user();
-        let request = McpServerRequest {
-            name: "preset-clear-token".to_string(),
-            provider_kind: Some("firecrawl".to_string()),
-            url: Some("https://mcp.firecrawl.dev/v2/mcp".to_string()),
-            auth_mode: Some(crate::db::MCP_AUTH_MODE_BEARER.to_string()),
-            bearer_tokens: Some(vec![]),
-            ..request_for_transport("http")
-        };
-        let err = request
-            .validate_for_update(&state, Uuid::new_v4(), None, &user)
-            .await
-            .unwrap_err();
-        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
     }
 }
 

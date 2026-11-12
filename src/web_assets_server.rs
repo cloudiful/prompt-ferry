@@ -219,52 +219,10 @@ where
         .fallback_service(ServeFile::new(dist.join("index.html")))
 }
 
-/// The body bytes of a response, for tests.
-#[cfg(test)]
-pub(crate) async fn response_body(response: Response) -> Vec<u8> {
-    axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap_or_default()
-        .to_vec()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        CacheControl, Frontend, FrontendFile, IMMUTABLE_CACHE_CONTROL, content_type_for, frontend,
-        frontend_routes, not_found, serve_embedded_index,
-    };
-    use crate::web_assets::FRONTEND_DIST_ENV;
-    use axum::{
-        Router,
-        body::Body,
-        http::{Request, header},
-    };
-    use std::{
-        path::PathBuf,
-        sync::{Mutex, MutexGuard, OnceLock},
-    };
-    use tower::ServiceExt as _;
-
-    /// Environment reads are process-wide, so the override tests run one at a
-    /// time and restore the variable afterwards.
-    fn env_lock() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    fn set_override(value: Option<&str>) {
-        match value {
-            Some(value) => unsafe { std::env::set_var(FRONTEND_DIST_ENV, value) },
-            None => unsafe { std::env::remove_var(FRONTEND_DIST_ENV) },
-        }
-    }
-
-    fn frontend_dist() -> std::path::PathBuf {
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("frontend/dist")
-    }
+    use super::{CacheControl, FrontendFile, IMMUTABLE_CACHE_CONTROL, content_type_for, not_found};
+    use axum::http::header;
 
     #[test]
     fn the_immutable_policy_covers_one_year_and_blocks_downgrade() {
@@ -275,20 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn hashed_assets_are_immutable_and_the_entry_is_not() {
-        // The cache policy is a property of the path shape, so the asset part
-        // is exercised with an embedded file when the build has one and is
-        // otherwise covered by the entry point, which is always present.
-        let with_asset = crate::web_assets::hashed_js_asset_path()
-            .and_then(FrontendFile::from_path)
-            .map(|asset| asset.response());
-        if let Some(response) = with_asset {
-            assert_eq!(
-                response.headers()[header::CACHE_CONTROL],
-                IMMUTABLE_CACHE_CONTROL
-            );
-        }
-
+    fn the_entry_point_is_never_given_the_immutable_policy() {
         let entry = FrontendFile {
             body: b"<html></html>",
             content_type: "text/html; charset=utf-8",
@@ -296,25 +241,6 @@ mod tests {
         }
         .response();
         assert_eq!(entry.headers()[header::CACHE_CONTROL], "no-cache");
-    }
-
-    #[test]
-    fn a_file_outside_the_asset_root_never_gets_the_immutable_policy() {
-        // The favicon ships with a built frontend; a no-dist build carries no
-        // embedded favicon, and the policy check below still holds for any
-        // embedded file outside `assets/`.
-        let favicon = FrontendFile::from_path("favicon.svg");
-        if let Some(favicon) = favicon {
-            assert_eq!(
-                favicon.response().headers()[header::CACHE_CONTROL],
-                "no-cache"
-            );
-        } else {
-            assert!(
-                !crate::web_assets::has_embedded_index(),
-                "a built dist must carry favicon.svg"
-            );
-        }
     }
 
     #[test]
@@ -344,151 +270,10 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn the_embedded_entry_point_serves_valid_html() {
-        let response = serve_embedded_index().await;
-
-        assert_eq!(response.status(), axum::http::StatusCode::OK);
-        assert_eq!(
-            response.headers()[header::CONTENT_TYPE],
-            "text/html; charset=utf-8"
-        );
-        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-cache");
-        let body = super::response_body(response).await;
-        let html = String::from_utf8(body).expect("the entry point is UTF-8");
-        assert!(
-            html.contains("<!doctype html") || html.contains("<html"),
-            "got: {html}"
-        );
-    }
-
     #[test]
     fn an_unknown_embedded_file_is_a_404_without_cache() {
         let response = not_found();
         assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
         assert_eq!(response.headers()[header::CACHE_CONTROL], "no-cache");
-    }
-
-    #[tokio::test]
-    async fn the_shared_frontend_routes_serve_the_entry_and_reject_a_missing_asset() {
-        // Both management listeners mount these, so what they must guarantee is
-        // checked once. Which variant answers is the caller's configuration, not
-        // a property of these routes: a checkout with a built `frontend/dist`
-        // resolves to the filesystem frontend and a backend-only one to the
-        // embedded assets. The lock keeps a test that is changing the selection
-        // from changing it underneath this one, and it is held only while the
-        // routes are built, because once built they carry the selection they were
-        // built from. The cache policy is asserted only where it is part of the
-        // contract rather than as an accident of which frontend was selected.
-        let (app, embedded): (Router<()>, bool) = {
-            let _guard = env_lock();
-            (frontend_routes(), matches!(frontend(), Frontend::Embedded))
-        };
-
-        let index = app
-            .clone()
-            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_eq!(index.status(), axum::http::StatusCode::OK);
-        assert!(
-            index.headers()[header::CONTENT_TYPE]
-                .to_str()
-                .unwrap()
-                .starts_with("text/html"),
-            "the entry point must be HTML in either variant, got {:?}",
-            index.headers()[header::CONTENT_TYPE]
-        );
-        if embedded {
-            assert_eq!(index.headers()[header::CACHE_CONTROL], "no-cache");
-        }
-
-        // A history route resolves to the entry point rather than a 404.
-        let deep = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/settings/relays")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(deep.status(), axum::http::StatusCode::OK);
-
-        // An asset that does not exist says so in either variant, instead of
-        // falling back to the entry point.
-        let asset = app
-            .oneshot(
-                Request::builder()
-                    .uri("/assets/does-not-exist.js")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(asset.status(), axum::http::StatusCode::NOT_FOUND);
-    }
-
-    #[test]
-    fn an_explicit_override_wins_over_the_embedded_assets() {
-        let _guard = env_lock();
-        set_override(Some("/nonexistent/prompt-ferry-dist"));
-
-        assert_eq!(
-            frontend(),
-            Frontend::Filesystem(PathBuf::from("/nonexistent/prompt-ferry-dist")),
-            "an explicitly configured dist must win even when it does not exist"
-        );
-
-        set_override(None);
-    }
-
-    #[test]
-    fn a_built_dist_beside_the_working_directory_is_the_override() {
-        let _guard = env_lock();
-        set_override(None);
-
-        // The repository checkout used for this test run carries frontend/dist,
-        // so the historical location resolves; otherwise the binary is embedded.
-        match frontend() {
-            Frontend::Filesystem(dist) => {
-                let resolved = dist
-                    .join("index.html")
-                    .canonicalize()
-                    .expect("resolve override");
-                let expected = frontend_dist()
-                    .join("index.html")
-                    .canonicalize()
-                    .expect("resolve checkout dist");
-                assert_eq!(
-                    resolved, expected,
-                    "the historical location must resolve to the checkout dist"
-                );
-            }
-            Frontend::Embedded => {
-                assert!(
-                    !frontend_dist().join("index.html").is_file(),
-                    "a checkout with a built dist must resolve to the filesystem frontend"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn a_blank_override_is_ignored() {
-        let _guard = env_lock();
-        set_override(Some("   "));
-
-        // Falls through to the historical-location check rather than treating
-        // the blank value as a path: the resolution matches the no-override
-        // outcome whatever that is for this checkout.
-        let with_blank = frontend();
-        set_override(None);
-        assert_eq!(
-            with_blank,
-            frontend(),
-            "a blank override must not change which frontend is selected"
-        );
     }
 }

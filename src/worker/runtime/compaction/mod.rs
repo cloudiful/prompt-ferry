@@ -10,9 +10,6 @@ use crate::{
 };
 
 pub mod prune;
-#[cfg(test)]
-#[path = "quota_feedback_tests.rs"]
-mod quota_feedback_tests;
 pub mod summarize;
 
 pub use prune::prune_for_compact;

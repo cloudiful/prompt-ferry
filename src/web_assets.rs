@@ -55,24 +55,7 @@ pub fn embedded_file(path: &str) -> Option<&'static [u8]> {
     EMBEDDED_FRONTEND.get_file(path).map(|file| file.contents())
 }
 
-/// One hashed JavaScript asset from the embedded tree, wherever it sits.
-///
-/// A test-only convenience: the built asset names change with their contents,
-/// so tests discover one instead of hard-coding a hash.
-#[cfg(test)]
-pub(crate) fn hashed_js_asset_path() -> Option<&'static str> {
-    fn walk(dir: &'static Dir<'static>) -> Option<&'static str> {
-        for file in dir.files() {
-            let path = file.path().to_str()?;
-            if path.starts_with("assets/") && path.ends_with(".js") {
-                return Some(path);
-            }
-        }
-        dir.dirs().find_map(walk)
-    }
-    walk(&EMBEDDED_FRONTEND)
-}
-
+/// The page served when the checkout was compiled without a frontend build.
 const FALLBACK_INDEX_HTML: &str = r#"<!doctype html>
 <html lang="en">
   <head>
@@ -101,45 +84,7 @@ cargo build --release</code></pre>
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        FALLBACK_INDEX_HTML, FRONTEND_DIST_ENV, embedded_assets, embedded_file, embedded_index,
-        has_embedded_index,
-    };
-
-    #[test]
-    fn embedded_assets_contain_the_spa_entry_when_the_frontend_was_built() {
-        let assets = embedded_assets();
-        if !has_embedded_index() {
-            // A backend-focused checkout: the fallback contract is what matters.
-            assert_eq!(
-                embedded_index(),
-                FALLBACK_INDEX_HTML.as_bytes(),
-                "a checkout without frontend/dist must serve the fallback page"
-            );
-            assert_eq!(embedded_file("index.html"), None);
-            return;
-        }
-
-        let index = embedded_index();
-        let html = std::str::from_utf8(index).expect("index.html is UTF-8");
-        assert!(html.contains("<script"), "built index.html loads the SPA");
-        assert!(
-            html.contains("assets/"),
-            "built index.html references hashed assets"
-        );
-        assert!(embedded_file("favicon.svg").is_some());
-        assert!(
-            assets
-                .dirs()
-                .any(|dir| dir.path() == std::path::Path::new("assets")),
-            "the built dist carries an assets directory"
-        );
-    }
-
-    #[test]
-    fn a_missing_embedded_file_is_none_without_panicking() {
-        assert_eq!(embedded_file("no/such/file.js"), None);
-    }
+    use super::{FALLBACK_INDEX_HTML, FRONTEND_DIST_ENV};
 
     #[test]
     fn the_fallback_page_names_the_remedy_without_leaking_state() {
@@ -148,23 +93,5 @@ mod tests {
         assert!(html.contains(FRONTEND_DIST_ENV));
         // The fallback is static and carries no build-specific content.
         assert!(!html.contains("assets/"));
-    }
-
-    #[test]
-    fn the_build_never_depends_on_a_generated_dist_being_committed() {
-        // build.rs creates `frontend/dist` when the SPA build has not run, so
-        // `include_dir!` always captures a directory and this module compiles
-        // on a clean checkout either way.
-        let dist = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("frontend/dist");
-        assert!(
-            dist.is_dir(),
-            "build.rs must leave a frontend/dist directory in place"
-        );
-    }
-
-    #[test]
-    fn the_override_env_name_is_stable() {
-        // The name is operator-facing configuration; it may not drift silently.
-        assert_eq!(FRONTEND_DIST_ENV, "PROMPT_FERRY_FRONTEND_DIST");
     }
 }

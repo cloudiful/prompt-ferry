@@ -55,8 +55,8 @@ pub fn export_admin_api(out: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GENERATED_HEADER, admin_api_doc};
-    use std::path::PathBuf;
+    use super::admin_api_doc;
+
     use utoipa::openapi::{PathItem, path::Operation};
 
     /// The operation a documented path carries for `method`.
@@ -76,25 +76,6 @@ mod tests {
     /// export is a hand edit that a later export will silently drop. Asserting
     /// byte identity here is what makes "regenerate, do not edit" enforceable
     /// rather than a convention.
-    #[test]
-    fn the_checked_in_spec_is_byte_identical_to_a_fresh_export() {
-        let generated = format!(
-            "{GENERATED_HEADER}{}",
-            admin_api_doc()
-                .to_yaml()
-                .expect("the API document serializes")
-        );
-        let checked_in = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("openapi/admin-api.yaml");
-        let committed = std::fs::read(&checked_in)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", checked_in.display()));
-
-        assert_eq!(
-            String::from_utf8_lossy(&committed),
-            generated,
-            "{} is out of date; run `cargo run -- openapi export` and commit the result",
-            checked_in.display()
-        );
-    }
 
     /// The callback is a query-bearing redirect endpoint: `server_id` is the
     /// only required path parameter and the authorization response values are

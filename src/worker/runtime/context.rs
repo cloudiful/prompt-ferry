@@ -100,18 +100,6 @@ impl RuntimeServices {
         }
     }
 
-    /// Observe every log this service submits to the recorder.
-    ///
-    /// Evidence instrumentation for the streaming-settlement regression: it
-    /// sees the `UsageLog` exactly as submitted, per service instance.
-    #[cfg(test)]
-    pub(super) fn observe_submitted_usage_log(
-        &mut self,
-        observer: impl Fn(&UsageLog) + Send + Sync + 'static,
-    ) {
-        self.submitted_logs = Some(std::sync::Arc::new(observer));
-    }
-
     pub(super) fn admin_state(&self) -> Option<&AdminState> {
         self.admin_state.as_ref()
     }
@@ -459,21 +447,8 @@ impl RouteExecutionContext {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        path::PathBuf,
-        sync::Arc,
-        time::{SystemTime, UNIX_EPOCH},
-    };
 
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
-
-    use super::{ResponseLimits, RuntimeServices, snapshot_thinking_effort_override};
-    use crate::{
-        relay_secrets::RelaySecretManager,
-        standalone_config::{StandaloneConfig, StandaloneConfigStore},
-        worker::runtime::{WorkerRuntimeState, standalone::StandaloneRuntimeState},
-        worker_usage::{UsageLog, UsageRequestMetadata},
-    };
+    use super::snapshot_thinking_effort_override;
 
     #[test]
     fn thinking_effort_snapshot_keeps_only_valid_overrides() {
@@ -489,64 +464,6 @@ mod tests {
         assert_eq!(snapshot_thinking_effort_override(Some("   ")), None);
         assert_eq!(snapshot_thinking_effort_override(Some("ultra")), None);
         assert_eq!(snapshot_thinking_effort_override(None), None);
-    }
-
-    fn database_path() -> PathBuf {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        std::env::temp_dir().join(format!("prompt-ferry-usage-dispatch-{suffix}.sqlite"))
-    }
-
-    #[tokio::test]
-    async fn dispatches_standalone_usage_and_keeps_no_state_as_noop() {
-        let _redaction_guard = crate::redact_test_support::lock_async().await;
-        let path = database_path();
-        let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
-        let standalone = StandaloneRuntimeState::new(
-            store,
-            RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager"),
-            StandaloneConfig::default(),
-        );
-        let services = RuntimeServices::new(
-            None,
-            super::BridgeSender::test_sender(),
-            reqwest::Client::new(),
-            WorkerRuntimeState::default(),
-            ResponseLimits::default(),
-        )
-        .with_standalone_state(standalone.clone());
-        let log = UsageLog::ai_request(
-            uuid::Uuid::new_v4(),
-            UsageRequestMetadata {
-                path: "/v1/models".to_string(),
-                ..UsageRequestMetadata::default()
-            },
-            None,
-        );
-
-        Box::pin(services.record_usage_event(log)).await;
-        assert_eq!(standalone.recent_usage().len(), 1);
-
-        let no_state = RuntimeServices::new(
-            None,
-            super::BridgeSender::test_sender(),
-            reqwest::Client::new(),
-            WorkerRuntimeState::default(),
-            ResponseLimits::default(),
-        );
-        Box::pin(no_state.record_usage_event(UsageLog::ai_request(
-            uuid::Uuid::new_v4(),
-            UsageRequestMetadata {
-                path: "/v1/models".to_string(),
-                ..UsageRequestMetadata::default()
-            },
-            None,
-        )))
-        .await;
-        assert_eq!(standalone.recent_usage().len(), 1);
-        let _ = std::fs::remove_file(path);
     }
 }
 

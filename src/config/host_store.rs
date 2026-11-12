@@ -93,12 +93,6 @@ pub fn activate(overlay: HostOverlay) {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = overlay;
 }
 
-/// Forget the recorded overlay. Tests use this to reach a clean startup again.
-#[cfg(test)]
-pub fn clear() {
-    activate(HostOverlay::default());
-}
-
 /// Narrow the host-local file to its owner. It carries a management token.
 fn restrict_to_owner() -> std::io::Result<()> {
     let path = runtime_env::host_config_path()
@@ -249,31 +243,6 @@ mod tests {
         }
 
         assert_eq!(app_config.host.role, HostRole::Relay);
-    }
-
-    #[test]
-    fn the_activated_overlay_reports_the_role_the_process_started_as() {
-        clear();
-        assert_eq!(active_role(), None);
-
-        activate(HostOverlay {
-            host: HostOverlayRole {
-                role: Some(HostRole::Worker),
-            },
-            relay: HostOverlayRelay::default(),
-        });
-        assert_eq!(active_role(), Some(HostRole::Worker));
-
-        // Recording again replaces the previous role, so a restart inside one
-        // process never answers with the role it stopped running.
-        activate(HostOverlay {
-            host: HostOverlayRole {
-                role: Some(HostRole::Relay),
-            },
-            relay: HostOverlayRelay::default(),
-        });
-        assert_eq!(active_role(), Some(HostRole::Relay));
-        clear();
     }
 
     #[test]

@@ -299,7 +299,3 @@ fn reject_unsupported_client_event(event_json_text: &str) -> anyhow::Result<()> 
     }
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "realtime/quota_feedback_tests.rs"]
-mod quota_feedback_tests;

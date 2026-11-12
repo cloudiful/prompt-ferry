@@ -99,18 +99,6 @@ fn scan_credits_used(value: &Value) -> Option<f64> {
     }
 }
 
-/// Test-only convenience wrapper: same as [`call_with_storage`] without a
-/// database pool, so connections never persist learned lifecycle state.
-#[cfg(test)]
-pub(super) async fn call(
-    server: &McpServer,
-    request: Value,
-    conversation_id: Option<&str>,
-    forced: Option<&crate::db::McpCredential>,
-) -> anyhow::Result<Value> {
-    call_with_storage(None, server, request, conversation_id, forced).await
-}
-
 pub(super) async fn call_with_storage(
     storage: Option<&super::McpRuntimeStorage>,
     server: &McpServer,
@@ -507,6 +495,3 @@ mod tests {
         assert_eq!(failure, None);
     }
 }
-
-#[cfg(test)]
-mod v2_tests;

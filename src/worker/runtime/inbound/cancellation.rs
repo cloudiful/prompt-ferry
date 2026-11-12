@@ -128,33 +128,9 @@ fn abort_message(reason: &str, abort_reason: RequestAbortReason) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        path::PathBuf,
-        sync::Arc,
-        time::{SystemTime, UNIX_EPOCH},
-    };
-
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
-    use tokio::sync::Mutex;
-    use uuid::Uuid;
 
     use super::abort_message;
-    use crate::{
-        db::{RequestAbortReason, RequestRecordCategory},
-        relay_secrets::RelaySecretManager,
-        standalone_config::StandaloneConfig,
-        standalone_config::StandaloneConfigStore,
-        worker::runtime::request_assembly::{PendingIncomingRequest, RequestCancellation},
-        worker::runtime::standalone::StandaloneRuntimeState,
-    };
-
-    fn database_path(label: &str) -> PathBuf {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        std::env::temp_dir().join(format!("prompt-ferry-cancel-{label}-{suffix}.sqlite"))
-    }
+    use crate::db::RequestAbortReason;
 
     #[test]
     fn classifies_downstream_disconnects() {
@@ -193,86 +169,5 @@ mod tests {
             RequestAbortReason::from_relay_reason("bridge_backpressure"),
             RequestAbortReason::BridgeBackpressureFull
         );
-    }
-
-    #[tokio::test]
-    async fn standalone_cancel_request_awaits_durable_persistence_and_survives_reopen() {
-        let _redaction_guard = crate::redact_test_support::lock_async().await;
-        let path = database_path("awaited");
-        let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
-        let manager =
-            RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager");
-        let state = StandaloneRuntimeState::new(
-            store.clone(),
-            manager.clone(),
-            StandaloneConfig::default(),
-        );
-        state.hydrate_usage().await;
-
-        let pending_requests: Arc<
-            Mutex<std::collections::HashMap<String, PendingIncomingRequest>>,
-        > = Arc::new(Mutex::new(std::collections::HashMap::new()));
-        let cancellations: Arc<Mutex<std::collections::HashMap<String, RequestCancellation>>> =
-            Arc::new(Mutex::new(std::collections::HashMap::new()));
-        let request_id = Uuid::new_v4();
-
-        // Awaiting cancel_request must complete the durable SQLite write
-        // before it returns, so the reopened ledger already contains the
-        // aborted summary without any further polling.
-        super::cancel_request(super::CancelRequestParams {
-            pending_requests: &pending_requests,
-            cancellations: &cancellations,
-            admin_state: None,
-            standalone_state: Some(&state),
-            category: RequestRecordCategory::Ai,
-            request_id: &request_id.to_string(),
-            reason: "downstream_closed",
-            response_started: false,
-        })
-        .await;
-
-        // After the awaited call, the open store must already observe the
-        // abort event without re-opening the database. This proves the
-        // write completed before cancel_request returned.
-        let persisted = store
-            .list_usage_summaries(16)
-            .await
-            .expect("list before reopen");
-        let aborted = persisted
-            .iter()
-            .find(|record| record.request_id == request_id)
-            .expect("aborted summary must be present after awaited cancel");
-        assert_eq!(aborted.state, "aborted");
-        assert_eq!(aborted.category, "ai");
-        assert_eq!(aborted.event_kind, "request");
-        assert_eq!(
-            aborted.error_code.as_deref(),
-            Some(RequestAbortReason::DownstreamClosed.as_str())
-        );
-
-        // Drop the in-process state and reopen the SQLite file to prove
-        // the cancelled summary survives process restart like any other
-        // standalone usage event.
-        drop(state);
-        drop(store);
-
-        let reopened = Arc::new(StandaloneConfigStore::open(&path).await.expect("reopen"));
-        let reopened_records = reopened
-            .list_usage_summaries(16)
-            .await
-            .expect("list after reopen");
-        let reopened_aborted = reopened_records
-            .iter()
-            .find(|record| record.request_id == request_id)
-            .expect("aborted summary must survive reopening the SQLite file");
-        assert_eq!(reopened_aborted.state, "aborted");
-        assert_eq!(reopened_aborted.category, "ai");
-        assert_eq!(
-            reopened_aborted.error_code.as_deref(),
-            Some(RequestAbortReason::DownstreamClosed.as_str())
-        );
-
-        drop(reopened);
-        let _ = std::fs::remove_file(path);
     }
 }

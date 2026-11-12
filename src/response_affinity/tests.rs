@@ -1,5 +1,4 @@
 use super::*;
-use redis::AsyncCommands;
 
 fn binding(endpoint_id: Uuid) -> ResponseAffinityBinding {
     ResponseAffinityBinding {
@@ -121,30 +120,6 @@ async fn local_store_peek_does_not_refresh_ttl() {
     );
 }
 
-#[tokio::test]
-async fn sqlite_store_keeps_one_binding_for_concurrent_creators() {
-    let path =
-        std::env::temp_dir().join(format!("prompt-ferry-affinity-{}.sqlite", Uuid::new_v4()));
-    let pool = crate::db::connect_sqlite(&path).await.unwrap();
-    crate::db::migrate_standalone(&pool).await.unwrap();
-    let store = ResponseAffinityStore::sqlite_with_ttl(
-        crate::standalone_config::StandaloneCoordinatorStore::new(pool.clone()),
-        60,
-    );
-    let key = "sqlite-affinity-key";
-    let first = binding(Uuid::new_v4());
-    let second = binding(Uuid::new_v4());
-    let (left, right) = tokio::join!(
-        store.get_or_create(key, &first),
-        store.get_or_create(key, &second)
-    );
-    let left = left.unwrap();
-    assert_eq!(right.unwrap(), left);
-    assert!(left == first || left == second);
-    pool.close().await;
-    let _ = std::fs::remove_file(path);
-}
-
 #[test]
 fn cache_key_is_hashed_and_scope_sensitive() {
     let rule_id = Uuid::new_v4();
@@ -153,121 +128,4 @@ fn cache_key_is_hashed_and_scope_sensitive() {
     assert!(first.starts_with(RESPONSE_AFFINITY_VALKEY_KEY_PREFIX));
     assert_ne!(first, second);
     assert!(!first.contains("session-a"));
-}
-
-#[tokio::test]
-async fn redis_store_get_or_create_refreshes_ttl_and_preserves_cas() {
-    let Ok(url) = std::env::var("PROMPT_FERRY_TEST_VALKEY_URL") else {
-        eprintln!(
-            "skipping Valkey response affinity test: PROMPT_FERRY_TEST_VALKEY_URL is not set"
-        );
-        return;
-    };
-
-    let client = redis::Client::open(url).unwrap();
-    let manager = client.get_connection_manager().await.unwrap();
-    let store = ResponseAffinityStore::from_connection_manager(manager.clone(), 30);
-    let key = format!(
-        "{RESPONSE_AFFINITY_VALKEY_KEY_PREFIX}test:{}",
-        Uuid::new_v4()
-    );
-    let first = binding(Uuid::new_v4());
-    let second = binding(Uuid::new_v4());
-    let mut connection = manager.clone();
-
-    let _: usize = connection.del(&key).await.unwrap();
-    let (left, right) = tokio::join!(
-        store.get_or_create(&key, &first),
-        store.get_or_create(&key, &second)
-    );
-    let bound = left.unwrap();
-    assert_eq!(right.unwrap(), bound.clone());
-    assert_eq!(store.get_or_create(&key, &first).await.unwrap(), bound);
-
-    let _: bool = connection.expire(&key, 1).await.unwrap();
-    assert_eq!(store.get_or_create(&key, &second).await.unwrap(), bound);
-    let ttl: i64 = connection.ttl(&key).await.unwrap();
-    assert!(ttl > 1, "get_or_create should refresh the binding TTL");
-
-    assert!(
-        store
-            .replace_if_current(&key, &bound, &second)
-            .await
-            .unwrap()
-    );
-    assert_eq!(store.get(&key).await.unwrap(), Some(second.clone()));
-    assert!(
-        !store
-            .replace_if_current(&key, &bound, &binding(Uuid::new_v4()))
-            .await
-            .unwrap()
-    );
-
-    let _: usize = connection.del(&key).await.unwrap();
-}
-
-#[tokio::test]
-async fn redis_store_delete_reports_whether_key_existed_and_removes_it() {
-    let Ok(url) = std::env::var("PROMPT_FERRY_TEST_VALKEY_URL") else {
-        eprintln!(
-            "skipping Valkey response affinity test: PROMPT_FERRY_TEST_VALKEY_URL is not set"
-        );
-        return;
-    };
-
-    let client = redis::Client::open(url).unwrap();
-    let manager = client.get_connection_manager().await.unwrap();
-    let store = ResponseAffinityStore::from_connection_manager(manager.clone(), 30);
-    let key = format!(
-        "{RESPONSE_AFFINITY_VALKEY_KEY_PREFIX}test:{}",
-        Uuid::new_v4()
-    );
-    let mut connection = manager.clone();
-    let _: usize = connection.del(&key).await.unwrap();
-
-    assert!(!store.delete(&key).await.unwrap());
-    assert_eq!(store.get(&key).await.unwrap(), None);
-
-    let first = binding(Uuid::new_v4());
-    store.get_or_create(&key, &first).await.unwrap();
-    assert!(store.delete(&key).await.unwrap());
-    assert!(!store.delete(&key).await.unwrap());
-    assert_eq!(store.get(&key).await.unwrap(), None);
-    assert_eq!(store.peek(&key).await.unwrap(), None);
-
-    let _: usize = connection.del(&key).await.unwrap();
-}
-
-#[tokio::test]
-async fn redis_store_peek_does_not_refresh_ttl() {
-    let Ok(url) = std::env::var("PROMPT_FERRY_TEST_VALKEY_URL") else {
-        eprintln!(
-            "skipping Valkey response affinity test: PROMPT_FERRY_TEST_VALKEY_URL is not set"
-        );
-        return;
-    };
-
-    let client = redis::Client::open(url).unwrap();
-    let manager = client.get_connection_manager().await.unwrap();
-    let store = ResponseAffinityStore::from_connection_manager(manager.clone(), 30);
-    let key = format!(
-        "{RESPONSE_AFFINITY_VALKEY_KEY_PREFIX}test:{}",
-        Uuid::new_v4()
-    );
-    let mut connection = manager.clone();
-    let _: usize = connection.del(&key).await.unwrap();
-
-    store
-        .get_or_create(&key, &binding(Uuid::new_v4()))
-        .await
-        .unwrap();
-    let _: bool = connection.expire(&key, 30).await.unwrap();
-    assert!(store.peek(&key).await.unwrap().is_some());
-    let ttl: i64 = connection.ttl(&key).await.unwrap();
-    assert!(
-        (25..=30).contains(&ttl),
-        "peek must not refresh the binding TTL (got {ttl})"
-    );
-
-    let _: usize = connection.del(&key).await.unwrap();
 }

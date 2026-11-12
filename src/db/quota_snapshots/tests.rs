@@ -1,15 +1,19 @@
-use super::{complete_refresh_success, latest_snapshot, validate_windows};
-use crate::db::types::{ChatgptQuotaSnapshotCreate, ChatgptQuotaSnapshotSource};
-use chrono::Utc;
-use serde_json::json;
-use uuid::Uuid;
+use super::validate_windows;
+use serde_json::{Value, json};
 
-use test_support::{cleanup_endpoint, create_endpoint, known_window, test_pool};
+fn known_window(source: &str, remaining: f64) -> Value {
+    json!([{
+        "source_window": source,
+        "window_seconds": 18_000,
+        "used_percent": 100.0 - remaining,
+        "remaining_percent": remaining,
+        "availability": "known"
+    }])
+}
 
 #[test]
 fn normalized_windows_reject_raw_or_inconsistent_payload_fields() {
-    validate_windows(&test_support::known_window("primary", 0.0))
-        .expect("known zero remains valid");
+    validate_windows(&known_window("primary", 0.0)).expect("known zero remains valid");
     validate_windows(&json!([{
         "source_window": "secondary",
         "window_seconds": 604_800,
@@ -23,167 +27,4 @@ fn normalized_windows_reject_raw_or_inconsistent_payload_fields() {
         .is_err()
     );
     assert!(validate_windows(&json!([{"source_window":"primary","availability":"known","used_percent":120,"remaining_percent":0}])).is_err());
-}
-
-#[tokio::test]
-async fn success_without_an_owned_lease_rolls_back_the_snapshot_insert() {
-    let Some(pool) = test_pool().await else {
-        return;
-    };
-    let endpoint_id = create_endpoint(&pool, "openai", true, true).await;
-    assert!(
-        !complete_refresh_success(
-            &pool,
-            Uuid::new_v4(),
-            ChatgptQuotaSnapshotCreate {
-                endpoint_id,
-                observed_at: Utc::now(),
-                plan_type: Some("plus".to_string()),
-                limit_reached: Some(false),
-                windows: known_window("primary", 75.0),
-                source: ChatgptQuotaSnapshotSource::Manual,
-            },
-        )
-        .await
-        .unwrap()
-    );
-    assert!(latest_snapshot(&pool, endpoint_id).await.unwrap().is_none());
-    cleanup_endpoint(&pool, endpoint_id).await;
-}
-
-pub(super) mod test_support {
-    use chrono::{DateTime, Duration, Utc};
-    use serde_json::{Value, json};
-    use sqlx::PgPool;
-    use uuid::Uuid;
-
-    use crate::db::{
-        ChatgptQuotaSnapshotCreate, ChatgptQuotaSnapshotSource,
-        quota_snapshots::{acquire_refresh_lease, complete_refresh_success, latest_snapshot},
-    };
-
-    #[allow(dead_code)]
-    mod test_pg_target {
-        include!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/support/test_pg_target.rs"
-        ));
-    }
-
-    // Only an absent pair of dedicated keys skips. A configured target that is
-    // malformed or disagrees with its confirmed identity fails here rather
-    // than degrading into a silent skip.
-    pub(in crate::db::quota_snapshots) async fn test_pool() -> Option<PgPool> {
-        match test_pg_target::optional_pool(4).await {
-            Ok(Some(pool)) => Some(pool),
-            Ok(None) => {
-                eprintln!(
-                    "skipped quota snapshot database setup: neither {} nor {} is configured",
-                    test_pg_target::DATABASE_URL_KEY,
-                    test_pg_target::CONFIRMED_TARGET_KEY
-                );
-                None
-            }
-            Err(error) => panic!("quota snapshot test target is not usable: {error}"),
-        }
-    }
-
-    pub(in crate::db::quota_snapshots) async fn create_endpoint(
-        pool: &PgPool,
-        provider: &str,
-        enabled: bool,
-        with_oauth: bool,
-    ) -> Uuid {
-        let endpoint_id = Uuid::new_v4();
-        sqlx::query(
-            "INSERT INTO provider_endpoints \
-             (endpoint_id, scope, owner_user_id, name, provider, provider_region, base_url, \
-              native_api, native_api_source, api_key, enabled) \
-             VALUES ($1, 'admin', NULL, $2, $3, NULL, 'https://example.invalid/v1', \
-                     'responses', 'manual', 'quota-fixture-key', $4)",
-        )
-        .bind(endpoint_id)
-        .bind(format!("quota-test-{endpoint_id}"))
-        .bind(provider)
-        .bind(enabled)
-        .execute(pool)
-        .await
-        .expect("insert isolated quota test endpoint");
-        if with_oauth {
-            sqlx::query(
-                "INSERT INTO endpoint_oauth_tokens (endpoint_id, access_token, refresh_token) \
-                 VALUES ($1, 'fixture-access', 'fixture-refresh')",
-            )
-            .bind(endpoint_id)
-            .execute(pool)
-            .await
-            .expect("insert fake OAuth presence for isolated endpoint");
-        }
-        endpoint_id
-    }
-
-    pub(in crate::db::quota_snapshots) async fn cleanup_endpoint(pool: &PgPool, endpoint_id: Uuid) {
-        sqlx::query("DELETE FROM request_records WHERE endpoint_id = $1")
-            .bind(endpoint_id)
-            .execute(pool)
-            .await
-            .expect("remove isolated request activity fixture");
-        sqlx::query("DELETE FROM provider_endpoints WHERE endpoint_id = $1")
-            .bind(endpoint_id)
-            .execute(pool)
-            .await
-            .expect("remove isolated quota endpoint fixture");
-    }
-
-    pub(in crate::db::quota_snapshots) fn known_window(source: &str, remaining: f64) -> Value {
-        json!([{
-            "source_window": source,
-            "window_seconds": 18_000,
-            "used_percent": 100.0 - remaining,
-            "remaining_percent": remaining,
-            "availability": "known"
-        }])
-    }
-
-    pub(in crate::db::quota_snapshots) async fn record_snapshot(
-        pool: &PgPool,
-        endpoint_id: Uuid,
-        observed_at: DateTime<Utc>,
-        source: ChatgptQuotaSnapshotSource,
-    ) -> i64 {
-        let attempted_at = Utc::now();
-        let owner = Uuid::new_v4();
-        assert!(
-            acquire_refresh_lease(
-                pool,
-                endpoint_id,
-                owner,
-                attempted_at,
-                attempted_at + Duration::seconds(45),
-            )
-            .await
-            .expect("acquire endpoint refresh lease")
-        );
-        assert!(
-            complete_refresh_success(
-                pool,
-                owner,
-                ChatgptQuotaSnapshotCreate {
-                    endpoint_id,
-                    observed_at,
-                    plan_type: Some("plus".to_string()),
-                    limit_reached: Some(false),
-                    windows: known_window("primary", 75.0),
-                    source,
-                },
-            )
-            .await
-            .expect("commit successful quota snapshot")
-        );
-        latest_snapshot(pool, endpoint_id)
-            .await
-            .expect("load latest snapshot")
-            .expect("snapshot was inserted")
-            .snapshot_id
-    }
 }

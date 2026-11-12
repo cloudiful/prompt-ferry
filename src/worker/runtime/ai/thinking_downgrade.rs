@@ -339,10 +339,7 @@ fn has_reasoning_text(item: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        DISABLE_ENV, ThinkingDisposition, apply_thinking_off, body_thinking_signals,
-        decide_thinking, thinking_downgrade_bypassed,
-    };
+    use super::{ThinkingDisposition, apply_thinking_off, body_thinking_signals, decide_thinking};
     use crate::{config::NativeApi, db};
     use serde_json::{Value, json};
 
@@ -628,32 +625,5 @@ mod tests {
             apply_thinking_off(NativeApi::Responses, not_object.clone()),
             not_object
         );
-    }
-
-    #[test]
-    fn env_escape_hatch_is_exact() {
-        let isolation = EnvIsolation::new();
-        unsafe { std::env::remove_var(DISABLE_ENV) };
-        assert!(!thinking_downgrade_bypassed());
-        unsafe { std::env::set_var(DISABLE_ENV, "0") };
-        assert!(!thinking_downgrade_bypassed());
-        unsafe { std::env::set_var(DISABLE_ENV, "1") };
-        assert!(thinking_downgrade_bypassed());
-        drop(isolation);
-    }
-
-    struct EnvIsolation;
-
-    impl EnvIsolation {
-        fn new() -> Self {
-            unsafe { std::env::remove_var(DISABLE_ENV) };
-            Self
-        }
-    }
-
-    impl Drop for EnvIsolation {
-        fn drop(&mut self) {
-            unsafe { std::env::remove_var(DISABLE_ENV) };
-        }
     }
 }

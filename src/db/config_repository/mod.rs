@@ -191,4 +191,6 @@ mod tests {
 }
 
 #[cfg(test)]
-mod integration_tests;
+mod archive_test_fixtures;
+#[cfg(test)]
+mod archive_tests;

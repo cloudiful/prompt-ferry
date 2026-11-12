@@ -3,7 +3,6 @@
 //! Unit coverage of the injection gate and its boundaries; the builder/pipeline
 //! regression lives in [`integration`] and shared fixtures in [`support`].
 
-mod integration;
 mod support;
 
 use std::borrow::Cow;

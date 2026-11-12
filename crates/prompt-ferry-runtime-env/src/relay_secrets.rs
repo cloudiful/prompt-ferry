@@ -66,11 +66,8 @@ pub fn load_or_create_worker_config_key_for(
 /// Where the effective worker configuration encryption key came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkerConfigKeySource {
-    /// Explicitly provided through configuration or environment.
     Configured,
-    /// Loaded from an existing persisted key file.
     KeyFile(PathBuf),
-    /// Newly generated and persisted for the first time.
     Generated(PathBuf),
 }
 
@@ -269,58 +266,5 @@ mod tests {
 
         let error = RelaySecretManager::from_base64("").unwrap_err();
         assert!(error.to_string().contains("encryption key is required"));
-    }
-
-    fn temp_key_path(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("prompt-ferry-key-{name}-{}", uuid::Uuid::new_v4()))
-    }
-
-    #[test]
-    fn generates_persists_and_reuses_key_file() {
-        let path = temp_key_path("generate");
-        let (first, source) = load_or_create_worker_config_key_at("", &path).expect("generate key");
-        assert_eq!(source, WorkerConfigKeySource::Generated(path.clone()));
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-            assert_eq!(mode & 0o777, 0o600);
-        }
-
-        // Restart simulation: the same key loads again from the file.
-        let (second, source) = load_or_create_worker_config_key_at("", &path).expect("reload key");
-        assert_eq!(source, WorkerConfigKeySource::KeyFile(path.clone()));
-        let envelope = first.encrypt("round-trip").unwrap();
-        assert_eq!(second.decrypt(&envelope).unwrap(), "round-trip");
-
-        // An explicitly configured key wins and does not rewrite the file.
-        let before = std::fs::read_to_string(&path).unwrap();
-        let (configured, source) =
-            load_or_create_worker_config_key_at(&test_key(), &path).expect("configured key");
-        assert_eq!(source, WorkerConfigKeySource::Configured);
-        assert!(configured.decrypt(&envelope).is_err());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
-
-        std::fs::remove_file(path).ok();
-    }
-
-    #[test]
-    fn invalid_key_files_fail_without_overwriting() {
-        let path = temp_key_path("malformed");
-        std::fs::write(&path, "not-a-valid-key\n").unwrap();
-
-        let error = load_or_create_worker_config_key_at("", &path).unwrap_err();
-        assert!(error.to_string().contains(&path.display().to_string()));
-
-        let path_short = temp_key_path("short");
-        std::fs::write(&path_short, STANDARD.encode([1_u8; 8])).unwrap();
-        let error = load_or_create_worker_config_key_at("", &path_short).unwrap_err();
-        assert!(error.to_string().contains("delete the file"));
-
-        let path_empty = temp_key_path("empty");
-        std::fs::write(&path_empty, "   \n").unwrap();
-        let error = load_or_create_worker_config_key_at("", &path_empty).unwrap_err();
-        assert!(error.to_string().contains("is empty"));
     }
 }

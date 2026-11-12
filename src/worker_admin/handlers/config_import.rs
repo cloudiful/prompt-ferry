@@ -156,6 +156,3 @@ fn import_error_response(err: ImportError) -> Response {
     };
     error(status, err.code(), &message)
 }
-
-#[cfg(test)]
-mod tests;

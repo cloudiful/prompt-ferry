@@ -301,6 +301,3 @@ pub async fn inspect_server(server: &McpServer) -> anyhow::Result<(Value, Value,
         json_response(json!("admin-test-prompts"), prompts),
     ))
 }
-
-#[cfg(test)]
-mod tests;

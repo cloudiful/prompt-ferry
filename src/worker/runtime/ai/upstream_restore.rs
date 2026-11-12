@@ -116,6 +116,3 @@ fn restore_mcp_string(text: &str, context: &redactor::RestoreContext<'_>) -> Res
 #[cfg(test)]
 #[path = "upstream_restore_blocking_tests.rs"]
 mod blocking_tests;
-#[cfg(test)]
-#[path = "upstream_restore_diagnostics_tests.rs"]
-mod diagnostics_tests;

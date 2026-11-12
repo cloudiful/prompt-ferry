@@ -109,13 +109,6 @@ pub(super) struct RouteForwardRequest<'a> {
     pub(super) raw_content_logging_enabled: bool,
 }
 
-#[cfg(test)]
-pub(super) async fn forward_route_request(
-    input: RouteForwardRequest<'_>,
-) -> anyhow::Result<ForwardOutcome> {
-    forward_route_request_with_probe(input, None).await
-}
-
 pub(super) async fn forward_route_request_with_probe(
     input: RouteForwardRequest<'_>,
     mut quota_probe: Option<crate::worker::runtime::routing::QuotaProbePermit>,
@@ -1113,6 +1106,3 @@ fn chatgpt_login_required(message: &str) -> CompatError {
         format!("{message}; complete the ChatGPT login for this endpoint again"),
     )
 }
-
-#[cfg(test)]
-mod tests;

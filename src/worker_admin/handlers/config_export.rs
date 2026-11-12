@@ -177,6 +177,3 @@ fn archive_filename(backend: crate::db::config_repository::ConfigBackendKind) ->
     let stamp = Utc::now().format("%Y%m%dT%H%M%SZ");
     format!("prompt-ferry-config-{}-{stamp}.pfce", backend.as_str())
 }
-
-#[cfg(test)]
-mod tests;

@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """Validate the cargo test summary: no failures, no ignored tests, real results.
 
-libtest captures a passing test's stderr, and a service-backed skip branch
-returns Ok without panicking, so a green log alone cannot prove per-test
-execution. The no-silent-skip guarantee therefore rests on
-`require-services.sh`, which requires both dedicated test services — the quota
-PostgreSQL database and the Valkey instance — before cargo starts; this check is
-the complementary summary guard and fails when the run reported failures, ignored
-tests, or no test result at all. It never needs `--nocapture` and never touches
-credentials.
+libtest captures a passing test's stderr, so a green log alone cannot prove
+per-test execution. This check is the summary guard and fails when the run
+reported failures, ignored tests, or no test result at all. The retained suite
+is unit-only, so there is no service preflight to complement it. It never needs
+`--nocapture` and never touches credentials.
 """
 
 from __future__ import annotations

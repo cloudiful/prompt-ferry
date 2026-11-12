@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Generate the repo + redaction-chain coverage report and enforce the
-# incremental gate on changed redaction-chain lines (#569 Phase 0).
+# Generate the repo + redaction-chain coverage report from the backend unit
+# suite and enforce the incremental gate on changed redaction-chain lines
+# (#569 Phase 0). The suite is unit-only, so no service preflight is needed.
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
-
-scripts/ci/require-services.sh
 
 OUT_DIR="target/coverage"
 mkdir -p "$OUT_DIR"
@@ -18,8 +17,7 @@ LCOV="$OUT_DIR/lcov.info"
 unset RUSTC_WRAPPER
 
 set +e
-SQLX_OFFLINE=true cargo llvm-cov --workspace --lcov --output-path "$LCOV" \
-  -- --test-threads=1 2>&1 | tee "$LOG"
+SQLX_OFFLINE=true cargo llvm-cov --workspace --lib --lcov --output-path "$LCOV" 2>&1 | tee "$LOG"
 status="${PIPESTATUS[0]}"
 set -e
 

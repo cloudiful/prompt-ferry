@@ -197,14 +197,13 @@ where
     F: FnOnce(String, u16) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<Vec<SocketAddr>>>,
 {
-    resolve_with_policy(host, port, resolve, false).await
+    resolve_with_policy(host, port, resolve).await
 }
 
 async fn resolve_with_policy<F, Fut>(
     host: &str,
     port: u16,
     resolve: F,
-    allow_loopback: bool,
 ) -> anyhow::Result<Result<Vec<SocketAddr>, ResolveError>>
 where
     F: FnOnce(String, u16) -> Fut,
@@ -222,45 +221,13 @@ where
             host: host.to_string(),
         }));
     }
-    if allow_loopback {
-        // The test-only path accepts literal loopback only; the caller still
-        // rejects every non-loopback answer after this policy check.
-        if resolved.iter().any(|addr| !addr.ip().is_loopback()) {
-            return Ok(Err(ResolveError::Blocked {
-                host: host.to_string(),
-                ip: resolved
-                    .iter()
-                    .map(SocketAddr::ip)
-                    .find(|ip| !ip.is_loopback())
-                    .unwrap_or(resolved[0].ip()),
-            }));
-        }
-    } else if let Some(addr) = resolved.iter().find(|addr| is_blocked_ip(addr.ip())) {
+    if let Some(addr) = resolved.iter().find(|addr| is_blocked_ip(addr.ip())) {
         return Ok(Err(ResolveError::Blocked {
             host: host.to_string(),
             ip: addr.ip(),
         }));
     }
     Ok(Ok(resolved))
-}
-
-/// Resolve `host` without applying the blocked-address policy.
-///
-/// Only tests that stand up a mock authorization server on a loopback
-/// address use this.
-#[cfg(test)]
-pub(crate) async fn resolve_host(host: &str, port: u16) -> anyhow::Result<Vec<SocketAddr>> {
-    let resolved: Vec<SocketAddr> = match host.parse::<IpAddr>() {
-        Ok(ip) => vec![SocketAddr::new(ip, port)],
-        Err(_) => tokio::net::lookup_host((host, port))
-            .await
-            .with_context(|| format!("failed to resolve host `{host}`"))?
-            .collect(),
-    };
-    if resolved.is_empty() {
-        bail!("host `{host}` did not resolve");
-    }
-    Ok(resolved)
 }
 
 /// A client pinned to the exact addresses validated by
@@ -335,33 +302,21 @@ where
     F: FnOnce(String, u16) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<Vec<SocketAddr>>>,
 {
-    build_pinned_client(url, timeout, resolve, false).await
+    build_pinned_client(url, timeout, resolve).await
 }
 
 /// The single construction pipeline: URL policy, resolver, validate every
-/// answer, then build the pinned client. `allow_loopback` is fixed false in
-/// production and only the cfg(test) wrappers pass true; even then only
-/// literal loopback answers are accepted.
+/// answer, then build the pinned client.
 async fn build_pinned_client<F, Fut>(
     url: &reqwest::Url,
     timeout: Duration,
     resolve: F,
-    allow_loopback: bool,
 ) -> anyhow::Result<Client>
 where
     F: FnOnce(String, u16) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<Vec<SocketAddr>>>,
 {
-    if allow_loopback {
-        if !matches!(url.scheme(), "http" | "https") {
-            bail!("URL must use HTTP(S) in the loopback test path");
-        }
-        if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
-            bail!("URL must not embed credentials or a fragment");
-        }
-    } else {
-        validate_https_url(url)?;
-    }
+    validate_https_url(url)?;
     let host = url
         .host_str()
         .filter(|host| !host.is_empty())
@@ -369,43 +324,11 @@ where
     let port = url.port_or_known_default().unwrap_or(443);
     let resolved = tokio::time::timeout(
         timeout.max(Duration::from_millis(100)),
-        resolve_with_policy(host, port, resolve, allow_loopback),
+        resolve_with_policy(host, port, resolve),
     )
     .await
     .map_err(|_| anyhow!("resolving the URL host timed out"))?
     .map_err(|error| anyhow!("failed to resolve URL host: {error}"))?
     .map_err(|error| anyhow!("{error}"))?;
-    if allow_loopback && resolved.iter().any(|addr| !addr.ip().is_loopback()) {
-        bail!("the loopback test path accepts only loopback addresses");
-    }
     client_with_pinned_dns(host, &resolved, timeout)
-}
-
-/// Test-only entry to the same construction pipeline with an injected
-/// resolver. Only loopback answers are accepted.
-#[cfg(test)]
-pub(crate) async fn test_pinned_client_for_url_with<F, Fut>(
-    url: &reqwest::Url,
-    timeout: Duration,
-    resolve: F,
-) -> anyhow::Result<Client>
-where
-    F: FnOnce(String, u16) -> Fut,
-    Fut: std::future::Future<Output = anyhow::Result<Vec<SocketAddr>>>,
-{
-    build_pinned_client(url, timeout, resolve, true).await
-}
-
-/// Test-only constructor for a real loopback MCP transport. It accepts only
-/// literal loopback answers and still validates, resolves and pins through the
-/// shared helpers; production never uses this path.
-#[cfg(test)]
-pub(crate) async fn loopback_client_for_url(
-    url: &reqwest::Url,
-    timeout: Duration,
-) -> anyhow::Result<Client> {
-    test_pinned_client_for_url_with(url, timeout, |host, port| async move {
-        resolve_host(&host, port).await
-    })
-    .await
 }
