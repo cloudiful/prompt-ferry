@@ -1,3 +1,5 @@
+import { useEffect } from 'react'
+import { useForm, useStore } from '@tanstack/react-form'
 import { Info, LoaderCircle, Trash2 } from 'lucide-react'
 import type { UsageClearScope, User } from '@/generated/admin-api'
 import { Button } from '@/components/ui/button'
@@ -14,6 +16,7 @@ import {
 } from '@/components/ui/select'
 import { useLocale } from '@/lib/i18n'
 import {
+  createDefaultUsageClearForm,
   usageClearScopeOptions,
   usageClearUserOptions,
   type UsageClearForm,
@@ -21,9 +24,7 @@ import {
 
 type UsageClearDialogProps = {
   currentUserLabel: string
-  form: UsageClearForm
   isAdmin: boolean
-  onFormChange: (form: UsageClearForm) => void
   onOpenChange: (open: boolean) => void
   onSubmit: (captured: UsageClearForm) => void
   open: boolean
@@ -35,16 +36,14 @@ type UsageClearDialogProps = {
 /**
  * The clear-history dialog.
  *
- * The form belongs to the parent, which snapshots it before the action and
- * decides whether a completion may close this dialog or reset a newer draft.
- * A clear in flight freezes every dismissal path and only its own submit shows
- * a spinner; the category is never part of the payload.
+ * The dialog owns the form values and snapshots them on submit; the parent
+ * owns the request guard and decides whether a completion may close it. A clear
+ * in flight freezes every dismissal path and only its own submit shows a
+ * spinner; the category is never part of the payload.
  */
 export function UsageClearDialog({
   currentUserLabel,
-  form,
   isAdmin,
-  onFormChange,
   onOpenChange,
   onSubmit,
   open,
@@ -53,6 +52,18 @@ export function UsageClearDialog({
   users,
 }: UsageClearDialogProps) {
   const { t } = useLocale()
+  const form = useForm({
+    defaultValues: createDefaultUsageClearForm(),
+    onSubmit: async ({ value }) => {
+      onSubmit({ ...value })
+    },
+  })
+  const values = useStore(form.store, (state) => state.values)
+
+  useEffect(() => {
+    if (open) form.reset(createDefaultUsageClearForm())
+  }, [open])
+
   const scopeOptions = usageClearScopeOptions(isAdmin, {
     allUsers: t('clearAllRecords'),
     currentUser: t('clearCurrentUserHistory'),
@@ -60,10 +71,6 @@ export function UsageClearDialog({
   })
   const userOptions = usageClearUserOptions(users)
   const clearing = pendingOrigin === 'clear'
-
-  function patch(next: Partial<UsageClearForm>): void {
-    onFormChange({ ...form, ...next })
-  }
 
   return (
     <Dialog
@@ -87,10 +94,12 @@ export function UsageClearDialog({
         <DialogTitle>{t('clearHistory')}</DialogTitle>
         <form
           className="grid gap-3 text-xs"
+          noValidate
           onSubmit={(event) => {
             event.preventDefault()
+            event.stopPropagation()
             if (pending) return
-            onSubmit(form)
+            void form.handleSubmit()
           }}
         >
           <div className="grid gap-1">
@@ -104,95 +113,122 @@ export function UsageClearDialog({
                 <Info className="size-3.5" />
               </span>
             </div>
-            <Select
-              disabled={pending}
-              onValueChange={(value) =>
-                patch({ scope: value as UsageClearScope })
-              }
-              value={form.scope}
-            >
-              <SelectTrigger
-                aria-label={t('clearScope')}
-                id="usage-clear-scope"
-                size="sm"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {scopeOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <form.Field name="scope">
+              {(field) => (
+                <Select
+                  disabled={pending}
+                  onValueChange={(value) =>
+                    field.handleChange(value as UsageClearScope)
+                  }
+                  value={field.state.value}
+                >
+                  <SelectTrigger
+                    aria-label={t('clearScope')}
+                    id="usage-clear-scope"
+                    size="sm"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {scopeOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </form.Field>
           </div>
 
-          {form.scope === 'target_user' && (
+          {values.scope === 'target_user' && (
             <div className="grid gap-1">
               <Label htmlFor="usage-clear-user">{t('selectUser')}</Label>
-              <Select
-                disabled={pending}
-                onValueChange={(value) => patch({ user_id: Number(value) })}
-                value={form.user_id === null ? '' : String(form.user_id)}
-              >
-                <SelectTrigger
-                  aria-label={t('selectUser')}
-                  id="usage-clear-user"
-                  size="sm"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {userOptions.map((option) => (
-                    <SelectItem key={option.value} value={String(option.value)}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <form.Field name="user_id">
+                {(field) => (
+                  <Select
+                    disabled={pending}
+                    onValueChange={(value) => field.handleChange(Number(value))}
+                    value={
+                      field.state.value === null
+                        ? ''
+                        : String(field.state.value)
+                    }
+                  >
+                    <SelectTrigger
+                      aria-label={t('selectUser')}
+                      id="usage-clear-user"
+                      size="sm"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {userOptions.map((option) => (
+                        <SelectItem
+                          key={option.value}
+                          value={String(option.value)}
+                        >
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </form.Field>
             </div>
           )}
 
-          {form.scope === 'current_user' && (
+          {values.scope === 'current_user' && (
             <div className="rounded border bg-muted px-3 py-2 text-muted-foreground">
               {currentUserLabel}
             </div>
           )}
 
-          <label className="inline-flex min-h-8 items-center gap-2 text-[0.75rem]">
-            <Checkbox
-              checked={form.delete_all}
-              disabled={pending}
-              id="usage-clear-all"
-              onCheckedChange={(checked) =>
-                patch({ delete_all: checked === true })
-              }
-            />
-            {t('clearAllRecords')}
-          </label>
+          <form.Field name="delete_all">
+            {(field) => (
+              <label className="inline-flex min-h-8 items-center gap-2 text-[0.75rem]">
+                <Checkbox
+                  checked={field.state.value}
+                  disabled={pending}
+                  id="usage-clear-all"
+                  onCheckedChange={(checked) =>
+                    field.handleChange(checked === true)
+                  }
+                />
+                {t('clearAllRecords')}
+              </label>
+            )}
+          </form.Field>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="grid gap-1">
-              <Label htmlFor="usage-clear-start">{t('startTime')}</Label>
-              <Input
-                disabled={pending || form.delete_all}
-                id="usage-clear-start"
-                onChange={(event) => patch({ start_at: event.target.value })}
-                type="datetime-local"
-                value={form.start_at}
-              />
-            </div>
-            <div className="grid gap-1">
-              <Label htmlFor="usage-clear-end">{t('endTime')}</Label>
-              <Input
-                disabled={pending || form.delete_all}
-                id="usage-clear-end"
-                onChange={(event) => patch({ end_at: event.target.value })}
-                type="datetime-local"
-                value={form.end_at}
-              />
-            </div>
+            <form.Field name="start_at">
+              {(field) => (
+                <div className="grid gap-1">
+                  <Label htmlFor="usage-clear-start">{t('startTime')}</Label>
+                  <Input
+                    disabled={pending || values.delete_all}
+                    id="usage-clear-start"
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    type="datetime-local"
+                    value={field.state.value}
+                  />
+                </div>
+              )}
+            </form.Field>
+            <form.Field name="end_at">
+              {(field) => (
+                <div className="grid gap-1">
+                  <Label htmlFor="usage-clear-end">{t('endTime')}</Label>
+                  <Input
+                    disabled={pending || values.delete_all}
+                    id="usage-clear-end"
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    type="datetime-local"
+                    value={field.state.value}
+                  />
+                </div>
+              )}
+            </form.Field>
           </div>
 
           <div className="rounded border border-destructive/40 bg-destructive/10 px-3 py-2 leading-5 text-destructive">

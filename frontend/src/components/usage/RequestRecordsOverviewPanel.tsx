@@ -1,7 +1,14 @@
 import type { EChartsOption } from 'echarts'
-import type { RequestRecordOverviewResponse } from '@/generated/admin-api'
-import { lazy, Suspense } from 'react'
+import type {
+  RequestRecordOverviewBreakdownRow,
+  RequestRecordOverviewResponse,
+} from '@/generated/admin-api'
+import { lazy, Suspense, useMemo } from 'react'
 import { LoaderCircle } from 'lucide-react'
+import {
+  DataTable,
+  type DataTableColumnDef,
+} from '@/components/shared/DataTable'
 import { Badge } from '@/components/ui/badge'
 import {
   Select,
@@ -10,14 +17,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { BreakdownDetailPopover } from '@/components/usage/BreakdownDetailPopover'
 import { useDisplayTimeZone } from '@/lib/display-timezone'
 import { useLocale } from '@/lib/i18n'
@@ -229,6 +228,140 @@ export function RequestRecordsOverviewPanel({
     return row.usage_unit ? `${provider} · ${row.usage_unit}` : provider
   }
 
+  const columns = useMemo<
+    Array<DataTableColumnDef<RequestRecordOverviewBreakdownRow>>
+  >(
+    () => [
+      {
+        id: 'object',
+        header:
+          category === 'ai' && perspective === 'upstream'
+            ? t('overviewUpstreamEndpoint')
+            : t('overviewObject'),
+        cell: ({ row }) => (
+          <span className="inline-flex items-center gap-1">
+            <span className="font-medium">{row.original.label}</span>
+            {category === 'ai' ? (
+              <BreakdownDetailPopover
+                perspective={perspective}
+                row={row.original}
+              />
+            ) : (
+              <Badge variant="secondary">{providerBadge(row.original)}</Badge>
+            )}
+          </span>
+        ),
+      },
+      {
+        id: 'requests',
+        header: t('requests'),
+        cell: ({ row }) => (
+          <span className="whitespace-nowrap">
+            {formatUsageCount(row.original.request_count, locale)}
+          </span>
+        ),
+      },
+      {
+        id: 'request_share',
+        header: t('overviewRequestShare'),
+        cell: ({ row }) => (
+          <span className="whitespace-nowrap">
+            {formatUsagePercent(row.original.request_share)}
+          </span>
+        ),
+      },
+      ...(category === 'ai'
+        ? [
+            {
+              id: 'total_tokens',
+              header: t('overviewTotalTokens'),
+              cell: ({
+                row,
+              }: {
+                row: { original: RequestRecordOverviewBreakdownRow }
+              }) => (
+                <span className="whitespace-nowrap">
+                  {formatUsageTokenQuantity(
+                    row.original.tokens.total_tokens,
+                    locale,
+                  )}
+                </span>
+              ),
+            } satisfies DataTableColumnDef<RequestRecordOverviewBreakdownRow>,
+            {
+              id: 'token_share',
+              header: t('overviewTokenShare'),
+              cell: ({
+                row,
+              }: {
+                row: { original: RequestRecordOverviewBreakdownRow }
+              }) => (
+                <span className="whitespace-nowrap">
+                  {formatUsagePercent(row.original.token_share)}
+                </span>
+              ),
+            } satisfies DataTableColumnDef<RequestRecordOverviewBreakdownRow>,
+            {
+              id: 'cache_rate',
+              header: t('overviewCacheRate'),
+              cell: ({
+                row,
+              }: {
+                row: { original: RequestRecordOverviewBreakdownRow }
+              }) => (
+                <span className="whitespace-nowrap">
+                  {formatUsagePercent(row.original.tokens.cache_rate)}
+                </span>
+              ),
+            } satisfies DataTableColumnDef<RequestRecordOverviewBreakdownRow>,
+            {
+              id: 'error_rate',
+              header: t('overviewErrorRate'),
+              cell: ({
+                row,
+              }: {
+                row: { original: RequestRecordOverviewBreakdownRow }
+              }) => (
+                <span className="whitespace-nowrap">
+                  {formatUsagePercent(row.original.error_rate)}
+                </span>
+              ),
+            } satisfies DataTableColumnDef<RequestRecordOverviewBreakdownRow>,
+            {
+              id: 'avg_output_rate',
+              header: t('overviewAvgOutputRate'),
+              cell: ({
+                row,
+              }: {
+                row: { original: RequestRecordOverviewBreakdownRow }
+              }) => (
+                <span className="whitespace-nowrap">
+                  {formatUsageTokensPerSecond(
+                    row.original.avg_output_tokens_per_second,
+                  )}
+                </span>
+              ),
+            } satisfies DataTableColumnDef<RequestRecordOverviewBreakdownRow>,
+          ]
+        : [
+            {
+              id: 'success_rate',
+              header: t('overviewSuccessRate'),
+              cell: ({
+                row,
+              }: {
+                row: { original: RequestRecordOverviewBreakdownRow }
+              }) => (
+                <span className="whitespace-nowrap">
+                  {formatUsagePercent(row.original.success_rate)}
+                </span>
+              ),
+            } satisfies DataTableColumnDef<RequestRecordOverviewBreakdownRow>,
+          ]),
+    ],
+    [category, perspective, t, locale],
+  )
+
   return (
     <div className="grid min-w-0 grid-cols-1 gap-3">
       {category === 'mcp' && (
@@ -332,122 +465,54 @@ export function RequestRecordsOverviewPanel({
               )}
             </div>
             <div className="overflow-x-auto">
-              <Table aria-busy={loading}>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>
-                      {category === 'ai' && perspective === 'upstream'
-                        ? t('overviewUpstreamEndpoint')
-                        : t('overviewObject')}
-                    </TableHead>
-                    <TableHead>{t('requests')}</TableHead>
-                    <TableHead>{t('overviewRequestShare')}</TableHead>
-                    {category === 'ai' ? (
-                      <>
-                        <TableHead>{t('overviewTotalTokens')}</TableHead>
-                        <TableHead>{t('overviewTokenShare')}</TableHead>
-                        <TableHead>{t('overviewCacheRate')}</TableHead>
-                        <TableHead>{t('overviewErrorRate')}</TableHead>
-                        <TableHead>{t('overviewAvgOutputRate')}</TableHead>
-                      </>
-                    ) : (
-                      <TableHead>{t('overviewSuccessRate')}</TableHead>
-                    )}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.map((row) => {
-                    const drilldown = usageDrilldownForPerspective(
-                      perspective,
-                      category,
-                      row,
-                    )
-                    return (
-                      <TableRow
-                        className={drilldown ? 'cursor-pointer' : undefined}
-                        data-drilldown={drilldown ? 'true' : 'false'}
-                        data-usage-breakdown-row={row.label}
-                        key={`${row.label}:${row.endpoint_id ?? ''}:${row.model ?? ''}`}
-                        onClick={
-                          drilldown ? () => onDrilldown(drilldown) : undefined
+              <DataTable
+                busy={loading}
+                cellAttributes={({ column }) => ({
+                  className:
+                    column.id === 'object'
+                      ? 'max-w-64 break-words'
+                      : 'whitespace-nowrap',
+                })}
+                columns={columns}
+                data={rows}
+                emptyLabel="-"
+                getRowId={(row) =>
+                  `${row.label}:${row.endpoint_id ?? ''}:${row.model ?? ''}`
+                }
+                getRowProps={(row) => {
+                  const drilldown = usageDrilldownForPerspective(
+                    perspective,
+                    category,
+                    row,
+                  )
+                  return {
+                    className: drilldown ? 'cursor-pointer' : undefined,
+                    onClick: drilldown
+                      ? () => onDrilldown(drilldown)
+                      : undefined,
+                    onKeyDown: drilldown
+                      ? (event) => {
+                          if (event.target !== event.currentTarget) return
+                          if (event.key !== 'Enter' && event.key !== ' ') return
+                          event.preventDefault()
+                          onDrilldown(drilldown)
                         }
-                        onKeyDown={
-                          drilldown
-                            ? (event) => {
-                                if (event.target !== event.currentTarget) return
-                                if (event.key !== 'Enter' && event.key !== ' ')
-                                  return
-                                event.preventDefault()
-                                onDrilldown(drilldown)
-                              }
-                            : undefined
-                        }
-                        tabIndex={drilldown ? 0 : undefined}
-                      >
-                        <TableCell className="max-w-64 break-words">
-                          <span className="inline-flex items-center gap-1">
-                            <span className="font-medium">{row.label}</span>
-                            {category === 'ai' ? (
-                              <BreakdownDetailPopover
-                                perspective={perspective}
-                                row={row}
-                              />
-                            ) : (
-                              <Badge variant="secondary">
-                                {providerBadge(row)}
-                              </Badge>
-                            )}
-                          </span>
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap">
-                          {formatUsageCount(row.request_count, locale)}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap">
-                          {formatUsagePercent(row.request_share)}
-                        </TableCell>
-                        {category === 'ai' ? (
-                          <>
-                            <TableCell className="whitespace-nowrap">
-                              {formatUsageTokenQuantity(
-                                row.tokens.total_tokens,
-                                locale,
-                              )}
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap">
-                              {formatUsagePercent(row.token_share)}
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap">
-                              {formatUsagePercent(row.tokens.cache_rate)}
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap">
-                              {formatUsagePercent(row.error_rate)}
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap">
-                              {formatUsageTokensPerSecond(
-                                row.avg_output_tokens_per_second,
-                              )}
-                            </TableCell>
-                          </>
-                        ) : (
-                          <TableCell className="whitespace-nowrap">
-                            {formatUsagePercent(row.success_rate)}
-                          </TableCell>
-                        )}
-                      </TableRow>
-                    )
-                  })}
-                  {rows.length === 0 && (
-                    <TableRow>
-                      <TableCell
-                        className="py-8 text-center text-muted-foreground"
-                        colSpan={category === 'ai' ? 8 : 4}
-                      >
-                        -
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+                      : undefined,
+                    tabIndex: drilldown ? 0 : undefined,
+                  }
+                }}
+                label={distributionTitle}
+                rowAttributes={(row) => ({
+                  'data-drilldown': usageDrilldownForPerspective(
+                    perspective,
+                    category,
+                    row,
+                  )
+                    ? 'true'
+                    : 'false',
+                  'data-usage-breakdown-row': row.label,
+                })}
+              />
             </div>
           </section>
         </div>

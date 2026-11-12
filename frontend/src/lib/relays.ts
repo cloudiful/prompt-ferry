@@ -1,18 +1,9 @@
 import type { QueryClient } from '@tanstack/react-query'
-import type {
-  ManagedRelay,
-  ManagedRelayListResponse,
-  ManagedRelayPatchRequest,
-  ManagedRelayRequest,
-} from '@/generated/admin-api'
+import type { ManagedRelayListResponse } from '@/generated/admin-api'
 import {
-  createRelay,
-  deleteRelay,
-  listRelays,
-  reconnectRelay,
-  updateRelay,
-} from '@/generated/admin-api'
-import { expectData, withData } from '@/api'
+  listRelaysOptions,
+  listRelaysQueryKey,
+} from '@/generated/admin-api/@tanstack/react-query.gen'
 import { recordActionKey } from '@/stores/record-action-types'
 
 export const RELAY_ACTION_PREFIX = 'relay'
@@ -22,71 +13,33 @@ export function relayActionKey(relayId: string | null): string {
   return recordActionKey(RELAY_ACTION_PREFIX, relayId)
 }
 
+export function relayPagesQueryKey() {
+  return listRelaysQueryKey()
+}
+
 export function relayPageQueryKey(first: number, rows: number) {
-  return ['relays', first, rows] as const
+  return listRelaysQueryKey({ query: { first, rows } })
 }
 
-export async function loadRelayPage(
-  first: number,
-  rows: number,
-): Promise<ManagedRelayListResponse> {
-  return expectData(
-    await listRelays<true>(withData({ query: { first, rows } })),
-  )
-}
-
-export async function createManagedRelay(
-  body: ManagedRelayRequest,
-): Promise<ManagedRelay> {
-  return expectData(await createRelay<true>(withData({ body })))
-}
-
-export async function updateManagedRelay(
-  relayId: string,
-  body: ManagedRelayPatchRequest,
-): Promise<ManagedRelay> {
-  return expectData(
-    await updateRelay<true>(withData({ path: { relay_id: relayId }, body })),
-  )
-}
-
-export async function deleteManagedRelay(relayId: string): Promise<void> {
-  await deleteRelay<true>(withData({ path: { relay_id: relayId } }))
-}
-
-export async function reconnectManagedRelay(
-  relayId: string,
-): Promise<ManagedRelay> {
-  return expectData(
-    await reconnectRelay<true>(withData({ path: { relay_id: relayId } })),
-  )
-}
-
-export async function loadRelayPageWithCorrection(
-  first: number,
-  rows: number,
-): Promise<ManagedRelayListResponse> {
-  const page = await loadRelayPage(first, rows)
-  if (page.relays.length > 0 || page.total === 0 || page.first < page.total) {
-    return page
-  }
-
-  const correctedFirst = Math.floor((page.total - 1) / page.rows) * page.rows
-  return loadRelayPage(correctedFirst, page.rows)
-}
-
+/**
+ * Reload one page of the relay list after a write: cancel the read of this
+ * page, drop every cached copy of the list, then read the page again.
+ */
 export async function refreshRelayPage(
   queryClient: QueryClient,
   first: number,
   rows: number,
 ): Promise<{ first: number; page: ManagedRelayListResponse }> {
-  const page = await queryClient.fetchQuery({
+  await queryClient.cancelQueries({
     queryKey: relayPageQueryKey(first, rows),
-    queryFn: () => loadRelayPageWithCorrection(first, rows),
-    staleTime: 0,
+    exact: true,
   })
-  if (page.first !== first) {
-    queryClient.setQueryData(relayPageQueryKey(page.first, page.rows), page)
-  }
+  await queryClient.invalidateQueries({
+    queryKey: relayPagesQueryKey(),
+    refetchType: 'none',
+  })
+  const page = await queryClient.fetchQuery(
+    listRelaysOptions({ query: { first, rows } }),
+  )
   return { first: page.first, page }
 }

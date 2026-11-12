@@ -21,9 +21,6 @@ import type {
 } from '@/generated/admin-api'
 import type { MessageKey } from '@/i18n'
 import type { StreamDeltaBatchingForm } from '@/models'
-import type { PendingActions } from './async-action'
-import type { SettingForm } from './settings-keys'
-import { SETTING_FORM_ORDER, settingFormKey } from './settings-keys'
 
 export type ModelRouteWhitelistForm = { enabled: boolean }
 
@@ -211,21 +208,4 @@ export function mergeModelRouteWhitelistResponse(
   return Object.is(current.enabled, submitted.enabled)
     ? { enabled: response.enabled }
     : current
-}
-
-/**
- * Whether a scoped refresh is safe: no requests write is in flight, and no form
- * is dirty, debouncing, queued or failed. A refresh replaces the loaded values,
- * so it must not discard a draft the operator has not saved yet.
- */
-export function settingsRefreshBlocked(input: {
-  pendingActions: PendingActions
-  dirty: Readonly<Record<SettingForm, boolean>>
-  failed: Readonly<Record<SettingForm, boolean>>
-}): boolean {
-  for (const form of SETTING_FORM_ORDER) {
-    if (input.dirty[form] || input.failed[form]) return true
-    if (Object.hasOwn(input.pendingActions, settingFormKey(form))) return true
-  }
-  return false
 }

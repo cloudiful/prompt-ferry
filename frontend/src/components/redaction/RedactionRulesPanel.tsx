@@ -1,7 +1,15 @@
 import { useMemo, useState } from 'react'
+import { useStore, type ReactFormExtendedApi } from '@tanstack/react-form'
 import { Eye, EyeOff, Plus, Trash2 } from 'lucide-react'
-import type { RedactionCustomStringRuleRowSchema } from '@/generated/admin-api'
+import type {
+  RedactionConfigSchema,
+  RedactionCustomStringRuleRowSchema,
+} from '@/generated/admin-api'
 import { formatDateTime } from '@/format/datetime-core'
+import {
+  DataTable,
+  type DataTableColumnDef,
+} from '@/components/shared/DataTable'
 import { TablePagination } from '@/components/shared/TablePagination'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -13,79 +21,69 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { useLocale } from '@/lib/i18n'
-import {
-  customStringRuleWarnings,
-  useRedactionStore,
-  visibleRedactionRows,
-  visibleRedactionTotal,
-} from '@/lib/redaction'
+import { customStringRuleWarnings } from '@/lib/redaction'
 import { createRedactionWorkspaceView } from '@/models/redaction'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/models/pagination'
 import { DeleteRuleConfirmDialog } from './DeleteRuleConfirmDialog'
 import { RuleWarningBadge } from './RuleWarningBadge'
 
-export function RedactionRulesPanel() {
+export type RedactionRulesForm = ReactFormExtendedApi<
+  RedactionConfigSchema,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined
+>
+
+type RedactionRulesPanelProps = {
+  customStringDirty: boolean
+  customStringFirst: number
+  customStringRevealAll: boolean
+  customStringRows: number
+  customStringSearch: string
+  form: RedactionRulesForm
+  onAddRule: () => void
+  onEditRule: () => void
+  onPage: (first: number, rows: number) => void
+  onRemoveRule: (arrayIndex: number) => void
+  onSearch: (search: string) => void
+  onToggleReveal: () => void
+  pageError: boolean
+  rows: RedactionCustomStringRuleRowSchema[]
+  total: number
+  validationError: boolean
+}
+
+export function RedactionRulesPanel({
+  customStringDirty,
+  customStringFirst,
+  customStringRevealAll,
+  customStringRows,
+  customStringSearch,
+  form,
+  onAddRule,
+  onEditRule,
+  onPage,
+  onRemoveRule,
+  onSearch,
+  onToggleReveal,
+  pageError,
+  rows,
+  total,
+  validationError,
+}: RedactionRulesPanelProps) {
   const { locale, t } = useLocale()
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
-  const config = useRedactionStore((state) => state.config)
-  const customStringPage = useRedactionStore((state) => state.customStringPage)
-  const customStringFirst = useRedactionStore(
-    (state) => state.customStringFirst,
-  )
-  const customStringRows = useRedactionStore((state) => state.customStringRows)
-  const customStringTotal = useRedactionStore(
-    (state) => state.customStringTotal,
-  )
-  const customStringSearch = useRedactionStore(
-    (state) => state.customStringSearch,
-  )
-  const customStringDirty = useRedactionStore(
-    (state) => state.customStringDirty,
-  )
-  const customStringRevealAll = useRedactionStore(
-    (state) => state.customStringRevealAll,
-  )
-  const validationError = useRedactionStore((state) => state.validationError)
-  const pageError = useRedactionStore((state) => state.pageError)
+  const config = useStore(form.store, (state) => state.values)
   const warnings = useMemo(() => customStringRuleWarnings(config), [config])
-  const rows = useMemo(
-    () =>
-      visibleRedactionRows({
-        config,
-        customStringDirty,
-        customStringFirst,
-        customStringRows,
-        customStringSearch,
-        customStringPage,
-      }),
-    [
-      config,
-      customStringDirty,
-      customStringFirst,
-      customStringRows,
-      customStringSearch,
-      customStringPage,
-    ],
-  )
-  const total = useMemo(
-    () =>
-      visibleRedactionTotal({
-        config,
-        customStringDirty,
-        customStringSearch,
-        customStringTotal,
-      }),
-    [config, customStringDirty, customStringSearch, customStringTotal],
-  )
   const workspace = useMemo(
     () =>
       createRedactionWorkspaceView({
@@ -95,128 +93,174 @@ export function RedactionRulesPanel() {
       }),
     [config, t],
   )
-  const store = useRedactionStore.getState()
-  const pendingDelete = deleteIndex === null ? null : { index: deleteIndex }
-
-  function updatePattern(arrayIndex: number, pattern: string): void {
-    store.updateCustomStringRule(arrayIndex, { pattern })
-  }
-
-  function changeMatchType(arrayIndex: number, value: string): void {
-    if (value !== 'exact' && value !== 'contains' && value !== 'regex') return
-    store.updateCustomStringRule(arrayIndex, { match_type: value })
-  }
-
-  function changeScope(arrayIndex: number, value: string): void {
-    if (value !== 'text' && value !== 'line') return
-    store.updateCustomStringRule(arrayIndex, { scope: value })
-  }
 
   function confirmDelete(): void {
-    if (deleteIndex !== null) store.removeCustomStringRule(deleteIndex)
+    if (deleteIndex !== null) onRemoveRule(deleteIndex)
     setDeleteIndex(null)
   }
 
-  function requestPage(first: number, pageRows: number): void {
-    void store.setCustomStringPage(first, pageRows).catch(() => undefined)
-  }
-
-  function updateSearch(search: string): void {
-    void store.setCustomStringSearch(search).catch(() => undefined)
-  }
-
-  function renderRule(row: RedactionCustomStringRuleRowSchema) {
-    const arrayIndex = row.array_index
-    const warning = warnings[arrayIndex] ?? {
-      duplicate: false,
-      conflict: false,
-      invalidRegex: false,
-    }
-    const errorId = `redaction-invalid-regex-${arrayIndex}`
-
-    return (
-      <TableRow key={arrayIndex} data-redaction-array-index={arrayIndex}>
-        <TableCell className="min-w-64">
-          <div className="flex min-w-56 items-center gap-1">
-            <Input
-              aria-describedby={warning.invalidRegex ? errorId : undefined}
-              aria-invalid={warning.invalidRegex || undefined}
-              aria-label={`${t('pattern')} ${arrayIndex + 1}`}
-              autoComplete="off"
-              className="font-mono"
-              name="redaction-custom-pattern"
-              onChange={(event) =>
-                updatePattern(arrayIndex, event.currentTarget.value)
+  const columns: Array<DataTableColumnDef<RedactionCustomStringRuleRowSchema>> =
+    [
+      {
+        id: 'pattern',
+        header: t('pattern'),
+        cell: ({ row }) => {
+          const arrayIndex = row.original.array_index
+          const warning = warnings[arrayIndex] ?? {
+            duplicate: false,
+            conflict: false,
+            invalidRegex: false,
+          }
+          const errorId = `redaction-invalid-regex-${arrayIndex}`
+          return (
+            <div className="min-w-64">
+              <form.Field name={`custom_strings[${arrayIndex}].pattern`}>
+                {(field) => (
+                  <Input
+                    aria-describedby={
+                      warning.invalidRegex ? errorId : undefined
+                    }
+                    aria-invalid={warning.invalidRegex || undefined}
+                    aria-label={`${t('pattern')} ${arrayIndex + 1}`}
+                    autoComplete="off"
+                    className="font-mono"
+                    name="redaction-custom-pattern"
+                    onChange={(event) => {
+                      field.handleChange(event.currentTarget.value)
+                      onEditRule()
+                    }}
+                    type={customStringRevealAll ? 'text' : 'password'}
+                    value={field.state.value}
+                  />
+                )}
+              </form.Field>
+              {warning.invalidRegex && (
+                <span className="sr-only" id={errorId} role="alert">
+                  {t('ruleInvalidRegex')}
+                </span>
+              )}
+            </div>
+          )
+        },
+      },
+      {
+        id: 'matchType',
+        header: t('matchType'),
+        cell: ({ row }) => {
+          const arrayIndex = row.original.array_index
+          return (
+            <form.Field name={`custom_strings[${arrayIndex}].match_type`}>
+              {(field) => (
+                <Select
+                  onValueChange={(value) => {
+                    if (
+                      value !== 'exact' &&
+                      value !== 'contains' &&
+                      value !== 'regex'
+                    )
+                      return
+                    field.handleChange(value)
+                    onEditRule()
+                  }}
+                  value={field.state.value}
+                >
+                  <SelectTrigger
+                    aria-label={`${t('matchType')} ${arrayIndex + 1}`}
+                    className="min-w-28"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {workspace.match_type_options.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </form.Field>
+          )
+        },
+      },
+      {
+        id: 'scope',
+        header: t('scopeField'),
+        cell: ({ row }) => {
+          const arrayIndex = row.original.array_index
+          return (
+            <form.Field name={`custom_strings[${arrayIndex}].scope`}>
+              {(field) => (
+                <Select
+                  onValueChange={(value) => {
+                    if (value !== 'text' && value !== 'line') return
+                    field.handleChange(value)
+                    onEditRule()
+                  }}
+                  value={field.state.value}
+                >
+                  <SelectTrigger
+                    aria-label={`${t('scopeField')} ${arrayIndex + 1}`}
+                    className="min-w-24"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {workspace.scope_options.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </form.Field>
+          )
+        },
+      },
+      {
+        id: 'createdAt',
+        header: t('createdAt'),
+        cell: ({ row }) => formatDateTime(row.original.created_at, locale),
+      },
+      {
+        id: 'updatedAt',
+        header: t('updatedAt'),
+        cell: ({ row }) => formatDateTime(row.original.updated_at, locale),
+      },
+      {
+        id: 'warnings',
+        header: t('warnings'),
+        cell: ({ row }) => (
+          <div className="min-w-44 whitespace-normal">
+            <RuleWarningBadge
+              warning={
+                warnings[row.original.array_index] ?? {
+                  duplicate: false,
+                  conflict: false,
+                  invalidRegex: false,
+                }
               }
-              type={customStringRevealAll ? 'text' : 'password'}
-              value={row.pattern}
             />
           </div>
-          {warning.invalidRegex && (
-            <span className="sr-only" id={errorId} role="alert">
-              {t('ruleInvalidRegex')}
-            </span>
-          )}
-        </TableCell>
-        <TableCell>
-          <Select
-            onValueChange={(value) => changeMatchType(arrayIndex, value)}
-            value={row.match_type}
-          >
-            <SelectTrigger
-              aria-label={`${t('matchType')} ${arrayIndex + 1}`}
-              className="min-w-28"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {workspace.match_type_options.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </TableCell>
-        <TableCell>
-          <Select
-            onValueChange={(value) => changeScope(arrayIndex, value)}
-            value={row.scope}
-          >
-            <SelectTrigger
-              aria-label={`${t('scopeField')} ${arrayIndex + 1}`}
-              className="min-w-24"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {workspace.scope_options.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </TableCell>
-        <TableCell>{formatDateTime(row.created_at, locale)}</TableCell>
-        <TableCell>{formatDateTime(row.updated_at, locale)}</TableCell>
-        <TableCell className="min-w-44 whitespace-normal">
-          <RuleWarningBadge warning={warning} />
-        </TableCell>
-        <TableCell>
+        ),
+      },
+      {
+        id: 'actions',
+        header: () => <span className="sr-only">{t('actions')}</span>,
+        cell: ({ row }) => (
           <Button
-            aria-label={`${t('deleteRuleConfirmSubmit')} ${arrayIndex + 1}`}
-            onClick={() => setDeleteIndex(arrayIndex)}
+            aria-label={`${t('deleteRuleConfirmSubmit')} ${row.original.array_index + 1}`}
+            onClick={() => setDeleteIndex(row.original.array_index)}
             size="icon-sm"
             type="button"
             variant="ghost"
           >
             <Trash2 aria-hidden="true" />
           </Button>
-        </TableCell>
-      </TableRow>
-    )
-  }
+        ),
+      },
+    ]
 
   return (
     <div className="grid min-w-0 gap-4">
@@ -232,19 +276,20 @@ export function RedactionRulesPanel() {
         </h2>
         <div className="grid grid-cols-1 gap-x-5 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
           {workspace.rule_options.map((option) => (
-            <label
-              className="flex min-h-9 items-center gap-2 rounded-md border px-3 text-sm"
-              key={option.key}
-            >
-              <Checkbox
-                aria-label={option.label}
-                checked={config.rules[option.key]}
-                onCheckedChange={(checked) =>
-                  store.setBuiltinRule(option.key, checked === true)
-                }
-              />
-              <span>{option.label}</span>
-            </label>
+            <form.Field key={option.key} name={`rules.${option.key}`}>
+              {(field) => (
+                <label className="flex min-h-9 items-center gap-2 rounded-md border px-3 text-sm">
+                  <Checkbox
+                    aria-label={option.label}
+                    checked={field.state.value}
+                    onCheckedChange={(checked) =>
+                      field.handleChange(checked === true)
+                    }
+                  />
+                  <span>{option.label}</span>
+                </label>
+              )}
+            </form.Field>
           ))}
         </div>
       </section>
@@ -271,9 +316,7 @@ export function RedactionRulesPanel() {
                 customStringRevealAll ? 'hideAllPlaintext' : 'showAllPlaintext',
               )}
               aria-pressed={customStringRevealAll}
-              onClick={() =>
-                store.setCustomStringRevealAll(!customStringRevealAll)
-              }
+              onClick={onToggleReveal}
               size="icon-sm"
               type="button"
               variant="ghost"
@@ -291,16 +334,12 @@ export function RedactionRulesPanel() {
               <Input
                 aria-label={t('pattern')}
                 autoComplete="off"
-                onChange={(event) => updateSearch(event.currentTarget.value)}
+                onChange={(event) => onSearch(event.currentTarget.value)}
                 type="search"
                 value={customStringSearch}
               />
             </label>
-            <Button
-              onClick={() => store.addCustomStringRule()}
-              type="button"
-              variant="outline"
-            >
+            <Button onClick={onAddRule} type="button" variant="outline">
               <Plus aria-hidden="true" />
               {t('addRule')}
             </Button>
@@ -327,27 +366,23 @@ export function RedactionRulesPanel() {
             {t('noCustomStrings')}
           </p>
         ) : (
-          <Table className="min-w-[900px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t('pattern')}</TableHead>
-                <TableHead>{t('matchType')}</TableHead>
-                <TableHead>{t('scopeField')}</TableHead>
-                <TableHead>{t('createdAt')}</TableHead>
-                <TableHead>{t('updatedAt')}</TableHead>
-                <TableHead>{t('warnings')}</TableHead>
-                <TableHead>
-                  <span className="sr-only">{t('actions')}</span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>{rows.map(renderRule)}</TableBody>
-          </Table>
+          <DataTable
+            className="min-w-[900px]"
+            columns={columns}
+            data={rows}
+            getRowId={(row) => String(row.array_index)}
+            label={t('customStrings')}
+            rowAttributes={(row) => ({
+              'data-redaction-array-index': row.array_index,
+            })}
+          />
         )}
 
         <TablePagination
           first={customStringFirst}
-          onChange={({ first, rows: pageRows }) => requestPage(first, pageRows)}
+          onChange={({ first: nextFirst, rows: pageRows }) =>
+            onPage(nextFirst, pageRows)
+          }
           pageSizeOptions={STANDARD_PAGE_SIZE_OPTIONS}
           rows={customStringRows}
           total={total}
@@ -359,7 +394,7 @@ export function RedactionRulesPanel() {
         onOpenChange={(open) => {
           if (!open) setDeleteIndex(null)
         }}
-        open={pendingDelete !== null}
+        open={deleteIndex !== null}
       />
     </div>
   )

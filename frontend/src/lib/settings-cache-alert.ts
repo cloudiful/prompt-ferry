@@ -1,41 +1,37 @@
 /**
- * The admin cache-alert settings tab: the DingTalk alert policy, read and saved
- * by hand.
+ * The admin cache-alert settings tab: the DingTalk alert policy, read by
+ * TanStack Query and edited through one native form.
  *
- * The shape follows the accepted network, review and storage ports: one scoped
- * read through the app query client with a read generation, one guarded write
- * under `setting:cacheAlert` with the form captured before the first await, a
- * per-leaf merge that keeps a newer edit, a secret draft cleared only where a
- * save consumed it, and a success report only for a write that reached the
- * server.
- *
- * Two things are specific to this tab. The DingTalk secret is write-only: the
- * server echoes only `has_dingtalk_secret`, which stays the sole source of the
- * presence badge, while the local draft decides the keep/replace mode. And the
- * whole setting is unavailable on a backend that cannot keep it, which the
- * server answers with the structured `capability_unavailable` code; that becomes
- * an explicit state, so the warning and its retry read do not depend on matching
- * an error message.
+ * The shape follows the storage port. The DingTalk secret and the SMTP password
+ * are write-only: the server echoes only their presence flags, the local drafts
+ * decide keep/replace, and a successful save clears exactly the drafts it
+ * consumed. The whole setting is unavailable on a backend that cannot keep it;
+ * that structured answer becomes an explicit query state.
  */
 
-import type { QueryClient } from '@tanstack/react-query'
-import { create } from 'zustand'
+import { useEffect, useRef, useState } from 'react'
+import { useForm, useStore } from '@tanstack/react-form'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
   CacheAlertSettingsResponse,
   MeResponse,
 } from '@/generated/admin-api'
 import {
-  getCacheAlertSetting,
-  setCacheAlertSetting,
-} from '@/generated/admin-api'
-import { expectData, withData } from '@/api'
+  getCacheAlertSettingOptions,
+  getCacheAlertSettingQueryKey,
+  setCacheAlertSettingMutation,
+} from '@/generated/admin-api/@tanstack/react-query.gen'
 import { capturePayload } from '@/stores/record-action-types'
 import { runAsyncAction, type AsyncActionOutcome } from './async-action'
-import { fetchFreshSetting, formatEnvelopeCause } from './settings-refresh'
+import { useSessionStore } from './session'
+import { useAsyncAction } from './use-async-action'
+import { formatEnvelopeCause } from './settings-refresh'
 import {
   CACHE_ALERT_KEY,
   cacheAlertDirty,
   cacheAlertFormToRequest,
+  cacheAlertRefreshBlocked,
+  cacheAlertSmtpIssues,
   clearSavedCacheAlertSecret,
   createCacheAlertForm,
   formFromCacheAlertResponse,
@@ -48,12 +44,6 @@ import {
   type CacheAlertSmtpLeaf,
 } from './settings-cache-alert-model'
 
-const SETTINGS_CACHE_ALERT_NAMESPACE = ['settings-cache-alert'] as const
-const CACHE_ALERT_QUERY_KEY = [
-  ...SETTINGS_CACHE_ALERT_NAMESPACE,
-  'cache-alert',
-] as const
-
 type SettingsIdentity = Pick<MeResponse, 'user_id' | 'login_name' | 'is_admin'>
 
 export function cacheAlertIdentityKey(
@@ -63,232 +53,175 @@ export function cacheAlertIdentityKey(
   return `${identity.user_id}:${identity.login_name}:${identity.is_admin}`
 }
 
-export type SettingsCacheAlertState = {
-  identityKey: string
-  form: CacheAlertForm
-  baseline: CacheAlertForm
-  loaded: boolean
-  loading: boolean
-  loadError: boolean
-  unavailable: boolean
-  unavailableMessage: string
-  saveFailed: boolean
-  initializeIdentity: (identity: SettingsIdentity | null) => void
-  resetIdentity: (identity: SettingsIdentity | null) => void
-  ensureLoaded: (queryClient: QueryClient) => Promise<void>
-  refresh: (queryClient: QueryClient) => Promise<void>
-  setField: <
-    K extends Exclude<keyof CacheAlertForm, 'has_dingtalk_secret' | 'smtp'>,
-  >(
+type SettingsCacheAlertOptions = {
+  onSaved?: () => void
+}
+
+export function useSettingsCacheAlert(options: SettingsCacheAlertOptions = {}) {
+  const queryClient = useQueryClient()
+  const asyncAction = useAsyncAction()
+  const me = useSessionStore((state) => state.me)
+  const identityKey = cacheAlertIdentityKey(me)
+  const onSavedRef = useRef(options.onSaved)
+  onSavedRef.current = options.onSaved
+
+  const form = useForm({
+    defaultValues: createCacheAlertForm(),
+    validators: {
+      onSubmit: ({ value }) =>
+        cacheAlertSmtpIssues(value).length > 0 ? 'invalid_smtp' : undefined,
+    },
+    onSubmit: async ({ value }) => {
+      const outcome = await saveValues(value)
+      if (outcome.executed) onSavedRef.current?.()
+    },
+  })
+  const values = useStore(form.store, (state) => state.values)
+
+  function applyForm(next: CacheAlertForm): void {
+    for (const field of Object.keys(next) as Array<keyof CacheAlertForm>) {
+      form.setFieldValue(field as never, next[field] as never, {
+        dontRunListeners: true,
+        dontUpdateMeta: true,
+        dontValidate: true,
+      })
+    }
+  }
+  const [baseline, setBaseline] = useState<CacheAlertForm>(() =>
+    createCacheAlertForm(),
+  )
+  const [saveFailed, setSaveFailed] = useState(false)
+  const loadedRef = useRef(false)
+  const valuesRef = useRef(values)
+  const baselineRef = useRef(baseline)
+  const queryDataRef = useRef<CacheAlertSettingsResponse | undefined>(undefined)
+
+  valuesRef.current = values
+  baselineRef.current = baseline
+
+  const query = useQuery({
+    ...getCacheAlertSettingOptions(),
+    enabled: identityKey !== '',
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+  const saveMutation = useMutation(setCacheAlertSettingMutation())
+
+  const loaded = query.data !== undefined
+  const loading = query.isFetching && !loaded
+  const loadError = query.isError
+  const unavailable = isCacheAlertCapabilityUnavailable(query.error)
+  const unavailableMessage = unavailable
+    ? (formatEnvelopeCause(query.error) ?? '')
+    : ''
+  const dirty = cacheAlertDirty(values, baseline)
+  const refreshBlocked = cacheAlertRefreshBlocked({
+    pendingActions: asyncAction.pendingActions,
+    dirty,
+    failed: saveFailed,
+    loading: query.isFetching,
+    loaded,
+  })
+
+  useEffect(() => {
+    const data = query.data
+    if (!data || queryDataRef.current === data) return
+    queryDataRef.current = data
+    const mapped = formFromCacheAlertResponse(data)
+    const pristine = !cacheAlertDirty(valuesRef.current, baselineRef.current)
+    if (loadedRef.current && !pristine) return
+    loadedRef.current = true
+    applyForm(mapped)
+    setBaseline(mapped)
+  }, [form, query.data])
+
+  async function refresh(): Promise<void> {
+    if (identityKey === '') return
+    await queryClient.fetchQuery({
+      ...getCacheAlertSettingOptions(),
+      staleTime: 0,
+    })
+  }
+
+  async function saveValues(
+    value: CacheAlertForm,
+  ): Promise<AsyncActionOutcome<void>> {
+    if (identityKey === '' || !loaded || unavailable) {
+      return { executed: false }
+    }
+    const submitted = capturePayload(value)
+    try {
+      const outcome = await runAsyncAction(
+        CACHE_ALERT_KEY,
+        async () => {
+          const body = cacheAlertFormToRequest(submitted)
+          const response = await saveMutation.mutateAsync({ body })
+          const latest = valuesRef.current
+          applyForm(
+            clearSavedCacheAlertSecret(
+              mergeCacheAlertResponse(latest, submitted, response),
+              submitted,
+            ),
+          )
+          setBaseline(formFromCacheAlertResponse(response))
+          loadedRef.current = true
+          queryClient.setQueryData(getCacheAlertSettingQueryKey(), response)
+        },
+        'cacheAlert',
+      )
+      if (outcome.executed) setSaveFailed(false)
+      return outcome
+    } catch (cause) {
+      setSaveFailed(true)
+      throw cause
+    }
+  }
+
+  function setField<K extends Exclude<keyof CacheAlertForm, 'smtp'>>(
     field: K,
     value: CacheAlertForm[K],
-  ) => void
-  setSecretDraft: (value: string) => void
-  setSmtpField: <K extends CacheAlertSmtpLeaf>(
+  ): void {
+    form.setFieldValue(field as never, value as never)
+  }
+
+  function setSecretDraft(value: string): void {
+    form.setFieldValue(
+      'secret',
+      setCacheAlertSecretDraft(valuesRef.current, value).secret,
+    )
+  }
+
+  function setSmtpField<K extends CacheAlertSmtpLeaf>(
     field: K,
     value: CacheAlertSmtpForm[K],
-  ) => void
-  setSmtpPasswordDraft: (value: string) => void
-  save: () => Promise<AsyncActionOutcome<void>>
+  ): void {
+    const smtp = { ...valuesRef.current.smtp, [field]: value }
+    form.setFieldValue('smtp', smtp)
+  }
+
+  function setSmtpPasswordDraft(value: string): void {
+    form.setFieldValue(
+      'smtp',
+      setCacheAlertSmtpPasswordDraft(valuesRef.current, value).smtp,
+    )
+  }
+
+  return {
+    form,
+    values,
+    loaded,
+    loading,
+    loadError,
+    unavailable,
+    unavailableMessage,
+    dirty,
+    saveFailed,
+    refresh,
+    refreshBlocked,
+    setField,
+    setSecretDraft,
+    setSmtpField,
+    setSmtpPasswordDraft,
+    pending: asyncAction.isPending(CACHE_ALERT_KEY),
+    pendingOrigin: asyncAction.pendingOrigin(CACHE_ALERT_KEY),
+  }
 }
-
-let readGeneration = 0
-let reportedNotifier: {
-  notifyApiError: (cause: unknown) => void
-  notifySaved: () => void
-} | null = null
-
-/**
- * Register the notifications the tab reports through, so the store never reaches
- * into a React context and the tab owns the notification surface.
- */
-export function setSettingsCacheAlertNotifier(
-  notifier: {
-    notifyApiError: (cause: unknown) => void
-    notifySaved: () => void
-  } | null,
-): void {
-  reportedNotifier = notifier
-}
-
-/** Drop a read that is still in flight once the operator edits or saves. */
-function invalidatePendingRead(): void {
-  if (!useSettingsCacheAlertStore.getState().loading) return
-  ++readGeneration
-  useSettingsCacheAlertStore.setState({ loading: false })
-}
-
-/**
- * Drop the tab: an in-flight read commits nothing, and the form — which holds
- * the operator's secret draft — is emptied so nothing sensitive survives the tab
- * on the module that outlives it.
- */
-export function disposeSettingsCacheAlert(): void {
-  ++readGeneration
-  useSettingsCacheAlertStore.setState({
-    form: createCacheAlertForm(),
-    baseline: createCacheAlertForm(),
-    loaded: false,
-    loading: false,
-    loadError: false,
-    unavailable: false,
-    unavailableMessage: '',
-    saveFailed: false,
-  })
-}
-
-async function fetchFresh(
-  queryClient: QueryClient,
-): Promise<CacheAlertSettingsResponse> {
-  return fetchFreshSetting(queryClient, {
-    queryKey: CACHE_ALERT_QUERY_KEY,
-    namespace: SETTINGS_CACHE_ALERT_NAMESPACE,
-    load: async () => expectData(await getCacheAlertSetting<true>(withData())),
-  })
-}
-
-export const useSettingsCacheAlertStore = create<SettingsCacheAlertState>(
-  (set, get) => ({
-    identityKey: '',
-    form: createCacheAlertForm(),
-    baseline: createCacheAlertForm(),
-    loaded: false,
-    loading: false,
-    loadError: false,
-    unavailable: false,
-    unavailableMessage: '',
-    saveFailed: false,
-
-    initializeIdentity(identity) {
-      const key = cacheAlertIdentityKey(identity)
-      if (get().identityKey === key) return
-      get().resetIdentity(identity)
-    },
-
-    resetIdentity(identity) {
-      ++readGeneration
-      set({
-        identityKey: cacheAlertIdentityKey(identity),
-        form: createCacheAlertForm(),
-        baseline: createCacheAlertForm(),
-        loaded: false,
-        loading: false,
-        loadError: false,
-        unavailable: false,
-        unavailableMessage: '',
-        saveFailed: false,
-      })
-    },
-
-    async ensureLoaded(queryClient) {
-      const state = get()
-      if (state.identityKey === '' || state.loaded || state.loading) return
-      await get().refresh(queryClient)
-    },
-
-    async refresh(queryClient) {
-      const state = get()
-      if (state.identityKey === '') return
-      if (cacheAlertDirty(state.form, state.baseline)) return
-      const identityKey = state.identityKey
-      const generation = ++readGeneration
-      set({ loading: true, loadError: false })
-      try {
-        const response = await fetchFresh(queryClient)
-        if (generation !== readGeneration) return
-        if (get().identityKey !== identityKey) return
-        const form = formFromCacheAlertResponse(response)
-        set({
-          form,
-          baseline: form,
-          loaded: true,
-          loading: false,
-          loadError: false,
-          unavailable: false,
-          unavailableMessage: '',
-          saveFailed: false,
-        })
-      } catch (cause) {
-        if (generation !== readGeneration) return
-        if (get().identityKey !== identityKey) return
-        const unavailable = isCacheAlertCapabilityUnavailable(cause)
-        set({
-          loading: false,
-          loadError: true,
-          unavailable,
-          unavailableMessage: unavailable
-            ? (formatEnvelopeCause(cause) ?? '')
-            : '',
-        })
-      }
-    },
-
-    setField(field, value) {
-      invalidatePendingRead()
-      set({ form: { ...get().form, [field]: value } })
-    },
-
-    setSecretDraft(value) {
-      invalidatePendingRead()
-      set({ form: setCacheAlertSecretDraft(get().form, value) })
-    },
-
-    setSmtpField(field, value) {
-      invalidatePendingRead()
-      const form = get().form
-      set({ form: { ...form, smtp: { ...form.smtp, [field]: value } } })
-    },
-
-    setSmtpPasswordDraft(value) {
-      invalidatePendingRead()
-      set({ form: setCacheAlertSmtpPasswordDraft(get().form, value) })
-    },
-
-    async save() {
-      const state = get()
-      // Saving before a successful read would submit the defaults over a
-      // configured policy.
-      if (state.identityKey === '' || !state.loaded || state.unavailable) {
-        return { executed: false }
-      }
-      const identityKey = state.identityKey
-      const submitted = capturePayload(state.form)
-      invalidatePendingRead()
-
-      try {
-        const outcome = await runAsyncAction(
-          CACHE_ALERT_KEY,
-          async () => {
-            const body = cacheAlertFormToRequest(submitted)
-            const response = expectData(
-              await setCacheAlertSetting<true>(withData({ body })),
-            )
-            if (get().identityKey !== identityKey) return
-            const latest = get()
-            set({
-              form: clearSavedCacheAlertSecret(
-                mergeCacheAlertResponse(latest.form, submitted, response),
-                submitted,
-              ),
-              // The baseline is the last accepted value, per leaf: a leaf or a
-              // secret draft edited during the write stays dirty against it.
-              baseline: formFromCacheAlertResponse(response),
-              loaded: true,
-              saveFailed: false,
-            })
-          },
-          'cacheAlert',
-        )
-        if (outcome.executed) {
-          set({ saveFailed: false })
-          reportedNotifier?.notifySaved()
-        }
-        return outcome
-      } catch (cause) {
-        set({ saveFailed: true })
-        reportedNotifier?.notifyApiError(cause)
-        return { executed: false }
-      }
-    },
-  }),
-)

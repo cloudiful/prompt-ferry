@@ -8,9 +8,18 @@ import {
 } from '@/components/ui/table'
 import { useLocale } from '@/lib/i18n'
 import { useDisplayTimeZone } from '@/lib/display-timezone'
-import { formatAuditCount, shortFingerprint } from '@/lib/config-archive-model'
-import { useSettingsConfigArchiveStore } from '@/lib/config-archive'
+import {
+  formatAuditCount,
+  shortFingerprint,
+  type ConfigArchiveImportApplied,
+  type ConfigArchiveImportPreview as ConfigArchiveImportPreviewState,
+} from '@/lib/config-archive-model'
 import { formatDateTime } from '@/format/datetime-core'
+
+type ConfigArchiveImportPreviewProps = {
+  applied: ConfigArchiveImportApplied | null
+  preview: ConfigArchiveImportPreviewState | null
+}
 
 /**
  * The import preview, and the applied summary that replaces it.
@@ -19,13 +28,14 @@ import { formatDateTime } from '@/format/datetime-core'
  * exported-at, format, fingerprint and warnings, and the applied summary reports
  * every restored domain with its record and unrecoverable-secret counts. A null
  * count renders as `-` while a real zero stays `0`, and the time uses the active
- * locale and display zone.
+ * locale and display zone. These are static details, not a business list.
  */
-export function ConfigArchiveImportPreview() {
+export function ConfigArchiveImportPreview({
+  applied,
+  preview,
+}: ConfigArchiveImportPreviewProps) {
   const { t, locale } = useLocale()
   const { effective: timeZone } = useDisplayTimeZone()
-  const preview = useSettingsConfigArchiveStore((state) => state.importPreview)
-  const applied = useSettingsConfigArchiveStore((state) => state.importApplied)
 
   if (applied) {
     return (

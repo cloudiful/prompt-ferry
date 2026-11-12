@@ -4,9 +4,9 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from 'react'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { LoaderCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { MultiSelect } from '@/components/ui/multi-select'
@@ -30,9 +30,10 @@ import { useLocale } from '@/lib/i18n'
 import { useDisplayTimeZone } from '@/lib/display-timezone'
 import { formatDateTime } from '@/format/datetime-core'
 import {
-  fetchKeyQuotaObservationHistory,
-  fetchKeyQuotaObservationTrend,
-} from '@/stores/endpoints-api'
+  quotaKeyObservationHistoryQueryKey,
+  quotaKeyObservationTrendOptions,
+} from '@/generated/admin-api/@tanstack/react-query.gen'
+import { quotaKeyObservationHistory } from '@/generated/admin-api'
 import {
   QUOTA_TREND_KINDS,
   quotaTrendKindLabels,
@@ -67,16 +68,14 @@ type ObservedKeys = {
   values: Map<string, string>
 }
 
-type ListScope = {
-  endpointId: string
-  keyKey: string
-}
-
-type TrendScope = {
-  endpointId: string
-  keyKey: string
-  kindKey: string
-  range: QuotaTrendRange
+function keyFilterQuery(keyIds: readonly string[]): {
+  key_id?: string
+  key_ids?: string
+} {
+  const keys = [...new Set(keyIds)].sort()
+  if (keys.length === 0) return {}
+  if (keys.length === 1) return { key_id: keys[0] }
+  return { key_ids: keys.join(',') }
 }
 
 function uniqueObservations(
@@ -201,258 +200,80 @@ export function KeyQuotaObservationHistory({
     label: kindLabels[kind],
   }))
 
-  const [items, setItems] = useState<QuotaKeyObservationHistoryItem[]>([])
-  const [nextCursor, setNextCursor] = useState<string | null>(null)
-  const [retentionDays, setRetentionDays] = useState(DEFAULT_RETENTION_DAYS)
-  const [listLoading, setListLoading] = useState(false)
-  const [listLoadingMore, setListLoadingMore] = useState(false)
-  const [listFailed, setListFailed] = useState(false)
-  const [listLoaded, setListLoaded] = useState(false)
-  const listGeneration = useRef(0)
-  const listScope = useRef<ListScope>({ endpointId, keyKey })
-  listScope.current = { endpointId, keyKey }
-
-  const [trend, setTrend] = useState<QuotaKeyObservationTrendResponse | null>(
-    null,
-  )
-  const [trendLoading, setTrendLoading] = useState(false)
-  const [trendFailed, setTrendFailed] = useState(false)
-  const trendGeneration = useRef(0)
-
   const chartActive = expanded && mode === 'chart'
   const listActive = expanded && mode === 'list'
-  const trendScope = useRef<TrendScope & { active: boolean }>({
-    endpointId,
-    keyKey,
-    kindKey,
-    range,
-    active: chartActive,
+  const keyIds = useMemo(() => (keyKey ? keyKey.split(',') : []), [keyKey])
+  const kinds = useMemo(
+    () => (kindKey ? (kindKey.split(',') as CanonicalQuotaWindowKind[]) : []),
+    [kindKey],
+  )
+  const historyKeyFilter = useMemo(() => keyFilterQuery(keyIds), [keyIds])
+  const trendKindFilter = kinds.length > 0 ? { kinds: kinds.join(',') } : {}
+
+  const listQuery = useInfiniteQuery({
+    queryKey: quotaKeyObservationHistoryQueryKey({
+      path: { endpoint_id: endpointId },
+      query: { limit: PAGE_SIZE, ...historyKeyFilter },
+    }),
+    queryFn: ({ pageParam, signal }) =>
+      quotaKeyObservationHistory({
+        path: { endpoint_id: endpointId },
+        query: {
+          limit: PAGE_SIZE,
+          ...historyKeyFilter,
+          ...(pageParam ? { before_id: pageParam } : {}),
+        },
+        signal,
+        throwOnError: true,
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor ?? null,
+    enabled: Boolean(endpointId) && listActive,
   })
-  trendScope.current = {
-    endpointId,
-    keyKey,
-    kindKey,
-    range,
-    active: chartActive,
+
+  const items = useMemo(
+    () =>
+      uniqueObservations(
+        listQuery.data?.pages.flatMap((page) => page.items) ?? [],
+      ),
+    [listQuery.data],
+  )
+  const lastPage = listQuery.data?.pages.at(-1)
+  const nextCursor = lastPage?.next_cursor ?? null
+  const retentionDays = lastPage?.retention_days ?? DEFAULT_RETENTION_DAYS
+  const listLoading = listQuery.isLoading
+  const listLoadingMore = listQuery.isFetchingNextPage
+  const listFailed = listQuery.isError
+  const listLoaded = listQuery.isSuccess
+
+  const trendQuery = useQuery({
+    ...quotaKeyObservationTrendOptions({
+      path: { endpoint_id: endpointId },
+      query: {
+        range,
+        ...historyKeyFilter,
+        ...trendKindFilter,
+      },
+    }),
+    enabled: Boolean(endpointId) && chartActive,
+  })
+  const trend: QuotaKeyObservationTrendResponse | null = trendQuery.data ?? null
+  const trendLoading = trendQuery.isFetching && !trendQuery.data
+  const trendFailed = trendQuery.isError
+
+  function loadListMore(): void {
+    if (listQuery.hasNextPage && !listQuery.isFetchingNextPage) {
+      void listQuery.fetchNextPage()
+    }
   }
 
-  const clearList = useCallback(() => {
-    listGeneration.current += 1
-    setItems([])
-    setNextCursor(null)
-    setRetentionDays(DEFAULT_RETENTION_DAYS)
-    setListLoading(false)
-    setListLoadingMore(false)
-    setListFailed(false)
-    setListLoaded(false)
-  }, [])
-
-  const loadListFirstPage = useCallback(async () => {
-    const id = endpointId
-    const requestKeyKey = keyKey
-    const keyIds = requestKeyKey ? requestKeyKey.split(',') : []
-    if (!id) return
-    const requestGeneration = ++listGeneration.current
-    setItems([])
-    setNextCursor(null)
-    setListFailed(false)
-    setListLoaded(false)
-    setListLoadingMore(false)
-    setListLoading(true)
-    try {
-      const page = await fetchKeyQuotaObservationHistory(id, keyIds, PAGE_SIZE)
-      const active = listScope.current
-      if (
-        requestGeneration !== listGeneration.current ||
-        active.endpointId !== id ||
-        active.keyKey !== requestKeyKey
-      ) {
-        return
-      }
-      setItems(uniqueObservations(page.items))
-      setNextCursor(page.next_cursor ?? null)
-      setRetentionDays(page.retention_days)
-      setListLoaded(true)
-    } catch {
-      const active = listScope.current
-      if (
-        requestGeneration === listGeneration.current &&
-        active.endpointId === id &&
-        active.keyKey === requestKeyKey
-      ) {
-        setListFailed(true)
-      }
-    } finally {
-      const active = listScope.current
-      if (
-        requestGeneration === listGeneration.current &&
-        active.endpointId === id &&
-        active.keyKey === requestKeyKey
-      ) {
-        setListLoading(false)
-      }
-    }
-  }, [endpointId, keyKey])
-
-  const loadListMore = useCallback(async () => {
-    const id = endpointId
-    const requestKeyKey = keyKey
-    const keyIds = requestKeyKey ? requestKeyKey.split(',') : []
-    const cursor = nextCursor
-    if (!id || !cursor || !listLoaded || listLoading || listLoadingMore) {
+  function retryList(): void {
+    if (items.length > 0 && nextCursor && listQuery.isError) {
+      loadListMore()
       return
     }
-    const requestGeneration = listGeneration.current
-    setListFailed(false)
-    setListLoadingMore(true)
-    try {
-      const page = await fetchKeyQuotaObservationHistory(
-        id,
-        keyIds,
-        PAGE_SIZE,
-        cursor,
-      )
-      const active = listScope.current
-      if (
-        requestGeneration !== listGeneration.current ||
-        active.endpointId !== id ||
-        active.keyKey !== requestKeyKey
-      ) {
-        return
-      }
-      setItems((current) => {
-        const seen = new Set(current.map((item) => item.observation_id))
-        return [
-          ...current,
-          ...page.items.filter((item) => {
-            if (seen.has(item.observation_id)) return false
-            seen.add(item.observation_id)
-            return true
-          }),
-        ]
-      })
-      setNextCursor(page.next_cursor ?? null)
-      setRetentionDays(page.retention_days)
-    } catch {
-      const active = listScope.current
-      if (
-        requestGeneration === listGeneration.current &&
-        active.endpointId === id &&
-        active.keyKey === requestKeyKey
-      ) {
-        setListFailed(true)
-      }
-    } finally {
-      const active = listScope.current
-      if (
-        requestGeneration === listGeneration.current &&
-        active.endpointId === id &&
-        active.keyKey === requestKeyKey
-      ) {
-        setListLoadingMore(false)
-      }
-    }
-  }, [endpointId, keyKey, listLoaded, listLoading, listLoadingMore, nextCursor])
-
-  const retryList = useCallback(() => {
-    if (items.length > 0 && nextCursor) void loadListMore()
-    else void loadListFirstPage()
-  }, [items.length, loadListFirstPage, loadListMore, nextCursor])
-
-  const loadTrend = useCallback(async () => {
-    const id = endpointId
-    const requestKeyKey = keyKey
-    const requestKindKey = kindKey
-    const keyIds = requestKeyKey ? requestKeyKey.split(',') : []
-    const kinds = requestKindKey
-      ? (requestKindKey.split(',') as CanonicalQuotaWindowKind[])
-      : []
-    const selectedRange = range
-    if (!id) return
-    const requestGeneration = ++trendGeneration.current
-    setTrend(null)
-    setTrendFailed(false)
-    setTrendLoading(true)
-    try {
-      const result = await fetchKeyQuotaObservationTrend(
-        id,
-        keyIds,
-        kinds,
-        selectedRange,
-      )
-      const active = trendScope.current
-      if (
-        requestGeneration !== trendGeneration.current ||
-        !active.active ||
-        active.endpointId !== id ||
-        active.keyKey !== requestKeyKey ||
-        active.kindKey !== requestKindKey ||
-        active.range !== selectedRange
-      ) {
-        return
-      }
-      setTrend(result)
-    } catch {
-      const active = trendScope.current
-      if (
-        requestGeneration === trendGeneration.current &&
-        active.active &&
-        active.endpointId === id &&
-        active.keyKey === requestKeyKey &&
-        active.kindKey === requestKindKey &&
-        active.range === selectedRange
-      ) {
-        setTrendFailed(true)
-      }
-    } finally {
-      const active = trendScope.current
-      if (
-        requestGeneration === trendGeneration.current &&
-        active.active &&
-        active.endpointId === id &&
-        active.keyKey === requestKeyKey &&
-        active.kindKey === requestKindKey &&
-        active.range === selectedRange
-      ) {
-        setTrendLoading(false)
-      }
-    }
-  }, [endpointId, keyKey, kindKey, range])
-
-  useEffect(() => {
-    if (!chartActive) {
-      trendGeneration.current += 1
-      setTrend(null)
-      setTrendLoading(false)
-      setTrendFailed(false)
-      return
-    }
-    void loadTrend()
-    return () => {
-      trendGeneration.current += 1
-    }
-  }, [chartActive, loadTrend])
-
-  useEffect(() => {
-    if (!expanded) {
-      clearList()
-      return
-    }
-    if (listActive && !listLoaded && !listLoading) {
-      void loadListFirstPage()
-    }
-  }, [expanded, listActive])
-
-  const previousListScope = useRef<ListScope>({ endpointId, keyKey })
-  useEffect(() => {
-    const previous = previousListScope.current
-    if (previous.endpointId === endpointId && previous.keyKey === keyKey) {
-      return
-    }
-    previousListScope.current = { endpointId, keyKey }
-    if (listActive) void loadListFirstPage()
-    else clearList()
-  }, [endpointId, keyKey, listActive, loadListFirstPage, clearList])
+    void listQuery.refetch()
+  }
 
   useEffect(() => {
     if (selection.endpointId === endpointId) return
@@ -478,14 +299,6 @@ export function KeyQuotaObservationHistory({
     }
     if (changed) setObservedKeys({ endpointId, values: next })
   }, [endpointId, items, observedKeys, trend])
-
-  useEffect(
-    () => () => {
-      listGeneration.current += 1
-      trendGeneration.current += 1
-    },
-    [],
-  )
 
   const selectKeys = useCallback(
     (next: string[]) => {
@@ -645,7 +458,7 @@ export function KeyQuotaObservationHistory({
               <KeyQuotaObservationChart
                 failed={trendFailed}
                 loading={trendLoading}
-                onRetry={() => void loadTrend()}
+                onRetry={() => void trendQuery.refetch()}
                 range={range}
                 trend={trend}
               />

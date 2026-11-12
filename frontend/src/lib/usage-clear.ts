@@ -113,11 +113,3 @@ export function usageClearToastMessage(
 ): string {
   return `${t('clearHistorySubmit')}: ${deleted}`
 }
-
-/** Whether a completion still belongs to the form that started it. */
-export function isSameUsageClearForm(
-  submitted: UsageClearForm,
-  current: UsageClearForm,
-): boolean {
-  return submitted === current
-}

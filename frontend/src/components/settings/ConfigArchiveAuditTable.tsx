@@ -1,29 +1,35 @@
-import { useEffect, useRef } from 'react'
 import { Clock, RefreshCw, TriangleAlert } from 'lucide-react'
+import type { ConfigAuditEntry } from '@/generated/admin-api'
 import { Button } from '@/components/ui/button'
+import {
+  DataTable,
+  type DataTableColumnDef,
+} from '@/components/shared/DataTable'
 import { SettingsCard } from '@/components/settings/SettingsCard'
 import { TablePagination } from '@/components/shared/TablePagination'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { useLocale } from '@/lib/i18n'
 import { useDisplayTimeZone } from '@/lib/display-timezone'
-import { useNotifier } from '@/lib/notifier'
-import { useSettingsConfigArchiveStore } from '@/lib/config-archive'
 import {
-  CONFIG_ARCHIVE_AUDIT_PAGE_SIZE_KEY,
   CONFIG_ARCHIVE_AUDIT_PAGE_SIZE_OPTIONS,
-  configArchiveAuditPageSize,
   configArchiveAuditRow,
   formatAuditCount,
+  type ConfigArchiveAuditRow,
 } from '@/lib/config-archive-model'
-import { readStorage, writeStorage } from '@/storage'
 import type { TablePageChange } from '@/models/pagination'
+
+type ConfigArchiveAuditTableProps = {
+  entries: ConfigAuditEntry[]
+  error: string
+  failed: boolean
+  first: number
+  loading: boolean
+  onPage: (change: TablePageChange) => void
+  onRefresh: () => void
+  rows: number
+  total: number
+  unavailable: boolean
+  unavailableMessage: string
+}
 
 /**
  * The archive audit trail: newest first, one page at a time.
@@ -32,63 +38,125 @@ import type { TablePageChange } from '@/models/pagination'
  * byte count, fingerprint, summed domain records, result, error code and time.
  * A nullable column renders as `-` while a real zero stays `0`, the fingerprint
  * shows a short form with the full value in its title, and the timestamp uses
- * the active locale and display time zone rather than the Vue formatter.
+ * the active locale and display time zone.
  */
-export function ConfigArchiveAuditTable() {
+export function ConfigArchiveAuditTable({
+  entries,
+  error,
+  failed,
+  first,
+  loading,
+  onPage,
+  onRefresh,
+  rows,
+  total,
+  unavailable,
+  unavailableMessage,
+}: ConfigArchiveAuditTableProps) {
   const { t, locale } = useLocale()
   const { effective: timeZone } = useDisplayTimeZone()
-  const { notifyApiError } = useNotifier()
-  const entries = useSettingsConfigArchiveStore((state) => state.auditEntries)
-  const first = useSettingsConfigArchiveStore((state) => state.auditFirst)
-  const rows = useSettingsConfigArchiveStore((state) => state.auditRows)
-  const total = useSettingsConfigArchiveStore((state) => state.auditTotal)
-  const loading = useSettingsConfigArchiveStore((state) => state.auditLoading)
-  const failed = useSettingsConfigArchiveStore((state) => state.auditFailed)
-  const error = useSettingsConfigArchiveStore((state) => state.auditError)
-  const unavailable = useSettingsConfigArchiveStore(
-    (state) => state.auditUnavailable,
-  )
-  const unavailableMessage = useSettingsConfigArchiveStore(
-    (state) => state.auditUnavailableMessage,
-  )
-  const setAuditRows = useSettingsConfigArchiveStore(
-    (state) => state.setAuditRows,
-  )
-  const refreshAudit = useSettingsConfigArchiveStore(
-    (state) => state.refreshAudit,
-  )
-
-  const rowsRef = useRef(rows)
-  rowsRef.current = rows
-
-  useEffect(() => {
-    // The page size is a preference, not data: it is restored once on mount and
-    // stored again whenever the operator changes it.
-    const stored = readStorage(CONFIG_ARCHIVE_AUDIT_PAGE_SIZE_KEY)
-    setAuditRows(configArchiveAuditPageSize(stored))
-  }, [setAuditRows])
-
-  async function read(nextFirst = first, nextRows = rowsRef.current) {
-    try {
-      await refreshAudit(nextFirst, nextRows)
-    } catch (cause) {
-      notifyApiError(cause)
-    }
-  }
-
-  function onPageChange(change: TablePageChange): void {
-    // A page-size change arrives as a first-page change, so persisting the rows
-    // here keeps the stored preference in step with what was read.
-    if (change.rows !== rows) {
-      setAuditRows(change.rows)
-      writeStorage(CONFIG_ARCHIVE_AUDIT_PAGE_SIZE_KEY, String(change.rows))
-    }
-    void read(change.first, change.rows)
-  }
-
   const projected = entries.map((entry) =>
     configArchiveAuditRow(entry, locale, timeZone),
   )
+
+  const columns: Array<DataTableColumnDef<ConfigArchiveAuditRow>> = [
+    {
+      id: 'action',
+      header: t('configArchiveAuditAction'),
+      cell: ({ row }) => (
+        <span
+          className={
+            row.original.action === 'export'
+              ? 'rounded border border-primary/40 px-1.5 py-0.5 text-[10px] text-primary'
+              : 'rounded border border-warning/40 px-1.5 py-0.5 text-[10px] text-warning'
+          }
+        >
+          {t(
+            row.original.action === 'export'
+              ? 'configArchiveAuditActionExport'
+              : 'configArchiveAuditActionImport',
+          )}
+        </span>
+      ),
+    },
+    {
+      id: 'actor',
+      header: t('configArchiveAuditActor'),
+      cell: ({ row }) => row.original.actor,
+    },
+    {
+      id: 'backend',
+      header: t('configArchiveExportBackend'),
+      cell: ({ row }) => row.original.backendKind,
+    },
+    {
+      id: 'bytes',
+      header: t('configArchiveAuditBytes'),
+      cell: ({ row }) => (
+        <span className="tabular-nums">
+          {formatAuditCount(row.original.archiveBytes, locale)}
+        </span>
+      ),
+    },
+    {
+      id: 'fingerprint',
+      header: t('configArchiveExportFingerprint'),
+      cell: ({ row }) => (
+        <span className="font-mono" title={row.original.fullFingerprint}>
+          {row.original.fingerprint}
+        </span>
+      ),
+    },
+    {
+      id: 'records',
+      header: t('configArchiveAuditRecords'),
+      cell: ({ row }) => (
+        <span className="tabular-nums">
+          {formatAuditCount(row.original.records, locale)}
+        </span>
+      ),
+    },
+    {
+      id: 'result',
+      header: t('configArchiveAuditResult'),
+      cell: ({ row }) => (
+        <span
+          data-audit-result={row.original.success ? 'success' : 'failed'}
+          className={
+            row.original.success
+              ? 'text-[11px] text-primary'
+              : 'text-[11px] text-destructive'
+          }
+        >
+          {t(row.original.success ? 'success' : 'failed')}
+        </span>
+      ),
+    },
+    {
+      id: 'error',
+      header: t('error'),
+      cell: ({ row }) => (
+        <div className="grid gap-px">
+          <span>{row.original.errorCode}</span>
+          {row.original.errorMessage ? (
+            <span
+              className="block max-w-[16rem] truncate text-[11px] text-muted-foreground"
+              title={row.original.errorMessage}
+            >
+              {row.original.errorMessage}
+            </span>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      id: 'createdAt',
+      header: t('configArchiveAuditCreatedAt'),
+      cell: ({ row }) => (
+        <span className="whitespace-nowrap">{row.original.createdAt}</span>
+      ),
+    },
+  ]
 
   return (
     <SettingsCard icon={Clock} title={t('configArchiveAuditTitle')}>
@@ -101,7 +169,7 @@ export function ConfigArchiveAuditTable() {
         <Button
           disabled={loading || unavailable}
           id="settings-config-archive-audit-refresh"
-          onClick={() => void read()}
+          onClick={onRefresh}
           size="xs"
           type="button"
           variant="outline"
@@ -124,7 +192,7 @@ export function ConfigArchiveAuditTable() {
           </span>
           <Button
             id="settings-config-archive-audit-unavailable-retry"
-            onClick={() => void read()}
+            onClick={onRefresh}
             size="xs"
             type="button"
             variant="outline"
@@ -145,7 +213,7 @@ export function ConfigArchiveAuditTable() {
           </span>
           <Button
             id="settings-config-archive-audit-retry"
-            onClick={() => void read()}
+            onClick={onRefresh}
             size="xs"
             type="button"
             variant="outline"
@@ -156,93 +224,22 @@ export function ConfigArchiveAuditTable() {
         </div>
       ) : null}
 
-      <Table className="min-w-0" data-config-archive-audit="true">
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t('configArchiveAuditAction')}</TableHead>
-            <TableHead>{t('configArchiveAuditActor')}</TableHead>
-            <TableHead>{t('configArchiveExportBackend')}</TableHead>
-            <TableHead>{t('configArchiveAuditBytes')}</TableHead>
-            <TableHead>{t('configArchiveExportFingerprint')}</TableHead>
-            <TableHead>{t('configArchiveAuditRecords')}</TableHead>
-            <TableHead>{t('configArchiveAuditResult')}</TableHead>
-            <TableHead>{t('error')}</TableHead>
-            <TableHead>{t('configArchiveAuditCreatedAt')}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {projected.map((row) => (
-            <TableRow data-audit-id={row.auditId} key={row.auditId}>
-              <TableCell>
-                <span
-                  className={
-                    row.action === 'export'
-                      ? 'rounded border border-primary/40 px-1.5 py-0.5 text-[10px] text-primary'
-                      : 'rounded border border-warning/40 px-1.5 py-0.5 text-[10px] text-warning'
-                  }
-                >
-                  {t(
-                    row.action === 'export'
-                      ? 'configArchiveAuditActionExport'
-                      : 'configArchiveAuditActionImport',
-                  )}
-                </span>
-              </TableCell>
-              <TableCell>{row.actor}</TableCell>
-              <TableCell>{row.backendKind}</TableCell>
-              <TableCell className="tabular-nums">
-                {formatAuditCount(row.archiveBytes, locale)}
-              </TableCell>
-              <TableCell>
-                <span className="font-mono" title={row.fullFingerprint}>
-                  {row.fingerprint}
-                </span>
-              </TableCell>
-              <TableCell className="tabular-nums">
-                {formatAuditCount(row.records, locale)}
-              </TableCell>
-              <TableCell>
-                <span
-                  data-audit-result={row.success ? 'success' : 'failed'}
-                  className={
-                    row.success
-                      ? 'text-[11px] text-primary'
-                      : 'text-[11px] text-destructive'
-                  }
-                >
-                  {t(row.success ? 'success' : 'failed')}
-                </span>
-              </TableCell>
-              <TableCell>
-                <div className="grid gap-px">
-                  <span>{row.errorCode}</span>
-                  {row.errorMessage ? (
-                    <span
-                      className="block max-w-[16rem] truncate text-[11px] text-muted-foreground"
-                      title={row.errorMessage}
-                    >
-                      {row.errorMessage}
-                    </span>
-                  ) : null}
-                </div>
-              </TableCell>
-              <TableCell className="whitespace-nowrap">
-                {row.createdAt}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-
-      {projected.length === 0 && !loading && !failed ? (
-        <p className="m-0 px-1 text-xs text-muted-foreground">
-          {t('configArchiveAuditEmpty')}
-        </p>
-      ) : null}
+      <DataTable
+        busy={loading}
+        className="min-w-0"
+        columns={columns}
+        data={projected}
+        emptyLabel={t('configArchiveAuditEmpty')}
+        getRowId={(row) => String(row.auditId)}
+        label={t('configArchiveAuditTitle')}
+        loading={loading}
+        rowAttributes={(row) => ({ 'data-audit-id': row.auditId })}
+        tableAttributes={{ 'data-config-archive-audit': 'true' }}
+      />
 
       <TablePagination
         first={first}
-        onChange={onPageChange}
+        onChange={onPage}
         pageSizeOptions={CONFIG_ARCHIVE_AUDIT_PAGE_SIZE_OPTIONS}
         rows={rows}
         total={total}

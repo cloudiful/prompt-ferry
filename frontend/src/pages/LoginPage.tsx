@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm } from '@tanstack/react-form'
 import { useLocation, useNavigate } from 'react-router'
 import { Eye, EyeOff, LogIn } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -20,11 +20,6 @@ import { useAsyncAction } from '@/lib/use-async-action'
 import { useLocale } from '@/lib/i18n'
 import { usePageTitle } from '@/lib/router'
 import { SESSION_AUTH_KEY, useSessionStore } from '@/lib/session'
-
-type LoginForm = {
-  login_name: string
-  password: string
-}
 
 function initialLoginName(): string {
   return readStorage(LOGIN_NAME_STORAGE_KEY) ?? 'admin'
@@ -53,12 +48,28 @@ export function LoginPage() {
 
   usePageTitle('login')
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<LoginForm>({
+  const form = useForm({
     defaultValues: { login_name: initialLoginName(), password: '' },
+    onSubmit: async ({ value }) => {
+      const loginName = value.login_name.trim()
+      writeStorage(LOGIN_NAME_STORAGE_KEY, loginName)
+      try {
+        const outcome = await login({
+          login_name: loginName,
+          password: value.password,
+        })
+        if (outcome.executed) {
+          const currentUser = useSessionStore.getState().me
+          if (currentUser) {
+            navigate(redirect ?? defaultNavPath(currentUser.is_admin), {
+              replace: true,
+            })
+          }
+        }
+      } catch {
+        return
+      }
+    },
   })
 
   useEffect(() => {
@@ -68,27 +79,6 @@ export function LoginPage() {
   useEffect(() => {
     if (me) navigate(redirect ?? defaultNavPath(me.is_admin), { replace: true })
   }, [me, navigate, redirect])
-
-  async function onSubmit(form: LoginForm): Promise<void> {
-    const loginName = form.login_name.trim()
-    writeStorage(LOGIN_NAME_STORAGE_KEY, loginName)
-    try {
-      const outcome = await login({
-        login_name: loginName,
-        password: form.password,
-      })
-      if (outcome.executed) {
-        const currentUser = useSessionStore.getState().me
-        if (currentUser) {
-          navigate(redirect ?? defaultNavPath(currentUser.is_admin), {
-            replace: true,
-          })
-        }
-      }
-    } catch {
-      return
-    }
-  }
 
   return (
     <main
@@ -103,60 +93,98 @@ export function LoginPage() {
           <form
             className="grid gap-4"
             noValidate
-            onSubmit={handleSubmit(onSubmit)}
+            onSubmit={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              void form.handleSubmit()
+            }}
           >
-            <div className="grid gap-2">
-              <Label htmlFor="login-name">{t('loginName')}</Label>
-              <Input
-                autoComplete="username"
-                autoFocus
-                disabled={busy}
-                id="login-name"
-                {...register('login_name', {
-                  required: t('loginNameRequired'),
-                  validate: (value) =>
-                    Boolean(value.trim()) || t('loginNameRequired'),
-                })}
-              />
-              {errors.login_name && (
-                <p className="text-sm text-destructive" role="alert">
-                  {errors.login_name.message}
-                </p>
-              )}
-            </div>
+            <form.Subscribe selector={(state) => state.submissionAttempts}>
+              {(attempts) => (
+                <>
+                  <div className="grid gap-2">
+                    <Label htmlFor="login-name">{t('loginName')}</Label>
+                    <form.Field
+                      name="login_name"
+                      validators={{
+                        onChange: ({ value }) =>
+                          value.trim() ? undefined : t('loginNameRequired'),
+                      }}
+                    >
+                      {(field) => (
+                        <>
+                          <Input
+                            autoComplete="username"
+                            autoFocus
+                            disabled={busy}
+                            id="login-name"
+                            onBlur={field.handleBlur}
+                            onChange={(event) =>
+                              field.handleChange(event.currentTarget.value)
+                            }
+                            value={field.state.value}
+                          />
+                          <FieldError
+                            attempts={attempts}
+                            errors={field.state.meta.errors}
+                          />
+                        </>
+                      )}
+                    </form.Field>
+                  </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="login-password">{t('password')}</Label>
-              <div className="flex gap-2">
-                <Input
-                  autoComplete="current-password"
-                  className="min-w-0 flex-1"
-                  disabled={busy}
-                  id="login-password"
-                  type={showPassword ? 'text' : 'password'}
-                  {...register('password', { required: t('passwordRequired') })}
-                />
-                <Button
-                  aria-label={t(showPassword ? 'hidePassword' : 'showPassword')}
-                  disabled={busy}
-                  onClick={() => setShowPassword((visible) => !visible)}
-                  size="icon"
-                  type="button"
-                  variant="outline"
-                >
-                  {showPassword ? (
-                    <EyeOff aria-hidden="true" />
-                  ) : (
-                    <Eye aria-hidden="true" />
-                  )}
-                </Button>
-              </div>
-              {errors.password && (
-                <p className="text-sm text-destructive" role="alert">
-                  {errors.password.message}
-                </p>
+                  <div className="grid gap-2">
+                    <Label htmlFor="login-password">{t('password')}</Label>
+                    <div className="flex gap-2">
+                      <form.Field
+                        name="password"
+                        validators={{
+                          onChange: ({ value }) =>
+                            value ? undefined : t('passwordRequired'),
+                        }}
+                      >
+                        {(field) => (
+                          <>
+                            <Input
+                              autoComplete="current-password"
+                              className="min-w-0 flex-1"
+                              disabled={busy}
+                              id="login-password"
+                              onBlur={field.handleBlur}
+                              onChange={(event) =>
+                                field.handleChange(event.currentTarget.value)
+                              }
+                              type={showPassword ? 'text' : 'password'}
+                              value={field.state.value}
+                            />
+                            <FieldError
+                              attempts={attempts}
+                              errors={field.state.meta.errors}
+                            />
+                          </>
+                        )}
+                      </form.Field>
+                      <Button
+                        aria-label={t(
+                          showPassword ? 'hidePassword' : 'showPassword',
+                        )}
+                        disabled={busy}
+                        onClick={() => setShowPassword((visible) => !visible)}
+                        size="icon"
+                        type="button"
+                        variant="outline"
+                      >
+                        {showPassword ? (
+                          <EyeOff aria-hidden="true" />
+                        ) : (
+                          <Eye aria-hidden="true" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </>
               )}
-            </div>
+            </form.Subscribe>
 
             {error && (
               <Alert variant="destructive">
@@ -180,5 +208,26 @@ export function LoginPage() {
         </CardFooter>
       </Card>
     </main>
+  )
+}
+
+type FieldErrorProps = {
+  attempts: number
+  errors: Array<unknown>
+}
+
+/**
+ * The message of a failed field.
+ *
+ * The message appears with the first submission attempt and then follows the
+ * field, so an untouched field does not report an error before the user
+ * tried to submit.
+ */
+function FieldError({ attempts, errors }: FieldErrorProps) {
+  if (attempts === 0 || errors.length === 0) return null
+  return (
+    <p className="text-sm text-destructive" role="alert">
+      {String(errors[0])}
+    </p>
   )
 }

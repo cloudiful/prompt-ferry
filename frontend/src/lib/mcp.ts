@@ -1,36 +1,15 @@
 import type { QueryClient } from '@tanstack/react-query'
-import {
-  createMcpServer,
-  deleteMcpServer,
-  disconnectMcpOauth,
-  getMcpCatalog,
-  getMcpOauthStatus,
-  listMcpProviders,
-  listMcpServers,
-  listUserOptions,
-  startMcpOauth,
-  testMcpServer,
-  updateMcpServer,
-} from '@/generated/admin-api'
 import type {
   McpCatalogResponse,
-  McpOAuthStatusResponse,
-  McpProviderDescriptor,
-  McpServer,
   McpServerPageResponse,
-  McpOAuthStartResponse,
-  McpServerRequest,
   McpTestResponse,
-  User,
-  UserOptionsResponse,
 } from '@/generated/admin-api'
-import { expectData, withData } from '@/api'
+import {
+  getMcpOauthStatusQueryKey,
+  listMcpServersOptions,
+  listMcpServersQueryKey,
+} from '@/generated/admin-api/@tanstack/react-query.gen'
 import { recordActionKey } from '@/stores/record-action-types'
-
-const mcpServersNamespace = ['mcp-servers-page'] as const
-const mcpProvidersNamespace = ['mcp-providers'] as const
-const mcpUserOptionsNamespace = ['mcp-user-options'] as const
-const mcpOAuthStatusNamespace = ['mcp-oauth-status'] as const
 
 export const MCP_KEY_PREFIX = 'mcp'
 export const MCP_TEST_KEY_PREFIX = 'mcptest'
@@ -57,51 +36,8 @@ export function mcpTestKey(serverId: string): string {
   return `${MCP_TEST_KEY_PREFIX}:${serverId}`
 }
 
-export function mcpServersQueryKey() {
-  return mcpServersNamespace
-}
-
-export function mcpServerPageQueryKey(
-  first: number,
-  rows: number,
-  userId: number,
-  isAdmin: boolean,
-) {
-  return [...mcpServersNamespace, userId, isAdmin, first, rows] as const
-}
-
-export function mcpProvidersQueryKey() {
-  return mcpProvidersNamespace
-}
-
-export function mcpUserOptionsQueryKey(adminId: number) {
-  return [...mcpUserOptionsNamespace, adminId] as const
-}
-
 export function mcpOAuthStatusQueryKey(serverId: string) {
-  return [...mcpOAuthStatusNamespace, serverId] as const
-}
-
-export async function fetchMcpOAuthStatus(
-  serverId: string,
-): Promise<McpOAuthStatusResponse> {
-  return expectData(
-    await getMcpOauthStatus<true>(withData({ path: { server_id: serverId } })),
-  )
-}
-
-export async function startMcpOAuth(
-  serverId: string,
-): Promise<McpOAuthStartResponse> {
-  return expectData(
-    await startMcpOauth<true>(withData({ path: { server_id: serverId } })),
-  )
-}
-
-export async function disconnectMcpOAuth(serverId: string): Promise<void> {
-  await disconnectMcpOauth<true>(
-    withData({ path: { server_id: serverId } }),
-  )
+  return getMcpOauthStatusQueryKey({ path: { server_id: serverId } })
 }
 
 export function mcpLastPageFirst(total: number, rows: number): number {
@@ -118,80 +54,23 @@ export function mcpCatalogFromTest(
   }
 }
 
-export async function fetchMcpServerPage(
-  first: number,
-  rows: number,
-): Promise<McpServerPageResponse> {
-  return expectData(
-    await listMcpServers<true>(withData({ query: { first, rows } })),
-  )
-}
-
-export async function fetchMcpProviders(): Promise<McpProviderDescriptor[]> {
-  return expectData(await listMcpProviders<true>(withData()))
-}
-
-export async function fetchMcpUsers(): Promise<User[]> {
-  const response = expectData(
-    await listUserOptions<true>(withData()),
-  ) as UserOptionsResponse
-  return response.users
-}
-
-export async function fetchMcpCatalog(
-  serverId: string,
-): Promise<McpCatalogResponse> {
-  return expectData(
-    await getMcpCatalog<true>(withData({ path: { server_id: serverId } })),
-  )
-}
-
-export async function saveMcpServerRecord(
-  serverId: string | null,
-  body: McpServerRequest,
-): Promise<McpServer> {
-  return serverId
-    ? expectData(
-        await updateMcpServer<true>(
-          withData({ path: { server_id: serverId }, body }),
-        ),
-      )
-    : expectData(await createMcpServer<true>(withData({ body })))
-}
-
-export async function removeMcpServerRecord(serverId: string): Promise<void> {
-  await deleteMcpServer<true>(withData({ path: { server_id: serverId } }))
-}
-
-export async function runMcpServerTest(
-  serverId: string,
-): Promise<McpTestResponse> {
-  return expectData(
-    await testMcpServer<true>(withData({ path: { server_id: serverId } })),
-  )
-}
-
 export async function refreshMcpServerPage(
   queryClient: QueryClient,
   first: number,
   rows: number,
-  userId: number,
-  isAdmin: boolean,
 ): Promise<McpServerPageResponse> {
-  const currentPageKey = mcpServerPageQueryKey(first, rows, userId, isAdmin)
+  const currentPageKey = listMcpServersQueryKey({ query: { first, rows } })
   await queryClient.cancelQueries({ queryKey: currentPageKey, exact: true })
   await queryClient.invalidateQueries({
-    queryKey: mcpServersQueryKey(),
+    queryKey: listMcpServersQueryKey(),
     refetchType: 'none',
   })
 
   let requestedFirst = first
   while (true) {
-    const page = await queryClient.fetchQuery({
-      queryKey: mcpServerPageQueryKey(requestedFirst, rows, userId, isAdmin),
-      queryFn: () => fetchMcpServerPage(requestedFirst, rows),
-      staleTime: 0,
-    })
+    const page = await queryClient.fetchQuery(
+      listMcpServersOptions({ query: { first: requestedFirst, rows } }),
+    )
     const pageRows = page.rows > 0 ? page.rows : rows
     if (
       pageRows > 0 &&

@@ -1,6 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { ChevronsUpDown, X } from 'lucide-react'
 import type { NativeApi } from '@/generated/admin-api'
+import { endpointModelsOptions } from '@/generated/admin-api/@tanstack/react-query.gen'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -10,8 +12,8 @@ import {
 } from '@/components/ui/popover'
 import { useLocale } from '@/lib/i18n'
 import {
-  endpointModelCatalogKey,
-  loadEndpointModelCatalog,
+  ENDPOINT_MODEL_CATALOG_TTL_MS,
+  normalizeEndpointModels,
 } from '@/lib/endpoint-models'
 
 type EndpointModelInputProps = {
@@ -21,20 +23,6 @@ type EndpointModelInputProps = {
   onChange: (value: string) => void
   placeholder: string
   value: string
-}
-
-type CatalogState = {
-  error: boolean
-  key: string | null
-  loading: boolean
-  models: string[]
-}
-
-const EMPTY_STATE: CatalogState = {
-  error: false,
-  key: null,
-  loading: false,
-  models: [],
 }
 
 export function EndpointModelInput({
@@ -47,19 +35,25 @@ export function EndpointModelInput({
 }: EndpointModelInputProps) {
   const { t } = useLocale()
   const listId = useId()
-  const activeKey = endpointId
-    ? endpointModelCatalogKey(endpointId, nativeApi)
-    : null
-  const [catalog, setCatalog] = useState<CatalogState>(EMPTY_STATE)
+  const catalogQuery = useQuery({
+    ...endpointModelsOptions({
+      path: { endpoint_id: endpointId },
+      query: nativeApi ? { native_api: nativeApi } : {},
+    }),
+    enabled: endpointId !== '',
+    staleTime: ENDPOINT_MODEL_CATALOG_TTL_MS,
+  })
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(-1)
   const [hovered, setHovered] = useState(-1)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const restoreFocusRef = useRef(false)
-  const current = catalog.key === activeKey
-  const models = current ? catalog.models : []
-  const failed = current && catalog.error
-  const loading = activeKey !== null && (!current || catalog.loading)
+  const models = useMemo(
+    () => normalizeEndpointModels(catalogQuery.data?.models ?? []),
+    [catalogQuery.data],
+  )
+  const failed = catalogQuery.isError
+  const loading = endpointId !== '' && catalogQuery.isPending
   const query = value.trim().toLocaleLowerCase()
   const matching = useMemo(
     () =>
@@ -75,47 +69,14 @@ export function EndpointModelInput({
   const empty = !loading && !failed && query !== '' && matching.length === 0
 
   useEffect(() => {
-    let currentRequest = true
-    if (!endpointId || !activeKey) {
-      setCatalog(EMPTY_STATE)
-      return () => {
-        currentRequest = false
-      }
-    }
-    setCatalog({ error: false, key: activeKey, loading: true, models: [] })
-    void loadEndpointModelCatalog(endpointId, nativeApi)
-      .then((next) => {
-        if (currentRequest)
-          setCatalog({
-            error: false,
-            key: activeKey,
-            loading: false,
-            models: next,
-          })
-      })
-      .catch(() => {
-        if (currentRequest)
-          setCatalog({
-            error: true,
-            key: activeKey,
-            loading: false,
-            models: [],
-          })
-      })
-    return () => {
-      currentRequest = false
-    }
-  }, [activeKey, endpointId, nativeApi])
-
-  useEffect(() => {
     setOpen(false)
     setActive(-1)
-  }, [activeKey])
+  }, [endpointId, nativeApi])
 
   useEffect(() => {
     setActive(-1)
     setHovered(-1)
-  }, [activeKey, catalog.models, query])
+  }, [endpointId, nativeApi, models, query])
 
   function closeList(): void {
     setOpen(false)

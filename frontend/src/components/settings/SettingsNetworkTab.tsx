@@ -1,30 +1,19 @@
-import { useEffect, useRef } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { LoaderCircle, Save, Shield } from 'lucide-react'
+import { LoaderCircle, RefreshCw, Save, Shield } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { HeaderActions } from '@/components/layout/HeaderActions'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { SettingsCard } from '@/components/settings/SettingsCard'
 import { useLocale } from '@/lib/i18n'
 import { useNotifier } from '@/lib/notifier'
-import {
-  disposeSettingsNetwork,
-  setSettingsNetworkNotifier,
-  useSettingsNetworkStore,
-} from '@/lib/settings-network'
-import {
-  RELAY_IP_WHITELIST_KEY,
-  type RelayIpWhitelistField,
-} from '@/lib/settings-network-model'
-import { useAsyncAction } from '@/lib/use-async-action'
+import { useSettingsNetwork } from '@/lib/settings-network'
 
 type RelayFieldProps = {
   disabled: boolean
-  field: RelayIpWhitelistField
   help: string
   id: string
   label: string
-  onChange: (field: RelayIpWhitelistField, value: string) => void
+  onChange: (value: string) => void
   placeholder: string
   value: string
 }
@@ -32,13 +21,9 @@ type RelayFieldProps = {
 /**
  * One CIDR list: a label, the monospace textarea, and the one sentence that
  * explains what the list governs.
- *
- * The help text is written once, under the control; a tooltip repeating the same
- * sentence would add a second copy of the same guidance.
  */
 function RelayField({
   disabled,
-  field,
   help,
   id,
   label,
@@ -56,7 +41,7 @@ function RelayField({
         disabled={disabled}
         id={id}
         name={id}
-        onChange={(event) => onChange(field, event.target.value)}
+        onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         rows={5}
         spellCheck={false}
@@ -80,61 +65,87 @@ function RelayField({
  */
 export function SettingsNetworkTab() {
   const { t } = useLocale()
-  const queryClient = useQueryClient()
   const { notifyApiError, notifySuccess } = useNotifier()
-  const { isPending, pendingOrigin } = useAsyncAction()
+  const settings = useSettingsNetwork({
+    onSaved: () => notifySuccess(t('saved')),
+  })
+  const { form } = settings
 
-  const form = useSettingsNetworkStore((state) => state.form)
-  const loaded = useSettingsNetworkStore((state) => state.loaded)
-  const loading = useSettingsNetworkStore((state) => state.loading)
-  const loadError = useSettingsNetworkStore((state) => state.loadError)
-  const refresh = useSettingsNetworkStore((state) => state.refresh)
-  const setField = useSettingsNetworkStore((state) => state.setField)
-  const save = useSettingsNetworkStore((state) => state.save)
+  const savePending = settings.pending
+  const saveOrigin = settings.pendingOrigin
+  const disabled = !settings.loaded || savePending
 
-  const savedMessage = useRef<() => void>(() => {})
-  savedMessage.current = () => notifySuccess(t('saved'))
+  const refresh = () => {
+    void settings.refresh().catch(notifyApiError)
+  }
 
-  useEffect(() => {
-    setSettingsNetworkNotifier({
-      notifyError: (cause) => notifyApiError(cause),
-      notifySaved: () => savedMessage.current(),
-    })
-    return () => {
-      setSettingsNetworkNotifier(null)
-      disposeSettingsNetwork()
-    }
-  }, [notifyApiError])
-
-  const savePending = isPending(RELAY_IP_WHITELIST_KEY)
-  const saveOrigin = pendingOrigin(RELAY_IP_WHITELIST_KEY)
-  const disabled = !loaded || savePending
-
-  if (loadError && !loaded) {
+  if (settings.loadError && !settings.loaded) {
     return (
-      <div className="grid min-w-0 gap-2 rounded-lg border bg-card px-3 py-2.5">
-        <p className="m-0 text-sm" role="alert">
-          {t('error')}
-        </p>
-        <div>
+      <>
+        <HeaderActions>
           <Button
-            onClick={() => void refresh(queryClient)}
+            aria-label={t('refresh')}
+            disabled={settings.refreshBlocked}
+            id="settings-network-refresh"
+            onClick={refresh}
             size="sm"
             type="button"
             variant="outline"
           >
-            {t('retry')}
+            <RefreshCw aria-hidden="true" />
+            {t('refresh')}
           </Button>
+        </HeaderActions>
+        <div className="grid min-w-0 gap-2 rounded-lg border bg-card px-3 py-2.5">
+          <p className="m-0 text-sm" role="alert">
+            {t('error')}
+          </p>
+          <div>
+            <Button onClick={refresh} size="sm" type="button" variant="outline">
+              {t('retry')}
+            </Button>
+          </div>
         </div>
-      </div>
+      </>
     )
   }
 
   return (
     <SettingsCard icon={Shield} title={t('relayIpWhitelist')}>
-      <div className="grid min-w-0 gap-3">
+      <HeaderActions>
+        <Button
+          aria-label={t('refresh')}
+          disabled={settings.refreshBlocked}
+          id="settings-network-refresh"
+          onClick={refresh}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          <RefreshCw aria-hidden="true" />
+          {t('refresh')}
+        </Button>
+      </HeaderActions>
+      {settings.loadError ? (
+        <p
+          className="m-0 rounded-lg border bg-card px-3 py-2.5 text-sm"
+          role="alert"
+        >
+          {t('error')}
+        </p>
+      ) : null}
+      <form
+        className="grid min-w-0 gap-3"
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          if (savePending) return
+          void form.handleSubmit().catch(notifyApiError)
+        }}
+      >
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
-          {loading && !loaded ? (
+          {settings.loading && !settings.loaded ? (
             <span
               aria-label={t('loading')}
               className="inline-flex"
@@ -161,37 +172,42 @@ export function SettingsNetworkTab() {
           <Button
             disabled={disabled}
             id="settings-relay-ip-whitelist-save"
-            onClick={() => void save()}
             size="sm"
-            type="button"
+            type="submit"
           >
             <Save aria-hidden="true" />
             {t('save')}
           </Button>
         </div>
         <div className="grid min-w-0 gap-3 md:grid-cols-2">
-          <RelayField
-            disabled={disabled}
-            field="allowed_cidrs_text"
-            help={t('allowedCidrsHelp')}
-            id="settings-allowed-cidrs"
-            label={t('allowedCidrs')}
-            onChange={setField}
-            placeholder={t('allowedCidrsPlaceholder')}
-            value={form.allowed_cidrs_text}
-          />
-          <RelayField
-            disabled={disabled}
-            field="trusted_proxy_cidrs_text"
-            help={t('trustedProxyCidrsHelp')}
-            id="settings-trusted-proxy-cidrs"
-            label={t('trustedProxyCidrs')}
-            onChange={setField}
-            placeholder={t('trustedProxyCidrsPlaceholder')}
-            value={form.trusted_proxy_cidrs_text}
-          />
+          <form.Field name="allowed_cidrs_text">
+            {(field) => (
+              <RelayField
+                disabled={disabled}
+                help={t('allowedCidrsHelp')}
+                id="settings-allowed-cidrs"
+                label={t('allowedCidrs')}
+                onChange={field.handleChange}
+                placeholder={t('allowedCidrsPlaceholder')}
+                value={field.state.value}
+              />
+            )}
+          </form.Field>
+          <form.Field name="trusted_proxy_cidrs_text">
+            {(field) => (
+              <RelayField
+                disabled={disabled}
+                help={t('trustedProxyCidrsHelp')}
+                id="settings-trusted-proxy-cidrs"
+                label={t('trustedProxyCidrs')}
+                onChange={field.handleChange}
+                placeholder={t('trustedProxyCidrsPlaceholder')}
+                value={field.state.value}
+              />
+            )}
+          </form.Field>
         </div>
-      </div>
+      </form>
     </SettingsCard>
   )
 }

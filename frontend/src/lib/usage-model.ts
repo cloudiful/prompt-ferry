@@ -14,7 +14,6 @@ import type { Locale } from '@/i18n'
 import {
   REQUEST_RECORD_PAGE_SIZE_OPTIONS,
   normalizePageSize,
-  pageSizeStorageKey,
 } from '@/models/pagination'
 
 export type UsageCategory = RequestRecordCategory
@@ -36,11 +35,6 @@ export const USAGE_PAGE_SIZE_OPTIONS = REQUEST_RECORD_PAGE_SIZE_OPTIONS
 export const USAGE_PAGE_SIZE_KEY = 'request-records'
 export const USAGE_MODE_STORAGE_KEY = 'request-records-overview-mode'
 export const USAGE_PERSPECTIVE_KEY = 'usage:perspective'
-
-export const USAGE_LIST_NAMESPACE = ['usage', 'records'] as const
-export const USAGE_FACETS_NAMESPACE = ['usage', 'facets'] as const
-export const USAGE_OVERVIEW_NAMESPACE = ['usage', 'overview'] as const
-export const USAGE_USER_OPTIONS_NAMESPACE = ['usage', 'user-options'] as const
 
 /** The optional record filters, each `null` when the filter is off. */
 export type UsageFilters = {
@@ -216,50 +210,6 @@ export function usageOverviewQuery(
     end: window.end,
   }
 }
-
-/** A stable cache signature: the key order is fixed by the builder above. */
-export function usageQuerySignature(query: object): string {
-  return JSON.stringify(query)
-}
-
-export function usageListQueryKey(
-  identity: UsageIdentity,
-  query: UsageListQuery,
-) {
-  return [
-    ...USAGE_LIST_NAMESPACE,
-    usageIdentityKey(identity),
-    usageQuerySignature(query),
-  ] as const
-}
-
-export function usageFacetsQueryKey(
-  identity: UsageIdentity,
-  query: UsageFacetsQuery,
-) {
-  return [
-    ...USAGE_FACETS_NAMESPACE,
-    usageIdentityKey(identity),
-    usageQuerySignature(query),
-  ] as const
-}
-
-export function usageOverviewQueryKey(
-  identity: UsageIdentity,
-  query: UsageOverviewQuery,
-) {
-  return [
-    ...USAGE_OVERVIEW_NAMESPACE,
-    usageIdentityKey(identity),
-    usageQuerySignature(query),
-  ] as const
-}
-
-export function usageUserOptionsQueryKey(identity: UsageIdentity) {
-  return [...USAGE_USER_OPTIONS_NAMESPACE, usageIdentityKey(identity)] as const
-}
-
-export const usagePageSizeStorageKey = pageSizeStorageKey(USAGE_PAGE_SIZE_KEY)
 
 export function normalizeUsagePageSize(value: number | string | null): number {
   return normalizePageSize(value, DEFAULT_USAGE_ROWS, USAGE_PAGE_SIZE_OPTIONS)
@@ -467,28 +417,6 @@ export function usageFiltersForScope(
 /** The facets the future filter controls read, with a stable empty shape. */
 export function emptyUsageFacets(): RequestRecordFacets {
   return { dates: [], users: [], models: [] }
-}
-
-/**
- * The overview query identity the newest result must still match.
- *
- * It is built from the stored window, not from the resolved request bounds, so
- * a refresh that starts in the same second still matches the state it read.
- */
-export function usageOverviewSignature(input: {
-  category: UsageCategory
-  perspective: UsagePerspective
-  range: UsageRange
-  start: string
-  end: string
-}): string {
-  return usageQuerySignature({
-    category: input.category,
-    perspective: input.perspective,
-    range: input.range,
-    start: input.start,
-    end: input.end,
-  })
 }
 
 export type { RequestRecordOverviewResponse }

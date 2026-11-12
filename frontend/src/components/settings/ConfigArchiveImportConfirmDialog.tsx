@@ -8,39 +8,42 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useLocale } from '@/lib/i18n'
-import { useSettingsConfigArchiveStore } from '@/lib/config-archive'
+
+type ConfigArchiveImportConfirmDialogProps = {
+  error: string
+  onApply: () => void
+  onCancel: () => void
+  open: boolean
+  pending: boolean
+  unavailable: boolean
+}
 
 /**
  * The destructive confirmation for the import apply.
  *
  * Opening it is local only: no request is sent until the operator confirms, and
  * the warning states the irreversible replacement in the existing catalog copy.
- * While the apply is in flight the dialog cannot be dismissed — not by the close
- * button, Escape or an outside click — so the answer always reaches a visible
- * surface.
+ * The selected file, preview and passphrase are already held by the import form
+ * and stay untouched while the dialog is open. While the apply is in flight the
+ * dialog cannot be dismissed — not by the close button, Escape or an outside
+ * click — so the answer always reaches a visible surface.
  */
-export function ConfigArchiveImportConfirmDialog() {
+export function ConfigArchiveImportConfirmDialog({
+  error,
+  onApply,
+  onCancel,
+  open,
+  pending,
+  unavailable,
+}: ConfigArchiveImportConfirmDialogProps) {
   const { t } = useLocale()
-  const open = useSettingsConfigArchiveStore((state) => state.confirmOpen)
-  const pending = useSettingsConfigArchiveStore((state) => state.importPending)
-  const unavailable = useSettingsConfigArchiveStore(
-    (state) => state.importUnavailable,
-  )
-  const error = useSettingsConfigArchiveStore((state) => state.importError)
-  const confirmApply = useSettingsConfigArchiveStore(
-    (state) => state.confirmApply,
-  )
-  const cancelApply = useSettingsConfigArchiveStore(
-    (state) => state.cancelApply,
-  )
-
   const blocked = pending || unavailable
 
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next && !pending) cancelApply()
+        if (!next && !pending) onCancel()
       }}
     >
       <DialogContent
@@ -74,7 +77,7 @@ export function ConfigArchiveImportConfirmDialog() {
           <Button
             disabled={blocked}
             id="settings-config-archive-confirm-cancel"
-            onClick={() => cancelApply()}
+            onClick={onCancel}
             type="button"
             variant="outline"
           >
@@ -83,7 +86,7 @@ export function ConfigArchiveImportConfirmDialog() {
           <Button
             disabled={blocked}
             id="settings-config-archive-confirm-apply"
-            onClick={() => void confirmApply()}
+            onClick={onApply}
             type="button"
           >
             {t('configArchiveImportConfirmSubmit')}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { HeaderActions } from '@/components/layout/HeaderActions'
 import { EndpointDialog } from '@/components/endpoints/EndpointDialog'
@@ -14,30 +14,30 @@ import type {
   ProviderEndpoint,
 } from '@/generated/admin-api'
 import {
+  createEndpointMutation,
+  deleteEndpointMutation,
+  listEndpointsOptions,
+  listUserOptionsOptions,
+  testEndpointMutation,
+  updateEndpointMutation,
+} from '@/generated/admin-api/@tanstack/react-query.gen'
+import {
   createEmptyEndpointForm,
   endpointFormToRequest,
   endpointToForm,
 } from '@/admin-mappers/forms/endpoint'
 import { capturePayload } from '@/stores/record-action-types'
 import {
+  buildEndpointEnabledRequest,
   endpointRecordsQueryKey,
-  endpointUserOptionsQueryKey,
-  endpointsPageQueryKey,
-  listEndpointUsers,
-  listEndpointsPage,
   modelRoutePagesQueryKey,
   patchEndpointPages,
   refreshEndpointsPage,
-  removeEndpointRecord,
-  saveEndpointRecord,
-  setEndpointEnabled,
-  testEndpointRecord,
 } from '@/lib/endpoints'
 import {
-  prefetchTokenPlanBatch,
+  prefetchTokenPlanUsageBatch,
   refreshTokenPlanUsageBatch,
 } from '@/lib/quota-cache'
-import { registerTokenPlanForegroundIds } from '@/lib/quota-foreground'
 import { useAsyncAction } from '@/lib/use-async-action'
 import { useLocale } from '@/lib/i18n'
 import { useNotifier } from '@/lib/notifier'
@@ -80,7 +80,8 @@ export function EndpointsPage() {
   )
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogEndpointId, setDialogEndpointId] = useState<string | null>(null)
-  const [dialogForm, setDialogForm] = useState<EndpointForm | null>(null)
+  const [dialogInitialForm, setDialogInitialForm] =
+    useState<EndpointForm | null>(null)
   const [tokenPlanDialogTarget, setTokenPlanDialogTarget] =
     useState<TokenPlanDialogTarget | null>(null)
   const firstRef = useRef(first)
@@ -88,22 +89,24 @@ export function EndpointsPage() {
   const dialogOpenRef = useRef(false)
   const dialogEndpointIdRef = useRef<string | null>(null)
   const dialogGenerationRef = useRef(0)
-  const quotaPageGenerationRef = useRef(0)
   const notifiedErrors = useRef(new WeakSet<object>())
 
   firstRef.current = first
   rowsRef.current = rows
 
   const endpointPageQuery = useQuery({
+    ...listEndpointsOptions({ query: { first, rows } }),
     enabled: isAdmin,
-    queryKey: endpointsPageQueryKey(first, rows),
-    queryFn: () => listEndpointsPage(first, rows),
   })
   const userOptionsQuery = useQuery({
+    ...listUserOptionsOptions(),
     enabled: isAdmin && me !== null,
-    queryKey: endpointUserOptionsQueryKey(me?.user_id ?? 0),
-    queryFn: listEndpointUsers,
   })
+
+  const createEndpoint = useMutation(createEndpointMutation())
+  const updateEndpoint = useMutation(updateEndpointMutation())
+  const deleteEndpointRecord = useMutation(deleteEndpointMutation())
+  const testEndpoint = useMutation(testEndpointMutation())
 
   const reportApiError = useCallback(
     (cause: unknown) => {
@@ -154,35 +157,25 @@ export function EndpointsPage() {
   }, [endpointPageQuery.data, first, rows, setRows])
 
   const endpoints = endpointPageQuery.data?.endpoints ?? EMPTY_ENDPOINTS
-  const users = userOptionsQuery.data ?? []
+  const users = userOptionsQuery.data?.users ?? []
   const eligibleQuotaIds = useMemo(
     () =>
       endpoints.filter(isQuotaEligible).map((endpoint) => endpoint.endpoint_id),
     [endpoints],
   )
-  const eligibleQuotaIdsKey = JSON.stringify(eligibleQuotaIds)
-
   useEffect(() => {
-    if (!isAdmin) return
-    const ids = JSON.parse(eligibleQuotaIdsKey) as string[]
-    if (ids.length === 0) return
-    const generation = ++quotaPageGenerationRef.current
-    const eligible = new Set(ids)
-    const release = registerTokenPlanForegroundIds(ids)
-    void prefetchTokenPlanBatch(
-      ids,
+    if (!isAdmin || eligibleQuotaIds.length === 0) return
+    let active = true
+    void prefetchTokenPlanUsageBatch(
+      queryClient,
+      eligibleQuotaIds,
       4,
-      (endpointId) =>
-        generation === quotaPageGenerationRef.current &&
-        eligible.has(endpointId),
+      () => active,
     )
     return () => {
-      if (generation === quotaPageGenerationRef.current) {
-        quotaPageGenerationRef.current += 1
-      }
-      release()
+      active = false
     }
-  }, [eligibleQuotaIdsKey, isAdmin])
+  }, [eligibleQuotaIds, isAdmin, queryClient])
   const probeInFlightId =
     endpoints.find((endpoint) =>
       asyncAction.isPending(networkTestKey('endpoint', endpoint.endpoint_id)),
@@ -263,7 +256,7 @@ export function EndpointsPage() {
     dialogEndpointIdRef.current = null
     dialogOpenRef.current = true
     setDialogEndpointId(null)
-    setDialogForm(createEmptyEndpointForm())
+    setDialogInitialForm(createEmptyEndpointForm())
     setDialogOpen(true)
   }
 
@@ -274,7 +267,7 @@ export function EndpointsPage() {
     dialogEndpointIdRef.current = endpointId
     dialogOpenRef.current = true
     setDialogEndpointId(endpointId)
-    setDialogForm(endpointToForm(endpoint))
+    setDialogInitialForm(endpointToForm(endpoint))
     setDialogOpen(true)
   }
 
@@ -287,14 +280,8 @@ export function EndpointsPage() {
       dialogGenerationRef.current += 1
       dialogEndpointIdRef.current = null
       setDialogEndpointId(null)
-      setDialogForm(null)
+      setDialogInitialForm(null)
     }
-  }
-
-  function updateDialogForm(
-    update: (current: EndpointForm) => EndpointForm,
-  ): void {
-    setDialogForm((current) => (current ? update(current) : current))
   }
 
   async function invalidateModelRoutePages(): Promise<void> {
@@ -310,9 +297,7 @@ export function EndpointsPage() {
     ])
   }
 
-  async function submitEndpoint(): Promise<void> {
-    const currentForm = dialogForm
-    if (!currentForm) return
+  async function submitEndpoint(currentForm: EndpointForm): Promise<void> {
     const endpointId = dialogEndpointIdRef.current
     const capturedId = endpointId
     const body = capturePayload(endpointFormToRequest(currentForm))
@@ -324,7 +309,12 @@ export function EndpointsPage() {
       const outcome = await asyncAction.run(
         endpointActionKey(capturedId),
         async () => {
-          const saved = await saveEndpointRecord(capturedId, body)
+          const saved = capturedId
+            ? await updateEndpoint.mutateAsync({
+                path: { endpoint_id: capturedId },
+                body,
+              })
+            : await createEndpoint.mutateAsync({ body })
           await invalidateModelRoutePages()
           const refreshedPage = await refreshEndpointsPage(
             queryClient,
@@ -346,7 +336,7 @@ export function EndpointsPage() {
         dialogEndpointIdRef.current = null
         setDialogOpen(false)
         setDialogEndpointId(null)
-        setDialogForm(null)
+        setDialogInitialForm(null)
         dialogGenerationRef.current += 1
       }
       notifySuccess(t('endpointSaved'))
@@ -366,7 +356,9 @@ export function EndpointsPage() {
       const outcome = await asyncAction.run(
         endpointActionKey(capturedId),
         async () => {
-          await removeEndpointRecord(capturedId)
+          await deleteEndpointRecord.mutateAsync({
+            path: { endpoint_id: capturedId },
+          })
           await invalidateModelRoutePages()
           const refreshedPage = await refreshEndpointsPage(
             queryClient,
@@ -394,7 +386,10 @@ export function EndpointsPage() {
       await asyncAction.run(
         endpointActionKey(endpointId),
         async () => {
-          const saved = await setEndpointEnabled(capturedEndpoint, enabled)
+          const saved = await updateEndpoint.mutateAsync({
+            path: { endpoint_id: capturedEndpoint.endpoint_id },
+            body: buildEndpointEnabledRequest(capturedEndpoint, enabled),
+          })
           patchEndpointPages(queryClient, saved)
           await invalidateModelRoutePages()
           return saved
@@ -406,7 +401,7 @@ export function EndpointsPage() {
     }
   }
 
-  async function testEndpoint(
+  async function probeEndpoint(
     endpointId: string,
     surface: TestResultSurface,
   ): Promise<void> {
@@ -415,7 +410,7 @@ export function EndpointsPage() {
     try {
       const outcome = await asyncAction.run(
         networkTestKey('endpoint', capturedId),
-        () => testEndpointRecord(capturedId),
+        () => testEndpoint.mutateAsync({ path: { endpoint_id: capturedId } }),
         'test',
       )
       if (!outcome.executed) return
@@ -438,7 +433,7 @@ export function EndpointsPage() {
           if (isAdmin) reads.push(userOptionsQuery.refetch())
           const [readResults, quotaOutcomes] = await Promise.all([
             Promise.allSettled(reads),
-            refreshTokenPlanUsageBatch(capturedQuotaIds),
+            refreshTokenPlanUsageBatch(queryClient, capturedQuotaIds),
           ])
           return { readResults, quotaOutcomes }
         },
@@ -503,7 +498,9 @@ export function EndpointsPage() {
         onEdit={openEditDialog}
         onPage={changePage}
         onResultOpenChange={changeTestResultOpen}
-        onTest={(endpointId, surface) => void testEndpoint(endpointId, surface)}
+        onTest={(endpointId, surface) =>
+          void probeEndpoint(endpointId, surface)
+        }
         onTokenPlanUsage={openTokenPlanUsage}
         onToggle={(endpointId, enabled) =>
           void toggleEndpoint(endpointId, enabled)
@@ -513,14 +510,14 @@ export function EndpointsPage() {
         rows={endpointPageQuery.data?.rows ?? rows}
         total={endpointPageQuery.data?.total ?? 0}
       />
-      {dialogForm ? (
+      {dialogInitialForm ? (
         <EndpointDialog
           dialogGeneration={dialogGenerationRef.current}
           endpointId={dialogEndpointId}
-          form={dialogForm}
-          onChange={updateDialogForm}
+          initialForm={dialogInitialForm}
+          key={dialogGenerationRef.current}
           onOpenChange={changeDialogOpen}
-          onSubmit={() => void submitEndpoint()}
+          onSubmit={(form) => submitEndpoint(form)}
           open={dialogOpen}
           pending={dialogPending}
           runOAuthAction={runOAuthAction}

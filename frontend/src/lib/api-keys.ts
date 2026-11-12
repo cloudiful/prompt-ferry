@@ -1,37 +1,18 @@
-import type { QueryClient } from '@tanstack/react-query'
+import type { QueryClient, UseQueryOptions } from '@tanstack/react-query'
+import type { ClientKeyPageResponse } from '@/generated/admin-api'
 import {
-  createClientKey,
-  deleteClientKey,
-  listClientKeys,
-  listUserOptions,
-  meCreateClientKey,
-  meDeleteClientKey,
-  meListClientKeys,
-  meListModels,
-  meUpdateClientKey,
-  updateClientKey,
-} from '@/generated/admin-api'
-import type {
-  AvailableModelsResponse,
-  ClientKey,
-  ClientKeyPageResponse,
-  CreateClientKeyRequest,
-  CreateClientKeyResponse,
-  UpdateClientKeyRequest,
-  User,
-  UserOptionsResponse,
-} from '@/generated/admin-api'
-import { expectData, withData } from '@/api'
+  listClientKeysOptions,
+  listClientKeysQueryKey,
+  meListClientKeysOptions,
+  meListClientKeysQueryKey,
+  meListModelsQueryKey,
+} from '@/generated/admin-api/@tanstack/react-query.gen'
 import { SELF_USER_ID } from '@/models/api-keys'
 
-const clientKeysRoot = ['client-keys'] as const
-
-export function clientKeyUsersQueryKey(userId: number) {
-  return [...clientKeysRoot, 'users', userId] as const
-}
-
 export function clientKeyPagesQueryKey(userId: number) {
-  return [...clientKeysRoot, 'page', userId] as const
+  return userId === SELF_USER_ID
+    ? meListClientKeysQueryKey()
+    : listClientKeysQueryKey({ path: { user_id: userId } })
 }
 
 export function clientKeyPageQueryKey(
@@ -39,83 +20,43 @@ export function clientKeyPageQueryKey(
   first: number,
   rows: number,
 ) {
-  return [...clientKeyPagesQueryKey(userId), first, rows] as const
+  return userId === SELF_USER_ID
+    ? meListClientKeysQueryKey({ query: { first, rows } })
+    : listClientKeysQueryKey({
+        path: { user_id: userId },
+        query: { first, rows },
+      })
+}
+
+/**
+ * The options of one client-key page.
+ *
+ * The self list and the owner list are two endpoints with one result shape,
+ * and the page reads either of them, so their generated options are widened to
+ * one query type.
+ */
+export type ClientKeyPageOptions = UseQueryOptions<
+  ClientKeyPageResponse,
+  Error,
+  ClientKeyPageResponse,
+  readonly unknown[]
+>
+
+export function clientKeyPageOptions(
+  userId: number,
+  first: number,
+  rows: number,
+): ClientKeyPageOptions {
+  return (userId === SELF_USER_ID
+    ? meListClientKeysOptions({ query: { first, rows } })
+    : listClientKeysOptions({
+        path: { user_id: userId },
+        query: { first, rows },
+      })) as unknown as ClientKeyPageOptions
 }
 
 export function availableModelsQueryKey(first: number, rows: number) {
-  return ['available-models', first, rows] as const
-}
-
-export async function listClientKeysPage(
-  userId: number,
-  first: number,
-  rows: number,
-): Promise<ClientKeyPageResponse> {
-  const result =
-    userId === SELF_USER_ID
-      ? await meListClientKeys<true>(withData({ query: { first, rows } }))
-      : await listClientKeys<true>(
-          withData({ path: { user_id: userId }, query: { first, rows } }),
-        )
-  return expectData(result)
-}
-
-export async function listClientKeyUsers(): Promise<User[]> {
-  const result = expectData(
-    await listUserOptions<true>(withData()),
-  ) as UserOptionsResponse
-  return result.users
-}
-
-export async function createClientKeyForUser(
-  userId: number,
-  body: CreateClientKeyRequest,
-): Promise<CreateClientKeyResponse> {
-  const result =
-    userId === SELF_USER_ID
-      ? await meCreateClientKey<true>(withData({ body }))
-      : await createClientKey<true>(
-          withData({ path: { user_id: userId }, body }),
-        )
-  return expectData(result)
-}
-
-export async function updateClientKeyForUser(
-  userId: number,
-  keyId: string,
-  body: UpdateClientKeyRequest,
-): Promise<ClientKey> {
-  const result =
-    userId === SELF_USER_ID
-      ? await meUpdateClientKey<true>(
-          withData({ path: { key_id: keyId }, body }),
-        )
-      : await updateClientKey<true>(
-          withData({ path: { user_id: userId, key_id: keyId }, body }),
-        )
-  return expectData(result)
-}
-
-export async function deleteClientKeyForUser(
-  userId: number,
-  keyId: string,
-): Promise<void> {
-  if (userId === SELF_USER_ID) {
-    await meDeleteClientKey<true>(withData({ path: { key_id: keyId } }))
-  } else {
-    await deleteClientKey<true>(
-      withData({ path: { user_id: userId, key_id: keyId } }),
-    )
-  }
-}
-
-export async function listAvailableModels(
-  first: number,
-  rows: number,
-): Promise<AvailableModelsResponse> {
-  return expectData(
-    await meListModels<true>(withData({ query: { first, rows } })),
-  )
+  return meListModelsQueryKey({ query: { first, rows } })
 }
 
 export async function refreshClientKeyPage(
@@ -133,11 +74,9 @@ export async function refreshClientKeyPage(
   let requestedFirst = first
 
   while (true) {
-    const page = await queryClient.fetchQuery({
-      queryKey: clientKeyPageQueryKey(userId, requestedFirst, rows),
-      queryFn: () => listClientKeysPage(userId, requestedFirst, rows),
-      staleTime: 0,
-    })
+    const page = await queryClient.fetchQuery(
+      clientKeyPageOptions(userId, requestedFirst, rows),
+    )
 
     if (
       page.rows > 0 &&

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { HeaderActions } from '@/components/layout/HeaderActions'
 import { CreateUserDialog } from '@/components/users/CreateUserDialog'
@@ -13,20 +13,18 @@ import type {
   UserUpdate,
 } from '@/generated/admin-api'
 import {
-  createUserRecord,
-  deleteUserRecord,
-  listUsersPage,
-  refreshUsersPage,
-  resetUserPasswordRecord,
-  updateUserRecord,
-  usersPageQueryKey,
-  usersPagesQueryKey,
-} from '@/lib/users'
+  createUserMutation,
+  deleteUserMutation,
+  listUsersOptions,
+  resetPasswordMutation,
+  updateUserMutation,
+} from '@/generated/admin-api/@tanstack/react-query.gen'
+import { refreshUsersPage, usersPagesQueryKey } from '@/lib/users'
 import { useAsyncAction } from '@/lib/use-async-action'
 import { useLocale } from '@/lib/i18n'
 import { useNotifier } from '@/lib/notifier'
 import { useSessionStore } from '@/lib/session'
-import { emptyUserForm, userActionKey, type NewUserForm } from '@/models/users'
+import { userActionKey, type NewUserForm } from '@/models/users'
 import type { TablePageChange } from '@/models/pagination'
 
 export function UsersPage() {
@@ -38,9 +36,7 @@ export function UsersPage() {
   const [first, setFirst] = useState(0)
   const [rows, setRows] = useStoredPageSize('users')
   const [createOpen, setCreateOpen] = useState(false)
-  const [createForm, setCreateForm] = useState<NewUserForm>(emptyUserForm)
   const [resetUser, setResetUser] = useState<User | null>(null)
-  const [resetPassword, setResetPassword] = useState('')
   const firstRef = useRef(first)
   const rowsRef = useRef(rows)
   const createOpenRef = useRef(false)
@@ -53,10 +49,14 @@ export function UsersPage() {
   rowsRef.current = rows
 
   const query = useQuery({
+    ...listUsersOptions({ query: { first, rows } }),
     enabled: me?.is_admin === true,
-    queryKey: usersPageQueryKey(first, rows),
-    queryFn: () => listUsersPage(first, rows),
   })
+
+  const createUser = useMutation(createUserMutation())
+  const updateUser = useMutation(updateUserMutation())
+  const removeUser = useMutation(deleteUserMutation())
+  const resetUserPassword = useMutation(resetPasswordMutation())
 
   const reportApiError = useCallback(
     (cause: unknown) => {
@@ -138,13 +138,13 @@ export function UsersPage() {
     if (!open) createGenerationRef.current += 1
   }
 
-  async function submitCreateUser(): Promise<void> {
+  async function submitCreateUser(form: NewUserForm): Promise<boolean> {
     const generation = createGenerationRef.current
     const body: CreateUserRequest = {
-      login_name: createForm.login_name,
-      password: createForm.password,
-      display_name: createForm.display_name,
-      is_admin: createForm.is_admin,
+      login_name: form.login_name,
+      password: form.password,
+      display_name: form.display_name,
+      is_admin: form.is_admin,
     }
     const capturedFirst = firstRef.current
     const capturedRows = rowsRef.current
@@ -153,7 +153,7 @@ export function UsersPage() {
       const outcome = await asyncAction.run(
         userActionKey(null),
         async () => {
-          const created = await createUserRecord(body)
+          const created = await createUser.mutateAsync({ body })
           const page = await refreshUsersPage(
             queryClient,
             capturedFirst,
@@ -164,16 +164,17 @@ export function UsersPage() {
         },
         'save',
       )
-      if (!outcome.executed) return
+      if (!outcome.executed) return false
       if (createOpenRef.current && createGenerationRef.current === generation) {
         createOpenRef.current = false
         setCreateOpen(false)
-        setCreateForm(emptyUserForm())
         createGenerationRef.current += 1
       }
       notifySuccess(t('userCreated'))
+      return true
     } catch (cause) {
       reportApiError(cause)
+      return false
     }
   }
 
@@ -188,7 +189,10 @@ export function UsersPage() {
       const outcome = await asyncAction.run(
         userActionKey(capturedUserId),
         async () => {
-          const saved = await updateUserRecord(capturedUserId, body)
+          const saved = await updateUser.mutateAsync({
+            path: { user_id: capturedUserId },
+            body,
+          })
           queryClient.setQueriesData<UserPageResponse>(
             { queryKey: usersPagesQueryKey() },
             (page) =>
@@ -223,7 +227,7 @@ export function UsersPage() {
       const outcome = await asyncAction.run(
         userActionKey(capturedUserId),
         async () => {
-          await deleteUserRecord(capturedUserId)
+          await removeUser.mutateAsync({ path: { user_id: capturedUserId } })
           const page = await refreshUsersPage(
             queryClient,
             capturedFirst,
@@ -242,7 +246,6 @@ export function UsersPage() {
   function openResetPasswordDialog(user: User): void {
     resetGenerationRef.current += 1
     resetUserRef.current = user
-    setResetPassword('')
     setResetUser(user)
   }
 
@@ -258,22 +261,24 @@ export function UsersPage() {
     if (!open) {
       resetUserRef.current = null
       resetGenerationRef.current += 1
-      setResetPassword('')
       setResetUser(null)
     }
   }
 
-  async function submitResetPassword(): Promise<void> {
+  async function submitResetPassword(password: string): Promise<void> {
     const capturedUser = resetUserRef.current
     if (!capturedUser) return
     const capturedUserId = capturedUser.user_id
-    const capturedPassword = resetPassword
     const generation = resetGenerationRef.current
 
     try {
       const outcome = await asyncAction.run(
         userActionKey(capturedUserId),
-        () => resetUserPasswordRecord(capturedUserId, capturedPassword),
+        () =>
+          resetUserPassword.mutateAsync({
+            path: { user_id: capturedUserId },
+            body: { password },
+          }),
         'reset',
       )
       if (!outcome.executed) return
@@ -282,7 +287,6 @@ export function UsersPage() {
         resetUserRef.current?.user_id === capturedUserId
       ) {
         resetUserRef.current = null
-        setResetPassword('')
         setResetUser(null)
         resetGenerationRef.current += 1
       }
@@ -339,21 +343,15 @@ export function UsersPage() {
       />
 
       <CreateUserDialog
-        form={createForm}
-        onChange={(field, value) =>
-          setCreateForm((current) => ({ ...current, [field]: value }))
-        }
         onOpenChange={changeCreateDialog}
-        onSubmit={() => void submitCreateUser()}
+        onSubmit={submitCreateUser}
         open={createOpen}
         pending={createPending}
       />
       <ResetPasswordDialog
         onOpenChange={changeResetDialog}
-        onPasswordChange={setResetPassword}
-        onSubmit={() => void submitResetPassword()}
+        onSubmit={(password) => void submitResetPassword(password)}
         open={resetUser !== null}
-        password={resetPassword}
         pending={resetPending}
         user={resetUser}
       />

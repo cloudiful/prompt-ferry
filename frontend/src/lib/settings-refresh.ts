@@ -1,33 +1,4 @@
-import type { QueryClient } from '@tanstack/react-query'
 import type { PendingActions } from './async-action'
-
-/**
- * Read one settings resource with the shared refresh contract: cancel the
- * in-flight read of this page, drop every cached copy in the domain namespace,
- * then fetch the resource uncached.
- */
-export async function fetchFreshSetting<T>(
-  queryClient: QueryClient,
-  options: {
-    queryKey: readonly unknown[]
-    namespace: readonly unknown[]
-    load: () => Promise<T>
-  },
-): Promise<T> {
-  await queryClient.cancelQueries({
-    queryKey: options.queryKey,
-    exact: true,
-  })
-  await queryClient.invalidateQueries({
-    queryKey: options.namespace,
-    refetchType: 'none',
-  })
-  return queryClient.fetchQuery({
-    queryKey: options.queryKey,
-    queryFn: options.load,
-    staleTime: 0,
-  })
-}
 
 export type SettingsRefreshGate = {
   pendingActions: PendingActions
@@ -37,6 +8,11 @@ export type SettingsRefreshGate = {
   loaded: boolean
 }
 
+/**
+ * Whether a scoped settings refresh is safe: loaded, idle, clean and without an
+ * unrecovered write failure. A refresh replaces the loaded value, so it must
+ * not discard a draft the operator has not saved yet.
+ */
 export function settingsRefreshGateBlocked(
   input: SettingsRefreshGate,
   key: string,

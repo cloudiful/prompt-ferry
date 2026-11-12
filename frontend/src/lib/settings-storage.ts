@@ -1,32 +1,33 @@
 /**
- * The admin Storage settings tab: the raw object store, read and saved by hand.
+ * The admin Storage settings tab: the raw object store, read by TanStack Query
+ * and edited through one native form.
  *
- * Two things make this tab different from the network and review ports. The
- * first is that the two S3 credentials are write-only: the server echoes only
- * their presence, so the store keeps the operator's drafts apart from the flags
- * and can never display a stored secret. The second is that the whole setting is
- * unavailable on a backend that cannot keep it, which the server answers with a
- * structured capability code; that becomes an explicit state, so the warning and
- * its retry read do not depend on matching an error message.
- *
- * Everything else follows the accepted pattern: one scoped read through the app
- * query client with a read generation, one guarded write under `setting:storage`
- * with the form captured before the first await, a per-field merge that keeps a
- * newer edit, secret drafts cleared only where a save consumed them, and a
- * success report only for a write that reached the server.
+ * The two S3 credentials are write-only: the server echoes only their presence,
+ * so the form keeps the operator's drafts apart from the flags and can never
+ * display a stored secret. The whole setting is unavailable on a backend that
+ * cannot keep it; that structured answer becomes an explicit query state rather
+ * than a message match. The tab is saved by hand, and a successful save clears
+ * only the secret drafts it consumed.
  */
 
-import type { QueryClient } from '@tanstack/react-query'
-import { create } from 'zustand'
+import { useEffect, useRef, useState } from 'react'
+import { useForm, useStore } from '@tanstack/react-form'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
   MeResponse,
   RawObjectStoreSettingsResponse,
 } from '@/generated/admin-api'
-import { getRawObjectStore, setRawObjectStore } from '@/generated/admin-api'
-import { expectData, withData } from '@/api'
+import {
+  getRawObjectStoreOptions,
+  getRawObjectStoreQueryKey,
+  setRawObjectStoreMutation,
+} from '@/generated/admin-api/@tanstack/react-query.gen'
 import { capturePayload } from '@/stores/record-action-types'
 import { runAsyncAction, type AsyncActionOutcome } from './async-action'
-import { fetchFreshSetting, formatEnvelopeCause } from './settings-refresh'
+import { useLocale } from './i18n'
+import { useSessionStore } from './session'
+import { useAsyncAction } from './use-async-action'
+import { formatEnvelopeCause } from './settings-refresh'
 import {
   STORAGE_KEY,
   clearSavedSecretDrafts,
@@ -38,249 +39,169 @@ import {
   rawObjectStoreDirty,
   rawObjectStoreFormToRequest,
   storageBucketMissing,
-  type RawObjectStoreField,
+  storageRefreshBlocked,
   type RawObjectStoreForm,
   type RawObjectStorePresence,
 } from './settings-storage-model'
 
-const SETTINGS_STORAGE_NAMESPACE = ['settings-storage'] as const
-const RAW_OBJECT_STORE_QUERY_KEY = [
-  ...SETTINGS_STORAGE_NAMESPACE,
-  'raw-object-store',
-] as const
-
 type SettingsIdentity = Pick<MeResponse, 'user_id' | 'login_name' | 'is_admin'>
+
+type SettingsStorageOptions = {
+  onSaved?: () => void
+}
 
 export function storageIdentityKey(identity: SettingsIdentity | null): string {
   if (!identity) return ''
   return `${identity.user_id}:${identity.login_name}:${identity.is_admin}`
 }
 
-export type SettingsStorageState = {
-  identityKey: string
-  form: RawObjectStoreForm
-  baseline: RawObjectStoreForm
-  presence: RawObjectStorePresence
-  loaded: boolean
-  loading: boolean
-  loadError: boolean
-  unavailable: boolean
-  unavailableMessage: string
-  saveFailed: boolean
-  initializeIdentity: (identity: SettingsIdentity | null) => void
-  resetIdentity: (identity: SettingsIdentity | null) => void
-  ensureLoaded: (queryClient: QueryClient) => Promise<void>
-  refresh: (queryClient: QueryClient) => Promise<void>
-  setField: <K extends RawObjectStoreField>(
-    field: K,
-    value: RawObjectStoreForm[K],
-  ) => void
-  save: () => Promise<AsyncActionOutcome<void>>
+const EMPTY_PRESENCE: RawObjectStorePresence = {
+  has_s3_access_key: false,
+  has_s3_secret_key: false,
 }
 
-let readGeneration = 0
-let reportedNotifier: {
-  notifyApiError: (cause: unknown) => void
-  notifyBucketRequired: () => void
-  notifySaved: () => void
-} | null = null
+export function useSettingsStorage(options: SettingsStorageOptions = {}) {
+  const queryClient = useQueryClient()
+  const asyncAction = useAsyncAction()
+  const { t } = useLocale()
+  const me = useSessionStore((state) => state.me)
+  const identityKey = storageIdentityKey(me)
+  const onSavedRef = useRef(options.onSaved)
+  onSavedRef.current = options.onSaved
 
-/**
- * Register the notifications the tab reports through, so the store never reaches
- * into a React context and the tab owns the notification surface.
- */
-export function setSettingsStorageNotifier(
-  notifier: {
-    notifyApiError: (cause: unknown) => void
-    notifyBucketRequired: () => void
-    notifySaved: () => void
-  } | null,
-): void {
-  reportedNotifier = notifier
-}
-
-/** Drop a read that is still in flight once the operator edits or saves. */
-function invalidatePendingRead(): void {
-  if (!useSettingsStorageStore.getState().loading) return
-  ++readGeneration
-  useSettingsStorageStore.setState({ loading: false })
-}
-
-/**
- * Drop the tab: an in-flight read commits nothing, and the form — which holds
- * the operator's secret drafts — is emptied so nothing sensitive survives the
- * tab on the module that outlives it.
- */
-export function disposeSettingsStorage(): void {
-  ++readGeneration
-  useSettingsStorageStore.setState({
-    form: createRawObjectStoreForm(),
-    baseline: createRawObjectStoreForm(),
-    presence: { has_s3_access_key: false, has_s3_secret_key: false },
-    loaded: false,
-    loading: false,
-    loadError: false,
-    unavailable: false,
-    unavailableMessage: '',
-    saveFailed: false,
-  })
-}
-
-async function fetchFresh(
-  queryClient: QueryClient,
-): Promise<RawObjectStoreSettingsResponse> {
-  return fetchFreshSetting(queryClient, {
-    queryKey: RAW_OBJECT_STORE_QUERY_KEY,
-    namespace: SETTINGS_STORAGE_NAMESPACE,
-    load: async () => expectData(await getRawObjectStore<true>(withData())),
-  })
-}
-
-export const useSettingsStorageStore = create<SettingsStorageState>(
-  (set, get) => ({
-    identityKey: '',
-    form: createRawObjectStoreForm(),
-    baseline: createRawObjectStoreForm(),
-    presence: { has_s3_access_key: false, has_s3_secret_key: false },
-    loaded: false,
-    loading: false,
-    loadError: false,
-    unavailable: false,
-    unavailableMessage: '',
-    saveFailed: false,
-
-    initializeIdentity(identity) {
-      const key = storageIdentityKey(identity)
-      if (get().identityKey === key) return
-      get().resetIdentity(identity)
+  const form = useForm({
+    defaultValues: createRawObjectStoreForm(),
+    validators: {
+      onSubmit: ({ value }) =>
+        storageBucketMissing(value) ? t('storageBucketRequired') : undefined,
     },
+    onSubmit: async ({ value }) => {
+      const outcome = await saveValues(value)
+      if (outcome.executed) onSavedRef.current?.()
+    },
+  })
+  const values = useStore(form.store, (state) => state.values)
 
-    resetIdentity(identity) {
-      ++readGeneration
-      set({
-        identityKey: storageIdentityKey(identity),
-        form: createRawObjectStoreForm(),
-        baseline: createRawObjectStoreForm(),
-        presence: { has_s3_access_key: false, has_s3_secret_key: false },
-        loaded: false,
-        loading: false,
-        loadError: false,
-        unavailable: false,
-        unavailableMessage: '',
-        saveFailed: false,
+  function applyForm(next: RawObjectStoreForm): void {
+    for (const field of Object.keys(next) as Array<keyof RawObjectStoreForm>) {
+      form.setFieldValue(field as never, next[field] as never, {
+        dontRunListeners: true,
+        dontUpdateMeta: true,
+        dontValidate: true,
       })
-    },
+    }
+  }
+  const [baseline, setBaseline] = useState<RawObjectStoreForm>(() =>
+    createRawObjectStoreForm(),
+  )
+  const [saveFailed, setSaveFailed] = useState(false)
+  const loadedRef = useRef(false)
+  const valuesRef = useRef(values)
+  const baselineRef = useRef(baseline)
+  const queryDataRef = useRef<RawObjectStoreSettingsResponse | undefined>(
+    undefined,
+  )
 
-    async ensureLoaded(queryClient) {
-      const state = get()
-      if (state.identityKey === '' || state.loaded || state.loading) return
-      await get().refresh(queryClient)
-    },
+  valuesRef.current = values
+  baselineRef.current = baseline
 
-    async refresh(queryClient) {
-      const state = get()
-      if (state.identityKey === '') return
-      if (rawObjectStoreDirty(state.form, state.baseline)) return
-      const identityKey = state.identityKey
-      const generation = ++readGeneration
-      set({ loading: true, loadError: false })
-      try {
-        const response = await fetchFresh(queryClient)
-        if (generation !== readGeneration) return
-        if (get().identityKey !== identityKey) return
-        const form = formFromRawObjectStore(response)
-        set({
-          form,
-          baseline: form,
-          presence: presenceFromRawObjectStore(response),
-          loaded: true,
-          loading: false,
-          loadError: false,
-          unavailable: false,
-          unavailableMessage: '',
-          saveFailed: false,
-        })
-      } catch (cause) {
-        if (generation !== readGeneration) return
-        if (get().identityKey !== identityKey) return
-        const unavailable = isRawObjectStoreCapabilityUnavailable(cause)
-        set({
-          loading: false,
-          loadError: true,
-          unavailable,
-          unavailableMessage: unavailable
-            ? (formatEnvelopeCause(cause) ?? '')
-            : '',
-        })
-      }
-    },
+  const query = useQuery({
+    ...getRawObjectStoreOptions(),
+    enabled: identityKey !== '',
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+  const saveMutation = useMutation(setRawObjectStoreMutation())
 
-    setField(field, value) {
-      invalidatePendingRead()
-      set({ form: { ...get().form, [field]: value } })
-    },
+  const loaded = query.data !== undefined
+  const loading = query.isFetching && !loaded
+  const loadError = query.isError
+  const unavailable = isRawObjectStoreCapabilityUnavailable(query.error)
+  const unavailableMessage = unavailable
+    ? (formatEnvelopeCause(query.error) ?? '')
+    : ''
+  const dirty = rawObjectStoreDirty(values, baseline)
+  const presence = query.data
+    ? presenceFromRawObjectStore(query.data)
+    : EMPTY_PRESENCE
+  const refreshBlocked = storageRefreshBlocked({
+    pendingActions: asyncAction.pendingActions,
+    dirty,
+    failed: saveFailed,
+    loading: query.isFetching,
+    loaded,
+  })
 
-    async save() {
-      const state = get()
-      // Saving before a successful read would submit the empty defaults over a
-      // configured store.
-      if (state.identityKey === '' || !state.loaded || state.unavailable) {
-        return { executed: false }
-      }
-      const identityKey = state.identityKey
-      const submitted = capturePayload(state.form)
-      invalidatePendingRead()
+  useEffect(() => {
+    const data = query.data
+    if (!data || queryDataRef.current === data) return
+    queryDataRef.current = data
+    const mapped = formFromRawObjectStore(data)
+    const pristine = !rawObjectStoreDirty(
+      valuesRef.current,
+      baselineRef.current,
+    )
+    if (loadedRef.current && !pristine) return
+    loadedRef.current = true
+    applyForm(mapped)
+    setBaseline(mapped)
+  }, [form, query.data])
 
-      let bucketMissing = false
-      try {
-        const outcome = await runAsyncAction(
-          STORAGE_KEY,
-          async () => {
-            if (storageBucketMissing(submitted)) {
-              bucketMissing = true
-              // The guard releases the key; nothing reached the server.
-              throw new StorageBucketRequiredError()
-            }
-            const body = rawObjectStoreFormToRequest(submitted)
-            const response = expectData(
-              await setRawObjectStore<true>(withData({ body })),
-            )
-            if (get().identityKey !== identityKey) return
-            const latest = get()
-            set({
-              form: clearSavedSecretDrafts(
-                mergeRawObjectStoreResponse(latest.form, submitted, response),
-                submitted,
-              ),
-              // The baseline is the last accepted value, per field: a field or a
-              // secret draft edited during the write stays dirty against it.
-              baseline: formFromRawObjectStore(response),
-              presence: presenceFromRawObjectStore(response),
-              loaded: true,
-              saveFailed: false,
-            })
-          },
-          'storage',
-        )
-        if (outcome.executed) {
-          set({ saveFailed: false })
-          reportedNotifier?.notifySaved()
-        }
-        return outcome
-      } catch (cause) {
-        set({ saveFailed: true })
-        if (bucketMissing) reportedNotifier?.notifyBucketRequired()
-        else reportedNotifier?.notifyApiError(cause)
-        return { executed: false }
-      }
-    },
-  }),
-)
+  async function refresh(): Promise<void> {
+    if (identityKey === '') return
+    await queryClient.fetchQuery({
+      ...getRawObjectStoreOptions(),
+      staleTime: 0,
+    })
+  }
 
-/** The S3 bucket is required for the s3 backend; reported before any request. */
-export class StorageBucketRequiredError extends Error {
-  constructor() {
-    super('S3 bucket is required')
-    this.name = 'StorageBucketRequiredError'
+  async function saveValues(
+    value: RawObjectStoreForm,
+  ): Promise<AsyncActionOutcome<void>> {
+    if (identityKey === '' || !loaded || unavailable) {
+      return { executed: false }
+    }
+    const submitted = capturePayload(value)
+    try {
+      const outcome = await runAsyncAction(
+        STORAGE_KEY,
+        async () => {
+          const body = rawObjectStoreFormToRequest(submitted)
+          const response = await saveMutation.mutateAsync({ body })
+          const latest = valuesRef.current
+          applyForm(
+            clearSavedSecretDrafts(
+              mergeRawObjectStoreResponse(latest, submitted, response),
+              submitted,
+            ),
+          )
+          setBaseline(formFromRawObjectStore(response))
+          loadedRef.current = true
+          queryClient.setQueryData(getRawObjectStoreQueryKey(), response)
+        },
+        'storage',
+      )
+      if (outcome.executed) setSaveFailed(false)
+      return outcome
+    } catch (cause) {
+      setSaveFailed(true)
+      throw cause
+    }
+  }
+
+  return {
+    form,
+    values,
+    presence,
+    loaded,
+    loading,
+    loadError,
+    unavailable,
+    unavailableMessage,
+    dirty,
+    saveFailed,
+    refresh,
+    refreshBlocked,
+    pending: asyncAction.isPending(STORAGE_KEY),
+    pendingOrigin: asyncAction.pendingOrigin(STORAGE_KEY),
   }
 }

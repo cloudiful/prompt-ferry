@@ -1,8 +1,9 @@
-import { useCallback, useSyncExternalStore } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
+import { tokenPlanUsageOptions } from '@/generated/admin-api/@tanstack/react-query.gen'
 import {
-  getTokenPlanUsageSnapshot,
-  subscribeTokenPlanUsage,
+  TOKEN_PLAN_CACHE_TTL_MS,
+  tokenPlanUsageSnapshot,
 } from '@/lib/quota-cache'
 import { useDisplayTimeZone } from '@/lib/display-timezone'
 import { useLocale } from '@/lib/i18n'
@@ -24,25 +25,17 @@ export function QuotaBadges({
 }: QuotaBadgesProps) {
   const { locale, t } = useLocale()
   const timeZone = useDisplayTimeZone()
-  const subscribe = useCallback(
-    (listener: () => void) =>
-      eligible
-        ? subscribeTokenPlanUsage(endpointId, listener)
-        : () => undefined,
-    [eligible, endpointId],
-  )
-  const getSnapshot = useCallback(
-    () =>
-      eligible
-        ? getTokenPlanUsageSnapshot(endpointId)
-        : getTokenPlanUsageSnapshot(''),
-    [eligible, endpointId],
-  )
-  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  const usageQuery = useQuery({
+    ...tokenPlanUsageOptions({ path: { endpoint_id: endpointId } }),
+    enabled: eligible && endpointId !== '',
+    staleTime: TOKEN_PLAN_CACHE_TTL_MS,
+    refetchOnWindowFocus: true,
+    refetchInterval: TOKEN_PLAN_CACHE_TTL_MS,
+  })
 
   if (!eligible) return null
 
-  const source = computeTokenPlanBadges(snapshot)
+  const source = computeTokenPlanBadges(tokenPlanUsageSnapshot(usageQuery))
   const pills = tokenPlanBadgePills(
     source,
     t as unknown as TranslateFn,

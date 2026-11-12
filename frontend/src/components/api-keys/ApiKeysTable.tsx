@@ -1,17 +1,13 @@
-import { useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { LoaderCircle } from 'lucide-react'
+import {
+  DataTable,
+  type DataTableColumnDef,
+} from '@/components/shared/DataTable'
+import { TablePagination } from '@/components/shared/TablePagination'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { TablePagination } from '@/components/shared/TablePagination'
 import type { PendingActions } from '@/lib/async-action'
 import { useLocale } from '@/lib/i18n'
 import { clientKeyActionKey } from '@/models/api-keys'
@@ -52,6 +48,20 @@ export function ApiKeysTable({
 }: ApiKeysTableProps) {
   const { t } = useLocale()
   const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const callbacks = useRef({
+    onCopyKeySecret,
+    onDeleteKey,
+    onRenameKey,
+    onToggleKey,
+    onToggleKeySecret,
+  })
+  callbacks.current = {
+    onCopyKeySecret,
+    onDeleteKey,
+    onRenameKey,
+    onToggleKey,
+    onToggleKeySecret,
+  }
 
   function draftLabel(item: ApiKeyItemView): string {
     return drafts[item.key_id] ?? item.label
@@ -77,7 +87,8 @@ export function ApiKeysTable({
       clearDraft(item.key_id)
       return
     }
-    if (await onRenameKey(item.key_id, label)) clearDraft(item.key_id)
+    if (await callbacks.current.onRenameKey(item.key_id, label))
+      clearDraft(item.key_id)
   }
 
   function rowPending(keyId: string): string | null {
@@ -125,7 +136,7 @@ export function ApiKeysTable({
         )}
         <Button
           aria-label={t(item.visible_secret ? 'hideSecret' : 'showSecret')}
-          onClick={() => onToggleKeySecret(item.key_id)}
+          onClick={() => callbacks.current.onToggleKeySecret(item.key_id)}
           size="sm"
           type="button"
           variant="ghost"
@@ -134,7 +145,7 @@ export function ApiKeysTable({
         </Button>
         <Button
           aria-label={t('copy')}
-          onClick={() => onCopyKeySecret(item.key_id)}
+          onClick={() => callbacks.current.onCopyKeySecret(item.key_id)}
           size="sm"
           type="button"
           variant="ghost"
@@ -153,7 +164,7 @@ export function ApiKeysTable({
           aria-label={t('status')}
           checked={item.enabled}
           disabled={pending !== null}
-          onCheckedChange={() => onToggleKey(item.key_id)}
+          onCheckedChange={() => callbacks.current.onToggleKey(item.key_id)}
         />
         {pending === 'toggle' && (
           <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
@@ -169,7 +180,7 @@ export function ApiKeysTable({
         aria-label={t('delete')}
         className="text-destructive"
         disabled={pending !== null}
-        onClick={() => onDeleteKey(item.key_id)}
+        onClick={() => callbacks.current.onDeleteKey(item.key_id)}
         size="sm"
         type="button"
         variant="ghost"
@@ -179,6 +190,56 @@ export function ApiKeysTable({
         )}
         {t('delete')}
       </Button>
+    )
+  }
+
+  const columns = useMemo<Array<DataTableColumnDef<ApiKeyItemView>>>(
+    () => [
+      {
+        id: 'label',
+        header: t('name'),
+        cell: ({ row }) => renderKeyLabelInput(row.original),
+      },
+      {
+        id: 'status',
+        header: t('status'),
+        cell: ({ row }) => renderKeyStatus(row.original),
+      },
+      {
+        id: 'secret',
+        header: t('apiKey'),
+        cell: ({ row }) => renderKeySecret(row.original),
+      },
+      {
+        id: 'actions',
+        header: () => <span className="sr-only">{t('delete')}</span>,
+        cell: ({ row }) => (
+          <div className="flex justify-end">
+            {renderDeleteKeyButton(row.original)}
+          </div>
+        ),
+      },
+    ],
+    // The draft state and the pending actions drive the cell content.
+    [drafts, pendingActions, t],
+  )
+
+  function renderCard(item: ApiKeyItemView) {
+    return (
+      <article
+        className="grid min-w-0 gap-3 rounded-lg border bg-card p-3"
+        data-key-row={item.key_id}
+      >
+        {renderKeyLabelInput(item, true)}
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs font-semibold text-muted-foreground">
+            {t('active')}
+          </span>
+          {renderKeyStatus(item)}
+        </div>
+        {renderKeySecret(item)}
+        <div className="flex justify-end">{renderDeleteKeyButton(item)}</div>
+      </article>
     )
   }
 
@@ -194,56 +255,14 @@ export function ApiKeysTable({
           {t('noClientKeys')}
         </div>
       ) : (
-        <>
-          <div className="grid gap-3 md:hidden">
-            {workspace.key_items.map((item) => (
-              <article
-                className="grid min-w-0 gap-3 rounded-lg border bg-card p-3"
-                data-key-row={item.key_id}
-                key={item.key_id}
-              >
-                {renderKeyLabelInput(item, true)}
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-semibold text-muted-foreground">
-                    {t('active')}
-                  </span>
-                  {renderKeyStatus(item)}
-                </div>
-                {renderKeySecret(item)}
-                <div className="flex justify-end">
-                  {renderDeleteKeyButton(item)}
-                </div>
-              </article>
-            ))}
-          </div>
-
-          <div className="hidden min-w-0 md:block">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t('name')}</TableHead>
-                  <TableHead>{t('status')}</TableHead>
-                  <TableHead>{t('apiKey')}</TableHead>
-                  <TableHead>
-                    <span className="sr-only">{t('delete')}</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {workspace.key_items.map((item) => (
-                  <TableRow data-key-row={item.key_id} key={item.key_id}>
-                    <TableCell>{renderKeyLabelInput(item)}</TableCell>
-                    <TableCell>{renderKeyStatus(item)}</TableCell>
-                    <TableCell>{renderKeySecret(item)}</TableCell>
-                    <TableCell className="text-right">
-                      {renderDeleteKeyButton(item)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </>
+        <DataTable
+          columns={columns}
+          data={workspace.key_items}
+          getRowId={(item) => item.key_id}
+          label={t('apiKeys')}
+          renderCard={renderCard}
+          rowAttributes={(item) => ({ 'data-key-row': item.key_id })}
+        />
       )}
       <TablePagination
         first={first}

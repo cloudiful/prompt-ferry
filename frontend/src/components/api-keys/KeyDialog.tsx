@@ -1,4 +1,5 @@
-import type { ComponentProps } from 'react'
+import { useEffect, type ComponentProps } from 'react'
+import { useForm } from '@tanstack/react-form'
 import { Copy, LoaderCircle, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -15,22 +16,18 @@ import { useLocale } from '@/lib/i18n'
 
 type KeyDialogProps = {
   generatedSecret: string
-  keyLabel: string
   onCloseAutoFocus?: ComponentProps<typeof DialogContent>['onCloseAutoFocus']
   onCopySecret: () => void
-  onKeyLabelChange: (value: string) => void
   onOpenChange: (open: boolean) => void
-  onSubmit: () => void
+  onSubmit: (label: string) => void
   open: boolean
   pending: boolean
 }
 
 export function KeyDialog({
   generatedSecret,
-  keyLabel,
   onCloseAutoFocus,
   onCopySecret,
-  onKeyLabelChange,
   onOpenChange,
   onSubmit,
   open,
@@ -38,9 +35,23 @@ export function KeyDialog({
 }: KeyDialogProps) {
   const { t } = useLocale()
 
+  const form = useForm({
+    defaultValues: { label: '' },
+    onSubmit: async ({ value }) => {
+      onSubmit(value.label)
+    },
+  })
+
+  useEffect(() => {
+    if (open) form.reset({ label: '' })
+  }, [open])
+
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent onCloseAutoFocus={onCloseAutoFocus} showCloseButton={false}>
+      <DialogContent
+        onCloseAutoFocus={onCloseAutoFocus}
+        showCloseButton={false}
+      >
         <DialogHeader>
           <DialogTitle>{t('generateKey')}</DialogTitle>
         </DialogHeader>
@@ -61,7 +72,8 @@ export function KeyDialog({
           noValidate
           onSubmit={(event) => {
             event.preventDefault()
-            onSubmit()
+            event.stopPropagation()
+            void form.handleSubmit()
           }}
         >
           {generatedSecret ? (
@@ -82,15 +94,19 @@ export function KeyDialog({
           ) : (
             <div className="grid gap-2">
               <Label htmlFor="client-key-label">{t('keyLabel')}</Label>
-              <Input
-                autoFocus
-                disabled={pending}
-                id="client-key-label"
-                onChange={(event) =>
-                  onKeyLabelChange(event.currentTarget.value)
-                }
-                value={keyLabel}
-              />
+              <form.Field name="label">
+                {(field) => (
+                  <Input
+                    autoFocus
+                    disabled={pending}
+                    id="client-key-label"
+                    onChange={(event) =>
+                      field.handleChange(event.currentTarget.value)
+                    }
+                    value={field.state.value}
+                  />
+                )}
+              </form.Field>
             </div>
           )}
           {!generatedSecret && (
