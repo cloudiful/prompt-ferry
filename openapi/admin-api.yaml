@@ -1065,6 +1065,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/admin/endpoints/{endpoint_id}/quota-inference:
+    get:
+      tags:
+      - endpoints
+      operationId: quota_inference
+      parameters:
+      - name: endpoint_id
+        in: path
+        description: Endpoint ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Observed subscription quota estimates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InferenceResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/admin/endpoints/{endpoint_id}/quota-observations:
     get:
       tags:
@@ -5090,6 +5122,28 @@ components:
       properties:
         error:
           $ref: '#/components/schemas/ErrorBody'
+    Estimate:
+      type: object
+      properties:
+        capacity_millions:
+          type:
+          - number
+          - 'null'
+          format: double
+        lower_millions:
+          type:
+          - number
+          - 'null'
+          format: double
+        reason:
+          type:
+          - string
+          - 'null'
+        upper_millions:
+          type:
+          - number
+          - 'null'
+          format: double
     GlmWindowUsage:
       type: object
       description: |-
@@ -5138,6 +5192,81 @@ components:
       - integrated
       - worker
       - relay
+    InferenceResponse:
+      type: object
+      required:
+      - method_version
+      - status
+      - calculated_at
+      - consumed_pp
+      - usable_blocks
+      - account
+      - models
+      - models_truncated
+      - unknown_tokens
+      - overflow_tokens
+      - omitted_rows
+      - observation_provenance
+      - account_history_assumed_stable
+      - current_refresh_failed
+      - account_identity_known
+      - cached
+      properties:
+        account:
+          $ref: '#/components/schemas/Estimate'
+        account_history_assumed_stable:
+          type: boolean
+        account_identity_known:
+          type: boolean
+        as_of:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        cached:
+          type: boolean
+        calculated_at:
+          type: string
+          format: date-time
+        consumed_pp:
+          type: number
+          format: double
+        current_refresh_failed:
+          type: boolean
+        latest_snapshot_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        method_version:
+          type: string
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelRow'
+        models_truncated:
+          type: boolean
+        observation_provenance:
+          type: string
+        omitted_rows:
+          type: integer
+          format: int64
+        overflow_tokens:
+          type: integer
+          format: int64
+        span_start:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        status:
+          type: string
+        unknown_tokens:
+          type: integer
+          format: int64
+        usable_blocks:
+          type: integer
+          minimum: 0
     LlmReviewSettings:
       type: object
       required:
@@ -6374,6 +6503,49 @@ components:
       properties:
         enabled:
           type: boolean
+    ModelRow:
+      type: object
+      required:
+      - model
+      - mixed_tokens
+      - fresh_tokens
+      - cache_read_tokens
+      - cache_write_tokens
+      - output_tokens
+      - actual
+      - observed_near_97
+      properties:
+        actual:
+          $ref: '#/components/schemas/Estimate'
+        cache_hit:
+          type:
+          - number
+          - 'null'
+          format: double
+        cache_read_tokens:
+          type: integer
+          format: int64
+        cache_write_tokens:
+          type: integer
+          format: int64
+        fresh_tokens:
+          type: integer
+          format: int64
+        mixed_tokens:
+          type: integer
+          format: int64
+        model:
+          type: string
+        observed_near_97:
+          $ref: '#/components/schemas/Estimate'
+        output_share:
+          type:
+          - number
+          - 'null'
+          format: double
+        output_tokens:
+          type: integer
+          format: int64
     NativeApi:
       type: string
       enum:
@@ -9235,6 +9407,10 @@ components:
           oneOf:
           - type: 'null'
           - $ref: '#/components/schemas/EndpointRegion'
+        quota_inference_available:
+          type:
+          - boolean
+          - 'null'
     TokenPlanWindowUsage:
       type: object
       properties:

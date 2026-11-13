@@ -41,6 +41,7 @@ pub(super) fn opencode_go_window(percent: f64) -> OpencodeGoWindowUsage {
 pub(super) fn opencode_go_usage(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
         local_today_tokens: None,
+        quota_inference_available: None,
         provider: db::EndpointProvider::OpencodeGo,
         provider_region: None,
         keys: keys

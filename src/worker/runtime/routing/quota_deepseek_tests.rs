@@ -50,6 +50,7 @@ fn deepseek_key(key_id: Uuid, label: &str, is_available: bool) -> TokenPlanKeyUs
 fn usage(keys: Vec<TokenPlanKeyUsage>) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
         local_today_tokens: None,
+        quota_inference_available: None,
         provider: db::EndpointProvider::DeepSeek,
         provider_region: None,
         keys,

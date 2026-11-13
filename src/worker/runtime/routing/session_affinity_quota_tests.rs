@@ -102,6 +102,7 @@ pub(super) fn request() -> BufferedBridgeRequest {
 fn usage_with_keys(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
         local_today_tokens: None,
+        quota_inference_available: None,
         provider: db::EndpointProvider::Minimax,
         provider_region: Some(db::EndpointRegion::Cn),
         keys: keys
@@ -197,6 +198,7 @@ fn model_window(
 fn model_usage(keys: Vec<TokenPlanKeyUsage>) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
         local_today_tokens: None,
+        quota_inference_available: None,
         provider: db::EndpointProvider::Minimax,
         provider_region: Some(db::EndpointRegion::Cn),
         keys,

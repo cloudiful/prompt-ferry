@@ -124,6 +124,7 @@ fn response(
             quota_windows: None,
         }],
         local_today_tokens: None,
+        quota_inference_available: None,
     };
     // Direct normalizer path (no decorate_usage call here): same central
     // projection so subscription rows carry real durations/availability.

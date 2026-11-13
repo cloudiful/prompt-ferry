@@ -19,6 +19,8 @@ pub(crate) mod openrouter_parsing;
 pub(crate) mod openrouter_usage;
 pub(crate) mod quota_canonical;
 pub(crate) mod quota_feedback;
+pub(crate) mod quota_inference;
+pub(crate) mod quota_inference_cache;
 pub(crate) mod quota_observation_service;
 pub(crate) mod quota_reset;
 pub(crate) mod quota_status;

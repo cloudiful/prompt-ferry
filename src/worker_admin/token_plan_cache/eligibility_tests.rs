@@ -19,6 +19,7 @@ fn window(remaining_percent: f64) -> crate::worker_admin_types::TokenPlanWindowU
 fn minimax_usage(key_id: Uuid, interval: f64, weekly: f64) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
         local_today_tokens: None,
+        quota_inference_available: None,
         provider: crate::db::EndpointProvider::Minimax,
         provider_region: None,
         keys: vec![TokenPlanKeyUsage {
