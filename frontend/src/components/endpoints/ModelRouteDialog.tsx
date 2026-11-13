@@ -202,7 +202,7 @@ export function ModelRouteDialog({
   }
 
   const preferredTargetIndex = orderedTargets.findIndex(
-    (target) => target.prefer_new_sessions,
+    (target) => target.enabled && target.prefer_new_sessions,
   )
 
   function endpointOptionFor(endpointId: string): EndpointOption | undefined {
@@ -352,23 +352,22 @@ export function ModelRouteDialog({
                       <SelectItem value="auto">
                         {t('modelRouteNewSessionAutomatic')}
                       </SelectItem>
-                      {orderedTargets.map((target, index) => (
-                        <SelectItem
-                          key={targetKey(target)}
-                          value={String(index)}
-                        >
-                          {target.endpoint_id
-                            ? (endpointOptionFor(target.endpoint_id)?.label ??
-                              target.endpoint_id)
-                            : `${t('target')} ${index + 1}`}
-                          {' · '}
-                          {target.upstream_model?.trim() ||
-                            t('modelRouteTargetInheritedModel')}
-                          {target.enabled
-                            ? ''
-                            : ` · ${t('modelRouteNewSessionTargetDisabled')}`}
-                        </SelectItem>
-                      ))}
+                      {orderedTargets.map((target, index) =>
+                        target.enabled ? (
+                          <SelectItem
+                            key={targetKey(target)}
+                            value={String(index)}
+                          >
+                            {target.endpoint_id
+                              ? (endpointOptionFor(target.endpoint_id)?.label ??
+                                target.endpoint_id)
+                              : `${t('target')} ${index + 1}`}
+                            {' · '}
+                            {target.upstream_model?.trim() ||
+                              t('modelRouteTargetInheritedModel')}
+                          </SelectItem>
+                        ) : null,
+                      )}
                     </SelectContent>
                   </Select>
                   <div className="flex items-center gap-2 pb-2">
