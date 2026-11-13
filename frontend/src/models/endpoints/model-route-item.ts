@@ -43,6 +43,7 @@ export function createModelRouteListItemView(
       enabled: target.enabled,
       endpoint_enabled: target.endpoint_enabled,
       upstream_model: target.upstream_model ?? null,
+      prefer_new_sessions: target.prefer_new_sessions === true,
     })),
     testing: options.testingModelRouteId === route.rule_id,
     toggling: options.togglingModelRouteId === route.rule_id,

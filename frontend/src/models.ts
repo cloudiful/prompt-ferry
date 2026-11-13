@@ -128,6 +128,10 @@ export type ModelRouteTargetForm = {
   // blocks save instead of being silently turned into inherit; the committed
   // value above is unchanged until the entry becomes valid.
   embedding_dimensions_invalid?: boolean
+  // This target is the route's manual preference for future
+  // unbound sessions. At most one target may carry it; always sent as a
+  // plain boolean so route/target toggles preserve it.
+  prefer_new_sessions: boolean
 }
 
 export type StreamDeltaBatchingForm = {

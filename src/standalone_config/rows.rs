@@ -13,7 +13,8 @@ use crate::{
     config::{BridgeEncryptionMode, NativeApi, NativeApiSource, TlsMode},
     db::McpServer,
     db::entities::sqlite::{
-        standalone_client_keys, standalone_mcp_servers, standalone_relays, standalone_settings,
+        standalone_client_keys, standalone_mcp_servers, standalone_model_route_targets,
+        standalone_model_routes, standalone_relays, standalone_settings,
     },
     relay_secrets::EncryptedSecretEnvelope,
 };
@@ -471,128 +472,76 @@ fn parse_timestamp(value: &str, column: &str) -> Result<chrono::DateTime<chrono:
     ))
 }
 
-pub(crate) fn route(row: &SqliteRow) -> Result<ModelRouteConfig> {
+pub(crate) fn route_from_model(model: &standalone_model_routes::Model) -> Result<ModelRouteConfig> {
     Ok(ModelRouteConfig {
-        rule_id: uuid(row, "rule_id")?,
-        scope: RouteScope::parse(&required_string(row, "scope")?)?,
-        owner_user_id: row.try_get("owner_user_id")?,
-        model_pattern: required_string(row, "model_pattern")?,
-        routing_strategy: RoutingStrategy::parse(&required_string(row, "routing_strategy")?)?,
-        enabled: bool_value(row, "enabled")?,
+        rule_id: model_uuid(&model.rule_id, "rule_id")?,
+        scope: RouteScope::parse(&model_required_string(&model.scope, "scope")?)?,
+        owner_user_id: model.owner_user_id,
+        model_pattern: model_required_string(&model.model_pattern, "model_pattern")?,
+        routing_strategy: RoutingStrategy::parse(&model_required_string(
+            &model.routing_strategy,
+            "routing_strategy",
+        )?)?,
+        enabled: model_bool(model.enabled, "enabled")?,
         targets: Vec::new(),
     })
 }
 
-pub(crate) fn route_target(
-    row: &SqliteRow,
+pub(crate) fn route_target_from_model(
+    model: &standalone_model_route_targets::Model,
 ) -> Result<(
     Uuid,
     ModelRouteTargetConfig,
     Option<EncryptedSecretEnvelope>,
 )> {
-    // Issue #378 Phase I: 0020 `active_windows` is plaintext; pre-migration
-    // rows lack the column and read as all-day (`None`).
-    let active_windows = match row.try_get::<Option<String>, _>("active_windows") {
-        Ok(value) => value
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty()),
-        Err(sqlx::Error::ColumnNotFound(_)) => None,
-        Err(error) => return Err(error.into()),
-    };
-    // Issue #392 Phase K: 0022 `dev_system_normalize` INTEGER 0/1;
-    // pre-migration rows lack the column and read as disabled.
-    let dev_system_normalize = match row.try_get::<Option<i64>, _>("dev_system_normalize") {
-        Ok(value) => value.unwrap_or(0) != 0,
-        Err(sqlx::Error::ColumnNotFound(_)) => false,
-        Err(error) => return Err(error.into()),
-    };
-    // Issue #566: 0030 `thinking_downgrade_enabled` INTEGER 0/1;
-    // pre-migration rows lack the column and read as disabled.
-    let thinking_downgrade_enabled =
-        match row.try_get::<Option<i64>, _>("thinking_downgrade_enabled") {
-            Ok(value) => value.unwrap_or(0) != 0,
-            Err(sqlx::Error::ColumnNotFound(_)) => false,
-            Err(error) => return Err(error.into()),
-        };
-    // Issue #409 Phase 1: 0023 `native_api` TEXT; pre-migration rows lack
-    // the column and read as `Auto` (follow the caller).
-    let native_api = match row.try_get::<Option<String>, _>("native_api") {
-        Ok(value) => value
-            .as_deref()
-            .map(parse_native_api_lossy)
-            .unwrap_or(NativeApi::Auto),
-        Err(sqlx::Error::ColumnNotFound(_)) => NativeApi::Auto,
-        Err(error) => return Err(error.into()),
-    };
-    // Issue #464: 0026 `thinking_effort_override` TEXT NULL;
-    // pre-migration rows lack the column and read as inherit (`None`).
-    // Empty/whitespace also normalizes to `None`.
-    let thinking_effort_override =
-        match row.try_get::<Option<String>, _>("thinking_effort_override") {
-            Ok(value) => value
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty()),
-            Err(sqlx::Error::ColumnNotFound(_)) => None,
-            Err(error) => return Err(error.into()),
-        };
-    // Issue #502 Task 5: 0028 `compact_mode` TEXT NOT NULL DEFAULT
-    // 'passthrough'; pre-migration rows lack the column and read as
-    // `passthrough` (no new default semantics).
-    let compact_mode = match row.try_get::<Option<String>, _>("compact_mode") {
-        Ok(value) => value
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| "passthrough".to_string()),
-        Err(sqlx::Error::ColumnNotFound(_)) => "passthrough".to_string(),
-        Err(error) => return Err(error.into()),
-    };
-    // Issue #637: 0034 `service_tier` TEXT NULL; pre-migration rows lack the
-    // column and read as inherit (`None`). Blank also normalizes to None.
-    let service_tier = match row.try_get::<Option<String>, _>("service_tier") {
-        Ok(value) => value
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty()),
-        Err(sqlx::Error::ColumnNotFound(_)) => None,
-        Err(error) => return Err(error.into()),
-    };
-    // Issue #1032: 0037 `embedding_dimensions_override` INTEGER NULL;
-    // pre-migration rows lack the column and read as inherit (`None`).
-    let embedding_dimensions_override =
-        match row.try_get::<Option<i64>, _>("embedding_dimensions_override") {
-            Ok(value) => match value {
-                Some(value) => Some(i32::try_from(value).map_err(|_| {
-                    StandaloneConfigError::CorruptDatabase(
-                        "route target embedding dimensions are outside i32 range".to_string(),
-                    )
-                })?),
-                None => None,
-            },
-            Err(sqlx::Error::ColumnNotFound(_)) => None,
-            Err(error) => return Err(error.into()),
-        };
+    let proxy_envelope = envelope_from_parts(
+        "proxy_url_override",
+        model.proxy_url_override_ciphertext.clone(),
+        model.proxy_url_override_nonce.clone(),
+        model.proxy_url_override_key_version,
+    )?;
     Ok((
-        uuid(row, "rule_id")?,
+        model_uuid(&model.rule_id, "rule_id")?,
         ModelRouteTargetConfig {
-            target_id: uuid(row, "target_id")?,
-            endpoint_id: uuid(row, "endpoint_id")?,
-            position: i32::try_from(row.try_get::<i64, _>("position")?).map_err(|_| {
-                StandaloneConfigError::CorruptDatabase(
-                    "route target position is outside i32 range".to_string(),
-                )
-            })?,
-            enabled: bool_value(row, "enabled")?,
-            upstream_model: optional_string(row, "upstream_model")?,
-            native_api,
+            target_id: model_uuid(&model.target_id, "target_id")?,
+            endpoint_id: model_uuid(&model.endpoint_id, "endpoint_id")?,
+            position: model.position,
+            enabled: model_bool(model.enabled, "enabled")?,
+            upstream_model: model.upstream_model.clone(),
+            native_api: parse_native_api_lossy(&model.native_api),
             proxy_url_override: None,
-            active_windows,
-            dev_system_normalize,
-            thinking_downgrade_enabled,
-            thinking_effort_override,
-            compact_mode,
-            service_tier,
-            embedding_dimensions_override,
+            active_windows: model
+                .active_windows
+                .clone()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            dev_system_normalize: model_bool(model.dev_system_normalize, "dev_system_normalize")?,
+            thinking_downgrade_enabled: model_bool(
+                model.thinking_downgrade_enabled,
+                "thinking_downgrade_enabled",
+            )?,
+            thinking_effort_override: model
+                .thinking_effort_override
+                .clone()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            compact_mode: {
+                let trimmed = model.compact_mode.trim();
+                if trimmed.is_empty() {
+                    "passthrough".to_string()
+                } else {
+                    trimmed.to_string()
+                }
+            },
+            service_tier: model
+                .service_tier
+                .clone()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            embedding_dimensions_override: model.embedding_dimensions_override,
+            prefer_new_sessions: model_bool(model.prefer_new_sessions, "prefer_new_sessions")?,
         },
-        envelope_opt(row, "proxy_url_override")?,
+        proxy_envelope,
     ))
 }
 

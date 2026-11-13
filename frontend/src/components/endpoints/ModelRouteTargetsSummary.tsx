@@ -29,6 +29,7 @@ type TargetPair = {
   endpoint: string
   override: string | null
   label: string
+  preferred: boolean
 }
 
 function toPair(target: ModelRouteTargetItemView): TargetPair {
@@ -37,12 +38,28 @@ function toPair(target: ModelRouteTargetItemView): TargetPair {
     endpoint: target.endpoint_label,
     override: routeTargetOverride(target),
     label: routeTargetPairLabel(target),
+    preferred: target.prefer_new_sessions,
   }
 }
 
-function PairChip({ pair }: { pair: TargetPair }) {
+function PairChip({
+  pair,
+  preferredLabel,
+}: {
+  pair: TargetPair
+  preferredLabel: string
+}) {
   return (
     <>
+      {pair.preferred ? (
+        <span
+          aria-label={preferredLabel}
+          className="mr-1 shrink-0 text-amber-600"
+          title={preferredLabel}
+        >
+          ★
+        </span>
+      ) : null}
       <span className="min-w-0 truncate">{pair.endpoint}</span>
       {pair.override ? (
         <span className="ml-1 min-w-0 shrink-[100] truncate text-muted-foreground">
@@ -60,6 +77,7 @@ export function ModelRouteTargetsSummary({
   pendingTargetId = null,
 }: ModelRouteTargetsSummaryProps) {
   const { t } = useLocale()
+  const preferredLabel = t('modelRoutePreferredTarget')
   const [open, setOpen] = useState(false)
   const enabled = enabledRouteTargets(targets)
   const preview = routeTargetPreview(targets).map(toPair)
@@ -94,11 +112,21 @@ export function ModelRouteTargetsSummary({
                     {override}
                   </span>
                 ) : null}
+                {target.prefer_new_sessions ? (
+                  <span className="text-xs text-amber-600">
+                    ★ {preferredLabel}
+                  </span>
+                ) : null}
                 {target.endpoint_enabled ? null : (
                   <span className="text-xs text-muted-foreground">
                     {t('modelRouteTargetEndpointDisabled')}
                   </span>
                 )}
+                {target.prefer_new_sessions && !target.enabled ? (
+                  <span className="text-xs text-muted-foreground">
+                    {t('modelRouteNewSessionTargetDisabled')}
+                  </span>
+                ) : null}
               </span>
               <span className="flex items-center gap-1">
                 <Switch
@@ -162,7 +190,7 @@ export function ModelRouteTargetsSummary({
               title={firstPair.label}
               type="button"
             >
-              <PairChip pair={firstPair} />
+              <PairChip pair={firstPair} preferredLabel={preferredLabel} />
             </button>
           </PopoverTrigger>
           {list}
@@ -180,7 +208,7 @@ export function ModelRouteTargetsSummary({
             key={pair.target_id}
             title={pair.label}
           >
-            <PairChip pair={pair} />
+            <PairChip pair={pair} preferredLabel={preferredLabel} />
           </span>
         ))}
       </div>

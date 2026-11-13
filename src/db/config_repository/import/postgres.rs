@@ -12,11 +12,14 @@
 //! [`super::postgres_domains`].
 
 use anyhow::{Context, Result};
+use sea_orm::{EntityTrait, Set};
 use sqlx::{PgConnection, Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use super::super::snapshot::{EndpointSnapshot, ModelRouteSnapshot, SnapshotDomains};
 use super::postgres_domains;
+use crate::db::entities::postgres::model_endpoint_rules;
+use crate::db::seaorm::PostgresNativeConnection;
 
 /// Child-before-parent order; deleting an MCP server or endpoint first keeps
 /// the cascade graph simple and never touches non-configuration tables.
@@ -247,24 +250,27 @@ async fn insert_route_rules(conn: &mut PgConnection, domains: &SnapshotDomains) 
     if routes.is_empty() {
         return Ok(());
     }
-    let mut query = QueryBuilder::new(
-        "INSERT INTO model_endpoint_rules (rule_id, scope, owner_user_id, model_pattern, \
-         routing_strategy, endpoint_id, priority, enabled, created_at, updated_at) ",
-    );
-    query.push_values(routes.iter(), |mut row, route| {
+    let connection = PostgresNativeConnection::new(&mut *conn);
+    for route in routes {
         let now = route
             .updated_at
             .unwrap_or(route.created_at.unwrap_or_else(chrono::Utc::now));
-        row.push_bind(route.rule_id)
-            .push_bind(route.scope.clone())
-            .push_bind(route.owner_user_id)
-            .push_bind(route.model_pattern.clone())
-            .push_bind(route.routing_strategy.clone())
-            .push_bind(route.targets[0].endpoint_id)
-            .push_bind(100_i32)
-            .push_bind(route.enabled)
-            .push_bind(route.created_at.unwrap_or(now))
-            .push_bind(now);
-    });
-    run(conn, query).await
+        model_endpoint_rules::Entity::insert(model_endpoint_rules::ActiveModel {
+            rule_id: Set(route.rule_id),
+            scope: Set(route.scope.clone()),
+            owner_user_id: Set(route.owner_user_id),
+            model_pattern: Set(route.model_pattern.clone()),
+            routing_strategy: Set(route.routing_strategy.clone()),
+            endpoint_id: Set(route.targets[0].endpoint_id),
+            priority: Set(100),
+            enabled: Set(route.enabled),
+            created_at: Set(route.created_at.unwrap_or(now)),
+            updated_at: Set(now),
+            ..Default::default()
+        })
+        .exec(&connection)
+        .await
+        .map_err(crate::db::seaorm::native_error)?;
+    }
+    Ok(())
 }

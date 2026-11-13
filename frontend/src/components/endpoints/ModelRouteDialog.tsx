@@ -174,6 +174,37 @@ export function ModelRouteDialog({
     form.setFieldValue('targets', [...orderedTargets])
   }
 
+  function setPreferredTarget(index: number | null): void {
+    form.setFieldValue(
+      'targets',
+      orderedTargets.map((target, targetIndex) => ({
+        ...target,
+        prefer_new_sessions: index !== null && targetIndex === index,
+      })),
+    )
+  }
+
+  function removeTarget(index: number): void {
+    // Removing the preferred target removes the preference naturally; the
+    // remaining targets keep their own flags.
+    const removingPreferred =
+      orderedTargets[index]?.prefer_new_sessions === true
+    form.setFieldValue(
+      'targets',
+      orderedTargets
+        .filter((_, targetIndex) => targetIndex !== index)
+        .map((target) =>
+          removingPreferred
+            ? { ...target, prefer_new_sessions: false }
+            : target,
+        ),
+    )
+  }
+
+  const preferredTargetIndex = orderedTargets.findIndex(
+    (target) => target.prefer_new_sessions,
+  )
+
   function endpointOptionFor(endpointId: string): EndpointOption | undefined {
     return endpointOptions.find((option) => option.value === endpointId)
   }
@@ -370,6 +401,53 @@ export function ModelRouteDialog({
                             {t('addTarget')}
                           </Button>
                         </div>
+                        <label className="grid min-w-0 gap-1 text-xs font-medium">
+                          <span>{t('modelRouteNewSessionPreference')}</span>
+                          <Select
+                            onValueChange={(value) =>
+                              setPreferredTarget(
+                                value === 'auto' ? null : Number(value),
+                              )
+                            }
+                            value={
+                              preferredTargetIndex < 0
+                                ? 'auto'
+                                : String(preferredTargetIndex)
+                            }
+                          >
+                            <SelectTrigger
+                              aria-label={t('modelRouteNewSessionPreference')}
+                              className="w-full min-w-0"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="auto">
+                                {t('modelRouteNewSessionAutomatic')}
+                              </SelectItem>
+                              {orderedTargets.map((target, index) => (
+                                <SelectItem
+                                  key={targetKey(target)}
+                                  value={String(index)}
+                                >
+                                  {target.endpoint_id
+                                    ? (endpointOptionFor(target.endpoint_id)
+                                        ?.label ?? target.endpoint_id)
+                                    : `${t('target')} ${index + 1}`}
+                                  {' · '}
+                                  {target.upstream_model?.trim() ||
+                                    t('modelRouteTargetInheritedModel')}
+                                  {target.enabled
+                                    ? ''
+                                    : ` · ${t('modelRouteNewSessionTargetDisabled')}`}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <span className="font-normal text-muted-foreground">
+                            {t('modelRouteNewSessionPreferenceHint')}
+                          </span>
+                        </label>
                         <ol className="grid min-w-0 gap-2">
                           {orderedTargets.map((target, index) => (
                             <li
@@ -508,9 +586,7 @@ export function ModelRouteDialog({
                                   <Button
                                     aria-label={`${t('delete')} ${t('target')} ${index + 1}`}
                                     disabled={orderedTargets.length <= 1}
-                                    onClick={() =>
-                                      targetsField.removeValue(index)
-                                    }
+                                    onClick={() => removeTarget(index)}
                                     size="icon-sm"
                                     type="button"
                                     variant="ghost"

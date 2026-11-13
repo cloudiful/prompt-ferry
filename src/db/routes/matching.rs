@@ -47,10 +47,40 @@ pub async fn get_route(pool: &PgPool, route_id: uuid::Uuid) -> Result<Option<Rou
 }
 
 pub async fn cleanup_orphan_model_routes(pool: &PgPool) -> Result<u64> {
-    let result = sqlx::query_file!("src/sql/routes/cleanup_orphan_model_routes.sql")
-        .execute(pool)
-        .await?;
+    use sea_orm::ConnectionTrait;
+
+    let statement = cleanup_statement();
+    let db = crate::db::seaorm::postgres_connection(pool);
+    let result = db
+        .execute(&statement)
+        .await
+        .map_err(crate::db::seaorm::native_error)?;
     Ok(result.rows_affected())
+}
+
+fn cleanup_statement() -> sea_orm::sea_query::DeleteStatement {
+    use sea_orm::sea_query::{Expr, ExprTrait, Query};
+    let targets = crate::db::entities::postgres::model_route_targets::Entity;
+    let rules = crate::db::entities::postgres::model_endpoint_rules::Entity;
+    Query::delete()
+        .from_table(rules)
+        .and_where(Expr::not_exists(
+            Query::select()
+                .expr(Expr::val(1))
+                .from(targets)
+                .and_where(
+                    Expr::col((
+                        crate::db::entities::postgres::model_route_targets::Entity,
+                        crate::db::entities::postgres::model_route_targets::Column::RuleId,
+                    ))
+                    .eq(Expr::col((
+                        crate::db::entities::postgres::model_endpoint_rules::Entity,
+                        crate::db::entities::postgres::model_endpoint_rules::Column::RuleId,
+                    ))),
+                )
+                .to_owned(),
+        ))
+        .to_owned()
 }
 
 pub(super) fn model_pattern_specificity(pattern: &str, model: &str) -> Option<(u8, usize)> {

@@ -75,6 +75,9 @@ pub enum RouteSelectionReason {
     SessionLoadBalance,
     ConversationOverride,
     QuotaFailover,
+    /// The initial session binding used the route's manual
+    /// new-session preference instead of the automatic weighted draw.
+    NewSessionPreference,
 }
 
 impl RouteSelectionReason {
@@ -85,6 +88,7 @@ impl RouteSelectionReason {
             Self::SessionLoadBalance => "session_load_balance",
             Self::ConversationOverride => "conversation_override",
             Self::QuotaFailover => "quota_failover",
+            Self::NewSessionPreference => "new_session_preference",
         }
     }
 }

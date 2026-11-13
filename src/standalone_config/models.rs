@@ -441,6 +441,11 @@ pub struct ModelRouteTargetConfig {
     /// `embedding_dimensions_override` INTEGER column.
     #[serde(default)]
     pub embedding_dimensions_override: Option<i32>,
+    /// Manual preference for future unbound sessions. At most one
+    /// target per route may carry it; SQLite persists the 0039
+    /// `prefer_new_sessions` INTEGER column.
+    #[serde(default)]
+    pub prefer_new_sessions: bool,
 }
 
 impl fmt::Debug for ModelRouteTargetConfig {
@@ -466,6 +471,7 @@ impl fmt::Debug for ModelRouteTargetConfig {
             .field("thinking_effort_override", &self.thinking_effort_override)
             .field("compact_mode", &self.compact_mode)
             .field("service_tier", &self.service_tier)
+            .field("prefer_new_sessions", &self.prefer_new_sessions)
             .finish()
     }
 }

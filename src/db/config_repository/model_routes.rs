@@ -59,6 +59,9 @@ pub struct UnifiedModelRouteTarget {
     /// unified admin shape; `None`/null means inherit the caller's
     /// dimensions, `Some(dimensions)` forces them.
     pub embedding_dimensions_override: Option<i32>,
+    /// Manual preference for future unbound sessions. At most one
+    /// target of a route carries it; `false` keeps automatic selection.
+    pub prefer_new_sessions: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -127,6 +130,8 @@ fn target_to_pg(target: UnifiedModelRouteTarget) -> PgModelRouteTarget {
         service_tier: target.service_tier,
         // Issue #1032: carry the nullable dimension override through.
         embedding_dimensions_override: target.embedding_dimensions_override,
+        // Carry the new-session preference through.
+        prefer_new_sessions: target.prefer_new_sessions,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     }

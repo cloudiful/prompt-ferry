@@ -1,12 +1,12 @@
 use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 
 use crate::config::NativeApi;
 use crate::db::types::{
-    EndpointApiKey, ModelEndpointRule, ModelEndpointRuleCreate, ModelEndpointRuleRow,
-    ModelRouteCandidate, ModelRouteCandidateTarget, ModelRoutePage, ModelRouteRoutingStrategy,
-    ModelRouteTarget, RouteConfig, SnapshotKey,
+    EndpointApiKey, ModelEndpointRule, ModelEndpointRuleCreate, ModelRouteCandidate,
+    ModelRouteCandidateTarget, ModelRoutePage, ModelRouteRoutingStrategy, ModelRouteTarget,
+    RouteConfig, SnapshotKey,
 };
 
 mod active_windows;
@@ -37,8 +37,9 @@ pub use snapshot::{
     effective_route, resolve_model_route, resolve_model_route_with_fallback, snapshot_keys,
 };
 
-#[derive(Debug, Clone, sqlx::FromRow)]
-struct ModelRouteCandidateRow {
+/// One row of the native route candidate join.
+#[derive(Debug, Clone)]
+pub(super) struct ModelRouteCandidateRow {
     rule_id: uuid::Uuid,
     scope: String,
     owner_user_id: Option<i64>,
@@ -67,10 +68,13 @@ struct ModelRouteCandidateRow {
     thinking_downgrade_enabled: bool,
     thinking_effort_override: Option<String>,
     compact_mode: Option<String>,
+    embedding_dimensions_override: Option<i32>,
+    prefer_new_sessions: bool,
 }
 
-#[derive(Debug, Clone, sqlx::FromRow)]
-struct ModelRouteTargetRow {
+/// One row of the native route target join.
+#[derive(Debug, Clone)]
+pub(super) struct ModelRouteTargetRow {
     target_id: uuid::Uuid,
     rule_id: uuid::Uuid,
     endpoint_id: uuid::Uuid,
@@ -88,6 +92,7 @@ struct ModelRouteTargetRow {
     compact_mode: Option<String>,
     service_tier: Option<String>,
     embedding_dimensions_override: Option<i32>,
+    prefer_new_sessions: bool,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }

@@ -405,6 +405,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             has_oauth_token: false,
+            prefer_new_sessions: false,
         }
     }
 
@@ -438,6 +439,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             has_oauth_token: false,
+            prefer_new_sessions: false,
         }
     }
 

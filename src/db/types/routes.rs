@@ -227,6 +227,12 @@ pub struct ModelRouteTarget {
     #[serde(default)]
     #[schema(minimum = 1)]
     pub embedding_dimensions_override: Option<i32>,
+    /// This target is the route's manual new-session preference.
+    /// At most one target per rule carries it; an unavailable preferred
+    /// target falls back to automatic selection without moving an existing
+    /// session. Always sent (no omit); `false` is the default.
+    #[serde(default)]
+    pub prefer_new_sessions: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -309,6 +315,10 @@ pub struct ModelRouteTargetCreate {
     #[serde(default)]
     #[schema(minimum = 1)]
     pub embedding_dimensions_override: Option<i32>,
+    /// Mark this target as the route's manual preference for
+    /// future unbound sessions. At most one target per rule may carry it.
+    #[serde(default)]
+    pub prefer_new_sessions: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -392,6 +402,10 @@ pub struct ModelRouteCandidateTarget {
     /// the caller's dimensions; `Some(dimensions)` forces the dimension
     /// count for the target. It is an override, never a cap.
     pub embedding_dimensions_override: Option<i32>,
+    /// This target is the route's manual new-session preference.
+    /// Consulted only when constructing an initial session binding; an
+    /// unavailable preferred target falls back to automatic selection.
+    pub prefer_new_sessions: bool,
 }
 
 #[derive(Debug, Clone)]

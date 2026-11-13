@@ -830,6 +830,7 @@ mod tests {
             endpoint_id: Uuid::new_v4(),
             endpoint_key_id: None,
             endpoint_key_fingerprint: "fingerprint".to_string(),
+            target: None,
         };
         assert_eq!(
             cache

@@ -1,27 +1,36 @@
+use sea_orm::sea_query::Expr;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set, TransactionTrait};
+
 use super::*;
+use crate::db::entities::postgres::model_endpoint_rules;
+use crate::db::entities::postgres::model_route_targets;
+use crate::db::seaorm::{native_error, postgres_connection};
 
 pub async fn create_model_endpoint_rule(
     pool: &PgPool,
     input: ModelEndpointRuleCreate,
 ) -> Result<ModelEndpointRule> {
-    let mut tx = pool.begin().await?;
     ensure_model_route_targets(&input)?;
     let legacy_endpoint_id = input.targets[0].endpoint_id;
-    let row = sqlx::query_file_as!(
-        ModelEndpointRuleRow,
-        "src/sql/routes/create_model_endpoint_rule.sql",
-        &input.scope,
-        input.owner_user_id,
-        &input.model_pattern,
-        input.routing_strategy.as_str(),
-        legacy_endpoint_id,
-        input.enabled,
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-    sync_model_route_targets(&mut tx, row.rule_id, &input).await?;
-    tx.commit().await?;
-    queries::get_model_endpoint_rule(pool, row.rule_id)
+    let db = postgres_connection(pool);
+    let transaction = db.begin().await.map_err(native_error)?;
+    let rule_id = model_endpoint_rules::Entity::insert(model_endpoint_rules::ActiveModel {
+        scope: Set(input.scope.clone()),
+        owner_user_id: Set(input.owner_user_id),
+        model_pattern: Set(input.model_pattern.clone()),
+        routing_strategy: Set(input.routing_strategy.as_str().to_string()),
+        endpoint_id: Set(legacy_endpoint_id),
+        priority: Set(0),
+        enabled: Set(input.enabled),
+        ..Default::default()
+    })
+    .exec(&transaction)
+    .await
+    .map_err(native_error)?
+    .last_insert_id;
+    sync_model_route_targets(&transaction, rule_id, &input).await?;
+    transaction.commit().await.map_err(native_error)?;
+    queries::get_model_endpoint_rule(pool, rule_id)
         .await?
         .ok_or_else(|| anyhow!("model route not found after insert"))
 }
@@ -31,46 +40,73 @@ pub async fn update_model_endpoint_rule(
     rule_id: uuid::Uuid,
     input: ModelEndpointRuleCreate,
 ) -> Result<Option<ModelEndpointRule>> {
-    let mut tx = pool.begin().await?;
     ensure_model_route_targets(&input)?;
     let legacy_endpoint_id = input.targets[0].endpoint_id;
-    let row = sqlx::query_file_as!(
-        ModelEndpointRuleRow,
-        "src/sql/routes/update_model_endpoint_rule.sql",
-        rule_id,
-        &input.scope,
-        input.owner_user_id,
-        &input.model_pattern,
-        input.routing_strategy.as_str(),
-        legacy_endpoint_id,
-        input.enabled,
-    )
-    .fetch_optional(&mut *tx)
-    .await?;
-    let Some(row) = row else {
-        tx.rollback().await?;
+    let db = postgres_connection(pool);
+    let transaction = db.begin().await.map_err(native_error)?;
+    let result = model_endpoint_rules::Entity::update_many()
+        .filter(model_endpoint_rules::Column::RuleId.eq(rule_id))
+        .col_expr(
+            model_endpoint_rules::Column::Scope,
+            Expr::value(input.scope.clone()),
+        )
+        .col_expr(
+            model_endpoint_rules::Column::OwnerUserId,
+            Expr::value(input.owner_user_id),
+        )
+        .col_expr(
+            model_endpoint_rules::Column::ModelPattern,
+            Expr::value(input.model_pattern.clone()),
+        )
+        .col_expr(
+            model_endpoint_rules::Column::RoutingStrategy,
+            Expr::value(input.routing_strategy.as_str().to_string()),
+        )
+        .col_expr(
+            model_endpoint_rules::Column::EndpointId,
+            Expr::value(legacy_endpoint_id),
+        )
+        .col_expr(model_endpoint_rules::Column::Priority, Expr::value(0))
+        .col_expr(
+            model_endpoint_rules::Column::Enabled,
+            Expr::value(input.enabled),
+        )
+        .col_expr(
+            model_endpoint_rules::Column::UpdatedAt,
+            Expr::current_timestamp(),
+        )
+        .exec(&transaction)
+        .await
+        .map_err(native_error)?;
+    if result.rows_affected == 0 {
+        transaction.rollback().await.map_err(native_error)?;
         return Ok(None);
-    };
-    sync_model_route_targets(&mut tx, row.rule_id, &input).await?;
-    tx.commit().await?;
-    queries::get_model_endpoint_rule(pool, row.rule_id).await
+    }
+    sync_model_route_targets(&transaction, rule_id, &input).await?;
+    transaction.commit().await.map_err(native_error)?;
+    queries::get_model_endpoint_rule(pool, rule_id).await
 }
 
 pub async fn delete_model_endpoint_rule(pool: &PgPool, rule_id: uuid::Uuid) -> Result<bool> {
-    let result = sqlx::query_file!("src/sql/routes/delete_model_endpoint_rule.sql", rule_id)
-        .execute(pool)
-        .await?;
-    Ok(result.rows_affected() > 0)
+    let db = postgres_connection(pool);
+    let result = model_endpoint_rules::Entity::delete_many()
+        .filter(model_endpoint_rules::Column::RuleId.eq(rule_id))
+        .exec(&db)
+        .await
+        .map_err(native_error)?;
+    Ok(result.rows_affected > 0)
 }
 
 async fn sync_model_route_targets(
-    tx: &mut Transaction<'_, Postgres>,
+    transaction: &sea_orm::DatabaseTransaction,
     rule_id: uuid::Uuid,
     input: &ModelEndpointRuleCreate,
 ) -> Result<()> {
-    sqlx::query_file!("src/sql/routes/delete_model_route_targets.sql", rule_id)
-        .execute(&mut **tx)
-        .await?;
+    model_route_targets::Entity::delete_many()
+        .filter(model_route_targets::Column::RuleId.eq(rule_id))
+        .exec(transaction)
+        .await
+        .map_err(native_error)?;
 
     for (position, target) in input.targets.iter().enumerate() {
         let proxy_override = target
@@ -86,27 +122,30 @@ async fn sync_model_route_targets(
         };
         // Issue #637: trim the free-form override; blank means inherit.
         let service_tier = crate::db::normalize_service_tier(target.service_tier.as_deref());
-        sqlx::query_file!(
-            "src/sql/routes/insert_model_route_target.sql",
-            rule_id,
-            target.endpoint_id,
-            position as i32,
-            target.enabled,
-            target.upstream_model,
-            target.native_api.as_str(),
-            proxy_override,
-            active_windows,
-            target.dev_system_normalize,
-            target.thinking_downgrade_enabled,
-            target.thinking_effort_override,
-            target.compact_mode.as_str(),
-            service_tier.as_deref(),
+        model_route_targets::Entity::insert(model_route_targets::ActiveModel {
+            rule_id: Set(rule_id),
+            endpoint_id: Set(target.endpoint_id),
+            position: Set(position as i32),
+            enabled: Set(target.enabled),
+            upstream_model: Set(target.upstream_model.clone()),
+            native_api: Set(target.native_api.as_str().to_string()),
+            proxy_url_override: Set(proxy_override.map(str::to_string)),
+            active_windows: Set(active_windows),
+            dev_system_normalize: Set(target.dev_system_normalize),
+            thinking_downgrade_enabled: Set(target.thinking_downgrade_enabled),
+            thinking_effort_override: Set(target.thinking_effort_override.clone()),
+            compact_mode: Set(target.compact_mode.as_str().to_string()),
+            service_tier: Set(service_tier),
             // Issue #1032: nullable positive dimension override; `None`
             // inherits the caller's dimensions.
-            target.embedding_dimensions_override,
-        )
-        .execute(&mut **tx)
-        .await?;
+            embedding_dimensions_override: Set(target.embedding_dimensions_override),
+            // Manual new-session preference.
+            prefer_new_sessions: Set(target.prefer_new_sessions),
+            ..Default::default()
+        })
+        .exec(transaction)
+        .await
+        .map_err(native_error)?;
     }
     Ok(())
 }

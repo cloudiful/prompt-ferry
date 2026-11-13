@@ -69,6 +69,7 @@ fn sample_config() -> StandaloneConfig {
                 compact_mode: "passthrough".to_string(),
                 thinking_downgrade_enabled: false,
                 service_tier: None,
+                prefer_new_sessions: false,
             }],
         }],
         client_keys: vec![ClientKeyConfig {

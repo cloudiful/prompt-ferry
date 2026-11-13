@@ -1,6 +1,6 @@
 use super::*;
 use crate::response_affinity::{ResponseAffinityBinding, ResponseAffinityStore};
-use crate::routing::{BoundBindingState, bound_binding_state, candidate_target_by_endpoint};
+use crate::routing::{BoundBindingState, bound_binding_state, candidate_target_for_binding};
 
 pub(in crate::worker_admin::handlers) async fn build_session_route_options_response(
     state: &AdminState,
@@ -198,7 +198,7 @@ fn affinity_status_for_binding(
         BoundBindingState::StaleEndpoint => SessionAffinityState::StaleEndpoint,
         BoundBindingState::StaleKey => SessionAffinityState::StaleKey,
     };
-    let Some(target) = candidate_target_by_endpoint(candidate, binding.endpoint_id) else {
+    let Some(target) = candidate_target_for_binding(candidate, binding) else {
         return SessionAffinityStatus {
             state,
             rule_id,
@@ -281,6 +281,8 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: db::CompactMode::Passthrough,
             has_oauth_token: true,
+
+            prefer_new_sessions: false,
         };
         let binding =
             crate::routing::credential_binding(&target, &crate::routing::subscription_selection());

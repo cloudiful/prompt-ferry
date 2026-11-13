@@ -5,6 +5,7 @@ fn binding(endpoint_id: Uuid) -> ResponseAffinityBinding {
         endpoint_id,
         endpoint_key_id: None,
         endpoint_key_fingerprint: "fingerprint".to_string(),
+        target: None,
     }
 }
 
@@ -128,4 +129,56 @@ fn cache_key_is_hashed_and_scope_sensitive() {
     assert!(first.starts_with(RESPONSE_AFFINITY_VALKEY_KEY_PREFIX));
     assert_ne!(first, second);
     assert!(!first.contains("session-a"));
+}
+
+/// A legacy payload carries no target identity and must round-trip
+/// byte-identically, so an affinity entry written before the identity field
+/// exists keeps its exact bytes and its endpoint-only meaning.
+#[test]
+fn a_legacy_payload_round_trips_byte_identically() {
+    let endpoint_id = Uuid::new_v4();
+    let payload = format!(
+        r#"{{"endpoint_id":"{endpoint_id}","endpoint_key_id":null,"endpoint_key_fingerprint":"fingerprint"}}"#
+    );
+    let binding: ResponseAffinityBinding = serde_json::from_str(&payload).unwrap();
+    assert_eq!(binding.target, None);
+    assert_eq!(serde_json::to_string(&binding).unwrap(), payload);
+}
+
+/// A new payload records the selected target: an inherited model serializes
+/// an empty identity, an explicit model serializes the normalized model.
+#[test]
+fn a_target_identity_is_serialized_with_the_binding() {
+    let endpoint_id = Uuid::new_v4();
+    let inherited = ResponseAffinityBinding {
+        endpoint_id,
+        endpoint_key_id: None,
+        endpoint_key_fingerprint: "fingerprint".to_string(),
+        target: Some(ResponseAffinityTargetIdentity {
+            upstream_model: None,
+        }),
+    };
+    assert_eq!(
+        serde_json::to_string(&inherited).unwrap(),
+        format!(
+            r#"{{"endpoint_id":"{endpoint_id}","endpoint_key_id":null,"endpoint_key_fingerprint":"fingerprint","target":{{}}}}"#
+        )
+    );
+
+    let explicit = ResponseAffinityBinding {
+        target: Some(ResponseAffinityTargetIdentity {
+            upstream_model: Some("upstream-model".to_string()),
+        }),
+        ..inherited.clone()
+    };
+    assert_eq!(
+        serde_json::to_string(&explicit).unwrap(),
+        format!(
+            r#"{{"endpoint_id":"{endpoint_id}","endpoint_key_id":null,"endpoint_key_fingerprint":"fingerprint","target":{{"upstream_model":"upstream-model"}}}}"#
+        )
+    );
+
+    // An inherited model is a different binding than a legacy one.
+    assert_ne!(inherited, binding(endpoint_id));
+    assert_ne!(inherited.target, explicit.target);
 }

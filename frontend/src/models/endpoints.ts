@@ -68,6 +68,7 @@ export type ModelRouteTargetItemView = {
   enabled: boolean
   endpoint_enabled: boolean
   upstream_model: string | null
+  prefer_new_sessions: boolean
 }
 
 export type ModelRouteListItemView = {

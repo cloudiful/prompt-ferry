@@ -169,7 +169,13 @@ pub(super) fn subscription_eligibility(
     if cache.chatgpt_subscription_exhausted_now(endpoint) {
         return Eligibility::Exhausted;
     }
-    Eligibility::Eligible(1.0)
+    // Fresh subscription windows carry a percent-scale weight so
+    // they compete with platform-key quota weights in the same units.
+    match cache.chatgpt_subscription_weight_now(endpoint) {
+        Some(weight) if weight.is_finite() && weight <= 0.0 => Eligibility::Exhausted,
+        Some(weight) if weight.is_finite() => Eligibility::Eligible(weight),
+        _ => Eligibility::Eligible(1.0),
+    }
 }
 
 pub(super) fn candidate_units<'a>(
@@ -266,6 +272,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             has_oauth_token,
+            prefer_new_sessions: false,
         }
     }
 

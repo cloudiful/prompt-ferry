@@ -55,6 +55,8 @@ pub(super) fn from_postgres_target(target: crate::db::ModelRouteTarget) -> Unifi
         service_tier: target.service_tier,
         // Issue #1032: nullable dimension override surfaced unchanged.
         embedding_dimensions_override: target.embedding_dimensions_override,
+        // Manual new-session preference surfaced unchanged.
+        prefer_new_sessions: target.prefer_new_sessions,
     }
 }
 
@@ -135,6 +137,8 @@ where
                 // Issue #1032: 0037 nullable positive dimension override;
                 // `None` inherits the caller's dimensions.
                 embedding_dimensions_override: target.embedding_dimensions_override,
+                // 0039 INTEGER 0/1; missing reads as automatic.
+                prefer_new_sessions: target.prefer_new_sessions,
             }
         })
         .collect();
@@ -213,6 +217,9 @@ pub(super) fn sqlite_route_from_create(
                     target.embedding_dimensions_override,
                 )
                 .map_err(|message| anyhow::anyhow!(message))?,
+                // At most one target per route carries the manual
+                // new-session preference; validation rejects multiples.
+                prefer_new_sessions: target.prefer_new_sessions,
             })
         })
         .collect::<Result<Vec<_>>>()?;

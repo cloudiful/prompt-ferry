@@ -43,11 +43,30 @@ redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
 return 1
 "#;
 
+/// The selected target of a route, as the session binding records it.
+///
+/// A route may use the same endpoint for several upstream models, so the
+/// endpoint alone does not identify the target that served a session. The
+/// identity is the endpoint plus the normalized upstream model of the
+/// selected target; `None` means the target inherits the request model.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ResponseAffinityTargetIdentity {
+    /// The selected target's upstream model, trimmed; `None` means the
+    /// target inherits the request model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_model: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResponseAffinityBinding {
     pub endpoint_id: Uuid,
     pub endpoint_key_id: Option<Uuid>,
     pub endpoint_key_fingerprint: String,
+    /// The selected target identity. `None` is a legacy endpoint-only
+    /// binding and is stored without the field, so a legacy payload
+    /// round-trips unchanged and keeps resolving by endpoint alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<ResponseAffinityTargetIdentity>,
 }
 
 #[derive(Clone)]

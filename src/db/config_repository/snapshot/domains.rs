@@ -115,6 +115,10 @@ pub struct ModelRouteTargetSnapshot {
     /// archives omit it, so it deserializes as inherit (`None`).
     #[serde(default)]
     pub embedding_dimensions_override: Option<i32>,
+    /// Manual new-session preference. Legacy archives omit it, so
+    /// it deserializes as automatic (`false`).
+    #[serde(default)]
+    pub prefer_new_sessions: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

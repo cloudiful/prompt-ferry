@@ -110,6 +110,7 @@ Personal HTTP MCP servers (for example `https://huggingface.co/mcp?login`) can u
 - Back up PostgreSQL and `<data-root>/prompt-ferry/worker-config.key`; without that key, stored secrets cannot be decrypted.
 - PostgreSQL 17 reaches 18 only through `pg_dump`/`pg_restore` or `pg_upgrade`. The example creates a fresh PostgreSQL 18 volume and migrates nothing.
 - Everything publishes on loopback. Reaching it from another machine means a deliberate port binding, TLS and a reverse proxy.
+- A session affinity payload records the selected upstream model. Upgrade every relay worker together: an old worker ignores that model and may serve the session from another model of the same endpoint.
 
 ## Documentation
 
