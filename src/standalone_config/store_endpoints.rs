@@ -1,13 +1,18 @@
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set, TransactionTrait,
+    QuerySelect, QueryTrait, Set, TransactionTrait,
 };
-use sqlx::Row;
 use uuid::Uuid;
 
+use crate::db::entities::sqlite::standalone_endpoint_admin_keys::{
+    ActiveModel as AdminActiveModel, Column as AdminColumn, Entity as AdminEntity,
+};
 use crate::db::entities::sqlite::standalone_endpoint_keys::{
     ActiveModel as EndpointKeyActiveModel, Column as EndpointKeyColumn, Entity as EndpointKeyEntity,
+};
+use crate::db::entities::sqlite::standalone_endpoint_oauth_tokens::{
+    ActiveModel as OAuthActiveModel, Column as OAuthColumn, Entity as OAuthEntity,
 };
 use crate::db::entities::sqlite::standalone_provider_endpoints::{
     ActiveModel as ProviderEndpointActiveModel, Column as ProviderEndpointColumn,
@@ -95,15 +100,27 @@ impl StandaloneConfigStore {
             .transpose()
             .map_err(StandaloneConfigError::Encryption)?;
         let now = rfc3339_now();
-        standalone_query!("src/sql/standalone/set_endpoint_admin_key.sql")
-            .bind(endpoint_id.to_string())
-            .bind(envelope_part(&envelope, EnvelopePart::Ciphertext))
-            .bind(envelope_part(&envelope, EnvelopePart::Nonce))
-            .bind(envelope_version(&envelope))
-            .bind(now.clone())
-            .bind(now)
-            .execute(self.pool())
-            .await?;
+        AdminEntity::insert(AdminActiveModel {
+            endpoint_id: Set(endpoint_id.to_string()),
+            admin_api_key_ciphertext: Set(envelope_part(&envelope, EnvelopePart::Ciphertext)),
+            admin_api_key_nonce: Set(envelope_part(&envelope, EnvelopePart::Nonce)),
+            admin_api_key_key_version: Set(envelope_version(&envelope)),
+            created_at: Set(now.clone()),
+            updated_at: Set(now),
+        })
+        .on_conflict(
+            OnConflict::column(AdminColumn::EndpointId)
+                .update_columns([
+                    AdminColumn::AdminApiKeyCiphertext,
+                    AdminColumn::AdminApiKeyNonce,
+                    AdminColumn::AdminApiKeyKeyVersion,
+                    AdminColumn::UpdatedAt,
+                ])
+                .to_owned(),
+        )
+        .exec(&sqlite_connection(&self.pool))
+        .await
+        .map_err(rows::native_error)?;
         Ok(())
     }
 
@@ -115,23 +132,38 @@ impl StandaloneConfigStore {
         manager: &RelaySecretManager,
         endpoint_id: uuid::Uuid,
     ) -> Result<Option<String>> {
-        let row = standalone_query!("src/sql/standalone/get_endpoint_admin_key.sql")
-            .bind(endpoint_id.to_string())
-            .fetch_optional(self.pool())
-            .await?;
-        let Some(row) = row else { return Ok(None) };
-        let envelope = rows::envelope(&row, "admin_api_key")?;
+        let query = AdminEntity::find_by_id(endpoint_id.to_string())
+            .select_only()
+            .columns([
+                AdminColumn::AdminApiKeyCiphertext,
+                AdminColumn::AdminApiKeyNonce,
+                AdminColumn::AdminApiKeyKeyVersion,
+            ])
+            .into_query();
+        let row = sqlite_connection(&self.pool)
+            .query_one(&query)
+            .await
+            .map_err(rows::native_error)?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let envelope = rows::native_credential_envelope(&row, "admin_api_key")?;
         write::decrypt_optional(manager, envelope.as_ref())
     }
 
     /// Endpoint ids that currently store an Admin API key, so a page listing
     /// resolves the saved indicator without a query per row.
     pub async fn list_endpoint_admin_key_ids(&self) -> Result<Vec<Uuid>> {
-        let rows = standalone_query!("src/sql/standalone/list_endpoint_admin_key_ids.sql")
-            .fetch_all(self.pool())
-            .await?;
-        rows.iter()
-            .map(|row| rows::uuid(row, "endpoint_id"))
+        let ids = AdminEntity::find()
+            .select_only()
+            .column(AdminColumn::EndpointId)
+            .filter(AdminColumn::AdminApiKeyCiphertext.is_not_null())
+            .into_tuple::<String>()
+            .all(&sqlite_connection(&self.pool))
+            .await
+            .map_err(rows::native_error)?;
+        ids.iter()
+            .map(|id| rows::model_uuid(id, "endpoint_id"))
             .collect()
     }
 
@@ -185,23 +217,39 @@ impl StandaloneConfigStore {
             .map(|record| manager.encrypt(&record.refresh_token))
             .transpose()?;
         let now = rfc3339_now();
-        standalone_query!("src/sql/standalone/set_endpoint_oauth_token.sql")
-            .bind(endpoint_id.to_string())
-            .bind(envelope_part(&access, EnvelopePart::Ciphertext))
-            .bind(envelope_part(&access, EnvelopePart::Nonce))
-            .bind(envelope_version(&access))
-            .bind(envelope_part(&refresh, EnvelopePart::Ciphertext))
-            .bind(envelope_part(&refresh, EnvelopePart::Nonce))
-            .bind(envelope_version(&refresh))
-            .bind(record.as_ref().and_then(|record| {
+        OAuthEntity::insert(OAuthActiveModel {
+            endpoint_id: Set(endpoint_id.to_string()),
+            access_token_ciphertext: Set(envelope_part(&access, EnvelopePart::Ciphertext)),
+            access_token_nonce: Set(envelope_part(&access, EnvelopePart::Nonce)),
+            access_token_key_version: Set(envelope_version(&access)),
+            refresh_token_ciphertext: Set(envelope_part(&refresh, EnvelopePart::Ciphertext)),
+            refresh_token_nonce: Set(envelope_part(&refresh, EnvelopePart::Nonce)),
+            refresh_token_key_version: Set(envelope_version(&refresh)),
+            expires_at: Set(record.as_ref().and_then(|record| {
                 record
                     .expires_at
                     .map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true))
-            }))
-            .bind(now.clone())
-            .bind(now)
-            .execute(&self.pool)
-            .await?;
+            })),
+            created_at: Set(now.clone()),
+            updated_at: Set(now),
+        })
+        .on_conflict(
+            OnConflict::column(OAuthColumn::EndpointId)
+                .update_columns([
+                    OAuthColumn::AccessTokenCiphertext,
+                    OAuthColumn::AccessTokenNonce,
+                    OAuthColumn::AccessTokenKeyVersion,
+                    OAuthColumn::RefreshTokenCiphertext,
+                    OAuthColumn::RefreshTokenNonce,
+                    OAuthColumn::RefreshTokenKeyVersion,
+                    OAuthColumn::ExpiresAt,
+                    OAuthColumn::UpdatedAt,
+                ])
+                .to_owned(),
+        )
+        .exec(&sqlite_connection(&self.pool))
+        .await
+        .map_err(rows::native_error)?;
         Ok(())
     }
 
@@ -213,13 +261,27 @@ impl StandaloneConfigStore {
         manager: &RelaySecretManager,
         endpoint_id: Uuid,
     ) -> Result<Option<EndpointOAuthToken>> {
-        let row = standalone_query!("src/sql/standalone/get_endpoint_oauth_token.sql")
-            .bind(endpoint_id.to_string())
-            .fetch_optional(&self.pool)
-            .await?;
-        let Some(row) = row else { return Ok(None) };
-        let access = rows::envelope(&row, "access_token")?;
-        let refresh = rows::envelope(&row, "refresh_token")?;
+        let query = OAuthEntity::find_by_id(endpoint_id.to_string())
+            .select_only()
+            .columns([
+                OAuthColumn::AccessTokenCiphertext,
+                OAuthColumn::AccessTokenNonce,
+                OAuthColumn::AccessTokenKeyVersion,
+                OAuthColumn::RefreshTokenCiphertext,
+                OAuthColumn::RefreshTokenNonce,
+                OAuthColumn::RefreshTokenKeyVersion,
+                OAuthColumn::ExpiresAt,
+            ])
+            .into_query();
+        let row = sqlite_connection(&self.pool)
+            .query_one(&query)
+            .await
+            .map_err(rows::native_error)?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let access = rows::native_credential_envelope(&row, "access_token")?;
+        let refresh = rows::native_credential_envelope(&row, "refresh_token")?;
         let Some(refresh) = refresh else {
             return Ok(None);
         };
@@ -229,7 +291,8 @@ impl StandaloneConfigStore {
             ));
         };
         let expires_at = row
-            .try_get::<Option<String>, _>("expires_at")?
+            .try_get::<Option<String>>("", "expires_at")
+            .map_err(rows::native_error)?
             .map(|raw| {
                 chrono::DateTime::parse_from_rfc3339(&raw)
                     .map(|value| value.with_timezone(&chrono::Utc))
@@ -252,11 +315,16 @@ impl StandaloneConfigStore {
     /// derived plan and the admin `has_oauth_token` indicator without ever
     /// touching the secrets themselves.
     pub async fn list_endpoint_oauth_token_ids(&self) -> Result<Vec<Uuid>> {
-        let rows = standalone_query!("src/sql/standalone/list_endpoint_oauth_token_ids.sql")
-            .fetch_all(&self.pool)
-            .await?;
-        rows.iter()
-            .map(|row| rows::uuid(row, "endpoint_id"))
+        let ids = OAuthEntity::find()
+            .select_only()
+            .column(OAuthColumn::EndpointId)
+            .filter(OAuthColumn::RefreshTokenCiphertext.is_not_null())
+            .into_tuple::<String>()
+            .all(&sqlite_connection(&self.pool))
+            .await
+            .map_err(rows::native_error)?;
+        ids.iter()
+            .map(|id| rows::model_uuid(id, "endpoint_id"))
             .collect()
     }
 

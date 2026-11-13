@@ -501,10 +501,13 @@ pub async fn delete_client_key(pool: &PgPool, user_id: i64, key_id: i64) -> Resu
 }
 
 pub async fn get_user_endpoint_setting(pool: &PgPool, user_id: i64) -> Result<Option<uuid::Uuid>> {
-    Ok(
-        sqlx::query_file_scalar!("src/sql/users/get_user_endpoint_setting.sql", user_id,)
-            .fetch_optional(pool)
-            .await?
-            .flatten(),
-    )
+    use crate::db::entities::postgres::user_endpoint_settings as settings;
+    Ok(settings::Entity::find_by_id(user_id)
+        .select_only()
+        .column(settings::Column::EndpointId)
+        .into_tuple::<Option<uuid::Uuid>>()
+        .one(&postgres_connection(pool))
+        .await
+        .map_err(native_error)?
+        .flatten())
 }

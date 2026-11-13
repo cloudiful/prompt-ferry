@@ -2,7 +2,9 @@
 
 pub mod standalone_client_keys;
 pub mod standalone_config_archive_audit;
+pub mod standalone_endpoint_admin_keys;
 pub mod standalone_endpoint_keys;
+pub mod standalone_endpoint_oauth_tokens;
 pub mod standalone_mcp_servers;
 pub mod standalone_model_route_targets;
 pub mod standalone_model_routes;

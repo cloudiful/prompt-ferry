@@ -110,9 +110,11 @@ pool.
   SeaORM entities in `src/db/entities/`: the PostgreSQL tables
   `worker_settings`, `managed_relays`, `mcp_servers`, `mcp_credentials`,
   `config_archive_audit`, `users`, `client_keys`, `provider_endpoints` and
-  `endpoint_api_keys`, plus the standalone SQLite settings, relay, MCP server,
-  config audit, `standalone_users`, `standalone_client_keys`,
-  `standalone_provider_endpoints` and `standalone_endpoint_keys` tables.
+  `endpoint_api_keys`, `endpoint_oauth_tokens` and `user_endpoint_settings`,
+  plus the standalone SQLite settings, relay, MCP server, config audit,
+  `standalone_users`, `standalone_client_keys`, `standalone_provider_endpoints`,
+  `standalone_endpoint_keys`, `standalone_endpoint_oauth_tokens` and
+  `standalone_endpoint_admin_keys` tables.
   `src/db/seaorm.rs` borrows the existing SQLx pool, so the native layer adds
   no second pool and owns no shutdown.
 - A standalone SQLite client-key update or delete targets only the row that
@@ -125,9 +127,9 @@ pool.
   stay SQLx-owned atomic islands. Each runs as one whole operation and is
   never split into native transactions or mixed with them. The SQLite snapshot
   and import keep their own endpoint and key SQL, while live endpoint and key
-  CRUD is native. The PostgreSQL visible-endpoint selection, admin/OAuth token
-  helpers and user endpoint settings also stay SQLx alongside native endpoint
-  CRUD.
+  CRUD is native. PostgreSQL visible-endpoint selection, effective routing and
+  quota eligibility queries remain SQLx alongside native credential and user
+  endpoint setting CRUD.
 - The entities also declare the native schema metadata for those tables,
   including checks and indexes. The declarations describe the schema the
   applied migrations already create; they are not a second schema applier. The
