@@ -205,7 +205,7 @@ pub struct ConfigAuditPage {
 
 /// Backend-neutral audit row, produced by the PostgreSQL decoder and by the
 /// SQLite reader, then converted into the public entry shape.
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, sea_orm::FromQueryResult)]
 pub(crate) struct RawConfigAuditRow {
     pub audit_id: i64,
     pub actor_user_id: Option<i64>,

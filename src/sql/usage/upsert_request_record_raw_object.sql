@@ -1,3 +1,6 @@
+-- The raw payload reference shares the request record's partition key, so the
+-- canonical `created_at` is bound directly. Selecting it back from
+-- `request_records` would scan every daily partition of the request family.
 INSERT INTO request_record_raw_payloads(
     event_id,
     created_at,
@@ -6,15 +9,14 @@ INSERT INTO request_record_raw_payloads(
     raw_object_sha256,
     raw_object_expires_at
 )
-SELECT
+VALUES (
     $1,
-    created_at,
     $2,
     $3,
     $4,
-    $5
-FROM request_records
-WHERE event_id = $1
+    $5,
+    $6
+)
 ON CONFLICT (created_at, event_id)
 DO UPDATE SET
     raw_object_key = EXCLUDED.raw_object_key,

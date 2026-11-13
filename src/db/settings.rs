@@ -2,11 +2,16 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use sea_orm::sea_query::{Expr, OnConflict};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde::{Serialize, de::DeserializeOwned};
+use serde_json::Value;
 use sqlx::PgPool;
 
 use crate::{
     db::StreamDeltaBatchingSettings,
+    db::entities::postgres::worker_settings,
+    db::seaorm::{native_error, postgres_connection},
     raw_payload_store::{RawObjectStoreConfig, RawObjectStorePersisted},
     redact::RedactionConfig,
     relay_secrets::RelaySecretManager,
@@ -51,29 +56,27 @@ const STREAM_OUTPUT_MAX_BUFFER_BYTES_MIN: usize = 1;
 const STREAM_OUTPUT_MAX_BUFFER_BYTES_MAX: usize = 65_536;
 
 pub async fn get_redaction_enabled(pool: &PgPool) -> Result<bool> {
-    Ok(
-        sqlx::query_file!("src/sql/settings/get_redaction_enabled.sql")
-            .fetch_optional(pool)
-            .await?
-            .map(|row| row.enabled)
-            .unwrap_or(false),
-    )
+    let db = postgres_connection(pool);
+    let row = worker_settings::Entity::find_by_id("redaction_enabled".to_string())
+        .one(&db)
+        .await
+        .map_err(native_error)?;
+    Ok(row.is_some_and(|row| row.setting_value == Value::Bool(true)))
 }
 
 pub async fn set_redaction_enabled(pool: &PgPool, enabled: bool) -> Result<()> {
-    sqlx::query_file!("src/sql/settings/set_redaction_enabled.sql", enabled,)
-        .execute(pool)
-        .await?;
-    Ok(())
+    set_setting_value(pool, "redaction_enabled", Value::Bool(enabled)).await
 }
 
 pub async fn get_json_setting<T>(pool: &PgPool, key: &str) -> Result<Option<T>>
 where
     T: DeserializeOwned,
 {
-    let value = sqlx::query_file!("src/sql/settings/get_json_setting.sql", key,)
-        .fetch_optional(pool)
-        .await?
+    let db = postgres_connection(pool);
+    let value = worker_settings::Entity::find_by_id(key.to_string())
+        .one(&db)
+        .await
+        .map_err(native_error)?
         .map(|row| row.setting_value);
     value
         .map(|value| serde_json::from_value(value).context("invalid json setting value"))
@@ -85,9 +88,28 @@ where
     T: Serialize + ?Sized,
 {
     let json_value = serde_json::to_value(value)?;
-    sqlx::query_file!("src/sql/settings/set_json_setting.sql", key, json_value,)
-        .execute(pool)
-        .await?;
+    set_setting_value(pool, key, json_value).await
+}
+
+async fn set_setting_value(pool: &PgPool, key: &str, value: Value) -> Result<()> {
+    let db = postgres_connection(pool);
+    worker_settings::Entity::insert(worker_settings::ActiveModel {
+        setting_key: Set(key.to_string()),
+        setting_value: Set(value),
+        updated_at: sea_orm::ActiveValue::NotSet,
+    })
+    .on_conflict(
+        OnConflict::column(worker_settings::Column::SettingKey)
+            .update_column(worker_settings::Column::SettingValue)
+            .value(
+                worker_settings::Column::UpdatedAt,
+                Expr::current_timestamp(),
+            )
+            .to_owned(),
+    )
+    .exec(&db)
+    .await
+    .map_err(native_error)?;
     Ok(())
 }
 
@@ -209,20 +231,18 @@ pub async fn list_redaction_custom_string_rules(
 }
 
 pub async fn get_bool_setting(pool: &PgPool, key: &str, default: bool) -> Result<bool> {
-    Ok(
-        sqlx::query_file!("src/sql/settings/get_bool_setting.sql", key,)
-            .fetch_optional(pool)
-            .await?
-            .map(|row| row.enabled)
-            .unwrap_or(default),
-    )
+    let db = postgres_connection(pool);
+    let row = worker_settings::Entity::find_by_id(key.to_string())
+        .one(&db)
+        .await
+        .map_err(native_error)?;
+    Ok(row
+        .map(|row| row.setting_value == Value::Bool(true))
+        .unwrap_or(default))
 }
 
 pub async fn set_bool_setting(pool: &PgPool, key: &str, enabled: bool) -> Result<()> {
-    sqlx::query_file!("src/sql/settings/set_bool_setting.sql", key, enabled,)
-        .execute(pool)
-        .await?;
-    Ok(())
+    set_setting_value(pool, key, Value::Bool(enabled)).await
 }
 
 pub async fn get_request_content_logging(pool: &PgPool) -> Result<RequestContentLoggingResponse> {
@@ -291,9 +311,12 @@ pub async fn set_request_content_logging(
 }
 
 async fn delete_setting(pool: &PgPool, key: &str) -> Result<()> {
-    sqlx::query_file!("src/sql/settings/delete_setting.sql", key)
-        .execute(pool)
-        .await?;
+    let db = postgres_connection(pool);
+    worker_settings::Entity::delete_many()
+        .filter(worker_settings::Column::SettingKey.eq(key))
+        .exec(&db)
+        .await
+        .map_err(native_error)?;
     Ok(())
 }
 

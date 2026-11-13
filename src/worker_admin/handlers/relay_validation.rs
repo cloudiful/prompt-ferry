@@ -67,10 +67,17 @@ pub(super) fn validate_final_relay_config(config: FinalRelayConfig<'_>) -> Resul
 }
 
 pub(super) fn map_relay_db_error(state: &AdminState, err: anyhow::Error) -> Response {
-    if let Some(db_err) = err.downcast_ref::<sqlx::Error>()
-        && let sqlx::Error::Database(db_err) = db_err
-        && db_err.constraint() == Some("managed_relays_relay_url_unique")
-    {
+    let native_constraint = err
+        .downcast_ref::<sea_orm::DbErr>()
+        .and_then(crate::db::seaorm::driver_error_details)
+        .and_then(|details| details.constraint);
+    let sqlx_constraint = err
+        .downcast_ref::<sqlx::Error>()
+        .and_then(|error| match error {
+            sqlx::Error::Database(database) => database.constraint().map(str::to_owned),
+            _ => None,
+        });
+    if native_constraint.or(sqlx_constraint).as_deref() == Some("managed_relays_relay_url_unique") {
         return error(
             StatusCode::BAD_REQUEST,
             "duplicate_relay_url",

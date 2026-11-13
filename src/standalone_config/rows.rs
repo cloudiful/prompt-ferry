@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use sea_orm::{DbErr, RuntimeErr};
 use sqlx::{Row, sqlite::SqliteRow};
 use uuid::Uuid;
 
@@ -9,8 +12,26 @@ use super::models::{
 use crate::{
     config::{BridgeEncryptionMode, NativeApi, NativeApiSource, TlsMode},
     db::McpServer,
+    db::entities::sqlite::{standalone_mcp_servers, standalone_relays, standalone_settings},
     relay_secrets::EncryptedSecretEnvelope,
 };
+
+/// Converts a native SeaORM error into the store error without losing the
+/// driver error the existing SQLx path exposed.
+pub(crate) fn native_error(error: DbErr) -> StandaloneConfigError {
+    let message = error.to_string();
+    match error {
+        DbErr::Exec(RuntimeErr::SqlxError(error))
+        | DbErr::Query(RuntimeErr::SqlxError(error))
+        | DbErr::Conn(RuntimeErr::SqlxError(error)) => match Arc::try_unwrap(error) {
+            Ok(error) => StandaloneConfigError::Database(error),
+            Err(error) => {
+                StandaloneConfigError::CorruptDatabase(format!("native SQLite error: {error}"))
+            }
+        },
+        _ => StandaloneConfigError::CorruptDatabase(format!("native SQLite error: {message}")),
+    }
+}
 
 pub(crate) fn uuid(row: &SqliteRow, column: &str) -> Result<Uuid> {
     let value: String = row.try_get(column)?;
@@ -33,19 +54,6 @@ pub(crate) fn optional_string(row: &SqliteRow, column: &str) -> Result<Option<St
     Ok(row.try_get(column)?)
 }
 
-pub(crate) fn optional_uuid(row: &SqliteRow, column: &str) -> Result<Option<Uuid>> {
-    let value = row.try_get::<Option<String>, _>(column)?;
-    value
-        .map(|value| {
-            Uuid::parse_str(&value).map_err(|error| {
-                StandaloneConfigError::CorruptDatabase(format!(
-                    "column {column} is not a UUID: {error}"
-                ))
-            })
-        })
-        .transpose()
-}
-
 pub(crate) fn bool_value(row: &SqliteRow, column: &str) -> Result<bool> {
     match row.try_get::<i64, _>(column)? {
         0 => Ok(false),
@@ -54,6 +62,53 @@ pub(crate) fn bool_value(row: &SqliteRow, column: &str) -> Result<bool> {
             "column {column} is not a boolean: {value}"
         ))),
     }
+}
+
+fn model_bool(value: i32, column: &str) -> Result<bool> {
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        value => Err(StandaloneConfigError::CorruptDatabase(format!(
+            "column {column} is not a boolean: {value}"
+        ))),
+    }
+}
+
+fn envelope_from_parts(
+    prefix: &str,
+    ciphertext: Option<Vec<u8>>,
+    nonce: Option<Vec<u8>>,
+    key_version: Option<i32>,
+) -> Result<Option<EncryptedSecretEnvelope>> {
+    match (ciphertext, nonce, key_version) {
+        (None, None, None) => Ok(None),
+        (Some(ciphertext), Some(nonce), Some(key_version)) => Ok(Some(EncryptedSecretEnvelope {
+            ciphertext,
+            nonce,
+            key_version: i16::try_from(key_version).map_err(|_| {
+                StandaloneConfigError::CorruptDatabase(format!(
+                    "{prefix}_key_version is outside the i16 range"
+                ))
+            })?,
+        })),
+        _ => Err(StandaloneConfigError::CorruptDatabase(format!(
+            "secret envelope {prefix} has incomplete columns"
+        ))),
+    }
+}
+
+fn required_envelope(
+    prefix: &str,
+    ciphertext: Option<Vec<u8>>,
+    nonce: Option<Vec<u8>>,
+    key_version: Option<i32>,
+    label: &str,
+) -> Result<EncryptedSecretEnvelope> {
+    envelope_from_parts(prefix, ciphertext, nonce, key_version)?.ok_or_else(|| {
+        StandaloneConfigError::CorruptDatabase(format!(
+            "MCP server is missing its {label} secret envelope"
+        ))
+    })
 }
 
 pub(crate) fn envelope(row: &SqliteRow, prefix: &str) -> Result<Option<EncryptedSecretEnvelope>> {
@@ -123,13 +178,84 @@ pub(crate) fn relay(
     ))
 }
 
-pub(crate) fn relay_envelopes(row: &SqliteRow) -> Result<[Option<EncryptedSecretEnvelope>; 4]> {
+fn model_required_string(value: &str, column: &str) -> Result<String> {
+    if value.trim().is_empty() {
+        return Err(StandaloneConfigError::CorruptDatabase(format!(
+            "column {column} is empty"
+        )));
+    }
+    Ok(value.to_string())
+}
+
+fn model_uuid(value: &str, column: &str) -> Result<Uuid> {
+    Uuid::parse_str(value).map_err(|error| {
+        StandaloneConfigError::CorruptDatabase(format!("column {column} is not a UUID: {error}"))
+    })
+}
+
+fn model_optional_uuid(value: Option<&str>, column: &str) -> Result<Option<Uuid>> {
+    value.map(|value| model_uuid(value, column)).transpose()
+}
+
+fn model_optional_timestamp(
+    value: Option<&str>,
+    column: &str,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>> {
+    value
+        .map(|value| parse_timestamp(value, column))
+        .transpose()
+}
+
+pub(crate) fn relay_envelopes_from_model(
+    model: &standalone_relays::Model,
+) -> Result<[Option<EncryptedSecretEnvelope>; 4]> {
     Ok([
-        envelope(row, "relay_ca")?,
-        envelope(row, "client_cert")?,
-        envelope(row, "client_key")?,
-        envelope(row, "bridge_encryption_key")?,
+        envelope_from_parts(
+            "relay_ca",
+            model.relay_ca_ciphertext.clone(),
+            model.relay_ca_nonce.clone(),
+            model.relay_ca_key_version,
+        )?,
+        envelope_from_parts(
+            "client_cert",
+            model.client_cert_ciphertext.clone(),
+            model.client_cert_nonce.clone(),
+            model.client_cert_key_version,
+        )?,
+        envelope_from_parts(
+            "client_key",
+            model.client_key_ciphertext.clone(),
+            model.client_key_nonce.clone(),
+            model.client_key_key_version,
+        )?,
+        envelope_from_parts(
+            "bridge_encryption_key",
+            model.bridge_encryption_key_ciphertext.clone(),
+            model.bridge_encryption_key_nonce.clone(),
+            model.bridge_encryption_key_key_version,
+        )?,
     ])
+}
+
+pub(crate) fn relay_from_model(
+    model: &standalone_relays::Model,
+) -> Result<(ManagedRelayConfig, [Option<EncryptedSecretEnvelope>; 4])> {
+    let relay = ManagedRelayConfig {
+        relay_id: model_uuid(&model.relay_id, "relay_id")?,
+        name: model_required_string(&model.name, "name")?,
+        relay_url: model_required_string(&model.relay_url, "relay_url")?,
+        enabled: model_bool(model.enabled, "enabled")?,
+        tls_mode: parse_tls_mode(&model_required_string(&model.tls_mode, "tls_mode")?)?,
+        bridge_encryption_mode: parse_bridge_mode(&model_required_string(
+            &model.bridge_encryption_mode,
+            "bridge_encryption_mode",
+        )?)?,
+        relay_ca_pem: None,
+        client_cert_pem: None,
+        client_key_pem: None,
+        bridge_encryption_key: None,
+    };
+    Ok((relay, relay_envelopes_from_model(model)?))
 }
 
 pub(crate) fn endpoint(
@@ -226,91 +352,100 @@ pub(crate) type McpServerRow = (
     Option<EncryptedSecretEnvelope>,
 );
 
-pub(crate) fn mcp_server(row: &SqliteRow) -> Result<McpServerRow> {
-    let auth_mode = optional_string(row, "auth_mode")?
-        .unwrap_or_else(|| crate::db::MCP_AUTH_MODE_NONE.to_string());
-    Ok((
-        McpServer {
-            server_id: uuid(row, "server_id")?,
-            source_endpoint_id: optional_uuid(row, "source_endpoint_id")?,
-            scope: required_string(row, "scope")?,
-            owner_user_id: row.try_get("owner_user_id")?,
-            name: required_string(row, "name")?,
-            aggregate_naming_mode: required_string(row, "aggregate_naming_mode")?,
-            transport: required_string(row, "transport")?,
-            provider_kind: optional_string(row, "provider_kind")?,
-            url: optional_string(row, "url")?,
-            command: optional_string(row, "command")?,
-            args: json_value(row, "args_json")?,
-            env_json: serde_json::Value::Null,
-            bearer_tokens_json: serde_json::Value::Null,
-            http_headers_json: json_value(row, "http_headers_json")?,
-            auth_mode,
-            basic_username: optional_string(row, "basic_username")?,
-            basic_password: None,
-            // Issue #375 Phase F: per-row proxy (0019 envelope). `None`
-            // means inherit; decrypted in `store::mcp_server_from_row`.
-            proxy_url: None,
-            has_proxy_url: false,
-            tool_filter_mode: required_string(row, "tool_filter_mode")?,
-            allowed_tools: json_value(row, "allowed_tools_json")?,
-            disabled_tools: json_value(row, "disabled_tools_json")?,
-            disabled_resources: json_value(row, "disabled_resources_json")?,
-            enabled: bool_value(row, "enabled")?,
-            timeout_ms: i32::try_from(row.try_get::<i64, _>("timeout_ms")?).map_err(|_| {
-                StandaloneConfigError::CorruptDatabase(
-                    "MCP timeout_ms is outside the i32 range".to_string(),
-                )
-            })?,
-            lifecycle_policy: required_string(row, "lifecycle_policy")?,
-            lifecycle_manual_protocol_version: optional_string(
-                row,
-                "lifecycle_manual_protocol_version",
-            )?,
-            lifecycle_learned_mode: optional_string(row, "lifecycle_learned_mode")?,
-            lifecycle_learned_protocol_version: optional_string(
-                row,
-                "lifecycle_learned_protocol_version",
-            )?,
-            lifecycle_learned_for_updated_at: optional_timestamp(
-                row,
-                "lifecycle_learned_for_updated_at",
-            )?,
-            lifecycle_learned_at: optional_timestamp(row, "lifecycle_learned_at")?,
-            created_at: sqlite_timestamp(row, "created_at")?,
-            updated_at: sqlite_timestamp(row, "updated_at")?,
-        },
-        envelope(row, "env")?.ok_or_else(|| {
-            StandaloneConfigError::CorruptDatabase(
-                "MCP server is missing its environment secret envelope".to_string(),
-            )
-        })?,
-        envelope(row, "bearer_tokens")?.ok_or_else(|| {
-            StandaloneConfigError::CorruptDatabase(
-                "MCP server is missing its bearer token secret envelope".to_string(),
-            )
-        })?,
-        envelope(row, "basic_password")?,
-        // Issue #375 Phase F: proxy envelope added by standalone 0019.
-        // Pre-migration rows lack the columns; treat missing as `None`
-        // (inherit) so legacy snapshots keep loading.
-        envelope_opt(row, "proxy_url")?,
-    ))
-}
-
-fn json_value(row: &SqliteRow, column: &str) -> Result<serde_json::Value> {
-    let value = required_string(row, column)?;
+fn model_json(value: &str, column: &str) -> Result<serde_json::Value> {
+    let value = model_required_string(value, column)?;
     serde_json::from_str(&value).map_err(StandaloneConfigError::Serialization)
 }
 
-fn optional_timestamp(
-    row: &SqliteRow,
-    column: &str,
-) -> Result<Option<chrono::DateTime<chrono::Utc>>> {
-    let value = row.try_get::<Option<String>, _>(column)?;
-    value
-        .map(|value| parse_timestamp(&value, column))
-        .transpose()
+pub(crate) fn mcp_server_from_model(model: &standalone_mcp_servers::Model) -> Result<McpServerRow> {
+    let auth_mode = model.auth_mode.clone();
+    Ok((
+        McpServer {
+            server_id: model_uuid(&model.server_id, "server_id")?,
+            source_endpoint_id: model_optional_uuid(
+                model.source_endpoint_id.as_deref(),
+                "source_endpoint_id",
+            )?,
+            scope: model_required_string(&model.scope, "scope")?,
+            owner_user_id: model.owner_user_id,
+            name: model_required_string(&model.name, "name")?,
+            aggregate_naming_mode: model_required_string(
+                &model.aggregate_naming_mode,
+                "aggregate_naming_mode",
+            )?,
+            transport: model_required_string(&model.transport, "transport")?,
+            provider_kind: model.provider_kind.clone(),
+            url: model.url.clone(),
+            command: model.command.clone(),
+            args: model_json(&model.args_json, "args_json")?,
+            env_json: serde_json::Value::Null,
+            bearer_tokens_json: serde_json::Value::Null,
+            http_headers_json: model_json(&model.http_headers_json, "http_headers_json")?,
+            auth_mode,
+            basic_username: model.basic_username.clone(),
+            basic_password: None,
+            proxy_url: None,
+            has_proxy_url: false,
+            tool_filter_mode: model_required_string(&model.tool_filter_mode, "tool_filter_mode")?,
+            allowed_tools: model_json(&model.allowed_tools_json, "allowed_tools_json")?,
+            disabled_tools: model_json(&model.disabled_tools_json, "disabled_tools_json")?,
+            disabled_resources: model_json(
+                &model.disabled_resources_json,
+                "disabled_resources_json",
+            )?,
+            enabled: model_bool(model.enabled, "enabled")?,
+            timeout_ms: model.timeout_ms,
+            lifecycle_policy: model_required_string(&model.lifecycle_policy, "lifecycle_policy")?,
+            lifecycle_manual_protocol_version: model.lifecycle_manual_protocol_version.clone(),
+            lifecycle_learned_mode: model.lifecycle_learned_mode.clone(),
+            lifecycle_learned_protocol_version: model.lifecycle_learned_protocol_version.clone(),
+            lifecycle_learned_for_updated_at: model_optional_timestamp(
+                model.lifecycle_learned_for_updated_at.as_deref(),
+                "lifecycle_learned_for_updated_at",
+            )?,
+            lifecycle_learned_at: model_optional_timestamp(
+                model.lifecycle_learned_at.as_deref(),
+                "lifecycle_learned_at",
+            )?,
+            created_at: parse_timestamp(&model.created_at, "created_at")?,
+            updated_at: parse_timestamp(&model.updated_at, "updated_at")?,
+        },
+        required_envelope(
+            "env",
+            Some(model.env_ciphertext.clone()),
+            Some(model.env_nonce.clone()),
+            Some(model.env_key_version),
+            "environment",
+        )?,
+        required_envelope(
+            "bearer_tokens",
+            Some(model.bearer_tokens_ciphertext.clone()),
+            Some(model.bearer_tokens_nonce.clone()),
+            Some(model.bearer_tokens_key_version),
+            "bearer token",
+        )?,
+        envelope_from_parts(
+            "basic_password",
+            model.basic_password_ciphertext.clone(),
+            model.basic_password_nonce.clone(),
+            model.basic_password_key_version,
+        )?,
+        envelope_from_parts(
+            "proxy_url",
+            model.proxy_url_ciphertext.clone(),
+            model.proxy_url_nonce.clone(),
+            model.proxy_url_key_version,
+        )?,
+    ))
+}
+
+pub(crate) fn setting_from_model(model: &standalone_settings::Model) -> Result<SettingConfig> {
+    let value = model_required_string(&model.value_json, "value_json")?;
+    Ok(SettingConfig {
+        key: model_required_string(&model.setting_key, "setting_key")?,
+        version: model.value_version,
+        value: serde_json::from_str(&value)?,
+    })
 }
 
 fn sqlite_timestamp(row: &SqliteRow, column: &str) -> Result<chrono::DateTime<chrono::Utc>> {

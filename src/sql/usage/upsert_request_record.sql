@@ -2,6 +2,8 @@
 -- to `request_record_content`, keyed by the same `(event_id, created_at)`.
 -- `created_at` arrives as a bind parameter (the in-memory request record owns
 -- it) because it is both the partition key and part of every arbiter.
+-- `created_at` is returned with the canonical `event_id` so the caller can
+-- reuse it without a second lookup across the daily partitions.
 INSERT INTO request_records(
     created_at, event_kind, request_category, request_state, request_id, user_id, client_key_label, request_user_agent, endpoint_id, endpoint_key_id, endpoint_key_label, model_route_rule_id, mcp_server_id, mcp_server_name, mcp_protocol_method, mcp_operation_name, path,
     http_request_content_encoding, http_request_compressed, http_request_compressed_bytes, http_request_decompressed_bytes, http_request_compression_ratio,
@@ -121,4 +123,4 @@ DO UPDATE SET
     session_header_id = COALESCE(EXCLUDED.session_header_id, request_records.session_header_id),
     session_parent_id = COALESCE(EXCLUDED.session_parent_id, request_records.session_parent_id),
     updated_at = NOW()
-RETURNING event_id
+RETURNING event_id, created_at
