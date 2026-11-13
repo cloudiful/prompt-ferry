@@ -13,8 +13,9 @@ use crate::{
     config::{BridgeEncryptionMode, NativeApi, NativeApiSource, TlsMode},
     db::McpServer,
     db::entities::sqlite::{
-        standalone_client_keys, standalone_mcp_servers, standalone_model_route_targets,
-        standalone_model_routes, standalone_relays, standalone_settings,
+        standalone_client_keys, standalone_endpoint_keys, standalone_mcp_servers,
+        standalone_model_route_targets, standalone_model_routes, standalone_provider_endpoints,
+        standalone_relays, standalone_settings,
     },
     relay_secrets::EncryptedSecretEnvelope,
 };
@@ -340,6 +341,90 @@ pub(crate) fn endpoint_key(
             updated_at,
         },
         envelope(row, "api_key")?.ok_or_else(|| {
+            StandaloneConfigError::CorruptDatabase(
+                "endpoint key is missing its secret envelope".to_string(),
+            )
+        })?,
+    ))
+}
+
+pub(crate) fn endpoint_from_model(
+    model: &standalone_provider_endpoints::Model,
+) -> Result<(
+    ProviderEndpointConfig,
+    Option<EncryptedSecretEnvelope>,
+    Option<EncryptedSecretEnvelope>,
+)> {
+    Ok((
+        ProviderEndpointConfig {
+            endpoint_id: model_uuid(&model.endpoint_id, "endpoint_id")?,
+            name: model_required_string(&model.name, "name")?,
+            provider: EndpointProvider::parse(&model_required_string(
+                &model.provider,
+                "provider",
+            )?)?,
+            provider_region: EndpointRegion::parse(model.provider_region.as_deref())?,
+            service_tier: model
+                .service_tier
+                .clone()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            base_url: model_required_string(&model.base_url, "base_url")?,
+            native_api: parse_native_api(&model_required_string(&model.native_api, "native_api")?)?,
+            native_api_source: parse_native_api_source(&model_required_string(
+                &model.native_api_source,
+                "native_api_source",
+            )?)?,
+            key_lb_enabled: model_bool(model.key_lb_enabled, "key_lb_enabled")?,
+            enabled: model_bool(model.enabled, "enabled")?,
+            mcp_enabled: model_bool(model.mcp_enabled, "mcp_enabled")?,
+            created_at: parse_timestamp(&model.created_at, "created_at")?,
+            updated_at: parse_timestamp(&model.updated_at, "updated_at")?,
+            api_key: String::new(),
+            api_keys: Vec::new(),
+            proxy_url: None,
+            active_windows: model
+                .active_windows
+                .clone()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+        },
+        envelope_from_parts(
+            "api_key",
+            Some(model.api_key_ciphertext.clone()),
+            Some(model.api_key_nonce.clone()),
+            Some(model.api_key_key_version),
+        )?,
+        envelope_from_parts(
+            "proxy_url",
+            model.proxy_url_ciphertext.clone(),
+            model.proxy_url_nonce.clone(),
+            model.proxy_url_key_version,
+        )?,
+    ))
+}
+
+pub(crate) fn endpoint_key_from_model(
+    model: &standalone_endpoint_keys::Model,
+) -> Result<(EndpointApiKeyConfig, EncryptedSecretEnvelope)> {
+    Ok((
+        EndpointApiKeyConfig {
+            key_id: model_uuid(&model.key_id, "key_id")?,
+            endpoint_id: model_uuid(&model.endpoint_id, "endpoint_id")?,
+            key_label: model_required_string(&model.key_label, "key_label")?,
+            api_key: String::new(),
+            position: model.position,
+            enabled: model_bool(model.enabled, "enabled")?,
+            created_at: parse_timestamp(&model.created_at, "created_at")?,
+            updated_at: parse_timestamp(&model.updated_at, "updated_at")?,
+        },
+        envelope_from_parts(
+            "api_key",
+            Some(model.api_key_ciphertext.clone()),
+            Some(model.api_key_nonce.clone()),
+            Some(model.api_key_key_version),
+        )?
+        .ok_or_else(|| {
             StandaloneConfigError::CorruptDatabase(
                 "endpoint key is missing its secret envelope".to_string(),
             )

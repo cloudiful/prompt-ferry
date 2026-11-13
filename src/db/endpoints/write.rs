@@ -5,29 +5,27 @@
 //! builds the returned endpoint is taken on that same transaction, so the
 //! caller never sees a key set from a later save than the one it triggered.
 
+use crate::db::{
+    entities::postgres::provider_endpoints::{self, Column, Entity},
+    seaorm::{native_error, postgres_connection},
+};
 use anyhow::Result;
-use sqlx::{Executor, PgPool, Postgres};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, QueryFilter, Set,
+    TransactionTrait, sea_query::Expr,
+};
+use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::db::types::{
-    EndpointApiKey, EndpointCreate, ProviderEndpoint, ProviderEndpointRow, normalize_service_tier,
-};
+use crate::db::types::{EndpointApiKey, EndpointCreate, ProviderEndpoint, normalize_service_tier};
 
 use super::keys::{
-    list_endpoint_api_keys_by_endpoint_id, lock_endpoint_for_update, replace_endpoint_api_keys,
+    list_endpoint_api_keys_native, lock_endpoint_for_update, replace_endpoint_api_keys,
 };
+use super::load_endpoint_projection;
 
 pub async fn create_endpoint(pool: &PgPool, input: EndpointCreate) -> Result<ProviderEndpoint> {
-    let mut tx = pool.begin().await?;
-    let endpoint = insert_endpoint(&mut *tx, &input).await?;
-    // The insert above already holds the new parent row, so the key set is
-    // written under a lock that no other transaction can overtake.
-    replace_endpoint_api_keys(&mut tx, endpoint.endpoint_id, &input.api_keys).await?;
-    let endpoint = attach_endpoint_api_keys(&mut *tx, vec![endpoint])
-        .await?
-        .remove(0);
-    tx.commit().await?;
-    Ok(endpoint)
+    create_endpoint_record(pool, input, false).await
 }
 
 /// Insert a new endpoint with `mcp_enabled` set in the same statement so the
@@ -39,13 +37,24 @@ pub async fn create_endpoint_with_mcp(
     input: EndpointCreate,
     mcp_enabled: bool,
 ) -> Result<ProviderEndpoint> {
-    let mut tx = pool.begin().await?;
-    let endpoint = insert_endpoint_with_mcp(&mut *tx, &input, mcp_enabled).await?;
-    replace_endpoint_api_keys(&mut tx, endpoint.endpoint_id, &input.api_keys).await?;
-    let endpoint = attach_endpoint_api_keys(&mut *tx, vec![endpoint])
+    create_endpoint_record(pool, input, mcp_enabled).await
+}
+
+async fn create_endpoint_record(
+    pool: &PgPool,
+    input: EndpointCreate,
+    mcp_enabled: bool,
+) -> Result<ProviderEndpoint> {
+    let db = postgres_connection(pool);
+    let tx = db.begin().await.map_err(native_error)?;
+    let endpoint = insert_endpoint(&tx, &input, mcp_enabled).await?;
+    // The insert above already holds the new parent row, so the key set is
+    // written under a lock that no other transaction can overtake.
+    replace_endpoint_api_keys(&tx, endpoint.endpoint_id, &input.api_keys).await?;
+    let endpoint = attach_endpoint_api_keys(&tx, vec![endpoint])
         .await?
         .remove(0);
-    tx.commit().await?;
+    tx.commit().await.map_err(native_error)?;
     Ok(endpoint)
 }
 
@@ -54,32 +63,38 @@ pub async fn update_endpoint(
     endpoint_id: Uuid,
     input: EndpointCreate,
 ) -> Result<Option<ProviderEndpoint>> {
-    let mut tx = pool.begin().await?;
+    let db = postgres_connection(pool);
+    let tx = db.begin().await.map_err(native_error)?;
     // Take the parent row's lock before the key set is read, so a second save
     // of the same endpoint waits here rather than planning its writes against
     // rows this transaction has not finished moving.
-    lock_endpoint_for_update(&mut tx, endpoint_id).await?;
-    let endpoint = update_endpoint_row(&mut tx, endpoint_id, &input).await?;
+    if !lock_endpoint_for_update(&tx, endpoint_id).await? {
+        tx.rollback().await.map_err(native_error)?;
+        return Ok(None);
+    }
+    let endpoint = update_endpoint_row(&tx, endpoint_id, &input).await?;
     let Some(endpoint) = endpoint else {
-        tx.rollback().await?;
+        tx.rollback().await.map_err(native_error)?;
         return Ok(None);
     };
-    replace_endpoint_api_keys(&mut tx, endpoint.endpoint_id, &input.api_keys).await?;
-    let endpoint = attach_endpoint_api_keys(&mut *tx, vec![endpoint])
+    replace_endpoint_api_keys(&tx, endpoint.endpoint_id, &input.api_keys).await?;
+    let endpoint = attach_endpoint_api_keys(&tx, vec![endpoint])
         .await?
         .remove(0);
-    tx.commit().await?;
+    tx.commit().await.map_err(native_error)?;
     Ok(Some(endpoint))
 }
 
 pub async fn delete_endpoint(pool: &PgPool, endpoint_id: Uuid) -> Result<bool> {
-    let result = sqlx::query_file!("src/sql/endpoints/delete_endpoint.sql", endpoint_id)
-        .execute(pool)
-        .await?;
-    if result.rows_affected() > 0 {
+    let result = Entity::delete_many()
+        .filter(Column::EndpointId.eq(endpoint_id))
+        .exec(&postgres_connection(pool))
+        .await
+        .map_err(native_error)?;
+    if result.rows_affected > 0 {
         super::super::routes::cleanup_orphan_model_routes(pool).await?;
     }
-    Ok(result.rows_affected() > 0)
+    Ok(result.rows_affected > 0)
 }
 
 pub async fn set_endpoint_mcp_enabled(
@@ -87,13 +102,13 @@ pub async fn set_endpoint_mcp_enabled(
     endpoint_id: Uuid,
     enabled: bool,
 ) -> Result<()> {
-    sqlx::query_file!(
-        "src/sql/endpoints/set_mcp_enabled.sql",
-        endpoint_id,
-        enabled
-    )
-    .execute(pool)
-    .await?;
+    Entity::update_many()
+        .col_expr(Column::McpEnabled, Expr::value(enabled))
+        .col_expr(Column::UpdatedAt, Expr::current_timestamp())
+        .filter(Column::EndpointId.eq(endpoint_id))
+        .exec(&postgres_connection(pool))
+        .await
+        .map_err(native_error)?;
     Ok(())
 }
 
@@ -142,110 +157,102 @@ fn normalize_endpoint<'a>(input: &'a EndpointCreate) -> NormalizedEndpoint<'a> {
     }
 }
 
-async fn insert_endpoint<'e, E>(executor: E, input: &EndpointCreate) -> Result<ProviderEndpoint>
-where
-    E: Executor<'e, Database = Postgres>,
-{
-    let form = normalize_endpoint(input);
-    Ok(sqlx::query_file_as!(
-        ProviderEndpointRow,
-        "src/sql/endpoints/create_endpoint.sql",
-        input.scope,
-        input.owner_user_id,
-        input.name,
-        input.provider.as_str(),
-        form.provider_region,
-        form.service_tier.as_deref(),
-        input.base_url,
-        input.native_api.as_str(),
-        input.native_api_source.as_str(),
-        input.api_key,
-        form.proxy_url,
-        form.active_windows,
-        input.key_lb_enabled,
-        input.enabled,
-    )
-    .fetch_one(executor)
-    .await
-    .map(ProviderEndpoint::from)?)
-}
-
-async fn insert_endpoint_with_mcp<'e, E>(
-    executor: E,
+async fn insert_endpoint(
+    tx: &DatabaseTransaction,
     input: &EndpointCreate,
     mcp_enabled: bool,
-) -> Result<ProviderEndpoint>
-where
-    E: Executor<'e, Database = Postgres>,
-{
+) -> Result<ProviderEndpoint> {
     let form = normalize_endpoint(input);
-    Ok(sqlx::query_file_as!(
-        ProviderEndpointRow,
-        "src/sql/endpoints/create_endpoint_with_mcp.sql",
-        input.scope,
-        input.owner_user_id,
-        input.name,
-        input.provider.as_str(),
-        form.provider_region,
-        form.service_tier.as_deref(),
-        input.base_url,
-        input.native_api.as_str(),
-        input.native_api_source.as_str(),
-        input.api_key,
-        form.proxy_url,
-        form.active_windows,
-        input.key_lb_enabled,
-        input.enabled,
-        mcp_enabled,
-    )
-    .fetch_one(executor)
+    let inserted = Entity::insert(provider_endpoints::ActiveModel {
+        scope: Set(input.scope.clone()),
+        owner_user_id: Set(input.owner_user_id),
+        name: Set(input.name.clone()),
+        provider: Set(input.provider.as_str().to_string()),
+        provider_region: Set(form.provider_region.map(str::to_string)),
+        service_tier: Set(form.service_tier.clone()),
+        base_url: Set(input.base_url.clone()),
+        native_api: Set(input.native_api.as_str().to_string()),
+        native_api_source: Set(input.native_api_source.as_str().to_string()),
+        api_key: Set(input.api_key.clone()),
+        proxy_url: Set(form.proxy_url.clone()),
+        active_windows: Set(form.active_windows.clone()),
+        key_lb_enabled: Set(input.key_lb_enabled),
+        enabled: Set(input.enabled),
+        mcp_enabled: Set(mcp_enabled),
+        ..Default::default()
+    })
+    .exec_with_returning_keys(tx)
     .await
-    .map(ProviderEndpoint::from)?)
+    .map_err(native_error)?;
+    let endpoint_id = inserted
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("inserted endpoint has no id"))?;
+    load_endpoint_projection(tx, endpoint_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("inserted endpoint not found"))
 }
 
 async fn update_endpoint_row(
-    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tx: &DatabaseTransaction,
     endpoint_id: Uuid,
     input: &EndpointCreate,
 ) -> Result<Option<ProviderEndpoint>> {
     let form = normalize_endpoint(input);
-    Ok(sqlx::query_file_as!(
-        ProviderEndpointRow,
-        "src/sql/endpoints/update_endpoint.sql",
-        endpoint_id,
-        input.scope,
-        input.owner_user_id,
-        input.name,
-        input.provider.as_str(),
-        form.provider_region,
-        form.service_tier.as_deref(),
-        input.base_url,
-        input.native_api.as_str(),
-        input.native_api_source.as_str(),
-        input.api_key,
-        form.proxy_url,
-        form.active_windows,
-        input.key_lb_enabled,
-        input.enabled,
-    )
-    .fetch_optional(&mut **tx)
-    .await?
-    .map(ProviderEndpoint::from))
+    let updated = Entity::update_many()
+        .col_expr(Column::Scope, Expr::value(input.scope.clone()))
+        .col_expr(Column::OwnerUserId, Expr::value(input.owner_user_id))
+        .col_expr(Column::Name, Expr::value(input.name.clone()))
+        .col_expr(
+            Column::Provider,
+            Expr::value(input.provider.as_str().to_string()),
+        )
+        .col_expr(
+            Column::ProviderRegion,
+            Expr::value(form.provider_region.map(str::to_string)),
+        )
+        .col_expr(Column::ServiceTier, Expr::value(form.service_tier.clone()))
+        .col_expr(Column::BaseUrl, Expr::value(input.base_url.clone()))
+        .col_expr(
+            Column::NativeApi,
+            Expr::value(input.native_api.as_str().to_string()),
+        )
+        .col_expr(
+            Column::NativeApiSource,
+            Expr::value(input.native_api_source.as_str().to_string()),
+        )
+        .col_expr(Column::ApiKey, Expr::value(input.api_key.clone()))
+        .col_expr(Column::ProxyUrl, Expr::value(form.proxy_url.clone()))
+        .col_expr(
+            Column::ActiveWindows,
+            Expr::value(form.active_windows.clone()),
+        )
+        .col_expr(Column::KeyLbEnabled, Expr::value(input.key_lb_enabled))
+        .col_expr(Column::Enabled, Expr::value(input.enabled))
+        .col_expr(Column::UpdatedAt, Expr::current_timestamp())
+        .filter(Column::EndpointId.eq(endpoint_id))
+        .exec(tx)
+        .await
+        .map_err(native_error)?;
+    if updated.rows_affected == 0 {
+        return Ok(None);
+    }
+    load_endpoint_projection(tx, endpoint_id).await
 }
 
-/// Read each endpoint's keys on the caller's transaction and fill them in.
+/// Read each endpoint's keys on the caller's connection and fill them in.
 ///
 /// An endpoint with no stored key falls back to its own legacy `api_key`, so a
 /// provider endpoint that predates the key table still answers with one key.
-pub(crate) async fn attach_endpoint_api_keys<'e, E>(
-    executor: E,
+pub(crate) async fn attach_endpoint_api_keys<C>(
+    db: &C,
     mut endpoints: Vec<ProviderEndpoint>,
 ) -> Result<Vec<ProviderEndpoint>>
 where
-    E: Executor<'e, Database = Postgres>,
+    C: ConnectionTrait,
 {
-    let rows_by_endpoint = list_endpoint_api_keys_by_endpoint_id(
-        executor,
+    let rows_by_endpoint = list_endpoint_api_keys_native(
+        db,
         &endpoints
             .iter()
             .map(|endpoint| endpoint.endpoint_id)

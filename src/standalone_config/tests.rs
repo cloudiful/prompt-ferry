@@ -342,3 +342,94 @@ fn client_key_model_projection_rejects_out_of_range_key_version() {
         .expect_err("an out-of-range key version must fail closed");
     assert!(error.to_string().contains("key_version"));
 }
+
+#[test]
+fn endpoint_and_key_model_projection_preserves_envelopes_and_timestamps() {
+    let endpoint_id = Uuid::new_v4();
+    let key_id = Uuid::new_v4();
+    let endpoint_model = crate::db::entities::sqlite::standalone_provider_endpoints::Model {
+        endpoint_id: endpoint_id.to_string(),
+        name: "projection".to_string(),
+        provider: "generic".to_string(),
+        provider_region: Some("global".to_string()),
+        base_url: "https://projection.test".to_string(),
+        native_api: "chat".to_string(),
+        native_api_source: "manual".to_string(),
+        key_lb_enabled: 1,
+        enabled: 1,
+        mcp_enabled: 0,
+        api_key_ciphertext: vec![1, 2, 3],
+        api_key_nonce: vec![4; 12],
+        api_key_key_version: 7,
+        proxy_url_ciphertext: None,
+        proxy_url_nonce: None,
+        proxy_url_key_version: None,
+        active_windows: Some("  []  ".to_string()),
+        created_at: "2026-02-01T00:00:00Z".to_string(),
+        updated_at: "2026-02-01T00:00:00Z".to_string(),
+        service_tier: Some("  priority  ".to_string()),
+    };
+    let (endpoint, api_key, proxy) =
+        super::rows::endpoint_from_model(&endpoint_model).expect("project the endpoint row");
+    assert_eq!(endpoint.endpoint_id, endpoint_id);
+    assert_eq!(endpoint.service_tier.as_deref(), Some("priority"));
+    assert_eq!(endpoint.active_windows.as_deref(), Some("[]"));
+    assert_eq!(
+        endpoint.created_at,
+        chrono::DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    );
+    let api_key = api_key.expect("required endpoint envelope");
+    assert_eq!(api_key.ciphertext, vec![1, 2, 3]);
+    assert_eq!(api_key.key_version, 7);
+    assert!(proxy.is_none());
+
+    let key_model = crate::db::entities::sqlite::standalone_endpoint_keys::Model {
+        key_id: key_id.to_string(),
+        endpoint_id: endpoint_id.to_string(),
+        key_label: "primary".to_string(),
+        enabled: 1,
+        position: 2,
+        api_key_ciphertext: vec![5, 6],
+        api_key_nonce: vec![7; 12],
+        api_key_key_version: 8,
+        created_at: "2026-02-01T00:00:00Z".to_string(),
+        updated_at: "2026-02-01T00:00:00Z".to_string(),
+    };
+    let (key, envelope) =
+        super::rows::endpoint_key_from_model(&key_model).expect("project the endpoint key");
+    assert_eq!(key.key_id, key_id);
+    assert_eq!(key.position, 2);
+    assert_eq!(envelope.ciphertext, vec![5, 6]);
+    assert_eq!(envelope.key_version, 8);
+}
+
+#[test]
+fn endpoint_model_projection_rejects_incomplete_proxy_envelope() {
+    let model = crate::db::entities::sqlite::standalone_provider_endpoints::Model {
+        endpoint_id: Uuid::new_v4().to_string(),
+        name: "projection-corrupt".to_string(),
+        provider: "generic".to_string(),
+        provider_region: None,
+        base_url: "https://projection.test".to_string(),
+        native_api: "chat".to_string(),
+        native_api_source: "manual".to_string(),
+        key_lb_enabled: 0,
+        enabled: 1,
+        mcp_enabled: 0,
+        api_key_ciphertext: vec![1],
+        api_key_nonce: vec![2; 12],
+        api_key_key_version: 1,
+        proxy_url_ciphertext: Some(vec![3]),
+        proxy_url_nonce: None,
+        proxy_url_key_version: Some(1),
+        active_windows: None,
+        created_at: "2026-02-01T00:00:00Z".to_string(),
+        updated_at: "2026-02-01T00:00:00Z".to_string(),
+        service_tier: None,
+    };
+    let error = super::rows::endpoint_from_model(&model)
+        .expect_err("an incomplete proxy envelope must fail closed");
+    assert!(error.to_string().contains("proxy_url"));
+}

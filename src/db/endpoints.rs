@@ -1,4 +1,10 @@
+use crate::db::entities::postgres::provider_endpoints::{self, Column, Entity};
+use crate::db::seaorm::postgres_connection;
 use anyhow::Result;
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter,
+    QueryOrder, QuerySelect,
+};
 use sqlx::PgPool;
 use std::collections::HashSet;
 
@@ -25,15 +31,108 @@ pub use write::{
     set_user_endpoint_setting, update_endpoint,
 };
 
+#[derive(FromQueryResult)]
+struct EndpointProjection {
+    endpoint_id: uuid::Uuid,
+    scope: String,
+    owner_user_id: Option<i64>,
+    name: String,
+    provider: String,
+    provider_region: Option<String>,
+    service_tier: Option<String>,
+    base_url: String,
+    native_api: String,
+    native_api_source: String,
+    api_key: String,
+    proxy_url: Option<String>,
+    active_windows: Option<String>,
+    key_lb_enabled: bool,
+    enabled: bool,
+    mcp_enabled: bool,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<EndpointProjection> for ProviderEndpoint {
+    fn from(row: EndpointProjection) -> Self {
+        ProviderEndpointRow {
+            endpoint_id: row.endpoint_id,
+            scope: row.scope,
+            owner_user_id: row.owner_user_id,
+            name: row.name,
+            provider: row.provider,
+            provider_region: row.provider_region,
+            service_tier: row.service_tier,
+            base_url: row.base_url,
+            native_api: row.native_api,
+            native_api_source: row.native_api_source,
+            api_key: row.api_key,
+            proxy_url: row.proxy_url,
+            active_windows: row.active_windows,
+            key_lb_enabled: row.key_lb_enabled,
+            enabled: row.enabled,
+            mcp_enabled: row.mcp_enabled,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+        .into()
+    }
+}
+
+fn endpoint_projection() -> sea_orm::Select<provider_endpoints::Entity> {
+    Entity::find().select_only().columns([
+        Column::EndpointId,
+        Column::Scope,
+        Column::OwnerUserId,
+        Column::Name,
+        Column::Provider,
+        Column::ProviderRegion,
+        Column::ServiceTier,
+        Column::BaseUrl,
+        Column::NativeApi,
+        Column::NativeApiSource,
+        Column::ApiKey,
+        Column::ProxyUrl,
+        Column::ActiveWindows,
+        Column::KeyLbEnabled,
+        Column::Enabled,
+        Column::McpEnabled,
+        Column::CreatedAt,
+        Column::UpdatedAt,
+    ])
+}
+
+/// Load one endpoint through the ordinary non-secret projection.
+///
+/// The caller's connection decides transactional visibility: the write paths
+/// pass their own transaction so the row they just wrote is read without an
+/// autocommit race, and the projection never selects `admin_api_key`.
+pub(super) async fn load_endpoint_projection<C>(
+    db: &C,
+    endpoint_id: uuid::Uuid,
+) -> Result<Option<ProviderEndpoint>>
+where
+    C: ConnectionTrait,
+{
+    Ok(endpoint_projection()
+        .filter(Column::EndpointId.eq(endpoint_id))
+        .into_model::<EndpointProjection>()
+        .one(db)
+        .await?
+        .map(ProviderEndpoint::from))
+}
+
 pub async fn list_endpoints(pool: &PgPool) -> Result<Vec<ProviderEndpoint>> {
-    let endpoints =
-        sqlx::query_file_as!(ProviderEndpointRow, "src/sql/endpoints/list_endpoints.sql",)
-            .fetch_all(pool)
-            .await?
-            .into_iter()
-            .map(ProviderEndpoint::from)
-            .collect::<Vec<_>>();
-    attach_endpoint_api_keys(pool, endpoints).await
+    let db = postgres_connection(pool);
+    let endpoints = endpoint_projection()
+        .order_by_desc(Column::UpdatedAt)
+        .into_model::<EndpointProjection>()
+        .all(&db)
+        .await?
+        .into_iter()
+        .map(ProviderEndpoint::from)
+        .collect();
+    attach_endpoint_api_keys(&db, endpoints).await
 }
 
 pub async fn list_visible_endpoints(pool: &PgPool, user_id: i64) -> Result<Vec<RouteConfig>> {
@@ -75,24 +174,22 @@ pub async fn list_visible_endpoints(pool: &PgPool, user_id: i64) -> Result<Vec<R
 }
 
 pub async fn list_endpoints_page(pool: &PgPool, first: i64, rows: i64) -> Result<EndpointPage> {
-    let total = sqlx::query_file!("src/sql/endpoints/count_endpoints.sql")
-        .fetch_one(pool)
+    let db = postgres_connection(pool);
+    let total = Entity::find().count(&db).await? as i64;
+    let endpoints = endpoint_projection()
+        .order_by_desc(Column::UpdatedAt)
+        .order_by_desc(Column::EndpointId)
+        .offset(first.max(0) as u64)
+        .limit(rows.clamp(1, 200) as u64)
+        .into_model::<EndpointProjection>()
+        .all(&db)
         .await?
-        .total;
-    let endpoints = sqlx::query_file_as!(
-        ProviderEndpointRow,
-        "src/sql/endpoints/list_endpoints_page.sql",
-        first.max(0),
-        rows.clamp(1, 200),
-    )
-    .fetch_all(pool)
-    .await?
-    .into_iter()
-    .map(ProviderEndpoint::from)
-    .collect::<Vec<_>>();
+        .into_iter()
+        .map(ProviderEndpoint::from)
+        .collect::<Vec<_>>();
     Ok(EndpointPage {
         total,
-        endpoints: attach_endpoint_api_keys(pool, endpoints).await?,
+        endpoints: attach_endpoint_api_keys(&db, endpoints).await?,
         first: first.max(0),
         rows: rows.clamp(1, 200),
     })
@@ -102,16 +199,10 @@ pub async fn get_endpoint(
     pool: &PgPool,
     endpoint_id: uuid::Uuid,
 ) -> Result<Option<ProviderEndpoint>> {
-    let endpoint = sqlx::query_file_as!(
-        ProviderEndpointRow,
-        "src/sql/endpoints/get_endpoint.sql",
-        endpoint_id,
-    )
-    .fetch_optional(pool)
-    .await?
-    .map(ProviderEndpoint::from);
+    let db = postgres_connection(pool);
+    let endpoint = load_endpoint_projection(&db, endpoint_id).await?;
     match endpoint {
-        Some(endpoint) => Ok(attach_endpoint_api_keys(pool, vec![endpoint])
+        Some(endpoint) => Ok(attach_endpoint_api_keys(&db, vec![endpoint])
             .await?
             .into_iter()
             .next()),

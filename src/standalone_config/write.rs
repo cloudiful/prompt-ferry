@@ -27,10 +27,10 @@ pub(crate) struct EncryptedRelay {
 }
 
 pub(crate) struct EncryptedEndpoint {
-    endpoint: ProviderEndpointConfig,
-    api_key: EncryptedSecretEnvelope,
-    proxy_url: Option<EncryptedSecretEnvelope>,
-    api_keys: Vec<(EndpointApiKeyConfig, EncryptedSecretEnvelope)>,
+    pub(super) endpoint: ProviderEndpointConfig,
+    pub(super) api_key: EncryptedSecretEnvelope,
+    pub(super) proxy_url: Option<EncryptedSecretEnvelope>,
+    pub(super) api_keys: Vec<(EndpointApiKeyConfig, EncryptedSecretEnvelope)>,
 }
 
 pub(crate) struct EncryptedRouteTarget {
