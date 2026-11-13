@@ -1,1 +1,0 @@
-DELETE FROM standalone_provider_endpoints WHERE endpoint_id = ?;

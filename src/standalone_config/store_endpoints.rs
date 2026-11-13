@@ -1,12 +1,25 @@
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect, Set, TransactionTrait,
+};
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::db::entities::sqlite::standalone_endpoint_keys::{
+    ActiveModel as EndpointKeyActiveModel, Column as EndpointKeyColumn, Entity as EndpointKeyEntity,
+};
+use crate::db::entities::sqlite::standalone_provider_endpoints::{
+    ActiveModel as ProviderEndpointActiveModel, Column as ProviderEndpointColumn,
+    Entity as ProviderEndpointEntity,
+};
+use crate::db::seaorm::sqlite_connection;
 use crate::db::{EndpointOAuthToken, EndpointOAuthTokenSet};
 use crate::relay_secrets::RelaySecretManager;
 use crate::standalone_config::models::EndpointOAuthTokenConfig;
 use crate::standalone_config::rows;
 use crate::standalone_config::write::{
-    self, EncryptedConfig, EnvelopePart, envelope_part, envelope_version,
+    self, EncryptedConfig, EncryptedEndpoint, EnvelopePart, envelope_part, envelope_version,
 };
 use crate::standalone_config::{
     EndpointApiKeyConfig, ProviderEndpointConfig, Result, StandaloneConfig, StandaloneConfigError,
@@ -23,28 +36,27 @@ impl StandaloneConfigStore {
         first: i64,
         rows: i64,
     ) -> Result<(i64, Vec<ProviderEndpointConfig>)> {
-        let total = standalone_query!("src/sql/standalone/count_endpoints.sql")
-            .fetch_one(&self.pool)
-            .await?
-            .try_get::<i64, _>("total")?;
-        let endpoint_rows = standalone_query!("src/sql/standalone/list_endpoints_page.sql")
-            .bind(rows.clamp(1, 200))
-            .bind(first.max(0))
-            .fetch_all(&self.pool)
-            .await?;
-        let mut endpoints = Vec::with_capacity(endpoint_rows.len());
-        for row in endpoint_rows {
-            let (mut endpoint, envelope, proxy_envelope) = rows::endpoint(&row)?;
-            endpoint.api_key =
-                write::decrypt_optional(manager, envelope.as_ref())?.ok_or_else(|| {
-                    StandaloneConfigError::CorruptDatabase(
-                        "endpoint is missing its API key".to_string(),
-                    )
-                })?;
-            endpoint.proxy_url = write::decrypt_optional(manager, proxy_envelope.as_ref())?
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty());
-            endpoints.push(endpoint);
+        let db = sqlite_connection(&self.pool);
+        let total = ProviderEndpointEntity::find()
+            .count(&db)
+            .await
+            .map_err(rows::native_error)? as i64;
+        let models = ProviderEndpointEntity::find()
+            .order_by_asc(ProviderEndpointColumn::Name)
+            .limit(rows.clamp(1, 200) as u64)
+            .offset(first.max(0) as u64)
+            .all(&db)
+            .await
+            .map_err(rows::native_error)?;
+        let mut endpoints = Vec::with_capacity(models.len());
+        for model in models {
+            let (endpoint, envelope, proxy_envelope) = rows::endpoint_from_model(&model)?;
+            endpoints.push(decode_endpoint(
+                manager,
+                endpoint,
+                envelope,
+                proxy_envelope,
+            )?);
         }
         Ok((total, endpoints))
     }
@@ -54,30 +66,15 @@ impl StandaloneConfigStore {
         manager: &RelaySecretManager,
         endpoint_id: uuid::Uuid,
     ) -> Result<Option<ProviderEndpointConfig>> {
-        let row = standalone_query!("src/sql/standalone/get_endpoint.sql")
-            .bind(endpoint_id.to_string())
-            .fetch_optional(&self.pool)
-            .await?;
-        let Some(row) = row else { return Ok(None) };
-        let (mut endpoint, envelope, proxy_envelope) = rows::endpoint(&row)?;
-        endpoint.api_key =
-            write::decrypt_optional(manager, envelope.as_ref())?.ok_or_else(|| {
-                StandaloneConfigError::CorruptDatabase(
-                    "endpoint is missing its API key".to_string(),
-                )
-            })?;
-        endpoint.proxy_url = write::decrypt_optional(manager, proxy_envelope.as_ref())?
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty());
-        let key_rows = standalone_query!("src/sql/standalone/list_endpoint_keys_for.sql")
-            .bind(endpoint_id.to_string())
-            .fetch_all(&self.pool)
-            .await?;
-        for row in key_rows {
-            let (mut key, envelope) = rows::endpoint_key(&row)?;
-            key.api_key = manager.decrypt(&envelope)?;
-            endpoint.api_keys.push(key);
-        }
+        let db = sqlite_connection(&self.pool);
+        let model = ProviderEndpointEntity::find_by_id(endpoint_id.to_string())
+            .one(&db)
+            .await
+            .map_err(rows::native_error)?;
+        let Some(model) = model else { return Ok(None) };
+        let (mut endpoint, envelope, proxy_envelope) = rows::endpoint_from_model(&model)?;
+        endpoint = decode_endpoint(manager, endpoint, envelope, proxy_envelope)?;
+        endpoint.api_keys = self.list_endpoint_keys_for(manager, endpoint_id).await?;
         Ok(Some(endpoint))
     }
 
@@ -143,13 +140,17 @@ impl StandaloneConfigStore {
         manager: &RelaySecretManager,
         endpoint_id: uuid::Uuid,
     ) -> Result<Vec<EndpointApiKeyConfig>> {
-        let rows = standalone_query!("src/sql/standalone/list_endpoint_keys_for.sql")
-            .bind(endpoint_id.to_string())
-            .fetch_all(&self.pool)
-            .await?;
-        rows.into_iter()
-            .map(|row| {
-                let (mut key, envelope) = rows::endpoint_key(&row)?;
+        let db = sqlite_connection(&self.pool);
+        let models = EndpointKeyEntity::find()
+            .filter(EndpointKeyColumn::EndpointId.eq(endpoint_id.to_string()))
+            .order_by_asc(EndpointKeyColumn::Position)
+            .all(&db)
+            .await
+            .map_err(rows::native_error)?;
+        models
+            .into_iter()
+            .map(|model| {
+                let (mut key, envelope) = rows::endpoint_key_from_model(&model)?;
                 key.api_key = manager.decrypt(&envelope)?;
                 Ok(key)
             })
@@ -270,13 +271,14 @@ impl StandaloneConfigStore {
         };
         snapshot.validate()?;
         let encrypted = EncryptedConfig::from_snapshot(manager, &snapshot)?;
-        let mut transaction = self.pool.begin().await?;
-        standalone_query!("src/sql/standalone/delete_endpoint_keys.sql")
-            .bind(endpoint.endpoint_id.to_string())
-            .execute(&mut *transaction)
-            .await?;
-        write::insert_endpoint(&mut transaction, &encrypted.endpoints[0]).await?;
-        transaction.commit().await?;
+        let db = sqlite_connection(&self.pool);
+        let transaction = db.begin().await.map_err(rows::native_error)?;
+        delete_endpoint_keys(&transaction, endpoint.endpoint_id).await?;
+        upsert_endpoint(&transaction, &encrypted.endpoints[0]).await?;
+        for (key, envelope) in &encrypted.endpoints[0].api_keys {
+            upsert_endpoint_key(&transaction, key, envelope).await?;
+        }
+        transaction.commit().await.map_err(rows::native_error)?;
         Ok(())
     }
 
@@ -285,29 +287,176 @@ impl StandaloneConfigStore {
         endpoint_id: uuid::Uuid,
         enabled: bool,
     ) -> Result<()> {
-        standalone_query!("src/sql/standalone/set_endpoint_mcp_enabled.sql")
-            .bind(i64::from(enabled))
-            .bind(chrono::Utc::now().to_rfc3339())
-            .bind(endpoint_id.to_string())
-            .execute(&self.pool)
-            .await?;
+        let db = sqlite_connection(&self.pool);
+        ProviderEndpointEntity::update_many()
+            .set(ProviderEndpointActiveModel {
+                mcp_enabled: Set(i32::from(enabled)),
+                updated_at: Set(chrono::Utc::now().to_rfc3339()),
+                ..Default::default()
+            })
+            .filter(ProviderEndpointColumn::EndpointId.eq(endpoint_id.to_string()))
+            .exec(&db)
+            .await
+            .map_err(rows::native_error)?;
         Ok(())
     }
 
     pub async fn delete_endpoint(&self, endpoint_id: uuid::Uuid) -> Result<bool> {
-        let mut transaction = self.pool.begin().await?;
-        standalone_query!("src/sql/standalone/delete_endpoint_keys.sql")
-            .bind(endpoint_id.to_string())
-            .execute(&mut *transaction)
-            .await?;
-        let result = standalone_query!("src/sql/standalone/delete_endpoint.sql")
-            .bind(endpoint_id.to_string())
-            .execute(&mut *transaction)
-            .await?;
-        let removed = result.rows_affected() > 0;
-        transaction.commit().await?;
+        let db = sqlite_connection(&self.pool);
+        let transaction = db.begin().await.map_err(rows::native_error)?;
+        delete_endpoint_keys(&transaction, endpoint_id).await?;
+        let removed = ProviderEndpointEntity::delete_many()
+            .filter(ProviderEndpointColumn::EndpointId.eq(endpoint_id.to_string()))
+            .exec(&transaction)
+            .await
+            .map_err(rows::native_error)?
+            .rows_affected
+            > 0;
+        transaction.commit().await.map_err(rows::native_error)?;
         Ok(removed)
     }
+}
+
+fn decode_endpoint(
+    manager: &RelaySecretManager,
+    mut endpoint: ProviderEndpointConfig,
+    envelope: Option<crate::relay_secrets::EncryptedSecretEnvelope>,
+    proxy_envelope: Option<crate::relay_secrets::EncryptedSecretEnvelope>,
+) -> Result<ProviderEndpointConfig> {
+    endpoint.api_key = write::decrypt_optional(manager, envelope.as_ref())?.ok_or_else(|| {
+        StandaloneConfigError::CorruptDatabase("endpoint is missing its API key".to_string())
+    })?;
+    endpoint.proxy_url = write::decrypt_optional(manager, proxy_envelope.as_ref())?
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    Ok(endpoint)
+}
+
+async fn delete_endpoint_keys<C: ConnectionTrait>(
+    connection: &C,
+    endpoint_id: uuid::Uuid,
+) -> Result<()> {
+    EndpointKeyEntity::delete_many()
+        .filter(EndpointKeyColumn::EndpointId.eq(endpoint_id.to_string()))
+        .exec(connection)
+        .await
+        .map_err(rows::native_error)?;
+    Ok(())
+}
+
+async fn upsert_endpoint<C: ConnectionTrait>(
+    connection: &C,
+    endpoint: &EncryptedEndpoint,
+) -> Result<()> {
+    ProviderEndpointEntity::insert(ProviderEndpointActiveModel {
+        endpoint_id: Set(endpoint.endpoint.endpoint_id.to_string()),
+        name: Set(endpoint.endpoint.name.clone()),
+        provider: Set(endpoint.endpoint.provider.as_str().to_string()),
+        provider_region: Set(endpoint
+            .endpoint
+            .provider_region
+            .map(|value| value.as_str().to_string())),
+        service_tier: Set(endpoint.endpoint.service_tier.clone()),
+        base_url: Set(endpoint.endpoint.base_url.clone()),
+        native_api: Set(endpoint.endpoint.native_api.as_str().to_string()),
+        native_api_source: Set(endpoint.endpoint.native_api_source.as_str().to_string()),
+        key_lb_enabled: Set(i32::from(endpoint.endpoint.key_lb_enabled)),
+        enabled: Set(i32::from(endpoint.endpoint.enabled)),
+        mcp_enabled: Set(i32::from(endpoint.endpoint.mcp_enabled)),
+        api_key_ciphertext: Set(endpoint.api_key.ciphertext.clone()),
+        api_key_nonce: Set(endpoint.api_key.nonce.clone()),
+        api_key_key_version: Set(i32::from(endpoint.api_key.key_version)),
+        proxy_url_ciphertext: Set(endpoint
+            .proxy_url
+            .as_ref()
+            .map(|envelope| envelope.ciphertext.clone())),
+        proxy_url_nonce: Set(endpoint
+            .proxy_url
+            .as_ref()
+            .map(|envelope| envelope.nonce.clone())),
+        proxy_url_key_version: Set(endpoint
+            .proxy_url
+            .as_ref()
+            .map(|envelope| i32::from(envelope.key_version))),
+        active_windows: Set(endpoint
+            .endpoint
+            .active_windows
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)),
+        created_at: Set(timestamp(endpoint.endpoint.created_at)),
+        updated_at: Set(timestamp(endpoint.endpoint.updated_at)),
+    })
+    .on_conflict(
+        OnConflict::column(ProviderEndpointColumn::EndpointId)
+            .update_columns([
+                ProviderEndpointColumn::Name,
+                ProviderEndpointColumn::Provider,
+                ProviderEndpointColumn::ProviderRegion,
+                ProviderEndpointColumn::ServiceTier,
+                ProviderEndpointColumn::BaseUrl,
+                ProviderEndpointColumn::NativeApi,
+                ProviderEndpointColumn::NativeApiSource,
+                ProviderEndpointColumn::KeyLbEnabled,
+                ProviderEndpointColumn::Enabled,
+                ProviderEndpointColumn::McpEnabled,
+                ProviderEndpointColumn::ApiKeyCiphertext,
+                ProviderEndpointColumn::ApiKeyNonce,
+                ProviderEndpointColumn::ApiKeyKeyVersion,
+                ProviderEndpointColumn::ProxyUrlCiphertext,
+                ProviderEndpointColumn::ProxyUrlNonce,
+                ProviderEndpointColumn::ProxyUrlKeyVersion,
+                ProviderEndpointColumn::ActiveWindows,
+                ProviderEndpointColumn::UpdatedAt,
+            ])
+            .to_owned(),
+    )
+    .exec(connection)
+    .await
+    .map_err(rows::native_error)?;
+    Ok(())
+}
+
+async fn upsert_endpoint_key<C: ConnectionTrait>(
+    connection: &C,
+    key: &EndpointApiKeyConfig,
+    envelope: &crate::relay_secrets::EncryptedSecretEnvelope,
+) -> Result<()> {
+    EndpointKeyEntity::insert(EndpointKeyActiveModel {
+        key_id: Set(key.key_id.to_string()),
+        endpoint_id: Set(key.endpoint_id.to_string()),
+        key_label: Set(key.key_label.clone()),
+        enabled: Set(i32::from(key.enabled)),
+        position: Set(key.position),
+        api_key_ciphertext: Set(envelope.ciphertext.clone()),
+        api_key_nonce: Set(envelope.nonce.clone()),
+        api_key_key_version: Set(i32::from(envelope.key_version)),
+        created_at: Set(timestamp(key.created_at)),
+        updated_at: Set(timestamp(key.updated_at)),
+    })
+    .on_conflict(
+        OnConflict::column(EndpointKeyColumn::KeyId)
+            .update_columns([
+                EndpointKeyColumn::EndpointId,
+                EndpointKeyColumn::KeyLabel,
+                EndpointKeyColumn::Enabled,
+                EndpointKeyColumn::Position,
+                EndpointKeyColumn::ApiKeyCiphertext,
+                EndpointKeyColumn::ApiKeyNonce,
+                EndpointKeyColumn::ApiKeyKeyVersion,
+                EndpointKeyColumn::UpdatedAt,
+            ])
+            .to_owned(),
+    )
+    .exec(connection)
+    .await
+    .map_err(rows::native_error)?;
+    Ok(())
+}
+
+fn timestamp(value: chrono::DateTime<chrono::Utc>) -> String {
+    value.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
 }
 
 /// Issue #599 R2a: `to_rfc3339()` timestamps for the OAuth token bookkeeping

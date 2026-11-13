@@ -17,16 +17,165 @@ mod tests {
 
     use super::postgres::client_keys;
     use super::postgres::config_archive_audit;
+    use super::postgres::endpoint_api_keys;
     use super::postgres::managed_relays;
     use super::postgres::mcp_servers;
     use super::postgres::model_endpoint_rules;
     use super::postgres::model_route_targets;
+    use super::postgres::provider_endpoints;
     use super::postgres::users;
     use super::sqlite::standalone_client_keys;
+    use super::sqlite::standalone_endpoint_keys;
     use super::sqlite::standalone_mcp_servers;
     use super::sqlite::standalone_model_route_targets;
     use super::sqlite::standalone_model_routes;
+    use super::sqlite::standalone_provider_endpoints;
     use super::sqlite::standalone_users;
+
+    #[test]
+    fn postgres_provider_endpoint_declaration_matches_the_applied_table() {
+        let table = provider_endpoints::create_table_statement().to_owned();
+        let sql = table.to_string(PostgresQueryBuilder);
+        for expected in [
+            "\"endpoint_id\" uuid NOT NULL DEFAULT ((md5(random()::text || clock_timestamp()::text)::uuid))",
+            "\"scope\" text NOT NULL",
+            "\"owner_user_id\" bigint",
+            "\"name\" text NOT NULL",
+            "\"base_url\" text NOT NULL",
+            "\"native_api\" text NOT NULL DEFAULT ('chat')",
+            "\"native_api_source\" text NOT NULL DEFAULT ('manual')",
+            "\"api_key\" text NOT NULL",
+            "\"enabled\" bool NOT NULL DEFAULT (TRUE)",
+            "\"created_at\" timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "\"updated_at\" timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "\"key_lb_enabled\" bool NOT NULL DEFAULT (FALSE)",
+            "\"provider\" text NOT NULL DEFAULT ('generic')",
+            "\"provider_region\" text",
+            "\"mcp_enabled\" bool NOT NULL DEFAULT (FALSE)",
+            "\"service_tier\" text",
+            "\"proxy_url\" text",
+            "\"active_windows\" text",
+            "\"admin_api_key\" text",
+        ] {
+            assert!(sql.contains(expected), "missing {expected}: {sql}");
+        }
+        // The applied table declares no name uniqueness and no service tier
+        // default or check.
+        assert!(
+            !sql.contains("UNIQUE"),
+            "no unique constraint allowed: {sql}"
+        );
+        assert!(
+            !sql.contains("service_tier\" text NOT NULL"),
+            "service tier must stay nullable: {sql}"
+        );
+        for expected in [
+            "provider_endpoints_scope_check",
+            "ck_provider_endpoint_owner",
+            "ck_provider_endpoints_native_api",
+            "ck_provider_endpoints_native_api_source",
+            "ck_provider_endpoints_provider",
+            "ck_provider_endpoints_provider_region",
+        ] {
+            assert!(sql.contains(expected), "missing {expected}: {sql}");
+        }
+        assert!(
+            !sql.contains("FOREIGN KEY"),
+            "the applied foreign key stays owned by the migration: {sql}"
+        );
+
+        let rendered = provider_endpoints::create_index_statements()
+            .iter()
+            .map(|index| index.to_string(PostgresQueryBuilder))
+            .collect::<Vec<_>>();
+        assert!(
+            rendered.iter().any(|sql| {
+                sql.contains("idx_provider_endpoints_scope_user")
+                    && sql.contains("(\"scope\", \"owner_user_id\", \"enabled\")")
+            }),
+            "applied scope, owner and enabled index missing: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn sqlite_provider_endpoint_declaration_matches_the_applied_table() {
+        let table = standalone_provider_endpoints::create_table_statement().to_owned();
+        let sql = table.to_string(SqliteQueryBuilder);
+        for expected in [
+            "\"provider\" IN ('generic', 'minimax', 'command_code', 'opencode_go', 'openrouter', 'glm', 'deepseek', 'openai')",
+            "\"native_api\" IN ('auto', 'anthropic_messages', 'chat', 'responses', 'realtime', 'embeddings')",
+            "\"native_api_source\" IN ('auto', 'detected', 'manual')",
+            "\"provider_region\" IS NULL OR \"provider_region\" IN ('cn', 'global')",
+            "\"name\" text NOT NULL UNIQUE",
+        ] {
+            assert!(sql.contains(expected), "missing {expected}: {sql}");
+        }
+        assert!(
+            !sql.contains("FOREIGN KEY"),
+            "the applied table carries no foreign key: {sql}"
+        );
+        let endpoint_id_start = sql.find("\"endpoint_id\"").expect("endpoint_id column");
+        let endpoint_id_rest = &sql[endpoint_id_start..];
+        let endpoint_id_end = endpoint_id_rest.find(',').unwrap_or(endpoint_id_rest.len());
+        let endpoint_id_column = &endpoint_id_rest[..endpoint_id_end];
+        assert!(
+            !endpoint_id_column.to_ascii_lowercase().contains("not null"),
+            "endpoint_id must keep the applied nullable TEXT PRIMARY KEY: {endpoint_id_column}"
+        );
+    }
+
+    #[test]
+    fn sqlite_endpoint_key_declaration_matches_the_applied_table() {
+        let table = standalone_endpoint_keys::create_table_statement().to_owned();
+        let sql = table.to_string(SqliteQueryBuilder);
+        for expected in [
+            "UNIQUE (\"endpoint_id\", \"key_label\")",
+            "UNIQUE (\"endpoint_id\", \"position\")",
+            "\"enabled\" integer NOT NULL CHECK (\"enabled\" IN (0, 1))",
+            "\"api_key_ciphertext\" blob NOT NULL",
+            "\"api_key_nonce\" blob NOT NULL",
+            "\"api_key_key_version\" integer NOT NULL",
+        ] {
+            assert!(sql.contains(expected), "missing {expected}: {sql}");
+        }
+        assert!(
+            !sql.contains("FOREIGN KEY"),
+            "the applied foreign key stays owned by the migration: {sql}"
+        );
+        let key_id_start = sql.find("\"key_id\"").expect("key_id column");
+        let key_id_rest = &sql[key_id_start..];
+        let key_id_end = key_id_rest.find(',').unwrap_or(key_id_rest.len());
+        let key_id_column = &key_id_rest[..key_id_end];
+        assert!(
+            !key_id_column.to_ascii_lowercase().contains("not null"),
+            "key_id must keep the applied nullable TEXT PRIMARY KEY: {key_id_column}"
+        );
+
+        let rendered = standalone_endpoint_keys::create_index_statements()
+            .iter()
+            .map(|index| index.to_string(SqliteQueryBuilder))
+            .collect::<Vec<_>>();
+        assert!(
+            rendered.iter().any(|sql| {
+                sql.contains("idx_standalone_endpoint_keys_endpoint")
+                    && sql.contains("(\"endpoint_id\", \"enabled\", \"position\")")
+            }),
+            "applied endpoint key index missing: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn postgres_endpoint_keys_declaration_keeps_position_uniqueness_only() {
+        let table = endpoint_api_keys::create_table_statement().to_string(PostgresQueryBuilder);
+        assert!(!table.contains("FOREIGN KEY"));
+        assert!(!table.contains("UNIQUE"));
+        assert!(table.contains("clock_timestamp()"));
+        let indexes = endpoint_api_keys::create_index_statements();
+        assert_eq!(indexes.len(), 1);
+        let index = indexes[0].to_string(PostgresQueryBuilder);
+        assert!(index.contains("UNIQUE"));
+        assert!(index.contains("(\"endpoint_id\", \"position\")"));
+    }
 
     #[test]
     fn postgres_relay_declaration_keeps_applied_checks_and_unique_index() {
