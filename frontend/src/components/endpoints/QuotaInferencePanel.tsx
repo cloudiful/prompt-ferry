@@ -40,33 +40,136 @@ export function QuotaInferencePanel({
     refetchInterval: false,
   })
 
-  function reason(value: string | null | undefined): string {
-    switch (value) {
+  function reason(
+    value: Estimate,
+    near: boolean,
+  ): { label: string; hint: string } {
+    switch (value.reason) {
       case 'insufficient_signal':
-        return t('inferenceInsufficient')
-      case 'at97_no_sample':
-        return t('inferenceNo97Sample')
-      case 'storage_unavailable':
-        return t('inferenceStorageUnavailable')
-      case 'model_truncated':
-      case 'block_overflow':
+        if (value.blocks == null || value.required_blocks == null) {
+          return {
+            label: t('inferenceReasonEvidence'),
+            hint: t('inferenceReasonEvidenceHint'),
+          }
+        }
+        if (value.blocks < value.required_blocks) {
+          return near
+            ? {
+                label: t('inferenceReasonNear97Insufficient'),
+                hint: t('inferenceReasonNear97InsufficientHint'),
+              }
+            : {
+                label: t('inferenceReasonInsufficient'),
+                hint: t('inferenceReasonInsufficientHint'),
+              }
+        }
+        return near
+          ? {
+              label: t('inferenceReasonNear97Coverage'),
+              hint: t('inferenceReasonNear97CoverageHint'),
+            }
+          : {
+              label: t('inferenceReasonCoverage'),
+              hint: t('inferenceReasonCoverageHint'),
+            }
+      case 'complexity':
+        return {
+          label: t('inferenceReasonComplexity'),
+          hint: t('inferenceReasonComplexityHint'),
+        }
+      case 'model_mix_flat':
+        return {
+          label: t('inferenceReasonModelMixFlat'),
+          hint: t('inferenceReasonModelMixFlatHint'),
+        }
+      case 'ill_conditioned':
+        return {
+          label: t('inferenceReasonIllConditioned'),
+          hint: t('inferenceReasonIllConditionedHint'),
+        }
+      case 'poor_fit':
+        return {
+          label: t('inferenceReasonPoorFit'),
+          hint: t('inferenceReasonPoorFitHint'),
+        }
+      case 'unstable':
+        return {
+          label: t('inferenceReasonUnstable'),
+          hint: t('inferenceReasonUnstableHint'),
+        }
+      case 'attribution_unstable':
+        return {
+          label: t('inferenceReasonAttributionUnstable'),
+          hint: t('inferenceReasonAttributionUnstableHint'),
+        }
+      case 'low_confidence':
+        return {
+          label: t('inferenceReasonLowConfidence'),
+          hint: t('inferenceReasonLowConfidenceHint'),
+        }
       case 'snapshot_overflow':
-        return t('inferenceLimit')
+        return {
+          label: t('inferenceReasonSnapshotOverflow'),
+          hint: t('inferenceReasonSnapshotOverflowHint'),
+        }
+      case 'block_overflow':
+        return {
+          label: t('inferenceReasonBlockOverflow'),
+          hint: t('inferenceReasonBlockOverflowHint'),
+        }
+      case 'model_truncated':
+        return {
+          label: t('inferenceReasonModelTruncated'),
+          hint: t('inferenceReasonModelTruncatedHint'),
+        }
+      case 'at97_no_sample':
+        return {
+          label: t('inferenceReasonNo97Sample'),
+          hint: t('inferenceReasonNo97SampleHint'),
+        }
+      case 'at97_unidentifiable':
+        return {
+          label: t('inferenceReasonUnidentifiable'),
+          hint: t('inferenceReasonUnidentifiableHint'),
+        }
+      case 'storage_unavailable':
+        return {
+          label: t('inferenceReasonStorageUnavailable'),
+          hint: t('inferenceReasonStorageUnavailableHint'),
+        }
       default:
-        return t('inferenceUnidentifiable')
+        return value.reason
+          ? { label: value.reason, hint: t('inferenceReasonUnknownHint') }
+          : {
+              label: t('inferenceReasonUnknown'),
+              hint: t('inferenceReasonUnknownHint'),
+            }
     }
   }
 
-  function estimate(value: Estimate) {
+  function estimate(value: Estimate, near = false) {
     const available =
       value.capacity_millions != null &&
       Number.isFinite(value.capacity_millions)
+    const resolved = reason(value, near)
     const range = `${t('inferenceRange')}: ${millions(value.lower_millions)} – ${millions(value.upper_millions)}`
+    const blocks =
+      near && value.blocks != null && value.required_blocks != null
+        ? t('inferenceNear97Detail', {
+            blocks: value.blocks,
+            required: value.required_blocks,
+          })
+        : null
+    const title = available
+      ? [range, blocks].filter(Boolean).join(' · ')
+      : [resolved.hint, blocks].filter(Boolean).join(' ')
     return (
-      <span title={available ? range : reason(value.reason)}>
-        {available
-          ? millions(value.capacity_millions)
-          : `— (${reason(value.reason)})`}
+      <span title={title}>
+        {available ? (
+          millions(value.capacity_millions)
+        ) : (
+          <span className="text-muted-foreground">— {resolved.label}</span>
+        )}
       </span>
     )
   }
@@ -80,32 +183,25 @@ export function QuotaInferencePanel({
       ),
     },
     {
-      id: 'mixed',
-      header: t('inferenceMixedTokens'),
-      cell: ({ row }) => millions(row.original.mixed_tokens / 1_000_000),
+      id: 'usage',
+      header: t('inferenceUsage'),
+      cell: ({ row }) => {
+        const model = row.original
+        const detail = `${t('inferenceFresh')}: ${model.fresh_tokens.toLocaleString()} · ${t('inferenceCacheRead')}: ${model.cache_read_tokens.toLocaleString()} · ${t('inferenceCacheWrite')}: ${model.cache_write_tokens.toLocaleString()} · ${t('inferenceOutput')}: ${model.output_tokens.toLocaleString()} · ${t('inferenceCacheHit')}: ${percent(model.cache_hit)} · ${t('inferenceOutputShare')}: ${percent(model.output_share)}`
+        return (
+          <span title={detail}>{millions(model.mixed_tokens / 1_000_000)}</span>
+        )
+      },
     },
     {
-      id: 'actual',
-      header: t('inferenceActual'),
+      id: 'capacity',
+      header: t('inferenceCapacity'),
       cell: ({ row }) => estimate(row.original.actual),
     },
     {
       id: 'near97',
       header: t('inferenceNear97'),
-      cell: ({ row }) => estimate(row.original.observed_near_97),
-    },
-    {
-      id: 'details',
-      header: t('inferenceDetails'),
-      cell: ({ row }) => (
-        <span
-          className="whitespace-nowrap"
-          title={`${t('inferenceFresh')}: ${row.original.fresh_tokens.toLocaleString()} · ${t('inferenceCacheRead')}: ${row.original.cache_read_tokens.toLocaleString()} · ${t('inferenceCacheWrite')}: ${row.original.cache_write_tokens.toLocaleString()} · ${t('inferenceOutput')}: ${row.original.output_tokens.toLocaleString()}`}
-        >
-          {t('inferenceCacheHit')}: {percent(row.original.cache_hit)} ·{' '}
-          {t('inferenceOutput')}: {percent(row.original.output_share)}
-        </span>
-      ),
+      cell: ({ row }) => estimate(row.original.observed_near_97, true),
     },
   ]
   const data = query.data
@@ -161,11 +257,6 @@ export function QuotaInferencePanel({
               query.isFetching ? (
                 <span className="text-amber-700 dark:text-amber-300">
                   {t('inferenceStale')}
-                </span>
-              ) : null}
-              {data.status === 'insufficient_signal' ? (
-                <span className="text-muted-foreground">
-                  {t('inferenceInsufficient')}
                 </span>
               ) : null}
               {query.isFetching ? (

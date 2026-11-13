@@ -9,6 +9,8 @@ pub(crate) struct Estimate {
     pub lower_millions: Option<f64>,
     pub upper_millions: Option<f64>,
     pub reason: Option<String>,
+    pub blocks: Option<usize>,
+    pub required_blocks: Option<usize>,
 }
 impl Estimate {
     pub(super) fn available(capacity: Capacity, divisor: f64) -> Self {
@@ -17,6 +19,8 @@ impl Estimate {
             lower_millions: Some(capacity.lower / divisor),
             upper_millions: Some(capacity.upper / divisor),
             reason: None,
+            blocks: None,
+            required_blocks: None,
         }
     }
     pub fn unavailable(reason: &str) -> Self {
@@ -25,7 +29,14 @@ impl Estimate {
             lower_millions: None,
             upper_millions: None,
             reason: Some(reason.into()),
+            blocks: None,
+            required_blocks: None,
         }
+    }
+    pub(super) fn with_blocks(mut self, blocks: usize, required: usize) -> Self {
+        self.blocks = Some(blocks);
+        self.required_blocks = Some(required);
+        self
     }
 }
 

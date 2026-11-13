@@ -122,6 +122,9 @@ fn fit(
     }
     Ok(base)
 }
+fn required_blocks(contributors: usize) -> usize {
+    8.max(2 * contributors + 2)
+}
 fn near97(cycle: &Cycle, rows: &[QuotaInferenceAggregate], keys: &[Key]) -> Vec<usize> {
     let mut indices = Vec::new();
     let mut ranges: Vec<Option<(f64, f64)>> = vec![None; keys.len()];
@@ -220,7 +223,7 @@ pub(crate) fn compute(
         .sum();
     result.models_truncated = sets[0]
         .iter()
-        .any(|r| r.distinct_models > 32 || r.bucket == "overflow");
+        .any(|r| r.distinct_models > 32 || (r.bucket == "overflow" && meters(r).mixed() > 0));
     result.unknown_tokens = totals
         .get(&("unknown".into(), None))
         .copied()
@@ -272,21 +275,18 @@ pub(crate) fn compute(
         fit(cycle, sets, &keys, &selected)
     };
     let near_indices = near97(cycle, sets[0], &keys);
+    let near_blocks = near_indices.len();
     let near = if near_indices.is_empty() {
         Err("at97_no_sample")
     } else if result.models_truncated || cycle.overflow {
         Err("at97_unidentifiable")
     } else {
-        fit(cycle, sets, &keys, &near_indices).map_err(|error| {
-            if error == "attribution_unstable" {
-                error
-            } else {
-                "at97_unidentifiable"
-            }
-        })
+        fit(cycle, sets, &keys, &near_indices)
     };
+    let required = required_blocks(keys.len());
+    let actual_blocks = selected.len();
     for ((bucket, name), m) in totals {
-        if bucket != "model" {
+        if bucket != "model" || m.mixed() <= 0 {
             continue;
         }
         let Some(name) = name else {
@@ -309,8 +309,8 @@ pub(crate) fn compute(
             output_tokens: m.output,
             cache_hit: m.hit(),
             output_share: m.output_share(),
-            actual: map(&actual, "insufficient_signal"),
-            observed_near_97: map(&near, "at97_no_sample"),
+            actual: map(&actual, "insufficient_signal").with_blocks(actual_blocks, required),
+            observed_near_97: map(&near, "at97_no_sample").with_blocks(near_blocks, required),
         });
     }
     result

@@ -724,9 +724,11 @@ export type ErrorEnvelope = {
 };
 
 export type Estimate = {
+    blocks?: number | null;
     capacity_millions?: number | null;
     lower_millions?: number | null;
     reason?: string | null;
+    required_blocks?: number | null;
     upper_millions?: number | null;
 };
 
