@@ -1,10 +1,12 @@
-//! Native SeaORM entities for the first configuration batch.
+//! Native SeaORM entities for migrated configuration and authentication tables.
 //!
-//! Each entity module carries its own native schema declaration: the entity
-//! model is the column contract, and the colocated `sea_query` statements add
-//! the checks and indexes that entity attributes cannot express. No entity
-//! declares a `Relation`, so no foreign key is ever generated; the applied
-//! foreign keys stay owned by the existing migration contract.
+//! The batch covers the PostgreSQL configuration, user and client-key tables
+//! and the standalone SQLite configuration, user and client-key tables. Each
+//! entity module carries its own native schema declaration: the entity model is
+//! the column contract, and the colocated `sea_query` statements add the checks
+//! and indexes that entity attributes cannot express. No entity declares a
+//! `Relation`, so no foreign key is ever generated; the applied foreign keys stay
+//! owned by the existing migration contract.
 
 pub mod postgres;
 pub mod sqlite;
@@ -13,10 +15,14 @@ pub mod sqlite;
 mod tests {
     use sea_orm::sea_query::{PostgresQueryBuilder, SqliteQueryBuilder};
 
+    use super::postgres::client_keys;
     use super::postgres::config_archive_audit;
     use super::postgres::managed_relays;
     use super::postgres::mcp_servers;
+    use super::postgres::users;
+    use super::sqlite::standalone_client_keys;
     use super::sqlite::standalone_mcp_servers;
+    use super::sqlite::standalone_users;
 
     #[test]
     fn postgres_relay_declaration_keeps_applied_checks_and_unique_index() {
@@ -89,6 +95,102 @@ mod tests {
                     && sql.contains("WHERE")
             ),
             "partial unique index missing: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn postgres_user_declaration_keeps_bigserial_and_login_uniqueness() {
+        let table = users::create_table_statement().to_owned();
+        let sql = table.to_string(PostgresQueryBuilder);
+        assert!(
+            sql.to_ascii_lowercase().contains("bigserial"),
+            "bigserial missing: {sql}"
+        );
+        assert!(
+            sql.contains("login_name") && sql.contains("UNIQUE"),
+            "login uniqueness missing: {sql}"
+        );
+    }
+
+    #[test]
+    fn postgres_client_key_declaration_keeps_bigserial_and_user_index() {
+        let table = client_keys::create_table_statement().to_owned();
+        let sql = table.to_string(PostgresQueryBuilder);
+        assert!(
+            sql.to_ascii_lowercase().contains("bigserial"),
+            "bigserial missing: {sql}"
+        );
+        assert!(
+            sql.contains("key_hash") && sql.contains("UNIQUE"),
+            "key hash uniqueness missing: {sql}"
+        );
+
+        let indexes = client_keys::create_index_statements();
+        let rendered = indexes
+            .iter()
+            .map(|index| index.to_string(PostgresQueryBuilder))
+            .collect::<Vec<_>>();
+        assert!(
+            rendered
+                .iter()
+                .any(|sql| sql.contains("idx_client_keys_user")
+                    && sql.contains("created_at")
+                    && sql.contains("DESC")),
+            "client key user index missing: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn sqlite_user_declaration_keeps_nocase_and_enabled_admin_index() {
+        let table = standalone_users::create_table_statement().to_owned();
+        let sql = table.to_string(SqliteQueryBuilder);
+        assert!(sql.contains("COLLATE NOCASE"), "nocase missing: {sql}");
+        assert!(sql.contains("CHECK"), "boolean checks missing: {sql}");
+        assert!(
+            sql.contains("CURRENT_TIMESTAMP"),
+            "timestamp defaults missing: {sql}"
+        );
+
+        let indexes = standalone_users::create_index_statements();
+        let rendered = indexes
+            .iter()
+            .map(|index| index.to_string(SqliteQueryBuilder))
+            .collect::<Vec<_>>();
+        assert!(
+            rendered
+                .iter()
+                .any(|sql| sql.contains("idx_standalone_users_enabled_admin")
+                    && sql.contains("is_admin")
+                    && sql.contains("login_name")),
+            "enabled admin index missing: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn sqlite_client_key_declaration_keeps_envelope_columns_and_check() {
+        let table = standalone_client_keys::create_table_statement().to_owned();
+        let sql = table.to_string(SqliteQueryBuilder);
+        let lowered = sql.to_ascii_lowercase();
+        for expected in [
+            "secret_ciphertext",
+            "secret_nonce",
+            "secret_key_version",
+            "blob",
+            "check",
+        ] {
+            assert!(lowered.contains(expected), "missing {expected}: {sql}");
+        }
+        assert!(
+            !sql.contains("FOREIGN KEY"),
+            "foreign keys stay in the migration: {sql}"
+        );
+        let key_id_start = sql.find("\"key_id\"").expect("key_id column");
+        let key_id_rest = &sql[key_id_start..];
+        let key_id_end = key_id_rest.find(',').unwrap_or(key_id_rest.len());
+        let key_id_column = &key_id_rest[..key_id_end];
+        assert!(
+            !key_id_column.to_ascii_lowercase().contains("not null"),
+            "key_id must keep the applied nullable TEXT PRIMARY KEY: {key_id_column}"
         );
     }
 }
