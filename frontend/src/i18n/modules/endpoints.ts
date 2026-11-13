@@ -70,9 +70,7 @@ export const endpointMessages = {
     modelRouteTargetSwitch: '目标 {target}',
     modelRouteTargetEndpointDisabled: '上游不可用',
     modelRouteNewSessionPreference: '新会话目标',
-    modelRouteNewSessionPreferenceHint:
-      '仅影响之后新建的会话，现有会话保持绑定；目标被禁用、超出时间窗口或无可用配额时自动回退。选择“自动”即可清除。',
-    modelRouteNewSessionAutomatic: '自动（清除偏好）',
+    modelRouteNewSessionAutomatic: '自动',
     modelRouteNewSessionTargetDisabled: '已禁用，将自动回退',
     modelRouteTargetInheritedModel: '沿用原始模型',
     modelRoutePreferredTarget: '新会话首选',
@@ -333,9 +331,7 @@ export const endpointMessages = {
     modelRouteTargetSwitch: 'Target {target}',
     modelRouteTargetEndpointDisabled: 'Upstream unavailable',
     modelRouteNewSessionPreference: 'New session target',
-    modelRouteNewSessionPreferenceHint:
-      'Applies only to sessions created afterwards; existing sessions keep their binding. If the target is disabled, outside its window or out of quota, selection falls back automatically. Choose Automatic to clear it.',
-    modelRouteNewSessionAutomatic: 'Automatic (clear preference)',
+    modelRouteNewSessionAutomatic: 'Automatic',
     modelRouteNewSessionTargetDisabled: 'disabled, falls back automatically',
     modelRouteTargetInheritedModel: 'inherits the request model',
     modelRoutePreferredTarget: 'Preferred for new sessions',

@@ -290,7 +290,7 @@ export function ModelRouteDialog({
               </>
             ) : (
               <>
-                <div className="grid min-w-0 gap-3 sm:grid-cols-[9rem_minmax(0,1fr)_auto] sm:items-end">
+                <div className="grid min-w-0 gap-3 sm:grid-cols-[auto_minmax(0,1fr)_14rem_auto] sm:items-end">
                   <label className="grid gap-1 text-xs font-medium">
                     <span>{t('scope')}</span>
                     <Select
@@ -330,6 +330,47 @@ export function ModelRouteDialog({
                       )}
                     </form.Field>
                   </label>
+                  <Select
+                    onValueChange={(value) =>
+                      setPreferredTarget(
+                        value === 'auto' ? null : Number(value),
+                      )
+                    }
+                    value={
+                      preferredTargetIndex < 0
+                        ? 'auto'
+                        : String(preferredTargetIndex)
+                    }
+                  >
+                    <SelectTrigger
+                      aria-label={t('modelRouteNewSessionPreference')}
+                      className="w-full min-w-0"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">
+                        {t('modelRouteNewSessionAutomatic')}
+                      </SelectItem>
+                      {orderedTargets.map((target, index) => (
+                        <SelectItem
+                          key={targetKey(target)}
+                          value={String(index)}
+                        >
+                          {target.endpoint_id
+                            ? (endpointOptionFor(target.endpoint_id)?.label ??
+                              target.endpoint_id)
+                            : `${t('target')} ${index + 1}`}
+                          {' · '}
+                          {target.upstream_model?.trim() ||
+                            t('modelRouteTargetInheritedModel')}
+                          {target.enabled
+                            ? ''
+                            : ` · ${t('modelRouteNewSessionTargetDisabled')}`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <div className="flex items-center gap-2 pb-2">
                     <span className="text-xs font-medium">{t('status')}</span>
                     <form.Field name="enabled">
@@ -401,53 +442,6 @@ export function ModelRouteDialog({
                             {t('addTarget')}
                           </Button>
                         </div>
-                        <label className="grid min-w-0 gap-1 text-xs font-medium">
-                          <span>{t('modelRouteNewSessionPreference')}</span>
-                          <Select
-                            onValueChange={(value) =>
-                              setPreferredTarget(
-                                value === 'auto' ? null : Number(value),
-                              )
-                            }
-                            value={
-                              preferredTargetIndex < 0
-                                ? 'auto'
-                                : String(preferredTargetIndex)
-                            }
-                          >
-                            <SelectTrigger
-                              aria-label={t('modelRouteNewSessionPreference')}
-                              className="w-full min-w-0"
-                            >
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="auto">
-                                {t('modelRouteNewSessionAutomatic')}
-                              </SelectItem>
-                              {orderedTargets.map((target, index) => (
-                                <SelectItem
-                                  key={targetKey(target)}
-                                  value={String(index)}
-                                >
-                                  {target.endpoint_id
-                                    ? (endpointOptionFor(target.endpoint_id)
-                                        ?.label ?? target.endpoint_id)
-                                    : `${t('target')} ${index + 1}`}
-                                  {' · '}
-                                  {target.upstream_model?.trim() ||
-                                    t('modelRouteTargetInheritedModel')}
-                                  {target.enabled
-                                    ? ''
-                                    : ` · ${t('modelRouteNewSessionTargetDisabled')}`}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <span className="font-normal text-muted-foreground">
-                            {t('modelRouteNewSessionPreferenceHint')}
-                          </span>
-                        </label>
                         <ol className="grid min-w-0 gap-2">
                           {orderedTargets.map((target, index) => (
                             <li
