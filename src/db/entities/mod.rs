@@ -33,6 +33,53 @@ mod tests {
     use super::sqlite::standalone_users;
 
     #[test]
+    fn postgres_conversation_override_declaration_matches_applied_table() {
+        let table = super::postgres::conversation_endpoint_overrides::create_table_statement()
+            .to_string(PostgresQueryBuilder);
+        for expected in [
+            "\"conversation_id\" uuid NOT NULL PRIMARY KEY",
+            "\"endpoint_id\" uuid NOT NULL",
+            "\"created_by_user_id\" bigint",
+            "\"created_at\" timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "\"updated_at\" timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "\"endpoint_key_id\" uuid",
+        ] {
+            assert!(table.contains(expected), "missing {expected}: {table}");
+        }
+        for absent in ["FOREIGN KEY", "CHECK", "UNIQUE"] {
+            assert!(!table.contains(absent), "{table}");
+        }
+        let indexes = super::postgres::conversation_endpoint_overrides::create_index_statements();
+        assert_eq!(indexes.len(), 2);
+        assert!(
+            indexes[0]
+                .to_string(PostgresQueryBuilder)
+                .contains("idx_conversation_endpoint_overrides_endpoint_id")
+        );
+        assert!(
+            indexes[1]
+                .to_string(PostgresQueryBuilder)
+                .contains("idx_conversation_endpoint_overrides_endpoint_key_id")
+        );
+    }
+
+    #[test]
+    fn postgres_user_redaction_declaration_matches_applied_table() {
+        let sql = super::postgres::user_redaction_configs::create_table_statement()
+            .to_string(PostgresQueryBuilder);
+        for expected in [
+            "\"user_id\" bigint NOT NULL PRIMARY KEY",
+            "\"config\" jsonb NOT NULL",
+            "\"updated_at\" timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        ] {
+            assert!(sql.contains(expected), "missing {expected}: {sql}");
+        }
+        for absent in ["FOREIGN KEY", "CHECK", "UNIQUE", "serial"] {
+            assert!(!sql.contains(absent), "unexpected {absent}: {sql}");
+        }
+    }
+
+    #[test]
     fn credential_and_user_setting_postgres_declarations_preserve_nullability_and_defaults() {
         use super::postgres::{endpoint_oauth_tokens, user_endpoint_settings};
         let token = endpoint_oauth_tokens::create_table_statement().to_string(PostgresQueryBuilder);

@@ -110,7 +110,8 @@ pool.
   SeaORM entities in `src/db/entities/`: the PostgreSQL tables
   `worker_settings`, `managed_relays`, `mcp_servers`, `mcp_credentials`,
   `config_archive_audit`, `users`, `client_keys`, `provider_endpoints` and
-  `endpoint_api_keys`, `endpoint_oauth_tokens` and `user_endpoint_settings`,
+  `endpoint_api_keys`, `endpoint_oauth_tokens`, `user_endpoint_settings`,
+  `user_redaction_configs`, and `conversation_endpoint_overrides`,
   plus the standalone SQLite settings, relay, MCP server, config audit,
   `standalone_users`, `standalone_client_keys`, `standalone_provider_endpoints`,
   `standalone_endpoint_keys`, `standalone_endpoint_oauth_tokens` and
@@ -129,7 +130,8 @@ pool.
   and import keep their own endpoint and key SQL, while live endpoint and key
   CRUD is native. PostgreSQL visible-endpoint selection, effective routing and
   quota eligibility queries remain SQLx alongside native credential and user
-  endpoint setting CRUD.
+  endpoint setting CRUD. Redaction custom-string count and list queries also
+  remain SQLx-owned JSONB projections.
 - The entities also declare the native schema metadata for those tables,
   including checks and indexes. The declarations describe the schema the
   applied migrations already create; they are not a second schema applier. The
