@@ -174,6 +174,7 @@ fn provider_usage_response(
 ) -> TokenPlanUsageResponse {
     let mut response = TokenPlanUsageResponse {
         local_today_tokens: None,
+        quota_inference_available: None,
         provider,
         provider_region,
         keys,

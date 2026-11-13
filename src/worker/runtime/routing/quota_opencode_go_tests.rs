@@ -76,6 +76,7 @@ fn opencode_go_key_usage(
 fn opencode_go_usage_response(keys: Vec<TokenPlanKeyUsage>) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
         local_today_tokens: None,
+        quota_inference_available: None,
         provider: db::EndpointProvider::OpencodeGo,
         provider_region: None,
         keys,

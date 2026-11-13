@@ -32,6 +32,8 @@ pub struct TokenPlanUsageResponse {
     /// "today usage" pill. `None` when not computed/applicable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_today_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota_inference_available: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

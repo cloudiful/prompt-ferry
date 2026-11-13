@@ -60,6 +60,7 @@ fn minimax_usage(
         provider_region: None::<EndpointRegion>,
         keys: vec![key],
         local_today_tokens: None,
+        quota_inference_available: None,
     }
 }
 

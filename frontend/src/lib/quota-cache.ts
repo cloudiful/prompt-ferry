@@ -1,7 +1,10 @@
 import type { QueryClient } from '@tanstack/react-query'
 import type { TokenPlanUsageResponse } from '@/generated/admin-api'
 import { tokenPlanUsage } from '@/generated/admin-api'
-import { tokenPlanUsageQueryKey } from '@/generated/admin-api/@tanstack/react-query.gen'
+import {
+  quotaInferenceQueryKey,
+  tokenPlanUsageQueryKey,
+} from '@/generated/admin-api/@tanstack/react-query.gen'
 import type { TokenPlanFetchState } from '@/models/endpoints/quota'
 
 export const TOKEN_PLAN_CACHE_TTL_MS = 60_000
@@ -121,6 +124,10 @@ export async function refreshTokenPlanUsageBatch(
         requested: true,
         failed: true,
         cause,
+      })
+    } finally {
+      await queryClient.invalidateQueries({
+        queryKey: quotaInferenceQueryKey({ path: { endpoint_id: endpointId } }),
       })
     }
   })

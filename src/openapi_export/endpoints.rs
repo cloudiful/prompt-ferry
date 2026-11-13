@@ -1,7 +1,10 @@
 use super::schemas::ErrorEnvelope;
 use crate::{
     db,
-    worker_admin::openai_org_usage::OpenAiOrganizationUsageResponse,
+    worker_admin::{
+        openai_org_usage::OpenAiOrganizationUsageResponse,
+        quota_inference::response::InferenceResponse,
+    },
     worker_admin_types::{
         EndpointModelsResponse, EndpointOAuthStatusResponse, EndpointPageResponse, EndpointRequest,
         EndpointTestResponse, ModelCatalogQuery, OAuthBrowserCompleteRequest,
@@ -89,6 +92,19 @@ pub(super) fn test_endpoint() {}
     tag = "endpoints"
 )]
 pub(super) fn endpoint_models() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/quota-inference",
+    params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
+    responses(
+        (status = 200, body = InferenceResponse, description = "Observed subscription quota estimates"),
+        (status = 400, body = ErrorEnvelope),
+        (status = 404, body = ErrorEnvelope)
+    ),
+    tag = "endpoints"
+)]
+pub(super) fn quota_inference() {}
 
 #[utoipa::path(
     get,

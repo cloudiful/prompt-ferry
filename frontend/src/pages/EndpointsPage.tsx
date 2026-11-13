@@ -59,6 +59,7 @@ type TokenPlanDialogTarget = {
   endpointId: string
   endpointName: string
   provider: ProviderEndpoint['provider']
+  plan: ProviderEndpoint['plan']
 }
 
 const EMPTY_ENDPOINTS: ProviderEndpoint[] = []
@@ -229,6 +230,7 @@ export function EndpointsPage() {
       endpointId,
       endpointName: endpoint.name,
       provider: endpoint.provider,
+      plan: endpoint.plan,
     })
   }
 
@@ -532,6 +534,7 @@ export function EndpointsPage() {
           onOpenChange={changeTokenPlanDialogOpen}
           open
           provider={tokenPlanDialogTarget.provider}
+          plan={tokenPlanDialogTarget.plan}
         />
       ) : null}
     </section>

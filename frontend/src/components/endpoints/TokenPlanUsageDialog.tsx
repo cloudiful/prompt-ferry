@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { KeyQuotaObservationHistory } from '@/components/endpoints/KeyQuotaObservationHistory'
+import { QuotaInferencePanel } from '@/components/endpoints/QuotaInferencePanel'
 import { TokenPlanKeyQuotaStatus } from '@/components/endpoints/TokenPlanKeyQuotaStatus'
 import { TokenPlanQuotaWindowRow } from '@/components/endpoints/TokenPlanQuotaWindowRow'
 import {
@@ -24,6 +25,7 @@ import {
   isFeedbackState,
 } from '@/composables/tokenPlanEffectiveKeys'
 import type {
+  EndpointPlan,
   EndpointProvider,
   TokenPlanKeyUsage,
   TokenPlanQuotaState,
@@ -52,6 +54,7 @@ export type TokenPlanUsageDialogProps = {
   onOpenChange: (open: boolean) => void
   open: boolean
   provider: EndpointProvider
+  plan?: EndpointPlan
 }
 
 const MUTED_QUOTA_STATES: ReadonlySet<TokenPlanQuotaState> = new Set([
@@ -137,6 +140,7 @@ export function TokenPlanUsageDialog({
   onOpenChange,
   open,
   provider,
+  plan,
 }: TokenPlanUsageDialogProps) {
   const { t } = useLocale()
   const onErrorRef = useRef(onError)
@@ -427,6 +431,12 @@ export function TokenPlanUsageDialog({
               ) : null}
             </>
           )}
+          {open &&
+          provider === 'openai' &&
+          plan === 'chatgpt_subscription' &&
+          usage?.quota_inference_available === true ? (
+            <QuotaInferencePanel endpointId={endpointId} enabled />
+          ) : null}
           {open && endpointId && provider !== 'generic' ? (
             <KeyQuotaObservationHistory
               configuredKeys={configuredKeys}

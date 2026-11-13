@@ -53,6 +53,7 @@ fn usage(provider: EndpointProvider, key: TokenPlanKeyUsage) -> TokenPlanUsageRe
         provider_region: None::<EndpointRegion>,
         keys: vec![key],
         local_today_tokens: None,
+        quota_inference_available: None,
     }
 }
 

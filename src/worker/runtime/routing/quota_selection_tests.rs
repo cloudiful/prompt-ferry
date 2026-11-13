@@ -47,6 +47,7 @@ async fn quota_key_lb_skips_a_key_with_no_remaining_window() {
             endpoint_id,
             TokenPlanUsageResponse {
                 local_today_tokens: None,
+                quota_inference_available: None,
                 provider: db::EndpointProvider::Minimax,
                 provider_region: Some(db::EndpointRegion::Cn),
                 keys: vec![
@@ -191,6 +192,7 @@ async fn quota_key_lb_skips_command_code_key_with_exhausted_monthly_pool() {
             endpoint_id,
             TokenPlanUsageResponse {
                 local_today_tokens: None,
+                quota_inference_available: None,
                 provider: db::EndpointProvider::CommandCode,
                 provider_region: None,
                 keys: vec![exhausted, available],
@@ -279,6 +281,7 @@ async fn quota_key_lb_skips_command_code_key_with_no_remaining_window() {
             endpoint_id,
             TokenPlanUsageResponse {
                 local_today_tokens: None,
+                quota_inference_available: None,
                 provider: db::EndpointProvider::CommandCode,
                 provider_region: None,
                 keys: vec![
@@ -313,6 +316,7 @@ async fn quota_key_lb_uses_tighter_command_code_window_and_single_arm() {
             endpoint_id,
             TokenPlanUsageResponse {
                 local_today_tokens: None,
+                quota_inference_available: None,
                 provider: db::EndpointProvider::CommandCode,
                 provider_region: None,
                 keys: vec![
@@ -372,6 +376,7 @@ async fn quota_key_lb_still_routes_payg_command_code_key_without_windows() {
             endpoint_id,
             TokenPlanUsageResponse {
                 local_today_tokens: None,
+                quota_inference_available: None,
                 provider: db::EndpointProvider::CommandCode,
                 provider_region: None,
                 keys: vec![command_code_key_usage(payg_key_id, "payg", None, None)],

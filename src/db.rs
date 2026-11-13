@@ -10,6 +10,7 @@ pub mod mcp_oauth;
 mod partition_ddl;
 mod partition_maintenance;
 mod pool_wait;
+pub mod quota_inference;
 pub mod quota_key_observations;
 pub mod quota_snapshots;
 mod relays;

@@ -13,6 +13,7 @@ fn local_estimator_is_conservative_for_small_payloads() {
 pub(super) fn opencode_go_usage(key_id: Uuid, remaining: f64) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
         local_today_tokens: None,
+        quota_inference_available: None,
         provider: db::EndpointProvider::OpencodeGo,
         provider_region: None,
         keys: vec![TokenPlanKeyUsage {

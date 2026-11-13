@@ -139,7 +139,7 @@ async fn chatgpt_subscription_usage(
             Ok(usage) => Json(quota_status::decorate_usage(
                 &state.token_plan_quota,
                 endpoint_id,
-                usage,
+                with_inference_capability(usage, endpoint, state.chatgpt_quota_service.is_some()),
             ))
             .into_response(),
             Err(crate::worker_admin::chatgpt_quota_service::ChatGptQuotaError::NotConfigured) => {
@@ -208,7 +208,11 @@ async fn chatgpt_subscription_usage(
         Ok(quota) => Json(quota_status::decorate_usage(
             &state.token_plan_quota,
             endpoint_id,
-            chatgpt_quota_response(endpoint, quota),
+            with_inference_capability(
+                chatgpt_quota_response(endpoint, quota),
+                endpoint,
+                state.chatgpt_quota_service.is_some(),
+            ),
         ))
         .into_response(),
         Err(err) => error(
@@ -217,6 +221,23 @@ async fn chatgpt_subscription_usage(
             &truncate_message(&maybe_redact(state, &err.to_string())),
         ),
     }
+}
+
+fn with_inference_capability(
+    mut usage: TokenPlanUsageResponse,
+    endpoint: &db::ProviderEndpoint,
+    storage_available: bool,
+) -> TokenPlanUsageResponse {
+    usage.quota_inference_available = (endpoint.provider == db::EndpointProvider::OpenAi
+        && endpoint.plan == db::EndpointPlan::ChatgptSubscription)
+        .then(|| {
+            crate::worker_admin_state::quota_inference_available(
+                endpoint.provider,
+                endpoint.plan,
+                storage_available,
+            )
+        });
+    usage
 }
 
 fn chatgpt_quota_response(
@@ -357,6 +378,35 @@ mod tests {
             unlimited_credits: Some(false),
             credits_balance: Some("12.5".to_string()),
         }
+    }
+
+    #[test]
+    fn inference_capability_matches_endpoint_and_storage() {
+        let mut endpoint = endpoint_fixture();
+        let usage = chatgpt_quota_response(&endpoint, quota(None, None));
+        assert!(
+            serde_json::to_value(&usage)
+                .unwrap()
+                .get("quota_inference_available")
+                .is_none()
+        );
+        let capable = with_inference_capability(usage.clone(), &endpoint, true);
+        assert_eq!(capable.quota_inference_available, Some(true));
+        assert_eq!(
+            with_inference_capability(usage.clone(), &endpoint, false).quota_inference_available,
+            Some(false)
+        );
+        endpoint.plan = db::EndpointPlan::PlatformApiKey;
+        assert_eq!(
+            with_inference_capability(usage.clone(), &endpoint, true).quota_inference_available,
+            None
+        );
+        endpoint.plan = db::EndpointPlan::ChatgptSubscription;
+        endpoint.provider = db::EndpointProvider::Minimax;
+        assert_eq!(
+            with_inference_capability(usage, &endpoint, true).quota_inference_available,
+            None
+        );
     }
 
     #[test]

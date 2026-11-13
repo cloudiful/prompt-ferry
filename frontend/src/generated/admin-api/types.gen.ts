@@ -723,6 +723,13 @@ export type ErrorEnvelope = {
     error: ErrorBody;
 };
 
+export type Estimate = {
+    capacity_millions?: number | null;
+    lower_millions?: number | null;
+    reason?: string | null;
+    upper_millions?: number | null;
+};
+
 /**
  * One GLM quota window (`TOKENS_LIMIT` or `CREDIT_LIMIT` row in the
  * `/api/monitor/usage/quota/limit` response). `percentage` is the used
@@ -751,6 +758,28 @@ export type GlmWindowUsage = {
  * names its own component (`relay`, `worker`, `serve`) and does not read it.
  */
 export type HostRole = 'integrated' | 'worker' | 'relay';
+
+export type InferenceResponse = {
+    account: Estimate;
+    account_history_assumed_stable: boolean;
+    account_identity_known: boolean;
+    as_of?: string | null;
+    cached: boolean;
+    calculated_at: string;
+    consumed_pp: number;
+    current_refresh_failed: boolean;
+    latest_snapshot_at?: string | null;
+    method_version: string;
+    models: Array<ModelRow>;
+    models_truncated: boolean;
+    observation_provenance: string;
+    omitted_rows: number;
+    overflow_tokens: number;
+    span_start?: string | null;
+    status: string;
+    unknown_tokens: number;
+    usable_blocks: number;
+};
 
 export type LlmReviewSettings = {
     custom_policy_text: string;
@@ -1295,6 +1324,19 @@ export type ModelRouteWhitelistRequest = {
 
 export type ModelRouteWhitelistResponse = {
     enabled: boolean;
+};
+
+export type ModelRow = {
+    actual: Estimate;
+    cache_hit?: number | null;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
+    fresh_tokens: number;
+    mixed_tokens: number;
+    model: string;
+    observed_near_97: Estimate;
+    output_share?: number | null;
+    output_tokens: number;
 };
 
 export type NativeApi = 'auto' | 'anthropic_messages' | 'chat' | 'embeddings' | 'responses' | 'realtime';
@@ -2413,6 +2455,7 @@ export type TokenPlanUsageResponse = {
     local_today_tokens?: number | null;
     provider: EndpointProvider;
     provider_region?: null | EndpointRegion;
+    quota_inference_available?: boolean | null;
 };
 
 export type TokenPlanWindowUsage = {
@@ -3383,6 +3426,34 @@ export type OrganizationUsageResponses = {
 };
 
 export type OrganizationUsageResponse = OrganizationUsageResponses[keyof OrganizationUsageResponses];
+
+export type QuotaInferenceData = {
+    body?: never;
+    path: {
+        /**
+         * Endpoint ID
+         */
+        endpoint_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/endpoints/{endpoint_id}/quota-inference';
+};
+
+export type QuotaInferenceErrors = {
+    400: ErrorEnvelope;
+    404: ErrorEnvelope;
+};
+
+export type QuotaInferenceError = QuotaInferenceErrors[keyof QuotaInferenceErrors];
+
+export type QuotaInferenceResponses = {
+    /**
+     * Observed subscription quota estimates
+     */
+    200: InferenceResponse;
+};
+
+export type QuotaInferenceResponse = QuotaInferenceResponses[keyof QuotaInferenceResponses];
 
 export type QuotaKeyObservationHistoryData = {
     body?: never;

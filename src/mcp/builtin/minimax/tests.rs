@@ -152,6 +152,7 @@ async fn quota_cache(endpoint_id: Uuid, keys: &[(Uuid, f64, f64)]) -> TokenPlanQ
     let cache = TokenPlanQuotaCache::default();
     let usage = TokenPlanUsageResponse {
         local_today_tokens: None,
+        quota_inference_available: None,
         provider: db::EndpointProvider::Minimax,
         provider_region: None,
         keys: keys

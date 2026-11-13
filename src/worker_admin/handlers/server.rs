@@ -256,6 +256,10 @@ fn api_router(state: AdminState) -> Router<AdminState> {
             get(token_plan_usage),
         )
         .route(
+            "/admin/endpoints/{endpoint_id}/quota-inference",
+            get(quota_inference),
+        )
+        .route(
             "/admin/endpoints/{endpoint_id}/quota-observations",
             get(quota_key_observation_history),
         )

@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use super::chatgpt_quota_service::ChatGptQuotaService;
 use super::openai_org_usage_cache::OpenAiOrgUsageCache;
+use super::quota_inference_cache::QuotaInferenceCache;
 use super::token_plan_cache::TokenPlanQuotaCache;
 use crate::{
     db::{ConfigRepository, ManagedRelayRuntimeStatus, StreamDeltaBatchingSettings, UserStore},
@@ -85,6 +86,16 @@ impl ManagedRelaySupervisorHandle {
     }
 }
 
+pub(crate) fn quota_inference_available(
+    provider: crate::db::EndpointProvider,
+    plan: crate::db::EndpointPlan,
+    storage_available: bool,
+) -> bool {
+    provider == crate::db::EndpointProvider::OpenAi
+        && plan == crate::db::EndpointPlan::ChatgptSubscription
+        && storage_available
+}
+
 #[derive(Clone)]
 pub struct AdminState {
     pub pool: PgPool,
@@ -116,6 +127,7 @@ pub struct AdminState {
     pub(crate) token_plan_quota: TokenPlanQuotaCache,
     /// Issue #589 P2b: display-only OpenAI organization usage cache.
     pub(crate) openai_org_usage: OpenAiOrgUsageCache,
+    pub(crate) quota_inference: QuotaInferenceCache,
     pub(crate) chatgpt_quota_service: Option<Arc<ChatGptQuotaService>>,
     /// Personal MCP OAuth backend. `None` disables personal OAuth only; no
     /// other auth mode or MCP behavior depends on it.
@@ -178,6 +190,7 @@ impl AdminState {
             endpoint_model_cache: init.endpoint_model_cache,
             token_plan_quota: TokenPlanQuotaCache::default(),
             openai_org_usage: OpenAiOrgUsageCache::default(),
+            quota_inference: QuotaInferenceCache::default(),
             chatgpt_quota_service: None,
             mcp_oauth: None,
         }

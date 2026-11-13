@@ -14,6 +14,7 @@ use uuid::Uuid;
 fn usage(keys: Vec<TokenPlanKeyUsage>) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
         local_today_tokens: None,
+        quota_inference_available: None,
         provider: db::EndpointProvider::OpenRouter,
         provider_region: None,
         keys,
