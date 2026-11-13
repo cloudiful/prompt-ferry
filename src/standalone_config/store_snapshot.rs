@@ -1,6 +1,9 @@
+use sea_orm::{EntityTrait, QueryOrder};
 use sqlx::Row;
 use sqlx::sqlite::Sqlite;
 
+use crate::db::entities::sqlite::{standalone_model_route_targets, standalone_model_routes};
+use crate::db::seaorm::SqliteNativeConnection;
 use crate::relay_secrets::RelaySecretManager;
 use crate::standalone_config::rows;
 use crate::standalone_config::write::{self, EncryptedConfig};
@@ -139,21 +142,28 @@ impl StandaloneConfigStore {
         transaction: &mut sqlx::Transaction<'_, Sqlite>,
         manager: &RelaySecretManager,
     ) -> Result<Vec<ModelRouteConfig>> {
-        let route_rows = standalone_query!("src/sql/standalone/list_routes.sql")
-            .fetch_all(&mut **transaction)
-            .await?;
-        let target_rows = standalone_query!("src/sql/standalone/list_route_targets.sql")
-            .fetch_all(&mut **transaction)
-            .await?;
-        let mut routes = route_rows
-            .into_iter()
-            .map(|row| rows::route(&row))
+        let connection = SqliteNativeConnection::new(&mut **transaction);
+        let route_models = standalone_model_routes::Entity::find()
+            .order_by_asc(standalone_model_routes::Column::ModelPattern)
+            .order_by_asc(standalone_model_routes::Column::RuleId)
+            .all(&connection)
+            .await
+            .map_err(rows::native_error)?;
+        let target_models = standalone_model_route_targets::Entity::find()
+            .order_by_asc(standalone_model_route_targets::Column::RuleId)
+            .order_by_asc(standalone_model_route_targets::Column::Position)
+            .all(&connection)
+            .await
+            .map_err(rows::native_error)?;
+        let mut routes = route_models
+            .iter()
+            .map(rows::route_from_model)
             .collect::<Result<Vec<_>>>()?;
-        for row in target_rows {
-            let (rule_id, mut target, proxy_envelope) = rows::route_target(&row)?;
+        for model in &target_models {
+            let (rule_id, mut target, proxy_envelope) = rows::route_target_from_model(model)?;
             target.proxy_url_override = write::decrypt_optional(manager, proxy_envelope.as_ref())?
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty());
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
             routes
                 .iter_mut()
                 .find(|route| route.rule_id == rule_id)

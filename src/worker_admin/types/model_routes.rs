@@ -88,6 +88,8 @@ impl ModelRouteRequest {
                         service_tier: None,
                         // Issue #1032: omitted; no existing target to carry.
                         embedding_dimensions_override: None,
+                        // Automatic (no preference) by default.
+                        prefer_new_sessions: false,
                     })
                     .collect()
             })
@@ -140,7 +142,7 @@ impl ModelRouteRequest {
                 // clears to inherit; an integer must be a positive i32 and
                 // is rejected with a 400 otherwise (never clamped).
                 let upstream_model =
-                    normalize_upstream_model(target.upstream_model.as_deref());
+                    crate::routing::normalize_upstream_model(target.upstream_model.as_deref());
                 let embedding_dimensions_override = match target.embedding_dimensions_override {
                     None => match existing_dimensions
                         .lookup(target.endpoint_id, upstream_model.as_deref())
@@ -185,6 +187,9 @@ impl ModelRouteRequest {
                     // Issue #1032: omitted carries the stored value; null
                     // clears; a positive i32 sets the forced dimensions.
                     embedding_dimensions_override,
+                    // Always sent (no omit); at most one target
+                    // per route may carry the preference.
+                    prefer_new_sessions: target.prefer_new_sessions,
                 })
             });
         let targets = futures::future::try_join_all(targets).await?;
@@ -267,6 +272,10 @@ impl ModelRouteRequest {
                 "model route targets must be unique per endpoint and upstream model",
             ));
         }
+        // At most one target per rule steers future unbound
+        // sessions; the database enforces the same rule with a partial
+        // unique index.
+        ensure_single_preferred_target(targets.iter().filter(|target| target.prefer_new_sessions))?;
         let unique_target_ids = target_keys
             .iter()
             .map(|(endpoint_id, _)| *endpoint_id)
@@ -416,6 +425,11 @@ pub struct ModelRouteTargetRequest {
     #[serde(default, deserialize_with = "deserialize_nullable_override")]
     #[schema(minimum = 1)]
     pub embedding_dimensions_override: Option<Option<i32>>,
+    /// Mark this target as the route's manual preference for
+    /// future unbound sessions. At most one target per route may carry it;
+    /// `false` (default) keeps automatic selection. Always sent (no omit).
+    #[serde(default)]
+    pub prefer_new_sessions: bool,
 }
 
 /// Issue #1032: distinguish an omitted field from an explicit `null` for a
@@ -510,25 +524,35 @@ impl From<db::ModelRoutePage> for ModelRoutePageResponse {
     }
 }
 
-/// Issue #419: trim an upstream model and map whitespace-only/empty to
-/// `None` (inherit). Shared by persistence (`into_create`) and target
-/// dedup so validation and stored rows agree on what "same target" means.
-fn normalize_upstream_model(upstream_model: Option<&str>) -> Option<String> {
-    upstream_model
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-/// Issue #419: dedup identity for a route target.
+/// Dedup identity for a route target: the endpoint plus the normalized
+/// upstream model.
 fn target_dedup_key(endpoint_id: Uuid, upstream_model: Option<&str>) -> (Uuid, Option<String>) {
-    (endpoint_id, normalize_upstream_model(upstream_model))
+    (
+        endpoint_id,
+        crate::routing::normalize_upstream_model(upstream_model),
+    )
 }
 
 /// Issue #419: `true` when two targets share the same endpoint and the same
 /// normalized upstream model.
 fn has_duplicate_targets(keys: &[(Uuid, Option<String>)]) -> bool {
     keys.iter().collect::<std::collections::HashSet<_>>().len() != keys.len()
+}
+
+/// Reject a route that marks more than one target as the manual
+/// new-session preference.
+fn ensure_single_preferred_target<'a>(
+    targets: impl Iterator<Item = &'a ModelRouteTargetRequest>,
+) -> Result<(), ApiError> {
+    let preferred = targets.filter(|target| target.prefer_new_sessions).count();
+    if preferred > 1 {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "multiple_preferred_targets",
+            "at most one target may be preferred for new sessions",
+        ));
+    }
+    Ok(())
 }
 
 /// Issue #1032: stored per-target dimension overrides for a PATCH that omits
@@ -618,7 +642,10 @@ fn normalize_proxy_url(trimmed: &str) -> Result<String, &'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ModelRouteTargetRequest, has_duplicate_targets, target_dedup_key};
+    use super::{
+        ModelRouteTargetRequest, ensure_single_preferred_target, has_duplicate_targets,
+        target_dedup_key,
+    };
 
     #[test]
     fn target_dedup_allows_same_endpoint_different_model() {
@@ -714,6 +741,7 @@ mod tests {
             compact_mode: None,
             service_tier: None,
             embedding_dimensions_override: None,
+            prefer_new_sessions: false,
         })
         .expect("serialize off");
         assert_eq!(
@@ -741,6 +769,7 @@ mod tests {
             compact_mode: Some("self_summarize".to_string()),
             service_tier: Some("fast".to_string()),
             embedding_dimensions_override: None,
+            prefer_new_sessions: true,
         })
         .expect("serialize on");
         assert_eq!(
@@ -795,6 +824,50 @@ mod tests {
                 .is_none()
         );
         assert!(crate::db::normalize_thinking_effort_override(Some("ultra")).is_err());
+    }
+
+    #[test]
+    fn new_session_preference_defaults_off_and_serializes() {
+        // Omitted means automatic, and the flag round-trips as a
+        // plain boolean so a target toggle never drops it.
+        let omitted: ModelRouteTargetRequest = serde_json::from_value(serde_json::json!({
+            "endpoint_id": "00000000-0000-0000-0000-000000000000"
+        }))
+        .expect("parse omitted preference");
+        assert!(!omitted.prefer_new_sessions);
+        assert!(
+            !serde_json::to_value(&omitted)
+                .expect("serialize omitted preference")
+                .get("prefer_new_sessions")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(true)
+        );
+    }
+
+    #[test]
+    fn at_most_one_target_may_be_preferred() {
+        let request = |preferred: bool| ModelRouteTargetRequest {
+            endpoint_id: uuid::Uuid::nil(),
+            enabled: Some(true),
+            upstream_model: None,
+            native_api: None,
+            proxy_url_override: None,
+            has_proxy_url_override: None,
+            active_windows: None,
+            dev_system_normalize: false,
+            thinking_downgrade_enabled: false,
+            thinking_effort_override: None,
+            compact_mode: None,
+            service_tier: None,
+            embedding_dimensions_override: None,
+            prefer_new_sessions: preferred,
+        };
+        let one = [request(true), request(false)];
+        assert!(ensure_single_preferred_target(one.iter()).is_ok());
+        let none = [request(false), request(false)];
+        assert!(ensure_single_preferred_target(none.iter()).is_ok());
+        let two = [request(true), request(true)];
+        assert!(ensure_single_preferred_target(two.iter()).is_err());
     }
 
     #[test]

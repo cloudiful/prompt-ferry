@@ -1,8 +1,20 @@
+use sea_orm::sea_query::{Expr, OnConflict};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
 use sqlx::Sqlite;
+use uuid::Uuid;
+
+use crate::db::entities::sqlite::standalone_model_route_targets::{
+    ActiveModel as TargetActiveModel, Column as TargetColumn, Entity as TargetEntity,
+};
+use crate::db::entities::sqlite::standalone_model_routes::{
+    ActiveModel as RouteActiveModel, Column as RouteColumn, Entity as RouteEntity,
+};
+use crate::db::seaorm::SqliteNativeConnection;
 
 use super::{
     ClientKeyConfig, EndpointApiKeyConfig, ManagedRelayConfig, ModelRouteConfig,
-    ProviderEndpointConfig, Result, SettingConfig, StandaloneConfig, StandaloneConfigError,
+    ModelRouteTargetConfig, ProviderEndpointConfig, Result, SettingConfig, StandaloneConfig,
+    StandaloneConfigError,
 };
 use crate::relay_secrets::{EncryptedSecretEnvelope, RelaySecretManager};
 
@@ -135,12 +147,14 @@ impl EncryptedConfig {
 }
 
 pub(crate) async fn delete_all(transaction: &mut sqlx::Transaction<'_, Sqlite>) -> Result<()> {
-    standalone_query!("src/sql/standalone/delete_route_targets_all.sql")
-        .execute(&mut **transaction)
-        .await?;
-    standalone_query!("src/sql/standalone/delete_routes.sql")
-        .execute(&mut **transaction)
-        .await?;
+    {
+        let connection = SqliteNativeConnection::new(&mut **transaction);
+        delete_route_targets(&connection, None).await?;
+        RouteEntity::delete_many()
+            .exec(&connection)
+            .await
+            .map_err(crate::standalone_config::rows::native_error)?;
+    }
     standalone_query!("src/sql/standalone/delete_endpoint_keys_all.sql")
         .execute(&mut **transaction)
         .await?;
@@ -289,131 +303,187 @@ pub(crate) async fn insert_endpoint(
     Ok(())
 }
 
-pub(crate) async fn insert_route(
-    transaction: &mut sqlx::Transaction<'_, Sqlite>,
+/// Inserts or replaces one route and its targets on a native connection.
+pub(crate) async fn insert_route<C: ConnectionTrait>(
+    connection: &C,
     manager: &RelaySecretManager,
     route: &ModelRouteConfig,
 ) -> Result<()> {
-    standalone_query!("src/sql/standalone/save_route.sql")
-        .bind(route.rule_id.to_string())
-        .bind(route.scope.as_str())
-        .bind(route.owner_user_id)
-        .bind(&route.model_pattern)
-        .bind(route.routing_strategy.as_str())
-        .bind(bool_i64(route.enabled))
-        .execute(&mut **transaction)
-        .await?;
+    let mut targets = Vec::with_capacity(route.targets.len());
     for target in &route.targets {
-        let proxy_envelope = encrypt_optional(
-            manager,
-            target
-                .proxy_url_override
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty()),
-        )?;
-        // Issue #378 Phase I: plaintext schedule; empty normalizes to NULL.
-        let active_windows = target
-            .active_windows
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .map(str::to_string);
-        standalone_query!("src/sql/standalone/save_route_target.sql")
-            .bind(target.target_id.to_string())
-            .bind(route.rule_id.to_string())
-            .bind(target.endpoint_id.to_string())
-            .bind(target.position)
-            .bind(bool_i64(target.enabled))
-            .bind(&target.upstream_model)
-            .bind(target.native_api.as_str())
-            .bind(envelope_part(&proxy_envelope, EnvelopePart::Ciphertext))
-            .bind(envelope_part(&proxy_envelope, EnvelopePart::Nonce))
-            .bind(envelope_version(&proxy_envelope))
-            .bind(active_windows)
-            .bind(bool_i64(target.dev_system_normalize))
-            .bind(bool_i64(target.thinking_downgrade_enabled))
-            .bind(
+        targets.push((
+            target.clone(),
+            encrypt_optional(
+                manager,
                 target
-                    .thinking_effort_override
+                    .proxy_url_override
                     .as_deref()
                     .map(str::trim)
-                    .filter(|v| !v.is_empty())
-                    .map(str::to_string),
-            )
-            .bind({
-                // Issue #502 Task 5: empty normalizes to `passthrough`.
-                let trimmed = target.compact_mode.trim();
-                if trimmed.is_empty() {
-                    "passthrough".to_string()
-                } else {
-                    trimmed.to_string()
-                }
-            })
-            // Issue #637: free-form override; blank means inherit (NULL).
-            .bind(target.service_tier.as_deref())
-            // Issue #1032: nullable positive dimension override; `None`
-            // inherits the caller's dimensions.
-            .bind(target.embedding_dimensions_override)
-            .execute(&mut **transaction)
-            .await?;
+                    .filter(|v| !v.is_empty()),
+            )?,
+        ));
     }
-    Ok(())
+    insert_route_rows(connection, &route, &targets).await
 }
 
+/// Inserts or replaces one route and its already encrypted targets on the
+/// shared configuration transaction.
 pub(crate) async fn insert_encrypted_route(
     transaction: &mut sqlx::Transaction<'_, Sqlite>,
     encrypted: &EncryptedRoute,
 ) -> Result<()> {
-    let route = &encrypted.route;
-    standalone_query!("src/sql/standalone/save_route.sql")
-        .bind(route.rule_id.to_string())
-        .bind(route.scope.as_str())
-        .bind(route.owner_user_id)
-        .bind(&route.model_pattern)
-        .bind(route.routing_strategy.as_str())
-        .bind(bool_i64(route.enabled))
-        .execute(&mut **transaction)
-        .await?;
-    for target in &encrypted.targets {
-        standalone_query!("src/sql/standalone/save_route_target.sql")
-            .bind(target.target.target_id.to_string())
-            .bind(route.rule_id.to_string())
-            .bind(target.target.endpoint_id.to_string())
-            .bind(target.target.position)
-            .bind(bool_i64(target.target.enabled))
-            .bind(&target.target.upstream_model)
-            .bind(target.target.native_api.as_str())
-            .bind(envelope_part(
-                &target.proxy_url_override,
-                EnvelopePart::Ciphertext,
-            ))
-            .bind(envelope_part(
-                &target.proxy_url_override,
-                EnvelopePart::Nonce,
-            ))
-            .bind(envelope_version(&target.proxy_url_override))
-            .bind(target.target.active_windows.clone())
-            .bind(bool_i64(target.target.dev_system_normalize))
-            .bind(bool_i64(target.target.thinking_downgrade_enabled))
-            .bind(target.target.thinking_effort_override.as_deref())
-            .bind({
-                // Issue #502 Task 5: empty normalizes to `passthrough`.
-                let trimmed = target.target.compact_mode.trim();
-                if trimmed.is_empty() {
-                    "passthrough".to_string()
-                } else {
-                    trimmed.to_string()
-                }
-            })
-            // Issue #637: free-form override; blank means inherit (NULL).
-            .bind(target.target.service_tier.as_deref())
-            // Issue #1032: nullable positive dimension override; `None`
-            // inherits the caller's dimensions.
-            .bind(target.target.embedding_dimensions_override)
-            .execute(&mut **transaction)
-            .await?;
+    let connection = SqliteNativeConnection::new(&mut **transaction);
+    let targets = encrypted
+        .targets
+        .iter()
+        .map(|target| (target.target.clone(), target.proxy_url_override.clone()))
+        .collect::<Vec<_>>();
+    insert_route_rows(&connection, &encrypted.route, &targets).await
+}
+
+async fn insert_route_rows<C: ConnectionTrait>(
+    connection: &C,
+    route: &ModelRouteConfig,
+    targets: &[(ModelRouteTargetConfig, Option<EncryptedSecretEnvelope>)],
+) -> Result<()> {
+    upsert_route(connection, route).await?;
+    for (target, proxy_envelope) in targets {
+        upsert_route_target(connection, route.rule_id, target, proxy_envelope.as_ref()).await?;
     }
+    Ok(())
+}
+
+/// Inserts or replaces the route row itself.
+pub(crate) async fn upsert_route<C: ConnectionTrait>(
+    connection: &C,
+    route: &ModelRouteConfig,
+) -> Result<()> {
+    RouteEntity::insert(RouteActiveModel {
+        rule_id: Set(route.rule_id.to_string()),
+        scope: Set(route.scope.as_str().to_string()),
+        owner_user_id: Set(route.owner_user_id),
+        model_pattern: Set(route.model_pattern.clone()),
+        routing_strategy: Set(route.routing_strategy.as_str().to_string()),
+        enabled: Set(i32::from(route.enabled)),
+        ..Default::default()
+    })
+    .on_conflict(
+        OnConflict::column(RouteColumn::RuleId)
+            .update_columns([
+                RouteColumn::Scope,
+                RouteColumn::OwnerUserId,
+                RouteColumn::ModelPattern,
+                RouteColumn::RoutingStrategy,
+                RouteColumn::Enabled,
+            ])
+            .value(RouteColumn::UpdatedAt, Expr::current_timestamp())
+            .to_owned(),
+    )
+    .exec(connection)
+    .await
+    .map_err(crate::standalone_config::rows::native_error)?;
+    Ok(())
+}
+
+/// Inserts or replaces one route target.
+pub(crate) async fn upsert_route_target<C: ConnectionTrait>(
+    connection: &C,
+    rule_id: Uuid,
+    target: &ModelRouteTargetConfig,
+    proxy_envelope: Option<&EncryptedSecretEnvelope>,
+) -> Result<()> {
+    // Issue #378 Phase I: plaintext schedule; empty normalizes to NULL.
+    let active_windows = target
+        .active_windows
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    TargetEntity::insert(TargetActiveModel {
+        target_id: Set(target.target_id.to_string()),
+        rule_id: Set(rule_id.to_string()),
+        endpoint_id: Set(target.endpoint_id.to_string()),
+        position: Set(target.position),
+        enabled: Set(i32::from(target.enabled)),
+        upstream_model: Set(target.upstream_model.clone()),
+        native_api: Set(target.native_api.as_str().to_string()),
+        proxy_url_override_ciphertext: Set(
+            proxy_envelope.map(|envelope| envelope.ciphertext.clone())
+        ),
+        proxy_url_override_nonce: Set(proxy_envelope.map(|envelope| envelope.nonce.clone())),
+        proxy_url_override_key_version: Set(
+            proxy_envelope.map(|envelope| i32::from(envelope.key_version))
+        ),
+        active_windows: Set(active_windows),
+        dev_system_normalize: Set(i32::from(target.dev_system_normalize)),
+        thinking_effort_override: Set(target
+            .thinking_effort_override
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)),
+        // Issue #502 Task 5: empty normalizes to `passthrough`.
+        compact_mode: Set({
+            let trimmed = target.compact_mode.trim();
+            if trimmed.is_empty() {
+                "passthrough".to_string()
+            } else {
+                trimmed.to_string()
+            }
+        }),
+        thinking_downgrade_enabled: Set(i32::from(target.thinking_downgrade_enabled)),
+        // Issue #637: free-form override; blank means inherit (NULL).
+        service_tier: Set(target.service_tier.clone()),
+        // Issue #1032: nullable positive dimension override; `None`
+        // inherits the caller's dimensions.
+        embedding_dimensions_override: Set(target.embedding_dimensions_override),
+        // Manual new-session preference, default off.
+        prefer_new_sessions: Set(i32::from(target.prefer_new_sessions)),
+        ..Default::default()
+    })
+    .on_conflict(
+        OnConflict::column(TargetColumn::TargetId)
+            .update_columns([
+                TargetColumn::RuleId,
+                TargetColumn::EndpointId,
+                TargetColumn::Position,
+                TargetColumn::Enabled,
+                TargetColumn::UpstreamModel,
+                TargetColumn::NativeApi,
+                TargetColumn::ProxyUrlOverrideCiphertext,
+                TargetColumn::ProxyUrlOverrideNonce,
+                TargetColumn::ProxyUrlOverrideKeyVersion,
+                TargetColumn::ActiveWindows,
+                TargetColumn::DevSystemNormalize,
+                TargetColumn::ThinkingEffortOverride,
+                TargetColumn::CompactMode,
+                TargetColumn::ThinkingDowngradeEnabled,
+                TargetColumn::ServiceTier,
+                TargetColumn::EmbeddingDimensionsOverride,
+                TargetColumn::PreferNewSessions,
+            ])
+            .value(TargetColumn::UpdatedAt, Expr::current_timestamp())
+            .to_owned(),
+    )
+    .exec(connection)
+    .await
+    .map_err(crate::standalone_config::rows::native_error)?;
+    Ok(())
+}
+
+/// Removes the targets of one route, or every target when no rule is given.
+pub(crate) async fn delete_route_targets<C: ConnectionTrait>(
+    connection: &C,
+    rule_id: Option<Uuid>,
+) -> Result<()> {
+    let mut delete = TargetEntity::delete_many();
+    if let Some(rule_id) = rule_id {
+        delete = delete.filter(TargetColumn::RuleId.eq(rule_id.to_string()));
+    }
+    delete
+        .exec(connection)
+        .await
+        .map_err(crate::standalone_config::rows::native_error)?;
     Ok(())
 }
 

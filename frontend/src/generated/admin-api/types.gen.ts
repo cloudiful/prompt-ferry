@@ -1123,6 +1123,13 @@ export type ModelRouteTarget = {
      */
     native_api?: NativeApi;
     position: number;
+    /**
+     * This target is the route's manual new-session preference.
+     * At most one target per rule carries it; an unavailable preferred
+     * target falls back to automatic selection without moving an existing
+     * session. Always sent (no omit); `false` is the default.
+     */
+    prefer_new_sessions?: boolean;
     rule_id: string;
     /**
      * Issue #637: per-target free-form service-tier override. `None`/blank
@@ -1189,6 +1196,12 @@ export type ModelRouteTargetRequest = {
      */
     has_proxy_url_override?: boolean | null;
     native_api?: null | NativeApi;
+    /**
+     * Mark this target as the route's manual preference for
+     * future unbound sessions. At most one target per route may carry it;
+     * `false` (default) keeps automatic selection. Always sent (no omit).
+     */
+    prefer_new_sessions?: boolean;
     /**
      * Issue #368 Phase B: per-target proxy override. `None` (omitted/null)
      * means keep on PATCH / inherit on create; `Some("")` means clear to
@@ -2227,7 +2240,7 @@ export type ResetPasswordRequest = {
 
 export type ReviewFailurePolicy = 'fail_open' | 'fail_closed';
 
-export type RouteSelectionReason = 'default' | 'session_affinity' | 'session_load_balance' | 'conversation_override' | 'quota_failover';
+export type RouteSelectionReason = 'default' | 'session_affinity' | 'session_load_balance' | 'conversation_override' | 'quota_failover' | 'new_session_preference';
 
 export type SessionAffinityResetResponse = {
     cleared: boolean;

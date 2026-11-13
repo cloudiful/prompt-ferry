@@ -1,7 +1,10 @@
 use crate::{
     db,
     response_affinity::ResponseAffinityBinding,
-    routing::{candidate_target_by_endpoint, credential_binding, select_bound_credential},
+    routing::{
+        candidate_target_for_binding, credential_binding, normalize_upstream_model,
+        select_bound_credential,
+    },
     worker::runtime::prompt_log::RequestPromptLog,
     worker::runtime::request_assembly::BufferedBridgeRequest,
     worker_admin::token_plan_cache::TokenPlanQuotaCache,
@@ -27,16 +30,14 @@ pub(super) fn selection_for_binding<'a>(
     request: &BufferedBridgeRequest,
     quota_cache: Option<&TokenPlanQuotaCache>,
 ) -> BindingSelection<'a> {
-    let Some(target) =
-        candidate_target_by_endpoint(candidate, binding.endpoint_id).filter(|target| {
-            target.enabled
-                && crate::db::effective_stored_is_active_at(
-                    target.active_windows.as_deref(),
-                    target.endpoint_active_windows.as_deref(),
-                    crate::db::worker_local_minutes_now(),
-                )
-        })
-    else {
+    let Some(target) = candidate_target_for_binding(candidate, binding).filter(|target| {
+        target.enabled
+            && crate::db::effective_stored_is_active_at(
+                target.active_windows.as_deref(),
+                target.endpoint_active_windows.as_deref(),
+                crate::db::worker_local_minutes_now(),
+            )
+    }) else {
         return BindingSelection::Unavailable;
     };
     let Some(key_selection) = select_bound_credential(target, binding) else {
@@ -84,7 +85,7 @@ fn bound_unit_id(
     if let Some(key_id) = binding.endpoint_key_id {
         return Some(key_id);
     }
-    candidate_target_by_endpoint(candidate, binding.endpoint_id)
+    candidate_target_for_binding(candidate, binding)
         .and_then(|target| select_bound_credential(target, binding))
         .and_then(|selection| selection.key_id)
 }
@@ -112,8 +113,19 @@ pub(super) fn quota_failover_selection<'a>(
     let chained = previous_response_chain(request_prompt_log);
     let mut pool = key_pool::candidate_units(candidate, Some(quota_cache), context, exclude, true);
     if chained {
-        pool.units
-            .retain(|unit| unit.target.endpoint_id == binding.endpoint_id);
+        // A continuation keeps the upstream node pinned. A binding with a
+        // target identity pins the exact endpoint and model; a legacy
+        // binding pins the endpoint only.
+        match binding.target.as_ref() {
+            Some(identity) => pool.units.retain(|unit| {
+                unit.target.endpoint_id == binding.endpoint_id
+                    && normalize_upstream_model(unit.target.upstream_model.as_deref())
+                        == identity.upstream_model
+            }),
+            None => pool
+                .units
+                .retain(|unit| unit.target.endpoint_id == binding.endpoint_id),
+        }
     }
     let unit = key_pool::draw(&pool.units, stable_key)?;
     Some((

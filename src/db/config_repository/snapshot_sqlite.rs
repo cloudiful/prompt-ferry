@@ -177,6 +177,7 @@ fn convert_route(route: &ModelRouteConfig) -> ModelRouteSnapshot {
                 compact_mode: target.compact_mode.clone(),
                 service_tier: target.service_tier.clone(),
                 embedding_dimensions_override: target.embedding_dimensions_override,
+                prefer_new_sessions: target.prefer_new_sessions,
             })
             .collect(),
     }

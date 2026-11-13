@@ -555,6 +555,7 @@ mod tests {
                 thinking_effort_override: None,
                 compact_mode: crate::db::CompactMode::Passthrough,
                 has_oauth_token: false,
+                prefer_new_sessions: false,
             }
         }
         let day = r#"[{"start":"06:00","end":"07:00"}]"#;
@@ -628,6 +629,8 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             has_oauth_token: false,
+
+            prefer_new_sessions: false,
         };
         assert!(!candidate_target_is_active(&active, 720));
         let candidate = crate::db::types::ModelRouteCandidate {

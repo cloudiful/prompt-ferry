@@ -6070,6 +6070,13 @@ components:
         position:
           type: integer
           format: int32
+        prefer_new_sessions:
+          type: boolean
+          description: |-
+            This target is the route's manual new-session preference.
+            At most one target per rule carries it; an unavailable preferred
+            target falls back to automatic selection without moving an existing
+            session. Always sent (no omit); `false` is the default.
         rule_id:
           type: string
           format: uuid
@@ -6175,6 +6182,12 @@ components:
               Issue #409 Phase 1: per-target port type. `None` (omitted/null)
               means `Auto` (follow the caller); an explicit value wins over the
               upstream endpoint `native_api`.
+        prefer_new_sessions:
+          type: boolean
+          description: |-
+            Mark this target as the route's manual preference for
+            future unbound sessions. At most one target per route may carry it;
+            `false` (default) keeps automatic selection. Always sent (no omit).
         proxy_url_override:
           type:
           - string
@@ -8768,6 +8781,7 @@ components:
       - session_load_balance
       - conversation_override
       - quota_failover
+      - new_session_preference
     SessionAffinityResetResponse:
       type: object
       required:

@@ -260,6 +260,7 @@ async fn none_binding_fingerprint_migrates_off_exhausted_key() {
         endpoint_id,
         endpoint_key_id: None,
         endpoint_key_fingerprint: api_key_fingerprint("key-a"),
+        target: None,
     };
     let (selection, replacement) = quota_failover_selection(
         &candidate,
@@ -278,4 +279,139 @@ async fn none_binding_fingerprint_migrates_off_exhausted_key() {
         db::RouteSelectionReason::QuotaFailover
     );
     assert_eq!(replacement.endpoint_key_id, Some(alternate_key_id));
+}
+
+/// A route may use one endpoint for several upstream models. A binding that
+/// records the target identity resolves the exact model, while a legacy
+/// binding keeps the old first-endpoint match. The identity survives a route
+/// save that regenerates the target ids.
+#[tokio::test]
+async fn a_target_identity_binding_resolves_the_exact_model_of_one_endpoint() {
+    use super::session_affinity_quota::{BindingSelection, selection_for_binding};
+    use super::unified_pool_fixtures::{candidate, endpoint_key, target};
+
+    let endpoint_id = uuid::Uuid::new_v4();
+    let key_id = uuid::Uuid::new_v4();
+    let mut first = target(
+        endpoint_id,
+        0,
+        false,
+        vec![endpoint_key(endpoint_id, key_id, "key", 0)],
+    );
+    first.upstream_model = Some("model-a".to_string());
+    let mut second = target(
+        endpoint_id,
+        1,
+        false,
+        vec![endpoint_key(endpoint_id, key_id, "key", 0)],
+    );
+    second.upstream_model = Some("model-b".to_string());
+    let candidate = candidate(vec![first, second]);
+    let cache = TokenPlanQuotaCache::default();
+
+    let binding = ResponseAffinityBinding {
+        endpoint_id,
+        endpoint_key_id: Some(key_id),
+        endpoint_key_fingerprint: api_key_fingerprint("key-key"),
+        target: Some(crate::response_affinity::ResponseAffinityTargetIdentity {
+            upstream_model: Some("model-b".to_string()),
+        }),
+    };
+    let BindingSelection::Selected(selection) =
+        selection_for_binding(&candidate, &binding, &request(), Some(&cache))
+    else {
+        panic!("the bound target must stay selectable");
+    };
+    assert_eq!(selection.target.upstream_model.as_deref(), Some("model-b"));
+
+    // A legacy binding keeps the old endpoint-only resolution.
+    let mut legacy = binding.clone();
+    legacy.target = None;
+    let BindingSelection::Selected(selection) =
+        selection_for_binding(&candidate, &legacy, &request(), Some(&cache))
+    else {
+        panic!("the legacy binding must stay selectable");
+    };
+    assert_eq!(selection.target.upstream_model.as_deref(), Some("model-a"));
+
+    // A route save regenerates the target ids; the identity still resolves.
+    let mut saved = candidate.clone();
+    for (index, target) in saved.targets.iter_mut().enumerate() {
+        target.target_id = uuid::Uuid::new_v4();
+        target.prefer_new_sessions = index == 1;
+    }
+    let BindingSelection::Selected(selection) =
+        selection_for_binding(&saved, &binding, &request(), Some(&cache))
+    else {
+        panic!("the bound target must stay selectable after a save");
+    };
+    assert_eq!(selection.target.upstream_model.as_deref(), Some("model-b"));
+}
+
+/// A `previous_response_id` continuation may not migrate to another model of
+/// the same endpoint. A legacy binding stays endpoint-only.
+#[tokio::test]
+async fn a_chained_failover_keeps_the_bound_model_and_a_legacy_binding_stays_endpoint_only() {
+    use super::unified_pool_fixtures::{candidate, endpoint_key, target};
+
+    let endpoint_id = uuid::Uuid::new_v4();
+    let bound_key_id = uuid::Uuid::new_v4();
+    let other_key_id = uuid::Uuid::new_v4();
+    let mut bound = target(
+        endpoint_id,
+        0,
+        false,
+        vec![endpoint_key(endpoint_id, bound_key_id, "bound", 0)],
+    );
+    bound.upstream_model = Some("model-b".to_string());
+    let mut other = target(
+        endpoint_id,
+        1,
+        false,
+        vec![endpoint_key(endpoint_id, other_key_id, "other", 0)],
+    );
+    other.upstream_model = Some("model-a".to_string());
+    let candidate = candidate(vec![bound, other]);
+    let cache = TokenPlanQuotaCache::default();
+    let log = RequestPromptLog {
+        request_previous_response_id: Some("previous".into()),
+        ..Default::default()
+    };
+
+    let binding = ResponseAffinityBinding {
+        endpoint_id,
+        endpoint_key_id: Some(bound_key_id),
+        endpoint_key_fingerprint: api_key_fingerprint("bound-key"),
+        target: Some(crate::response_affinity::ResponseAffinityTargetIdentity {
+            upstream_model: Some("model-b".to_string()),
+        }),
+    };
+    assert!(
+        quota_failover_selection(
+            &candidate,
+            &binding,
+            &request(),
+            &log,
+            &cache,
+            "session-stable-key",
+            1
+        )
+        .is_none(),
+        "a continuation must not migrate to another model of the same endpoint"
+    );
+
+    let mut legacy = binding.clone();
+    legacy.target = None;
+    let (selection, _) = quota_failover_selection(
+        &candidate,
+        &legacy,
+        &request(),
+        &log,
+        &cache,
+        "session-stable-key",
+        1,
+    )
+    .expect("a legacy binding stays pinned to the endpoint");
+    assert_eq!(selection.target.endpoint_id, endpoint_id);
+    assert_eq!(selection.target.upstream_model.as_deref(), Some("model-a"));
 }

@@ -6,7 +6,7 @@ use http::StatusCode;
 use crate::{
     db,
     response_affinity::{ResponseAffinityBinding, ResponseAffinityStore, log_unavailable},
-    routing::credential_binding,
+    routing::{credential_binding, healed_credential_binding},
     worker::runtime::context::AffinityFailureAudit,
     worker_admin::token_plan_cache::{TokenPlanQuotaCache, estimate_input_tokens},
 };
@@ -21,6 +21,7 @@ use super::selection::endpoint_key_stickiness_value;
 use super::session_affinity_quota::{
     BindingSelection, log_quota_failover, quota_failover_selection, selection_for_binding,
 };
+use super::session_quota_selection::NewSessionPreferencePermission;
 use super::{
     quota_eligibility::{QuotaContext, reserve},
     quota_probe::{self, ProbeClaim, QuotaProbePermit},
@@ -112,6 +113,11 @@ pub(super) async fn select<'a>(
             return Err(anyhow::Error::new(RouteAffinityError::backend_unavailable()));
         }
     };
+    // The new-session preference only steers a session without a binding.
+    // Once a binding has been observed for this session, the selection
+    // follows the automatic rules, whether the binding is kept, healed or
+    // rebuilt.
+    let mut observed_existing_binding = binding.is_some();
     let quota_cache = &admin_state.token_plan_quota;
     refresh_candidate_quota(services, candidate).await;
     let model = request_model(request);
@@ -257,6 +263,7 @@ pub(super) async fn select<'a>(
                 model: model.as_deref(),
                 path: &request.path,
             },
+            NewSessionPreferencePermission::for_attempt(observed_existing_binding),
         )?;
         let created = match store.get_or_create(&cache_key, &candidate_binding).await {
             Ok(binding) => binding,
@@ -274,6 +281,9 @@ pub(super) async fn select<'a>(
             );
             return Ok(selection);
         }
+        // A concurrent worker bound the session first; the loaded binding is
+        // an observed binding, so a rebuild of it never uses the preference.
+        observed_existing_binding = true;
         binding = Some(created);
     }
 
@@ -346,7 +356,8 @@ async fn heal_stale_binding(
     binding: &ResponseAffinityBinding,
     selection: &SessionAffinitySelection<'_>,
 ) {
-    let replacement = credential_binding(selection.target, &selection.key_selection);
+    let replacement =
+        healed_credential_binding(selection.target, &selection.key_selection, binding);
     if replacement == *binding {
         return;
     }
@@ -365,6 +376,7 @@ fn select_new_binding<'a>(
     audit: &AffinityFailureAudit,
     quota_cache: &TokenPlanQuotaCache,
     context: QuotaContext<'_>,
+    permission: NewSessionPreferencePermission,
 ) -> Result<(SessionAffinitySelection<'a>, ResponseAffinityBinding)> {
     for _ in 0..quota_probe::candidate_claim_limit(candidate) {
         let selected = super::session_quota_selection::select(
@@ -374,6 +386,7 @@ fn select_new_binding<'a>(
             quota_cache,
             context,
             audit,
+            permission,
         )?;
         if selected.invalid_override {
             return Err(anyhow::Error::new(RouteAffinityError::conflict(

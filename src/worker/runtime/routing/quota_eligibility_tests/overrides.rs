@@ -6,6 +6,170 @@ use super::*;
 use crate::{routing::credential_binding, worker::runtime::prompt_log::RequestPromptLog};
 
 #[tokio::test]
+async fn new_session_preference_steers_initial_binding_and_falls_back_when_unavailable() {
+    let cache = TokenPlanQuotaCache::default();
+    let preferred_endpoint = Uuid::new_v4();
+    let fallback_endpoint = Uuid::new_v4();
+    let preferred_key = Uuid::new_v4();
+    let fallback_key = Uuid::new_v4();
+    let mut candidate = candidate(vec![
+        target(
+            preferred_endpoint,
+            0,
+            false,
+            vec![endpoint_key(
+                preferred_endpoint,
+                preferred_key,
+                "preferred",
+                0,
+            )],
+        ),
+        target(
+            fallback_endpoint,
+            1,
+            false,
+            vec![endpoint_key(fallback_endpoint, fallback_key, "fallback", 0)],
+        ),
+    ]);
+    candidate.targets[0].prefer_new_sessions = true;
+
+    // A fresh unbound session uses the preferred target and records why.
+    let selected = session_quota_selection::select(
+        &candidate,
+        &RequestPromptLog::default(),
+        "session",
+        &cache,
+        text(),
+        &Default::default(),
+        session_quota_selection::NewSessionPreferencePermission::InitialBinding,
+    )
+    .unwrap();
+    assert_eq!(selected.target.endpoint_id, preferred_endpoint);
+    assert_eq!(
+        selected.reason,
+        crate::db::RouteSelectionReason::NewSessionPreference
+    );
+
+    // An explicit conversation override keeps precedence over the preference.
+    let log = RequestPromptLog {
+        conversation_override_endpoint_id: Some(fallback_endpoint),
+        ..Default::default()
+    };
+    let selected = session_quota_selection::select(
+        &candidate,
+        &log,
+        "session",
+        &cache,
+        text(),
+        &Default::default(),
+        session_quota_selection::NewSessionPreferencePermission::InitialBinding,
+    )
+    .unwrap();
+    assert_eq!(selected.target.endpoint_id, fallback_endpoint);
+    assert_eq!(
+        selected.reason,
+        crate::db::RouteSelectionReason::ConversationOverride
+    );
+
+    // An exhausted preferred target contributes no unit: the automatic draw
+    // binds normally instead of failing the session.
+    cache
+        .store_for_test(
+            preferred_endpoint,
+            opencode_go_usage(&[(preferred_key, "preferred", 0.0)]),
+        )
+        .await;
+    let selected = session_quota_selection::select(
+        &candidate,
+        &RequestPromptLog::default(),
+        "session",
+        &cache,
+        text(),
+        &Default::default(),
+        session_quota_selection::NewSessionPreferencePermission::InitialBinding,
+    )
+    .unwrap();
+    assert_eq!(selected.target.endpoint_id, fallback_endpoint);
+    assert_eq!(
+        selected.reason,
+        crate::db::RouteSelectionReason::SessionAffinity
+    );
+}
+
+/// The new-session preference only steers a session without a binding. A
+/// session that already has one — a stale binding that is rebuilt, or an
+/// existing binding that is rebound — follows the automatic rules.
+#[tokio::test]
+async fn an_observed_binding_withdraws_the_new_session_preference() {
+    let cache = TokenPlanQuotaCache::default();
+    let preferred_endpoint = Uuid::new_v4();
+    let fallback_endpoint = Uuid::new_v4();
+    let mut candidate = candidate(vec![
+        target(
+            preferred_endpoint,
+            0,
+            false,
+            vec![endpoint_key(
+                preferred_endpoint,
+                Uuid::new_v4(),
+                "preferred",
+                0,
+            )],
+        ),
+        target(
+            fallback_endpoint,
+            1,
+            false,
+            vec![endpoint_key(
+                fallback_endpoint,
+                Uuid::new_v4(),
+                "fallback",
+                0,
+            )],
+        ),
+    ]);
+    candidate.targets[0].prefer_new_sessions = true;
+
+    // Without a binding the preference steers the session.
+    let selected = session_quota_selection::select(
+        &candidate,
+        &RequestPromptLog::default(),
+        "session",
+        &cache,
+        text(),
+        &Default::default(),
+        session_quota_selection::NewSessionPreferencePermission::InitialBinding,
+    )
+    .unwrap();
+    assert_eq!(selected.target.endpoint_id, preferred_endpoint);
+    assert_eq!(
+        selected.reason,
+        crate::db::RouteSelectionReason::NewSessionPreference
+    );
+
+    // An observed binding withdraws the permission, so the automatic rules
+    // decide the selection.
+    let selected = session_quota_selection::select(
+        &candidate,
+        &RequestPromptLog::default(),
+        "session",
+        &cache,
+        text(),
+        &Default::default(),
+        session_quota_selection::NewSessionPreferencePermission::ExistingBinding,
+    )
+    .unwrap();
+    assert_ne!(
+        selected.reason,
+        crate::db::RouteSelectionReason::NewSessionPreference
+    );
+    assert_eq!(
+        selected.reason,
+        crate::db::RouteSelectionReason::SessionAffinity
+    );
+}
+
+#[tokio::test]
 async fn blocked_override_and_preference_use_alternate_without_secret_bypass() {
     let cache = TokenPlanQuotaCache::default();
     let a = Uuid::new_v4();
@@ -41,6 +205,7 @@ async fn blocked_override_and_preference_use_alternate_without_secret_bypass() {
         &cache,
         text(),
         &Default::default(),
+        session_quota_selection::NewSessionPreferencePermission::InitialBinding,
     )
     .unwrap();
     assert_eq!(selected.target.endpoint_id, b);

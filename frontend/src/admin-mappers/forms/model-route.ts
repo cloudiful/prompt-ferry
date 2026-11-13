@@ -127,6 +127,8 @@ export function createEmptyModelRouteForm(): ModelRouteForm {
         // Issue #1032: inherit the caller's dimensions by default; no guessed
         // dimension is ever filled in.
         embedding_dimensions_override: null,
+        // Automatic selection by default.
+        prefer_new_sessions: false,
       },
     ],
   }
@@ -216,6 +218,8 @@ export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
         (target as { embedding_dimensions_override?: unknown } | undefined)
           ?.embedding_dimensions_override,
       ),
+      // Legacy payloads miss the flag (means automatic).
+      prefer_new_sessions: target?.prefer_new_sessions === true,
     })),
   }
 }
@@ -318,6 +322,9 @@ export function modelRouteFormToRequest(
           embedding_dimensions_override: normalizeEmbeddingDimensions(
             target?.embedding_dimensions_override,
           ),
+          // Always sent so a route/target toggle preserves the
+          // single preference.
+          prefer_new_sessions: target?.prefer_new_sessions === true,
         }
       }),
   }

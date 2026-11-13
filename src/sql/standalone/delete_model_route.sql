@@ -1,1 +1,0 @@
-DELETE FROM standalone_model_routes WHERE rule_id = ?;

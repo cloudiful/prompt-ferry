@@ -148,6 +148,8 @@ fn target_from_endpoint(
         compact_mode: db::resolve_target_compact_mode(Some(target.compact_mode.as_str())),
         // Issue #1004 P1: non-secret subscription eligibility.
         has_oauth_token,
+        // Manual new-session preference, default off.
+        prefer_new_sessions: target.prefer_new_sessions,
     }
 }
 
@@ -250,6 +252,8 @@ mod tests {
                         compact_mode: "passthrough".to_string(),
                         thinking_downgrade_enabled: false,
                         service_tier: None,
+
+                        prefer_new_sessions: false,
                     }],
                 },
                 ModelRouteConfig {
@@ -274,6 +278,8 @@ mod tests {
                         compact_mode: "passthrough".to_string(),
                         thinking_downgrade_enabled: false,
                         service_tier: None,
+
+                        prefer_new_sessions: false,
                     }],
                 },
             ],
@@ -333,6 +339,8 @@ mod tests {
                     thinking_downgrade_enabled: false,
                     // Issue #637: inherit the endpoint override.
                     service_tier: None,
+
+                    prefer_new_sessions: false,
                 }],
             }],
             ..StandaloneConfig::default()

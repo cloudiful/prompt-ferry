@@ -19,9 +19,13 @@ mod tests {
     use super::postgres::config_archive_audit;
     use super::postgres::managed_relays;
     use super::postgres::mcp_servers;
+    use super::postgres::model_endpoint_rules;
+    use super::postgres::model_route_targets;
     use super::postgres::users;
     use super::sqlite::standalone_client_keys;
     use super::sqlite::standalone_mcp_servers;
+    use super::sqlite::standalone_model_route_targets;
+    use super::sqlite::standalone_model_routes;
     use super::sqlite::standalone_users;
 
     #[test]
@@ -191,6 +195,229 @@ mod tests {
         assert!(
             !key_id_column.to_ascii_lowercase().contains("not null"),
             "key_id must keep the applied nullable TEXT PRIMARY KEY: {key_id_column}"
+        );
+    }
+
+    #[test]
+    fn postgres_model_route_declaration_keeps_applied_checks() {
+        let rules = model_endpoint_rules::create_table_statement().to_owned();
+        let rules_sql = rules.to_string(PostgresQueryBuilder);
+        for expected in [
+            "model_endpoint_rules_scope_check",
+            "ck_model_route_owner",
+            "ck_model_endpoint_rules_routing_strategy",
+        ] {
+            assert!(
+                rules_sql.contains(expected),
+                "missing {expected}: {rules_sql}"
+            );
+        }
+        assert!(
+            !rules_sql.contains("FOREIGN KEY"),
+            "no foreign key allowed: {rules_sql}"
+        );
+
+        let targets = model_route_targets::create_table_statement().to_owned();
+        let targets_sql = targets.to_string(PostgresQueryBuilder);
+        for expected in [
+            "ck_model_route_targets_native_api",
+            "ck_model_route_targets_compact_mode",
+            "ck_model_route_targets_thinking_effort",
+            "ck_model_route_targets_embedding_dimensions_override",
+        ] {
+            assert!(
+                targets_sql.contains(expected),
+                "missing {expected}: {targets_sql}"
+            );
+        }
+        assert!(
+            !targets_sql.contains("FOREIGN KEY"),
+            "no foreign key allowed: {targets_sql}"
+        );
+    }
+
+    #[test]
+    fn postgres_model_route_indexes_keep_rule_position_and_preference() {
+        let rendered = model_route_targets::create_index_statements()
+            .iter()
+            .map(|index| index.to_string(PostgresQueryBuilder))
+            .collect::<Vec<_>>();
+        assert!(
+            rendered
+                .iter()
+                .any(|sql| sql.contains("idx_model_route_targets_rule_position")
+                    && sql.contains("UNIQUE")),
+            "rule position unique index missing: {rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|sql| {
+                sql.contains("ux_model_route_targets_preferred_new_session")
+                    && sql.contains("UNIQUE")
+                    && sql.contains("WHERE")
+            }),
+            "preferred new session unique index missing: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn sqlite_model_route_declaration_matches_the_applied_standalone_schema() {
+        let routes = standalone_model_routes::create_table_statement().to_owned();
+        let routes_sql = routes.to_string(SqliteQueryBuilder);
+        for expected in [
+            "standalone_model_routes_scope_check",
+            "standalone_model_routes_routing_strategy_check",
+            "standalone_model_routes_enabled_check",
+            "standalone_model_routes_owner_check",
+        ] {
+            assert!(
+                routes_sql.contains(expected),
+                "missing {expected}: {routes_sql}"
+            );
+        }
+        // The applied table declares the routing strategy without a default
+        // and accepts only the remaining strategy.
+        assert!(
+            routes_sql.contains("\"routing_strategy\" text NOT NULL,"),
+            "routing strategy must have no default: {routes_sql}"
+        );
+        assert!(
+            routes_sql.contains("\"routing_strategy\" IN ('responses_session_affinity')"),
+            "routing strategy check drifted: {routes_sql}"
+        );
+        assert!(
+            !routes_sql.contains("client_key_rendezvous"),
+            "the removed strategy must not be declared: {routes_sql}"
+        );
+        // The applied scope, owner and pattern uniqueness is an unnamed table
+        // constraint.
+        assert!(
+            routes_sql.contains("UNIQUE (\"scope\", \"owner_user_id\", \"model_pattern\")"),
+            "scope, owner and pattern uniqueness missing: {routes_sql}"
+        );
+
+        let rendered = standalone_model_routes::create_index_statements()
+            .iter()
+            .map(|index| index.to_string(SqliteQueryBuilder))
+            .collect::<Vec<_>>();
+        assert!(
+            rendered
+                .iter()
+                .any(|sql| sql.contains("idx_standalone_routes_enabled")
+                    && sql.contains("(\"scope\", \"owner_user_id\", \"enabled\")")),
+            "applied route index missing: {rendered:?}"
+        );
+
+        let targets = standalone_model_route_targets::create_table_statement().to_owned();
+        let targets_sql = targets.to_string(SqliteQueryBuilder);
+        assert!(
+            targets_sql.contains("UNIQUE (\"rule_id\", \"position\")"),
+            "rule and position uniqueness missing: {targets_sql}"
+        );
+        assert!(
+            targets_sql.contains(
+                "typeof(\"standalone_model_route_targets\".\"embedding_dimensions_override\") = 'integer'"
+            ),
+            "dimension check drifted: {targets_sql}"
+        );
+
+        let rendered = standalone_model_route_targets::create_index_statements()
+            .iter()
+            .map(|index| index.to_string(SqliteQueryBuilder))
+            .collect::<Vec<_>>();
+        assert!(
+            rendered.iter().any(|sql| {
+                sql.contains("ux_standalone_model_route_targets_preferred")
+                    && sql.contains("UNIQUE")
+                    && sql.contains("WHERE")
+            }),
+            "preferred new session unique index missing: {rendered:?}"
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|sql| sql.contains("idx_standalone_route_targets_rule")
+                    && sql.contains("(\"rule_id\", \"enabled\", \"position\")")),
+            "applied target index missing: {rendered:?}"
+        );
+        assert!(
+            !rendered
+                .iter()
+                .any(|sql| sql.contains("ux_standalone_model_route_targets_rule_position")),
+            "an invented unique index name must not be declared: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn postgres_model_route_declaration_matches_the_applied_migrations() {
+        let rules = model_endpoint_rules::create_table_statement().to_owned();
+        let rules_sql = rules.to_string(PostgresQueryBuilder);
+        // The applied column keeps its original default and the narrowed check.
+        assert!(
+            rules_sql
+                .contains("\"routing_strategy\" text NOT NULL DEFAULT 'client_key_rendezvous'"),
+            "routing strategy default drifted: {rules_sql}"
+        );
+        assert!(
+            rules_sql.contains("\"routing_strategy\" = 'responses_session_affinity'"),
+            "routing strategy check drifted: {rules_sql}"
+        );
+        let rendered = model_endpoint_rules::create_index_statements()
+            .iter()
+            .map(|index| index.to_string(PostgresQueryBuilder))
+            .collect::<Vec<_>>();
+        assert!(
+            rendered
+                .iter()
+                .any(|sql| sql.contains("idx_model_endpoint_rules_scope_user")
+                    && sql.contains("(\"scope\", \"owner_user_id\", \"enabled\", \"priority\")")),
+            "applied rule index missing: {rendered:?}"
+        );
+
+        let targets = model_route_targets::create_table_statement().to_owned();
+        let targets_sql = targets.to_string(PostgresQueryBuilder);
+        for expected in [
+            "\"native_api\" text NOT NULL DEFAULT 'auto'",
+            "\"compact_mode\" text NOT NULL DEFAULT 'passthrough'",
+            "\"dev_system_normalize\" bool NOT NULL DEFAULT (FALSE)",
+            "\"prefer_new_sessions\" bool NOT NULL DEFAULT (FALSE)",
+            "\"embedding_dimensions_override\" integer",
+        ] {
+            assert!(
+                targets_sql.contains(expected),
+                "missing {expected}: {targets_sql}"
+            );
+        }
+        assert!(
+            targets_sql.contains(
+                "\"embedding_dimensions_override\" IS NULL OR \"embedding_dimensions_override\" > 0"
+            ),
+            "dimension check drifted: {targets_sql}"
+        );
+
+        let rendered = model_route_targets::create_index_statements()
+            .iter()
+            .map(|index| index.to_string(PostgresQueryBuilder))
+            .collect::<Vec<_>>();
+        assert!(
+            rendered
+                .iter()
+                .any(|sql| sql.contains("idx_model_route_targets_rule_position")
+                    && sql.contains("UNIQUE")),
+            "rule position unique index missing: {rendered:?}"
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|sql| sql.contains("idx_model_route_targets_endpoint_enabled")),
+            "endpoint enabled index missing: {rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|sql| {
+                sql.contains("ux_model_route_targets_preferred_new_session")
+                    && sql.contains("UNIQUE")
+                    && sql.contains("WHERE")
+            }),
+            "preferred new session unique index missing: {rendered:?}"
         );
     }
 }

@@ -107,6 +107,7 @@ Compose 已写入数据的数据库，请先把 Compose 卷中的
 - 备份 PostgreSQL 与 `<data-root>/prompt-ferry/worker-config.key`；缺少该密钥则已存储的密文无法解密。
 - PostgreSQL 17 升级到 18 只能通过 `pg_dump`/`pg_restore` 或 `pg_upgrade`；本示例新建 PostgreSQL 18 数据卷，不会迁移任何旧数据。
 - 所有端口仅绑定回环地址。需要从其他机器访问时，请显式绑定端口并配置 TLS 与反向代理。
+- 会话亲和负载会记录选中的上游模型。请一次性升级全部 relay worker：旧版本会忽略该模型，可能把同一端点的会话交给另一个模型处理。
 
 ## 相关文档
 

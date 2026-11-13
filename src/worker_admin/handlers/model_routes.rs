@@ -1116,6 +1116,7 @@ mod route_test_probe_tests {
             thinking_effort_override: None,
             compact_mode: db::CompactMode::Passthrough,
             has_oauth_token: false,
+            prefer_new_sessions: false,
         }
     }
 

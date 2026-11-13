@@ -1,5 +1,7 @@
 use crate::db::{EndpointApiKeySelection, ModelRouteCandidate, ModelRouteCandidateTarget};
-use crate::response_affinity::{ResponseAffinityBinding, api_key_fingerprint};
+use crate::response_affinity::{
+    ResponseAffinityBinding, ResponseAffinityTargetIdentity, api_key_fingerprint,
+};
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 
@@ -8,6 +10,18 @@ pub enum BoundBindingState {
     Active,
     StaleEndpoint,
     StaleKey,
+}
+
+/// Normalize an upstream model name: trimmed, and a blank value means the
+/// target inherits the request model.
+///
+/// Shared by the admin target dedup validation and by the session binding
+/// identity, so both agree on what "the same target" means.
+pub fn normalize_upstream_model(upstream_model: Option<&str>) -> Option<String> {
+    upstream_model
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 pub fn candidate_target_by_endpoint(
@@ -20,11 +34,30 @@ pub fn candidate_target_by_endpoint(
         .find(|target| target.endpoint_id == endpoint_id)
 }
 
+/// The target a session binding points at.
+///
+/// A legacy binding carries no target identity and resolves by endpoint
+/// alone, matching the first target of that endpoint. A binding with an
+/// identity resolves the exact endpoint and upstream model, so a route that
+/// uses one endpoint for several models keeps its selected model.
+pub fn candidate_target_for_binding<'a>(
+    candidate: &'a ModelRouteCandidate,
+    binding: &ResponseAffinityBinding,
+) -> Option<&'a ModelRouteCandidateTarget> {
+    let Some(identity) = binding.target.as_ref() else {
+        return candidate_target_by_endpoint(candidate, binding.endpoint_id);
+    };
+    candidate.targets.iter().find(|target| {
+        target.endpoint_id == binding.endpoint_id
+            && normalize_upstream_model(target.upstream_model.as_deref()) == identity.upstream_model
+    })
+}
+
 pub fn bound_binding_state(
     candidate: &ModelRouteCandidate,
     binding: &ResponseAffinityBinding,
 ) -> BoundBindingState {
-    let Some(target) = candidate_target_by_endpoint(candidate, binding.endpoint_id) else {
+    let Some(target) = candidate_target_for_binding(candidate, binding) else {
         return BoundBindingState::StaleEndpoint;
     };
     if !target.enabled {
@@ -53,6 +86,13 @@ pub(crate) fn subscription_selection() -> EndpointApiKeySelection {
     }
 }
 
+/// The identity of the target a binding points at.
+pub fn target_identity(target: &ModelRouteCandidateTarget) -> ResponseAffinityTargetIdentity {
+    ResponseAffinityTargetIdentity {
+        upstream_model: normalize_upstream_model(target.upstream_model.as_deref()),
+    }
+}
+
 pub(crate) fn credential_binding(
     target: &ModelRouteCandidateTarget,
     selection: &EndpointApiKeySelection,
@@ -66,7 +106,24 @@ pub(crate) fn credential_binding(
         endpoint_id: target.endpoint_id,
         endpoint_key_id: key_id,
         endpoint_key_fingerprint: api_key_fingerprint(secret),
+        target: Some(target_identity(target)),
     }
+}
+
+/// The replacement binding for a healed binding.
+///
+/// A legacy binding stays legacy: healing refreshes its credential but
+/// never repins the session to a target it did not select before.
+pub(crate) fn healed_credential_binding(
+    target: &ModelRouteCandidateTarget,
+    selection: &EndpointApiKeySelection,
+    previous: &ResponseAffinityBinding,
+) -> ResponseAffinityBinding {
+    let mut binding = credential_binding(target, selection);
+    if previous.target.is_none() {
+        binding.target = None;
+    }
+    binding
 }
 
 pub fn select_bound_credential(

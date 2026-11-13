@@ -30,7 +30,7 @@ mod snapshot;
 #[path = "store_usage_summaries.rs"]
 mod usage_summaries;
 
-const CURRENT_SCHEMA_VERSION: i64 = 38;
+const CURRENT_SCHEMA_VERSION: i64 = 39;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootstrapOutcome {

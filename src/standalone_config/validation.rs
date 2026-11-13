@@ -102,7 +102,11 @@ impl StandaloneConfig {
                 _ => {}
             }
             let mut target_ids = HashSet::new();
+            let mut preferred_targets = 0usize;
             for target in &route.targets {
+                if target.prefer_new_sessions {
+                    preferred_targets += 1;
+                }
                 if !endpoint_ids.contains(&target.endpoint_id) {
                     return invalid(
                         "target.endpoint_id",
@@ -126,6 +130,12 @@ impl StandaloneConfig {
             }
             if route.targets.is_empty() {
                 return invalid("targets", "must contain at least one target");
+            }
+            if preferred_targets > 1 {
+                return invalid(
+                    "prefer_new_sessions",
+                    "at most one target may be preferred for new sessions",
+                );
             }
         }
 

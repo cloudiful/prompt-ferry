@@ -5,10 +5,13 @@
 //! replace transaction opened by [`super::postgres::apply`].
 
 use anyhow::{Context, Result};
+use sea_orm::{EntityTrait, Set};
 use sqlx::{PgConnection, QueryBuilder};
 
 use super::super::snapshot::{McpCredentialSnapshot, McpServerSnapshot, SnapshotDomains};
 use super::postgres::run;
+use crate::db::entities::postgres::model_route_targets;
+use crate::db::seaorm::PostgresNativeConnection;
 use crate::db::settings::RAW_OBJECT_STORE_SETTINGS_KEY;
 use crate::raw_payload_store::{RawObjectStoreConfig, RawObjectStorePersisted};
 use crate::relay_secrets::{EncryptedSecretEnvelope, RelaySecretManager};
@@ -33,31 +36,37 @@ pub(super) async fn insert_route_targets(
     if targets.is_empty() {
         return Ok(());
     }
-    let mut query = QueryBuilder::new(
-        "INSERT INTO model_route_targets (target_id, rule_id, endpoint_id, position, enabled, \
-         created_at, updated_at, upstream_model, proxy_url_override, active_windows, \
-         dev_system_normalize, native_api, thinking_effort_override, compact_mode, \
-         thinking_downgrade_enabled, service_tier) ",
-    );
-    query.push_values(targets, |mut row, (rule_id, stamp, target)| {
-        row.push_bind(target.target_id)
-            .push_bind(rule_id)
-            .push_bind(target.endpoint_id)
-            .push_bind(target.position)
-            .push_bind(target.enabled)
-            .push_bind(stamp)
-            .push_bind(stamp)
-            .push_bind(target.upstream_model.clone())
-            .push_bind(target.proxy_url_override.clone())
-            .push_bind(target.active_windows.clone())
-            .push_bind(target.dev_system_normalize)
-            .push_bind(target.native_api.clone())
-            .push_bind(target.thinking_effort_override.clone())
-            .push_bind(target.compact_mode.clone())
-            .push_bind(target.thinking_downgrade_enabled)
-            .push_bind(target.service_tier.clone());
-    });
-    run(conn, query).await
+    let connection = PostgresNativeConnection::new(&mut *conn);
+    for (rule_id, stamp, target) in targets {
+        model_route_targets::Entity::insert(model_route_targets::ActiveModel {
+            target_id: Set(target.target_id),
+            rule_id: Set(rule_id),
+            endpoint_id: Set(target.endpoint_id),
+            position: Set(target.position),
+            enabled: Set(target.enabled),
+            created_at: Set(stamp),
+            updated_at: Set(stamp),
+            upstream_model: Set(target.upstream_model.clone()),
+            proxy_url_override: Set(target.proxy_url_override.clone()),
+            active_windows: Set(target.active_windows.clone()),
+            dev_system_normalize: Set(target.dev_system_normalize),
+            native_api: Set(target.native_api.clone()),
+            thinking_effort_override: Set(target.thinking_effort_override.clone()),
+            compact_mode: Set(target.compact_mode.clone()),
+            thinking_downgrade_enabled: Set(target.thinking_downgrade_enabled),
+            service_tier: Set(target.service_tier.clone()),
+            // The archive carries the dimension override, so the
+            // restore keeps it.
+            embedding_dimensions_override: Set(target.embedding_dimensions_override),
+            // Manual new-session preference.
+            prefer_new_sessions: Set(target.prefer_new_sessions),
+            ..Default::default()
+        })
+        .exec(&connection)
+        .await
+        .map_err(crate::db::seaorm::native_error)?;
+    }
+    Ok(())
 }
 
 /// Rebuild `bearer_tokens_json` from the credential rows so the server keeps
