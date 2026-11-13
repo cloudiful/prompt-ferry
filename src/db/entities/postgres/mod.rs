@@ -2,6 +2,7 @@
 
 pub mod client_keys;
 pub mod config_archive_audit;
+pub mod conversation_endpoint_overrides;
 pub mod endpoint_api_keys;
 pub mod endpoint_oauth_tokens;
 pub mod managed_relays;
@@ -11,5 +12,6 @@ pub mod model_endpoint_rules;
 pub mod model_route_targets;
 pub mod provider_endpoints;
 pub mod user_endpoint_settings;
+pub mod user_redaction_configs;
 pub mod users;
 pub mod worker_settings;

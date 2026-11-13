@@ -3,14 +3,14 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use sea_orm::sea_query::{Expr, OnConflict};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use sqlx::PgPool;
 
 use crate::{
     db::StreamDeltaBatchingSettings,
-    db::entities::postgres::worker_settings,
+    db::entities::postgres::{user_redaction_configs, worker_settings},
     db::seaorm::{native_error, postgres_connection},
     raw_payload_store::{RawObjectStoreConfig, RawObjectStorePersisted},
     redact::RedactionConfig,
@@ -136,20 +136,32 @@ pub async fn get_redaction_config_updated_at(
     global: bool,
     user_id: Option<i64>,
 ) -> Result<Option<DateTime<Utc>>> {
-    let row = sqlx::query_file!(
-        "src/sql/settings/get_redaction_config_updated_at.sql",
-        global,
-        user_id,
-    )
-    .fetch_one(pool)
-    .await?;
-    Ok(row.updated_at)
+    let db = postgres_connection(pool);
+    if global {
+        Ok(
+            worker_settings::Entity::find_by_id("redaction_config".to_string())
+                .one(&db)
+                .await
+                .map_err(native_error)?
+                .map(|row| row.updated_at),
+        )
+    } else if let Some(user_id) = user_id {
+        Ok(user_redaction_configs::Entity::find_by_id(user_id)
+            .one(&db)
+            .await
+            .map_err(native_error)?
+            .map(|row| row.updated_at))
+    } else {
+        Ok(None)
+    }
 }
 
 pub async fn get_user_redaction_config(pool: &PgPool, user_id: i64) -> Result<RedactionConfig> {
-    let value = sqlx::query_file!("src/sql/settings/get_user_redaction_config.sql", user_id,)
-        .fetch_optional(pool)
-        .await?
+    let db = postgres_connection(pool);
+    let value = user_redaction_configs::Entity::find_by_id(user_id)
+        .one(&db)
+        .await
+        .map_err(native_error)?
         .map(|row| row.config);
     value
         .map(serde_json::from_value)
@@ -160,9 +172,12 @@ pub async fn get_user_redaction_config(pool: &PgPool, user_id: i64) -> Result<Re
 }
 
 pub async fn list_user_redaction_configs(pool: &PgPool) -> Result<HashMap<i64, RedactionConfig>> {
-    let rows = sqlx::query_file!("src/sql/settings/list_user_redaction_configs.sql")
-        .fetch_all(pool)
-        .await?;
+    let db = postgres_connection(pool);
+    let rows = user_redaction_configs::Entity::find()
+        .order_by_asc(user_redaction_configs::Column::UserId)
+        .all(&db)
+        .await
+        .map_err(native_error)?;
     let mut configs = HashMap::with_capacity(rows.len());
     for row in rows {
         configs.insert(
@@ -179,13 +194,24 @@ pub async fn set_user_redaction_config(
     config: &RedactionConfig,
 ) -> Result<()> {
     let json_value = serde_json::to_value(config)?;
-    sqlx::query_file!(
-        "src/sql/settings/set_user_redaction_config.sql",
-        user_id,
-        json_value,
+    let db = postgres_connection(pool);
+    user_redaction_configs::Entity::insert(user_redaction_configs::ActiveModel {
+        user_id: Set(user_id),
+        config: Set(json_value),
+        updated_at: sea_orm::ActiveValue::NotSet,
+    })
+    .on_conflict(
+        OnConflict::column(user_redaction_configs::Column::UserId)
+            .update_column(user_redaction_configs::Column::Config)
+            .value(
+                user_redaction_configs::Column::UpdatedAt,
+                Expr::current_timestamp(),
+            )
+            .to_owned(),
     )
-    .execute(pool)
-    .await?;
+    .exec(&db)
+    .await
+    .map_err(native_error)?;
     Ok(())
 }
 
