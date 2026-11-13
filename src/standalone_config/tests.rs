@@ -308,3 +308,17 @@ async fn metadata_record_debug_output_omits_raw_body_and_secret_field_names() {
 }
 
 // ---- Phase 1C-b standalone replay snapshot tests ----
+
+#[test]
+fn setting_model_projection_preserves_the_full_i64_version_range() {
+    let version = i64::from(i32::MAX) + 12_345;
+    let model = crate::db::entities::sqlite::standalone_settings::Model {
+        setting_key: "large-version".to_string(),
+        value_version: version,
+        value_json: "{\"large\":true}".to_string(),
+        updated_at: "2026-01-01 00:00:00".to_string(),
+    };
+    let setting = super::rows::setting_from_model(&model).expect("project the setting row");
+    assert_eq!(setting.version, version);
+    assert_eq!(setting.value, serde_json::json!({"large": true}));
+}

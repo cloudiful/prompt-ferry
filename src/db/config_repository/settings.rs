@@ -85,9 +85,15 @@ impl super::ConfigRepository {
 pub(super) async fn list_all_settings_postgres(
     pool: &sqlx::PgPool,
 ) -> Result<Vec<SettingSnapshot>> {
-    Ok(sqlx::query_file!("src/sql/settings/list_all_settings.sql")
-        .fetch_all(pool)
-        .await?
+    use sea_orm::{EntityTrait, QueryOrder};
+
+    let db = crate::db::seaorm::postgres_connection(pool);
+    let rows = crate::db::entities::postgres::worker_settings::Entity::find()
+        .order_by_asc(crate::db::entities::postgres::worker_settings::Column::SettingKey)
+        .all(&db)
+        .await
+        .map_err(crate::db::seaorm::native_error)?;
+    Ok(rows
         .into_iter()
         .map(|row| SettingSnapshot {
             key: row.setting_key,
@@ -136,16 +142,12 @@ impl SqliteConfigRepository {
     where
         T: DeserializeOwned,
     {
-        let snapshot = self
+        let setting = self
             .store
-            .load_snapshot(&self.manager)
+            .get_setting(key)
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
-        let Some(setting) = snapshot
-            .settings
-            .into_iter()
-            .find(|setting| setting.key == key)
-        else {
+        let Some(setting) = setting else {
             return Ok(None);
         };
         let value = serde_json::from_value(setting.value)?;
@@ -176,29 +178,21 @@ impl SqliteConfigRepository {
     }
 
     async fn get_setting(&self, key: &str) -> Result<Option<UnifiedSetting>> {
-        let snapshot = self
+        let setting = self
             .store
-            .load_snapshot(&self.manager)
+            .get_setting(key)
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
-        Ok(snapshot
-            .settings
-            .into_iter()
-            .find(|setting| setting.key == key)
-            .map(UnifiedSetting::from_sqlite))
+        Ok(setting.map(UnifiedSetting::from_sqlite))
     }
 
     async fn get_bool_setting(&self, key: &str, default: bool) -> Result<bool> {
-        let snapshot = self
+        let setting = self
             .store
-            .load_snapshot(&self.manager)
+            .get_setting(key)
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
-        let Some(setting) = snapshot
-            .settings
-            .into_iter()
-            .find(|setting| setting.key == key)
-        else {
+        let Some(setting) = setting else {
             return Ok(default);
         };
         Ok(setting.value.as_bool().unwrap_or(default))

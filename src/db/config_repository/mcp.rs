@@ -337,12 +337,40 @@ impl super::ConfigRepository {
 async fn list_all_credentials_postgres(
     pool: &sqlx::PgPool,
 ) -> Result<Vec<crate::db::McpCredential>> {
-    Ok(sqlx::query_file_as!(
-        crate::db::McpCredential,
-        "src/sql/mcp_credentials/list_credentials_all.sql",
-    )
-    .fetch_all(pool)
-    .await?)
+    use sea_orm::{EntityTrait, QueryOrder};
+
+    let db = crate::db::seaorm::postgres_connection(pool);
+    let rows = crate::db::entities::postgres::mcp_credentials::Entity::find()
+        .order_by_asc(crate::db::entities::postgres::mcp_credentials::Column::ServerId)
+        .order_by_asc(crate::db::entities::postgres::mcp_credentials::Column::Position)
+        .order_by_asc(crate::db::entities::postgres::mcp_credentials::Column::CredentialId)
+        .all(&db)
+        .await
+        .map_err(crate::db::seaorm::native_error)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| crate::db::McpCredential {
+            credential_id: row.credential_id,
+            server_id: row.server_id,
+            credential_label: row.credential_label,
+            secret: row.secret,
+            position: row.position,
+            enabled: row.enabled,
+            provider_kind: row.provider_kind,
+            default_cost: row.default_cost,
+            strict_mode: row.strict_mode,
+            billing_period_start: row.billing_period_start,
+            billing_period_end: row.billing_period_end,
+            provider_remaining: row.provider_remaining,
+            provider_synced_at: row.provider_synced_at,
+            provider_reset_at: row.provider_reset_at,
+            cooldown_until: row.cooldown_until,
+            last_error: row.last_error,
+            last_error_at: row.last_error_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+        .collect())
 }
 
 fn input_from_endpoint(endpoint: &ProviderEndpoint, name: String, enabled: bool) -> McpServerInput {

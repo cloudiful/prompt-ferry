@@ -4,10 +4,21 @@ use chrono::Duration as ChronoDuration;
 use tracing::warn;
 
 pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) -> Result<i64> {
+    let (event_id, _created_at) = record_request_record_with_created_at(pool, input).await?;
+    Ok(event_id)
+}
+
+/// Persist the request record and return its canonical identity: the
+/// `event_id` and the `created_at` partition key the row was written with.
+/// The caller reuses that timestamp instead of looking the row up again.
+async fn record_request_record_with_created_at(
+    pool: &PgPool,
+    input: RequestRecordCreate,
+) -> Result<(i64, DateTime<Utc>)> {
     let ref_full = input.request_full_json.clone();
     let ref_delta = input.request_delta_json.clone();
     let mut tx = pool.begin().await?;
-    let event_id = sqlx::query_file_scalar!(
+    let record = sqlx::query_file!(
         "src/sql/usage/upsert_request_record.sql",
         input.created_at,
         input.event_kind.as_str(),
@@ -86,6 +97,8 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
     )
     .fetch_one(&mut *tx)
     .await?;
+    let event_id = record.event_id;
+    let created_at = record.created_at;
 
     // Issue #277 Phase P7: the content half lives in its own daily partition.
     // A row is written even when every payload column is NULL, because a
@@ -140,13 +153,16 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
     )
     .await?;
 
-    Ok(event_id)
+    Ok((event_id, created_at))
 }
 
 /// Persist the request-record metadata first, then upload the raw payload to
 /// the selected store and record its object metadata. There is deliberately no
 /// PostgreSQL body fallback: when the store upload fails the raw payload is
 /// dropped with a warning while the metadata event survives.
+/// The partition key comes from the insert that just wrote the request record,
+/// so neither the raw reference nor the object metadata needs a lookup across
+/// the daily partitions of the request family.
 pub async fn record_request_record_with_raw_store(
     pool: &PgPool,
     input: RequestRecordCreate,
@@ -157,7 +173,7 @@ pub async fn record_request_record_with_raw_store(
         request_raw_json: input.request_raw_json.clone(),
         response_raw_body: input.response_raw_body.clone(),
     };
-    let event_id = record_request_record(pool, input).await?;
+    let (event_id, created_at) = record_request_record_with_created_at(pool, input).await?;
     let Some(raw_store) = raw_store else {
         return Ok(event_id);
     };
@@ -165,13 +181,6 @@ pub async fn record_request_record_with_raw_store(
         return Ok(event_id);
     }
 
-    let created_at =
-        sqlx::query_file_scalar!("src/sql/usage/get_request_record_created_at.sql", event_id,)
-            .fetch_optional(pool)
-            .await?;
-    let Some(created_at) = created_at else {
-        return Ok(event_id);
-    };
     let expires_at = created_at + ChronoDuration::days(raw_retention_days.max(1));
     // The store merges this phase's fields into any existing per-event object,
     // so a request-only write followed by a response-only write is idempotent.
@@ -188,6 +197,7 @@ pub async fn record_request_record_with_raw_store(
     if let Err(err) = sqlx::query_file!(
         "src/sql/usage/upsert_request_record_raw_object.sql",
         event_id,
+        created_at,
         object.object_key,
         object.size_bytes,
         object.sha256,

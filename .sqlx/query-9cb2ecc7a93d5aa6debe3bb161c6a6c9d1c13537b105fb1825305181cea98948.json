@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- The raw payload reference shares the request record's partition key, so the\n-- canonical `created_at` is bound directly. Selecting it back from\n-- `request_records` would scan every daily partition of the request family.\nINSERT INTO request_record_raw_payloads(\n    event_id,\n    created_at,\n    raw_object_key,\n    raw_object_size_bytes,\n    raw_object_sha256,\n    raw_object_expires_at\n)\nVALUES (\n    $1,\n    $2,\n    $3,\n    $4,\n    $5,\n    $6\n)\nON CONFLICT (created_at, event_id)\nDO UPDATE SET\n    raw_object_key = EXCLUDED.raw_object_key,\n    raw_object_size_bytes = EXCLUDED.raw_object_size_bytes,\n    raw_object_sha256 = EXCLUDED.raw_object_sha256,\n    raw_object_expires_at = EXCLUDED.raw_object_expires_at\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz",
+        "Text",
+        "Int8",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9cb2ecc7a93d5aa6debe3bb161c6a6c9d1c13537b105fb1825305181cea98948"
+}

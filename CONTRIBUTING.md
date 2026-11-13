@@ -101,6 +101,33 @@ cargo sqlx prepare --workspace -- --all-targets
 The `.sqlx` directory is tracked so GitHub Actions can compile with
 `SQLX_OFFLINE=true`.
 
+## Persistence Architecture
+
+The backend writes PostgreSQL through two layers that share one schema and one
+pool.
+
+- Ordinary configuration CRUD runs natively through the SeaORM entities in
+  `src/db/entities/`: the PostgreSQL tables `worker_settings`,
+  `managed_relays`, `mcp_servers`, `mcp_credentials` and
+  `config_archive_audit`, plus the standalone SQLite settings, relay, MCP
+  server and config audit tables. `src/db/seaorm.rs` borrows the existing SQLx
+  pool, so the native layer adds no second pool and owns no shutdown.
+- The PostgreSQL configuration import and the standalone snapshot and import
+  stay SQLx-owned atomic islands. Each runs as one whole operation and is
+  never split into native transactions or mixed with them.
+- The entities also declare the native schema metadata for those tables,
+  including checks and indexes. The declarations describe the schema the
+  applied migrations already create; they are not a second schema applier. The
+  migrations in `migrations/` remain the only initializer and upgrade path,
+  and the standalone schema version is unchanged.
+- The usage and request-record write paths stay SQLx. The request record
+  insert returns its own `created_at`, and the raw payload reference row
+  binds that timestamp directly instead of selecting it back from the daily
+  request-family partitions.
+
+Migrate a query only after checking that no SQLx island or shared helper
+still depends on it, and regenerate the `.sqlx` metadata in the same change.
+
 ## Frontend Standards
 
 The admin UI is React with TypeScript, Bun, shadcn/ui and Tailwind CSS.

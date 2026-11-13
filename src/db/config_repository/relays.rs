@@ -142,12 +142,17 @@ impl super::ConfigRepository {
                     .map(|policy| policy.unwrap_or_default())
             }
             Self::Sqlite(sqlite) => {
-                let snapshot = sqlite
+                let setting = sqlite
                     .store
-                    .load_snapshot(&sqlite.manager)
+                    .get_setting("relay_ip_whitelist")
                     .await
                     .map_err(|err| anyhow::anyhow!("{err}"))?;
-                Ok(relays_map::policy_from_settings(&snapshot.settings))
+                Ok(match setting {
+                    Some(setting) => {
+                        relays_map::policy_from_settings(std::slice::from_ref(&setting))
+                    }
+                    None => RelayIpPolicy::default(),
+                })
             }
         }
     }

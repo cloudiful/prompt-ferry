@@ -1,1 +1,0 @@
-DELETE FROM standalone_relays WHERE relay_id = ?;

@@ -1,16 +1,17 @@
 //! SQLite persistence for the administrator configuration archive audit trail.
 //!
-//! The statements live under `src/standalone_config/sql/audit/` and are loaded
-//! through the standalone text-query wrapper, because the crate-wide
-//! `DATABASE_URL` points at PostgreSQL while these statements target the
-//! runtime-selected standalone SQLite database.
-//!
-//! The trail stores non-secret metadata only; see
+//! The native entity for `standalone_config_archive_audit` owns the ordinary
+//! insert and paged read; the columns stay the same as the applied migration
+//! and the trail stores non-secret metadata only. See
 //! [`crate::db::config_repository::audit`] for the shared contract.
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use sqlx::Row;
+use sea_orm::sea_query::{Alias, Expr, ExprTrait, JoinType, Order, Query};
+use sea_orm::{ConnectionTrait, EntityTrait, PaginatorTrait, Set};
+
+use crate::db::entities::sqlite::standalone_config_archive_audit::{ActiveModel, Column, Entity};
+use crate::db::seaorm::sqlite_connection;
 
 use super::StandaloneConfigStore;
 use crate::db::config_repository::audit::{
@@ -20,42 +21,71 @@ use crate::db::config_repository::audit::{
 impl StandaloneConfigStore {
     pub(crate) async fn record_config_audit(&self, record: &ConfigAuditRecord) -> Result<i64> {
         let domains = serde_json::to_string(&record.domains).context("serialize audit domains")?;
-        let outcome =
-            standalone_query!("src/standalone_config/sql/audit/insert_config_archive_audit.sql")
-                .bind(record.actor_user_id)
-                .bind(record.action.as_str())
-                .bind(record.backend_kind.as_str())
-                .bind(record.format_version.map(i64::from))
-                .bind(record.archive_bytes)
-                .bind(record.payload_fingerprint.as_deref())
-                .bind(record.success)
-                .bind(record.error_code.as_deref())
-                .bind(record.error_message.as_deref())
-                .bind(domains)
-                .bind(Utc::now().to_rfc3339())
-                .execute(&self.pool)
-                .await
-                .context("failed to persist the configuration archive audit row")?;
-        Ok(outcome.last_insert_rowid())
+        let db = sqlite_connection(&self.pool);
+        let outcome = Entity::insert(ActiveModel {
+            actor_user_id: Set(record.actor_user_id),
+            action: Set(record.action.as_str().to_string()),
+            backend_kind: Set(record.backend_kind.as_str().to_string()),
+            format_version: Set(record.format_version.map(i32::from)),
+            archive_bytes: Set(record.archive_bytes),
+            payload_fingerprint: Set(record.payload_fingerprint.clone()),
+            success: Set(i32::from(record.success)),
+            error_code: Set(record.error_code.clone()),
+            error_message: Set(record.error_message.clone()),
+            domain_summary: Set(domains),
+            created_at: Set(Utc::now().to_rfc3339()),
+            ..Default::default()
+        })
+        .exec(&db)
+        .await
+        .context("failed to persist the configuration archive audit row")?;
+        Ok(outcome.last_insert_id)
     }
 
     pub(crate) async fn list_config_audit(&self, first: i64, rows: i64) -> Result<ConfigAuditPage> {
-        let total =
-            standalone_query!("src/standalone_config/sql/audit/count_config_archive_audit.sql")
-                .fetch_one(&self.pool)
-                .await
-                .context("failed to count the configuration archive audit rows")?
-                .try_get::<i64, _>("total")?;
+        let db = sqlite_connection(&self.pool);
+        let total = Entity::find()
+            .count(&db)
+            .await
+            .context("failed to count the configuration archive audit rows")?
+            as i64;
         let (first, rows) = clamp_audit_page(first, rows);
-        let records =
-            standalone_query!("src/standalone_config/sql/audit/list_config_archive_audit.sql")
-                .bind(rows)
-                .bind(first)
-                .fetch_all(&self.pool)
-                .await
-                .context("failed to read the configuration archive audit page")?;
+        let users = Alias::new("standalone_users");
+        let query = Query::select()
+            .column((Entity, Column::AuditId))
+            .column((Entity, Column::ActorUserId))
+            .expr_as(
+                Expr::col((users.clone(), Alias::new("login_name"))),
+                Alias::new("actor_login_name"),
+            )
+            .column((Entity, Column::Action))
+            .column((Entity, Column::BackendKind))
+            .column((Entity, Column::FormatVersion))
+            .column((Entity, Column::ArchiveBytes))
+            .column((Entity, Column::PayloadFingerprint))
+            .column((Entity, Column::Success))
+            .column((Entity, Column::ErrorCode))
+            .column((Entity, Column::ErrorMessage))
+            .column((Entity, Column::DomainSummary))
+            .column((Entity, Column::CreatedAt))
+            .from(Entity)
+            .join(
+                JoinType::LeftJoin,
+                users.clone(),
+                Expr::col((Entity, Column::ActorUserId))
+                    .equals((users.clone(), Alias::new("user_id"))),
+            )
+            .order_by((Entity, Column::CreatedAt), Order::Desc)
+            .order_by((Entity, Column::AuditId), Order::Desc)
+            .limit(rows as u64)
+            .offset(first as u64)
+            .to_owned();
+        let records = db
+            .query_all(&query)
+            .await
+            .context("failed to read the configuration archive audit page")?;
         let entries = records
-            .into_iter()
+            .iter()
             .map(audit_entry)
             .collect::<Result<Vec<_>>>()?;
         Ok(ConfigAuditPage {
@@ -67,23 +97,22 @@ impl StandaloneConfigStore {
     }
 }
 
-fn audit_entry(row: sqlx::sqlite::SqliteRow) -> Result<ConfigAuditEntry> {
-    let domain_summary: String = row.try_get("domain_summary")?;
-    let created_at: String = row.try_get("created_at")?;
+fn audit_entry(row: &sea_orm::QueryResult) -> Result<ConfigAuditEntry> {
+    let domain_summary: String = row.try_get("", "domain_summary")?;
+    let created_at: String = row.try_get("", "created_at")?;
+    let format_version: Option<i64> = row.try_get("", "format_version")?;
     RawConfigAuditRow {
-        audit_id: row.try_get("audit_id")?,
-        actor_user_id: row.try_get("actor_user_id")?,
-        actor_login_name: row.try_get("actor_login_name")?,
-        action: row.try_get("action")?,
-        backend_kind: row.try_get("backend_kind")?,
-        format_version: row
-            .try_get::<Option<i64>, _>("format_version")?
-            .map(|version| i32::try_from(version).unwrap_or_default()),
-        archive_bytes: row.try_get("archive_bytes")?,
-        payload_fingerprint: row.try_get("payload_fingerprint")?,
-        success: row.try_get::<i64, _>("success")? != 0,
-        error_code: row.try_get("error_code")?,
-        error_message: row.try_get("error_message")?,
+        audit_id: row.try_get("", "audit_id")?,
+        actor_user_id: row.try_get("", "actor_user_id")?,
+        actor_login_name: row.try_get("", "actor_login_name")?,
+        action: row.try_get("", "action")?,
+        backend_kind: row.try_get("", "backend_kind")?,
+        format_version: format_version.map(|version| i32::try_from(version).unwrap_or_default()),
+        archive_bytes: row.try_get("", "archive_bytes")?,
+        payload_fingerprint: row.try_get("", "payload_fingerprint")?,
+        success: row.try_get::<i64>("", "success")? != 0,
+        error_code: row.try_get("", "error_code")?,
+        error_message: row.try_get("", "error_message")?,
         domain_summary: serde_json::from_str(&domain_summary)
             .context("audit row carries an invalid domain summary")?,
         created_at: parse_audit_timestamp(&created_at)?,
