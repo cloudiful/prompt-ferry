@@ -117,13 +117,22 @@ pub async fn set_user_endpoint_setting(
     user_id: i64,
     endpoint_id: Option<Uuid>,
 ) -> Result<()> {
-    sqlx::query_file!(
-        "src/sql/endpoints/set_user_endpoint_setting.sql",
-        user_id,
-        endpoint_id,
+    use crate::db::entities::postgres::user_endpoint_settings as settings;
+    use sea_orm::sea_query::OnConflict;
+    settings::Entity::insert(settings::ActiveModel {
+        user_id: Set(user_id),
+        endpoint_id: Set(endpoint_id),
+        ..Default::default()
+    })
+    .on_conflict(
+        OnConflict::column(settings::Column::UserId)
+            .update_column(settings::Column::EndpointId)
+            .value(settings::Column::UpdatedAt, Expr::current_timestamp())
+            .to_owned(),
     )
-    .execute(pool)
-    .await?;
+    .exec(&postgres_connection(pool))
+    .await
+    .map_err(native_error)?;
     Ok(())
 }
 

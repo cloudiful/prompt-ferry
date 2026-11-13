@@ -6,7 +6,11 @@
 //! `StandaloneConfigStore` so encrypted secrets are written through the
 //! envelope helpers without copying the persistence layer.
 
+use crate::db::entities::postgres::{endpoint_oauth_tokens, provider_endpoints};
+use crate::db::seaorm::{native_error, postgres_connection};
 use anyhow::{Context, Result};
+use sea_orm::sea_query::{Expr, ExprTrait, Func, OnConflict};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect, Set};
 use serde::Serialize;
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -515,15 +519,23 @@ impl PostgresConfigRepository {
             ),
             None => (None, None, None),
         };
-        sqlx::query_file!(
-            "src/sql/endpoints/set_endpoint_oauth_token.sql",
-            endpoint_id,
-            access_token,
-            refresh_token,
-            expires_at,
+        use endpoint_oauth_tokens::{ActiveModel, Column, Entity};
+        Entity::insert(ActiveModel {
+            endpoint_id: Set(endpoint_id),
+            access_token: Set(access_token),
+            refresh_token: Set(refresh_token),
+            expires_at: Set(expires_at),
+            ..Default::default()
+        })
+        .on_conflict(
+            OnConflict::column(Column::EndpointId)
+                .update_columns([Column::AccessToken, Column::RefreshToken, Column::ExpiresAt])
+                .value(Column::UpdatedAt, Expr::current_timestamp())
+                .to_owned(),
         )
-        .execute(&self.pool)
-        .await?;
+        .exec(&postgres_connection(&self.pool))
+        .await
+        .map_err(native_error)?;
         Ok(())
     }
 
@@ -531,19 +543,21 @@ impl PostgresConfigRepository {
         &self,
         endpoint_id: Uuid,
     ) -> Result<Option<EndpointOAuthToken>> {
-        let row = sqlx::query_file!(
-            "src/sql/endpoints/get_endpoint_oauth_token.sql",
-            endpoint_id,
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-        let Some(row) = row else { return Ok(None) };
-        // `query_file!` yields a generated record struct, so columns are read
-        // as fields; nullable columns stay `Option`, matching the clear
-        // convention below.
-        let access_token = row.access_token;
-        let refresh_token = row.refresh_token;
-        let expires_at = row.expires_at;
+        use endpoint_oauth_tokens::{Column, Entity};
+        let row = Entity::find_by_id(endpoint_id)
+            .select_only()
+            .columns([Column::AccessToken, Column::RefreshToken, Column::ExpiresAt])
+            .into_tuple::<(
+                Option<String>,
+                Option<String>,
+                Option<chrono::DateTime<chrono::Utc>>,
+            )>()
+            .one(&postgres_connection(&self.pool))
+            .await
+            .map_err(native_error)?;
+        let Some((access_token, refresh_token, expires_at)) = row else {
+            return Ok(None);
+        };
         match (access_token, refresh_token) {
             (Some(access_token), Some(refresh_token)) => Ok(Some(EndpointOAuthToken {
                 endpoint_id,
@@ -563,10 +577,12 @@ impl PostgresConfigRepository {
     }
 
     async fn list_endpoint_oauth_token_ids(&self) -> Result<Vec<Uuid>> {
-        let rows = sqlx::query_file!("src/sql/endpoints/list_endpoint_oauth_token_ids.sql")
-            .fetch_all(&self.pool)
-            .await?;
-        Ok(rows.into_iter().map(|row| row.endpoint_id).collect())
+        Ok(
+            crate::db::endpoints::list_oauth_token_endpoint_ids(&self.pool)
+                .await?
+                .into_iter()
+                .collect(),
+        )
     }
 
     /// Issue #589: write (or clear) the optional Admin API key column. Blank
@@ -576,35 +592,55 @@ impl PostgresConfigRepository {
         endpoint_id: Uuid,
         admin_api_key: Option<&str>,
     ) -> Result<()> {
-        sqlx::query_file!(
-            "src/sql/endpoints/set_endpoint_admin_api_key.sql",
-            endpoint_id,
-            normalize_admin_api_key(admin_api_key),
-        )
-        .execute(&self.pool)
-        .await?;
+        use provider_endpoints::{Column, Entity};
+        Entity::update_many()
+            .col_expr(
+                Column::AdminApiKey,
+                Expr::value(normalize_admin_api_key(admin_api_key)),
+            )
+            .col_expr(Column::UpdatedAt, Expr::current_timestamp())
+            .filter(Column::EndpointId.eq(endpoint_id))
+            .exec(&postgres_connection(&self.pool))
+            .await
+            .map_err(native_error)?;
         Ok(())
     }
 
     /// Issue #589: decrypted Admin API key for the server-side PATCH carry and
     /// the organization usage read.
     async fn endpoint_admin_api_key(&self, endpoint_id: Uuid) -> Result<Option<String>> {
-        let row = sqlx::query_file!(
-            "src/sql/endpoints/get_endpoint_admin_api_key.sql",
-            endpoint_id,
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(row.and_then(|row| normalize_admin_api_key(row.admin_api_key.as_deref())))
+        use provider_endpoints::{Column, Entity};
+        let value = Entity::find_by_id(endpoint_id)
+            .select_only()
+            .column(Column::AdminApiKey)
+            .into_tuple::<Option<String>>()
+            .one(&postgres_connection(&self.pool))
+            .await
+            .map_err(native_error)?
+            .flatten();
+        Ok(normalize_admin_api_key(value.as_deref()))
     }
 
     /// Issue #589: endpoints with a stored (non-blank) Admin API key. Drives
     /// the admin `has_admin_api_key` indicator for a page in one query.
     async fn endpoint_admin_key_ids(&self) -> Result<HashSet<Uuid>> {
-        let rows = sqlx::query_file!("src/sql/endpoints/list_endpoint_admin_key_ids.sql")
-            .fetch_all(&self.pool)
-            .await?;
-        Ok(rows.into_iter().map(|row| row.endpoint_id).collect())
+        use provider_endpoints::{Column, Entity};
+        let rows = Entity::find()
+            .select_only()
+            .column(Column::EndpointId)
+            .filter(Column::AdminApiKey.is_not_null())
+            .filter(
+                Expr::expr(
+                    Func::cust(sea_orm::sea_query::Alias::new("btrim"))
+                        .arg(Expr::col(Column::AdminApiKey)),
+                )
+                .ne(""),
+            )
+            .into_tuple::<Uuid>()
+            .all(&postgres_connection(&self.pool))
+            .await
+            .map_err(native_error)?;
+        Ok(rows.into_iter().collect())
     }
 
     async fn endpoint_proxy_url(&self, endpoint_id: Uuid) -> Result<Option<String>> {

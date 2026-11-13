@@ -244,8 +244,14 @@ pub(crate) async fn attach_route_config_credentials(
 /// only — no secret is read, and the query reuses the existing token-id
 /// listing so no schema or SQL change is needed.
 pub(crate) async fn list_oauth_token_endpoint_ids(pool: &PgPool) -> Result<HashSet<uuid::Uuid>> {
-    let rows = sqlx::query_file!("src/sql/endpoints/list_endpoint_oauth_token_ids.sql")
-        .fetch_all(pool)
-        .await?;
-    Ok(rows.into_iter().map(|row| row.endpoint_id).collect())
+    use crate::db::entities::postgres::endpoint_oauth_tokens as tokens;
+    let rows = tokens::Entity::find()
+        .select_only()
+        .column(tokens::Column::EndpointId)
+        .filter(tokens::Column::RefreshToken.is_not_null())
+        .into_tuple::<uuid::Uuid>()
+        .all(&postgres_connection(pool))
+        .await
+        .map_err(crate::db::seaorm::native_error)?;
+    Ok(rows.into_iter().collect())
 }

@@ -84,6 +84,31 @@ fn envelope_from_parts(
     nonce: Option<Vec<u8>>,
     key_version: Option<i32>,
 ) -> Result<Option<EncryptedSecretEnvelope>> {
+    credential_envelope(prefix, ciphertext, nonce, key_version.map(i64::from))
+}
+
+pub(crate) fn native_credential_envelope(
+    row: &sea_orm::QueryResult,
+    prefix: &str,
+) -> Result<Option<EncryptedSecretEnvelope>> {
+    let ciphertext = row
+        .try_get("", &format!("{prefix}_ciphertext"))
+        .map_err(native_error)?;
+    let nonce = row
+        .try_get("", &format!("{prefix}_nonce"))
+        .map_err(native_error)?;
+    let version = row
+        .try_get("", &format!("{prefix}_key_version"))
+        .map_err(native_error)?;
+    credential_envelope(prefix, ciphertext, nonce, version)
+}
+
+pub(crate) fn credential_envelope(
+    prefix: &str,
+    ciphertext: Option<Vec<u8>>,
+    nonce: Option<Vec<u8>>,
+    key_version: Option<i64>,
+) -> Result<Option<EncryptedSecretEnvelope>> {
     match (ciphertext, nonce, key_version) {
         (None, None, None) => Ok(None),
         (Some(ciphertext), Some(nonce), Some(key_version)) => Ok(Some(EncryptedSecretEnvelope {
@@ -191,7 +216,7 @@ fn model_required_string(value: &str, column: &str) -> Result<String> {
     Ok(value.to_string())
 }
 
-fn model_uuid(value: &str, column: &str) -> Result<Uuid> {
+pub(crate) fn model_uuid(value: &str, column: &str) -> Result<Uuid> {
     Uuid::parse_str(value).map_err(|error| {
         StandaloneConfigError::CorruptDatabase(format!("column {column} is not a UUID: {error}"))
     })

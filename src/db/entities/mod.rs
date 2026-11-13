@@ -33,6 +33,58 @@ mod tests {
     use super::sqlite::standalone_users;
 
     #[test]
+    fn credential_and_user_setting_postgres_declarations_preserve_nullability_and_defaults() {
+        use super::postgres::{endpoint_oauth_tokens, user_endpoint_settings};
+        let token = endpoint_oauth_tokens::create_table_statement().to_string(PostgresQueryBuilder);
+        for expected in [
+            "\"endpoint_id\" uuid NOT NULL",
+            "\"access_token\" text,",
+            "\"refresh_token\" text,",
+            "\"expires_at\" timestamp with time zone,",
+            "\"created_at\" timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "\"updated_at\" timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "PRIMARY KEY",
+        ] {
+            assert!(token.contains(expected), "missing {expected}: {token}");
+        }
+        assert!(!token.contains("FOREIGN KEY"));
+        let setting =
+            user_endpoint_settings::create_table_statement().to_string(PostgresQueryBuilder);
+        for expected in [
+            "\"user_id\" bigint NOT NULL",
+            "\"endpoint_id\" uuid,",
+            "\"updated_at\" timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "PRIMARY KEY",
+        ] {
+            assert!(setting.contains(expected), "missing {expected}: {setting}");
+        }
+        assert!(!setting.contains("FOREIGN KEY"));
+    }
+
+    #[test]
+    fn sqlite_credential_declarations_preserve_nullable_primary_key_and_envelopes() {
+        use super::sqlite::{standalone_endpoint_admin_keys, standalone_endpoint_oauth_tokens};
+        for sql in [
+            standalone_endpoint_admin_keys::create_table_statement().to_string(SqliteQueryBuilder),
+            standalone_endpoint_oauth_tokens::create_table_statement()
+                .to_string(SqliteQueryBuilder),
+        ] {
+            assert!(sql.contains("\"endpoint_id\" text PRIMARY KEY"), "{sql}");
+            assert!(!sql.contains("FOREIGN KEY"), "{sql}");
+            assert!(!sql.contains("blob NOT NULL"), "{sql}");
+            assert!(!sql.contains("integer NOT NULL"), "{sql}");
+            assert!(
+                sql.contains("\"created_at\" text NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+                "{sql}"
+            );
+            assert!(
+                sql.contains("\"updated_at\" text NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+                "{sql}"
+            );
+        }
+    }
+
+    #[test]
     fn postgres_provider_endpoint_declaration_matches_the_applied_table() {
         let table = provider_endpoints::create_table_statement().to_owned();
         let sql = table.to_string(PostgresQueryBuilder);
