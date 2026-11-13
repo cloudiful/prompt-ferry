@@ -1,1 +1,0 @@
-SELECT COUNT(*) AS total FROM standalone_client_keys WHERE user_id = ?;

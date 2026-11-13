@@ -106,12 +106,19 @@ The `.sqlx` directory is tracked so GitHub Actions can compile with
 The backend writes PostgreSQL through two layers that share one schema and one
 pool.
 
-- Ordinary configuration CRUD runs natively through the SeaORM entities in
-  `src/db/entities/`: the PostgreSQL tables `worker_settings`,
-  `managed_relays`, `mcp_servers`, `mcp_credentials` and
-  `config_archive_audit`, plus the standalone SQLite settings, relay, MCP
-  server and config audit tables. `src/db/seaorm.rs` borrows the existing SQLx
+- Ordinary configuration and authentication CRUD runs natively through the
+  SeaORM entities in `src/db/entities/`: the PostgreSQL tables
+  `worker_settings`, `managed_relays`, `mcp_servers`, `mcp_credentials`,
+  `config_archive_audit`, `users` and `client_keys`, plus the standalone SQLite
+  settings, relay, MCP server, config audit, `standalone_users` and
+  `standalone_client_keys` tables. `src/db/seaorm.rs` borrows the existing SQLx
   pool, so the native layer adds no second pool and owns no shutdown.
+- A standalone SQLite client-key update or delete targets only the row that
+  matches its `user_id` and `key_id`. The update changes the label, enabled flag
+  and `updated_at` while leaving the encrypted secret, prefix and `created_at`
+  untouched; the delete removes that key. Neither operation rewrites the rest
+  of the configuration, unlike the snapshot publication used for full imports
+  and exports.
 - The PostgreSQL configuration import and the standalone snapshot and import
   stay SQLx-owned atomic islands. Each runs as one whole operation and is
   never split into native transactions or mixed with them.

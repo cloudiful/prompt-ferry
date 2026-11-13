@@ -322,3 +322,22 @@ fn setting_model_projection_preserves_the_full_i64_version_range() {
     assert_eq!(setting.version, version);
     assert_eq!(setting.value, serde_json::json!({"large": true}));
 }
+
+#[test]
+fn client_key_model_projection_rejects_out_of_range_key_version() {
+    let model = crate::db::entities::sqlite::standalone_client_keys::Model {
+        key_id: Uuid::new_v4().to_string(),
+        user_id: 1,
+        key_prefix: "pfy_probe".to_string(),
+        label: "probe".to_string(),
+        enabled: 1,
+        secret_ciphertext: vec![1, 2, 3],
+        secret_nonce: vec![0; 12],
+        secret_key_version: i32::from(i16::MAX) + 1,
+        created_at: "2026-01-01 00:00:00".to_string(),
+        updated_at: "2026-01-01 00:00:00".to_string(),
+    };
+    let error = super::rows::client_key_from_model(&model)
+        .expect_err("an out-of-range key version must fail closed");
+    assert!(error.to_string().contains("key_version"));
+}

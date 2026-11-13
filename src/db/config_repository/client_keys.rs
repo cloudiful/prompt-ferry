@@ -291,61 +291,19 @@ impl SqliteConfigRepository {
         label: Option<String>,
         enabled: Option<bool>,
     ) -> Result<Option<UnifiedClientKey>> {
-        let snapshot = self
+        let updated = self
             .store
-            .load_snapshot(&self.manager)
+            .update_client_key(&self.manager, user_id, key_id, label, enabled)
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
-        let mut snapshot = snapshot;
-        let mut updated = None;
-        for key in snapshot.client_keys.iter_mut() {
-            if key.user_id == user_id && key.key_id == key_id {
-                if let Some(label) = label.clone() {
-                    key.label = label.trim().to_string();
-                }
-                if let Some(enabled) = enabled {
-                    key.enabled = enabled;
-                }
-                updated = Some(UnifiedClientKey {
-                    key_id: key.key_id,
-                    user_id: key.user_id,
-                    key_prefix: key.key_prefix.clone(),
-                    label: key.label.clone(),
-                    enabled: key.enabled,
-                    created_at: Utc::now(),
-                    secret: Some(key.secret.clone()),
-                });
-                break;
-            }
-        }
-        if updated.is_some() {
-            self.store
-                .replace_snapshot(&self.manager, &snapshot)
-                .await
-                .map_err(|err| anyhow::anyhow!("{err}"))?;
-        }
-        Ok(updated)
+        Ok(updated.map(UnifiedClientKey::from_sqlite))
     }
 
     async fn delete_client_key(&self, user_id: i64, key_id: Uuid) -> Result<bool> {
-        let snapshot = self
-            .store
-            .load_snapshot(&self.manager)
-            .await
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
-        let mut snapshot = snapshot;
-        let before = snapshot.client_keys.len();
-        snapshot
-            .client_keys
-            .retain(|key| !(key.user_id == user_id && key.key_id == key_id));
-        if snapshot.client_keys.len() == before {
-            return Ok(false);
-        }
         self.store
-            .replace_snapshot(&self.manager, &snapshot)
+            .delete_client_key(user_id, key_id)
             .await
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
-        Ok(true)
+            .map_err(|err| anyhow::anyhow!("{err}"))
     }
 
     async fn resolve_client_key_uuid(

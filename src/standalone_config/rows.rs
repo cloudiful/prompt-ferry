@@ -12,7 +12,9 @@ use super::models::{
 use crate::{
     config::{BridgeEncryptionMode, NativeApi, NativeApiSource, TlsMode},
     db::McpServer,
-    db::entities::sqlite::{standalone_mcp_servers, standalone_relays, standalone_settings},
+    db::entities::sqlite::{
+        standalone_client_keys, standalone_mcp_servers, standalone_relays, standalone_settings,
+    },
     relay_secrets::EncryptedSecretEnvelope,
 };
 
@@ -605,6 +607,32 @@ pub(crate) fn client_key(row: &SqliteRow) -> Result<(ClientKeyConfig, EncryptedS
             enabled: bool_value(row, "enabled")?,
         },
         envelope(row, "secret")?.ok_or_else(|| {
+            StandaloneConfigError::CorruptDatabase(
+                "client key is missing its secret envelope".to_string(),
+            )
+        })?,
+    ))
+}
+
+pub(crate) fn client_key_from_model(
+    model: &standalone_client_keys::Model,
+) -> Result<(ClientKeyConfig, EncryptedSecretEnvelope)> {
+    Ok((
+        ClientKeyConfig {
+            key_id: model_uuid(&model.key_id, "key_id")?,
+            user_id: model.user_id,
+            key_prefix: model_required_string(&model.key_prefix, "key_prefix")?,
+            label: model_required_string(&model.label, "label")?,
+            secret: String::new(),
+            enabled: model_bool(model.enabled, "enabled")?,
+        },
+        envelope_from_parts(
+            "secret",
+            Some(model.secret_ciphertext.clone()),
+            Some(model.secret_nonce.clone()),
+            Some(model.secret_key_version),
+        )?
+        .ok_or_else(|| {
             StandaloneConfigError::CorruptDatabase(
                 "client key is missing its secret envelope".to_string(),
             )
