@@ -1,17 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { HeaderActions } from '@/components/layout/HeaderActions'
-import { Skeleton } from '@/components/ui/skeleton'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+  DataTable,
+  type DataTableColumnDef,
+} from '@/components/shared/DataTable'
 import {
   TablePagination,
   useStoredPageSize,
@@ -23,7 +18,8 @@ import {
 import { useLocale } from '@/lib/i18n'
 import { useNotifier } from '@/lib/notifier'
 import { useSessionStore } from '@/lib/session'
-import { availableModelsQueryKey, listAvailableModels } from '@/lib/api-keys'
+import { meListModelsOptions } from '@/generated/admin-api/@tanstack/react-query.gen'
+import type { AvailableModelsResponse } from '@/generated/admin-api'
 
 export function AvailableModelsPage() {
   const { t } = useLocale()
@@ -34,9 +30,8 @@ export function AvailableModelsPage() {
   const notifiedErrors = useRef(new WeakSet<object>())
 
   const query = useQuery({
+    ...meListModelsOptions({ query: { first, rows } }),
     enabled: me !== null,
-    queryKey: availableModelsQueryKey(first, rows),
-    queryFn: () => listAvailableModels(first, rows),
   })
 
   const reportApiError = useCallback(
@@ -80,6 +75,38 @@ export function AvailableModelsPage() {
 
   const models = query.data?.models ?? []
 
+  const columns = useMemo<
+    Array<DataTableColumnDef<AvailableModelsResponse['models'][number]>>
+  >(
+    () => [
+      {
+        id: 'id',
+        header: t('id'),
+        cell: ({ row }) => (
+          <span
+            className="block max-w-[20rem] truncate"
+            title={row.original.id}
+          >
+            {row.original.id}
+          </span>
+        ),
+      },
+      {
+        id: 'name',
+        header: t('name'),
+        cell: ({ row }) => (
+          <span
+            className="block max-w-[24rem] truncate"
+            title={row.original.name}
+          >
+            {row.original.name}
+          </span>
+        ),
+      },
+    ],
+    [t],
+  )
+
   return (
     <section
       className="grid min-w-0 max-w-full gap-3"
@@ -102,49 +129,13 @@ export function AvailableModelsPage() {
         </Button>
       </HeaderActions>
       <div className="min-w-0">
-        <Table aria-busy={query.isFetching}>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t('id')}</TableHead>
-              <TableHead>{t('name')}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {query.isPending ? (
-              <TableRow>
-                <TableCell colSpan={2}>
-                  <Skeleton aria-label={t('loading')} className="h-8 w-full" />
-                </TableCell>
-              </TableRow>
-            ) : models.length > 0 ? (
-              models.map((model) => (
-                <TableRow key={model.id}>
-                  <TableCell
-                    className="max-w-[20rem] truncate"
-                    title={model.id}
-                  >
-                    {model.id}
-                  </TableCell>
-                  <TableCell
-                    className="max-w-[24rem] truncate"
-                    title={model.name}
-                  >
-                    {model.name}
-                  </TableCell>
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell
-                  className="py-8 text-center text-muted-foreground"
-                  colSpan={2}
-                >
-                  {t('noData')}
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+        <DataTable
+          columns={columns}
+          data={models}
+          getRowId={(model) => model.id}
+          label={t('availableModels')}
+          loading={query.isPending}
+        />
       </div>
       <TablePagination
         first={query.data?.first ?? first}

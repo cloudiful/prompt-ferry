@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useStore, type ReactFormExtendedApi } from '@tanstack/react-form'
 import { Check, Clipboard, Eye, LoaderCircle } from 'lucide-react'
 import type {
   AppliedReplacementSchema,
+  RedactionConfigSchema,
   RedactionFindingSchema,
+  RedactionPreviewSchema,
 } from '@/generated/admin-api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -29,25 +32,41 @@ import {
   redactionInputSegments,
   redactionOutputSegments,
 } from '@/lib/redaction-preview'
-import { useRedactionStore } from '@/lib/redaction'
+import type { RedactionPreviewFormValues } from '@/lib/redaction'
 import { createRedactionWorkspaceView } from '@/models/redaction'
 
+export type RedactionPreviewForm = ReactFormExtendedApi<
+  RedactionPreviewFormValues,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined
+>
+
 type RedactionPreviewPanelProps = {
-  onRunPreview: () => void
+  config: RedactionConfigSchema
+  form: RedactionPreviewForm
+  previewResult: RedactionPreviewSchema | null
   previewing: boolean
 }
 
 type PreviewPane = 'input' | 'output'
 
 export function RedactionPreviewPanel({
-  onRunPreview,
+  config,
+  form,
+  previewResult,
   previewing,
 }: RedactionPreviewPanelProps) {
   const { t } = useLocale()
-  const config = useRedactionStore((state) => state.config)
-  const previewText = useRedactionStore((state) => state.previewText)
-  const previewInputKind = useRedactionStore((state) => state.previewInputKind)
-  const previewResult = useRedactionStore((state) => state.previewResult)
+  const values = useStore(form.store, (state) => state.values)
   const findings = previewResult?.findings
   const [activeFindingIndex, setActiveFindingIndex] = useState<number | null>(
     null,
@@ -69,8 +88,8 @@ export function RedactionPreviewPanel({
     [config, previewResult, t],
   )
   const inputSegments = useMemo(
-    () => redactionInputSegments(previewText, selectedFinding),
-    [previewText, selectedFinding],
+    () => redactionInputSegments(values.text, selectedFinding),
+    [values.text, selectedFinding],
   )
   const outputSegments = useMemo(
     () =>
@@ -95,11 +114,6 @@ export function RedactionPreviewPanel({
     },
     [],
   )
-
-  function setInputKind(value: string): void {
-    if (value !== 'text' && value !== 'git_diff') return
-    useRedactionStore.getState().setPreviewInputKind(value)
-  }
 
   function selectFinding(index: number): void {
     setActiveFindingIndex(index)
@@ -181,31 +195,51 @@ export function RedactionPreviewPanel({
   }
 
   return (
-    <div className="grid min-w-0 gap-4" data-redaction-preview-panel>
+    <form
+      className="grid min-w-0 gap-4"
+      data-redaction-preview-panel="true"
+      noValidate
+      onSubmit={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        if (previewing) return
+        void form.handleSubmit()
+      }}
+    >
       <section className="grid min-w-0 gap-3 rounded-lg border p-4">
         <div className="flex min-w-0 flex-wrap items-end justify-between gap-3">
           <label className="grid min-w-0 gap-2 sm:w-64">
             <span className="text-sm text-muted-foreground">
               {t('inputKind')}
             </span>
-            <Select onValueChange={setInputKind} value={previewInputKind}>
-              <SelectTrigger
-                aria-label={t('inputKind')}
-                className="w-full"
-                id="redaction-input-kind"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {workspace.input_kind_options.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <form.Field name="input_kind">
+              {(field) => (
+                <Select
+                  onValueChange={(value) => {
+                    if (value !== 'text' && value !== 'git_diff') return
+                    field.handleChange(value)
+                  }}
+                  value={field.state.value}
+                >
+                  <SelectTrigger
+                    aria-label={t('inputKind')}
+                    className="w-full"
+                    id="redaction-input-kind"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {workspace.input_kind_options.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </form.Field>
           </label>
-          <Button disabled={previewing} onClick={onRunPreview} type="button">
+          <Button disabled={previewing} type="submit">
             {previewing ? (
               <LoaderCircle aria-hidden="true" className="animate-spin" />
             ) : (
@@ -280,18 +314,20 @@ export function RedactionPreviewPanel({
                 ))}
               </div>
             ) : (
-              <Textarea
-                aria-label={t('redactionInput')}
-                id="redaction-preview-input"
-                name="redaction-preview-input"
-                onChange={(event) =>
-                  useRedactionStore
-                    .getState()
-                    .setPreviewText(event.currentTarget.value)
-                }
-                rows={7}
-                value={previewText}
-              />
+              <form.Field name="text">
+                {(field) => (
+                  <Textarea
+                    aria-label={t('redactionInput')}
+                    id="redaction-preview-input"
+                    name="redaction-preview-input"
+                    onChange={(event) =>
+                      field.handleChange(event.currentTarget.value)
+                    }
+                    rows={7}
+                    value={field.state.value}
+                  />
+                )}
+              </form.Field>
             )}
           </div>
 
@@ -393,6 +429,6 @@ export function RedactionPreviewPanel({
           </Table>
         </section>
       </section>
-    </div>
+    </form>
   )
 }

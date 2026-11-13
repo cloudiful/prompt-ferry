@@ -1,18 +1,14 @@
-import { useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { KeyRound, LoaderCircle, Save, Trash2 } from 'lucide-react'
 import type { User, UserUpdate } from '@/generated/admin-api'
+import {
+  DataTable,
+  type DataTableColumnDef,
+} from '@/components/shared/DataTable'
 import { TablePagination } from '@/components/shared/TablePagination'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import type { PendingActions } from '@/lib/async-action'
 import { useLocale } from '@/lib/i18n'
 import { userActionKey } from '@/models/users'
@@ -50,6 +46,8 @@ export function UsersTable({
 }: UsersTableProps) {
   const { t } = useLocale()
   const [drafts, setDrafts] = useState<Record<number, UserDraft>>({})
+  const callbacks = useRef({ onDeleteUser, onOpenResetPassword, onSaveUser })
+  callbacks.current = { onDeleteUser, onOpenResetPassword, onSaveUser }
 
   function valuesFor(user: User): UserDraft {
     return (
@@ -69,10 +67,11 @@ export function UsersTable({
     setDrafts((current) => ({
       ...current,
       [user.user_id]: {
-        ...current[user.user_id],
-        display_name: current[user.user_id]?.display_name ?? user.display_name,
-        is_admin: current[user.user_id]?.is_admin ?? user.is_admin,
-        is_active: current[user.user_id]?.is_active ?? user.is_active,
+        ...(current[user.user_id] ?? {
+          display_name: user.display_name,
+          is_admin: user.is_admin,
+          is_active: user.is_active,
+        }),
         [field]: value,
       },
     }))
@@ -84,7 +83,7 @@ export function UsersTable({
 
   async function save(user: User): Promise<void> {
     const values = valuesFor(user)
-    const saved = await onSaveUser(user.user_id, {
+    const saved = await callbacks.current.onSaveUser(user.user_id, {
       display_name: values.display_name,
       is_admin: values.is_admin,
       is_active: values.is_active,
@@ -154,7 +153,7 @@ export function UsersTable({
           aria-label={t('resetPassword')}
           className={buttonClass}
           disabled={pending !== null}
-          onClick={() => onOpenResetPassword(user)}
+          onClick={() => callbacks.current.onOpenResetPassword(user)}
           size="sm"
           type="button"
           variant="ghost"
@@ -186,7 +185,7 @@ export function UsersTable({
           aria-label={t('delete')}
           className={`text-destructive ${buttonClass}`}
           disabled={pending !== null}
-          onClick={() => onDeleteUser(user)}
+          onClick={() => callbacks.current.onDeleteUser(user)}
           size="sm"
           type="button"
           variant="ghost"
@@ -202,6 +201,81 @@ export function UsersTable({
     )
   }
 
+  const columns = useMemo<Array<DataTableColumnDef<User>>>(
+    () => [
+      {
+        id: 'login_name',
+        header: t('user'),
+        cell: ({ row }) => (
+          <div
+            className="max-w-64 whitespace-normal break-all font-semibold break-all"
+            data-user-login={row.original.user_id}
+            title={row.original.login_name}
+          >
+            {row.original.login_name}
+          </div>
+        ),
+      },
+      {
+        id: 'display_name',
+        header: t('displayName'),
+        cell: ({ row }) => renderDisplayName(row.original),
+      },
+      {
+        id: 'is_admin',
+        header: t('adminShort'),
+        cell: ({ row }) => renderAdminCheckbox(row.original),
+      },
+      {
+        id: 'is_active',
+        header: t('active'),
+        cell: ({ row }) => renderActiveCheckbox(row.original),
+      },
+      {
+        id: 'actions',
+        header: () => <span className="sr-only">{t('save')}</span>,
+        cell: ({ row }) => renderActions(row.original),
+      },
+    ],
+    // The draft state and the pending actions drive the cell content.
+    [drafts, pendingActions, t],
+  )
+
+  function renderCard(user: User) {
+    return (
+      <article
+        className="grid min-w-0 gap-3 rounded-lg border bg-card p-3"
+        data-user-row={user.user_id}
+      >
+        <div className="grid min-w-0 gap-1">
+          <div
+            className="break-all text-sm font-semibold"
+            data-user-login={user.user_id}
+          >
+            {user.login_name}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {t('id')} {user.user_id}
+          </div>
+        </div>
+        <div className="grid gap-2">
+          {renderDisplayName(user, true)}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <label className="inline-flex min-h-8 items-center gap-2 text-xs">
+              {renderAdminCheckbox(user)}
+              {t('adminShort')}
+            </label>
+            <label className="inline-flex min-h-8 items-center gap-2 text-xs">
+              {renderActiveCheckbox(user)}
+              {t('active')}
+            </label>
+          </div>
+        </div>
+        {renderActions(user, true)}
+      </article>
+    )
+  }
+
   return (
     <section className="grid min-w-0 max-w-full gap-3">
       {loading && users.length === 0 ? (
@@ -214,78 +288,14 @@ export function UsersTable({
           {t('noUser')}
         </div>
       ) : (
-        <>
-          <div className="grid gap-3 md:hidden">
-            {users.map((user) => (
-              <article
-                className="grid min-w-0 gap-3 rounded-lg border bg-card p-3"
-                data-user-row={user.user_id}
-                key={user.user_id}
-              >
-                <div className="grid min-w-0 gap-1">
-                  <div
-                    className="break-all text-sm font-semibold"
-                    data-user-login={user.user_id}
-                  >
-                    {user.login_name}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {t('id')} {user.user_id}
-                  </div>
-                </div>
-                <div className="grid gap-2">
-                  {renderDisplayName(user, true)}
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                    <label className="inline-flex min-h-8 items-center gap-2 text-xs">
-                      {renderAdminCheckbox(user)}
-                      {t('adminShort')}
-                    </label>
-                    <label className="inline-flex min-h-8 items-center gap-2 text-xs">
-                      {renderActiveCheckbox(user)}
-                      {t('active')}
-                    </label>
-                  </div>
-                </div>
-                {renderActions(user, true)}
-              </article>
-            ))}
-          </div>
-
-          <div className="hidden min-w-0 md:block">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t('user')}</TableHead>
-                  <TableHead>{t('displayName')}</TableHead>
-                  <TableHead>{t('adminShort')}</TableHead>
-                  <TableHead>{t('active')}</TableHead>
-                  <TableHead>
-                    <span className="sr-only">{t('save')}</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {users.map((user) => (
-                  <TableRow data-user-row={user.user_id} key={user.user_id}>
-                    <TableCell className="max-w-64 whitespace-normal break-all">
-                      <div
-                        className="font-semibold break-all"
-                        data-user-login={user.user_id}
-                        title={user.login_name}
-                      >
-                        {user.login_name}
-                      </div>
-                    </TableCell>
-                    <TableCell>{renderDisplayName(user)}</TableCell>
-                    <TableCell>{renderAdminCheckbox(user)}</TableCell>
-                    <TableCell>{renderActiveCheckbox(user)}</TableCell>
-                    <TableCell>{renderActions(user)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </>
+        <DataTable
+          columns={columns}
+          data={users}
+          getRowId={(user) => String(user.user_id)}
+          label={t('user')}
+          renderCard={renderCard}
+          rowAttributes={(user) => ({ 'data-user-row': user.user_id })}
+        />
       )}
       <TablePagination
         first={first}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { LoaderCircle, Plus, RefreshCw } from 'lucide-react'
 import {
   modelRouteFormToRequest,
@@ -12,11 +12,17 @@ import type {
   ModelRouteTestResponse,
   ProviderEndpoint,
 } from '@/generated/admin-api'
+import {
+  createModelRouteMutation,
+  deleteModelRouteMutation,
+  listModelRoutesOptions,
+  listUserOptionsOptions,
+  testModelRouteMutation,
+  updateModelRouteMutation,
+} from '@/generated/admin-api/@tanstack/react-query.gen'
 import { ModelRouteDialog } from '@/components/endpoints/ModelRouteDialog'
-import { ModelRouteMobileCard } from '@/components/endpoints/ModelRouteMobileCard'
 import { ModelRouteTestResultsDialog } from '@/components/endpoints/ModelRouteTestResultsDialog'
 import { ModelRoutesTable } from '@/components/endpoints/ModelRoutesTable'
-import { TablePagination } from '@/components/shared/TablePagination'
 import {
   testResultKey,
   type TestResultSurface,
@@ -25,20 +31,13 @@ import { Button } from '@/components/ui/button'
 import { HeaderActions } from '@/components/layout/HeaderActions'
 import {
   endpointRecordsQueryKey,
-  endpointUserOptionsQueryKey,
   listAllEndpointRecords,
-  listEndpointUsers,
 } from '@/lib/endpoints'
 import {
-  modelRoutePageQueryKey,
-  listModelRoutePage,
+  buildModelRouteEnabledRequest,
+  buildModelRouteTargetEnabledRequest,
   patchModelRoutePages,
   refreshModelRoutePage,
-  removeModelRoute,
-  saveModelRoute,
-  setModelRouteEnabled,
-  setModelRouteTargetEnabled,
-  testModelRoute,
 } from '@/lib/model-routes'
 import { useAsyncAction } from '@/lib/use-async-action'
 import { useLocale } from '@/lib/i18n'
@@ -89,9 +88,8 @@ export function ModelRoutesPage() {
   rowsRef.current = rows
 
   const routePageQuery = useQuery({
+    ...listModelRoutesOptions({ query: { first, rows } }),
     enabled: isAdmin,
-    queryKey: modelRoutePageQueryKey(first, rows),
-    queryFn: () => listModelRoutePage(first, rows),
   })
   const endpointsQuery = useQuery({
     enabled: isAdmin,
@@ -100,10 +98,14 @@ export function ModelRoutesPage() {
     staleTime: 0,
   })
   const usersQuery = useQuery({
+    ...listUserOptionsOptions(),
     enabled: isAdmin && me !== null,
-    queryKey: endpointUserOptionsQueryKey(me?.user_id ?? 0),
-    queryFn: listEndpointUsers,
   })
+
+  const createModelRoute = useMutation(createModelRouteMutation())
+  const updateModelRoute = useMutation(updateModelRouteMutation())
+  const deleteModelRouteRecord = useMutation(deleteModelRouteMutation())
+  const testModelRouteProbe = useMutation(testModelRouteMutation())
 
   const reportApiError = useCallback(
     (cause: unknown) => {
@@ -155,7 +157,7 @@ export function ModelRoutesPage() {
 
   const routes = page?.routes ?? EMPTY_ROUTES
   const endpoints = endpointsQuery.data ?? EMPTY_ENDPOINTS
-  const users = usersQuery.data ?? []
+  const users = usersQuery.data?.users ?? []
   const pendingActions = asyncAction.pendingActions
   const items = useMemo(
     () =>
@@ -244,9 +246,7 @@ export function ModelRoutesPage() {
     }
   }
 
-  async function submitModelRoute(): Promise<void> {
-    const currentForm = dialogForm
-    if (!currentForm) return
+  async function submitModelRoute(currentForm: ModelRouteForm): Promise<void> {
     const ruleId = currentForm.rule_id || null
     const capturedRuleId = ruleId
     const body = capturePayload(modelRouteFormToRequest(currentForm))
@@ -258,7 +258,12 @@ export function ModelRoutesPage() {
       const outcome = await asyncAction.run(
         modelRouteActionKey(capturedRuleId),
         async () => {
-          const saved = await saveModelRoute(capturedRuleId, body)
+          const saved = capturedRuleId
+            ? await updateModelRoute.mutateAsync({
+                path: { rule_id: capturedRuleId },
+                body,
+              })
+            : await createModelRoute.mutateAsync({ body })
           const refreshedPage = await refreshModelRoutePage(
             queryClient,
             capturedFirst,
@@ -297,7 +302,9 @@ export function ModelRoutesPage() {
       const outcome = await asyncAction.run(
         modelRouteActionKey(capturedRuleId),
         async () => {
-          await removeModelRoute(capturedRuleId)
+          await deleteModelRouteRecord.mutateAsync({
+            path: { rule_id: capturedRuleId },
+          })
           const refreshedPage = await refreshModelRoutePage(
             queryClient,
             capturedFirst,
@@ -324,7 +331,10 @@ export function ModelRoutesPage() {
       await asyncAction.run(
         modelRouteActionKey(ruleId),
         async () => {
-          const saved = await setModelRouteEnabled(capturedRoute, enabled)
+          const saved = await updateModelRoute.mutateAsync({
+            path: { rule_id: capturedRoute.rule_id },
+            body: buildModelRouteEnabledRequest(capturedRoute, enabled),
+          })
           patchModelRoutePages(queryClient, saved)
         },
         'toggle',
@@ -347,11 +357,14 @@ export function ModelRoutesPage() {
       const outcome = await asyncAction.run(
         modelRouteActionKey(ruleId),
         async () => {
-          const saved = await setModelRouteTargetEnabled(
-            capturedRoute,
-            capturedTargetId,
-            enabled,
-          )
+          const saved = await updateModelRoute.mutateAsync({
+            path: { rule_id: capturedRoute.rule_id },
+            body: buildModelRouteTargetEnabledRequest(
+              capturedRoute,
+              capturedTargetId,
+              enabled,
+            ),
+          })
           patchModelRoutePages(queryClient, saved)
           return saved
         },
@@ -371,7 +384,7 @@ export function ModelRoutesPage() {
     try {
       const outcome = await asyncAction.run(
         networkTestKey('modelroute', ruleId),
-        () => testModelRoute(ruleId),
+        () => testModelRouteProbe.mutateAsync({ body: { rule_id: ruleId } }),
         'test',
       )
       if (!outcome.executed) return
@@ -463,70 +476,25 @@ export function ModelRoutesPage() {
           </Button>
         </div>
       ) : null}
-      {routePageQuery.isLoading ? (
-        <div
-          aria-label={t('loading')}
-          className="grid min-h-32 place-items-center"
-          role="status"
-        >
-          <LoaderCircle className="animate-spin" />
-        </div>
-      ) : (
-        <>
-          <ModelRoutesTable
-            first={page?.first ?? first}
-            items={items}
-            onDelete={(id) => void deleteModelRoute(id)}
-            onEdit={openEditDialog}
-            onPageChange={changePage}
-            onProbe={(id, surface) => void probeModelRoute(id, surface)}
-            onResultOpenChange={changeTestResultOpen}
-            onShowDetails={showModelRouteDetails}
-            onToggle={(id, enabled) => void toggleModelRoute(id, enabled)}
-            onToggleTarget={(id, targetId, enabled) =>
-              void toggleModelRouteTarget(id, targetId, enabled)
-            }
-            openResultKey={openTestResultKey}
-            pendingActions={pendingActions}
-            rows={page?.rows ?? rows}
-            total={page?.total ?? 0}
-          />
-          <div className="grid gap-2 md:hidden">
-            {items.length === 0 ? (
-              <div className="rounded-xl border p-6 text-center text-sm text-muted-foreground">
-                {t('noModelRoutes')}
-              </div>
-            ) : (
-              items.map((item) => (
-                <ModelRouteMobileCard
-                  item={item}
-                  key={item.rule_id}
-                  onDelete={(id) => void deleteModelRoute(id)}
-                  onEdit={openEditDialog}
-                  onProbe={(id, surface) => void probeModelRoute(id, surface)}
-                  onResultOpenChange={changeTestResultOpen}
-                  onShowDetails={showModelRouteDetails}
-                  onToggle={(id, enabled) => void toggleModelRoute(id, enabled)}
-                  onToggleTarget={(id, targetId, enabled) =>
-                    void toggleModelRouteTarget(id, targetId, enabled)
-                  }
-                  openResultKey={openTestResultKey}
-                  pendingActions={pendingActions}
-                />
-              ))
-            )}
-            <div className="rounded-xl border bg-card">
-              <TablePagination
-                first={page?.first ?? first}
-                onChange={changePage}
-                pageSizeOptions={STANDARD_PAGE_SIZE_OPTIONS}
-                rows={page?.rows ?? rows}
-                total={page?.total ?? 0}
-              />
-            </div>
-          </div>
-        </>
-      )}
+      <ModelRoutesTable
+        first={page?.first ?? first}
+        items={items}
+        loading={routePageQuery.isPending}
+        onDelete={(id) => void deleteModelRoute(id)}
+        onEdit={openEditDialog}
+        onPageChange={changePage}
+        onProbe={(id, surface) => void probeModelRoute(id, surface)}
+        onResultOpenChange={changeTestResultOpen}
+        onShowDetails={showModelRouteDetails}
+        onToggle={(id, enabled) => void toggleModelRoute(id, enabled)}
+        onToggleTarget={(id, targetId, enabled) =>
+          void toggleModelRouteTarget(id, targetId, enabled)
+        }
+        openResultKey={openTestResultKey}
+        pendingActions={pendingActions}
+        rows={page?.rows ?? rows}
+        total={page?.total ?? 0}
+      />
       {dialogForm ? (
         <ModelRouteDialog
           endpoints={endpoints}
@@ -535,10 +503,10 @@ export function ModelRoutesPage() {
             value: endpoint.endpoint_id,
             provider: endpoint.provider,
           }))}
-          form={dialogForm}
-          onChange={setDialogForm}
+          initialForm={dialogForm}
+          key={dialogGenerationRef.current}
           onOpenChange={changeDialogOpen}
-          onSave={() => void submitModelRoute()}
+          onSave={(form) => void submitModelRoute(form)}
           open={dialogOpenRef.current}
           ownerOptionsLoading={usersQuery.isLoading}
           savePending={asyncAction.isPending(

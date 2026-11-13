@@ -1,9 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Clock, LoaderCircle } from 'lucide-react'
 import type {
   ApprovalRequest,
   ApprovalStatusFilter,
 } from '@/generated/admin-api'
+import {
+  DataTable,
+  type DataTableColumnDef,
+} from '@/components/shared/DataTable'
+import { TablePagination } from '@/components/shared/TablePagination'
+import { WorkspacePagerBar } from '@/components/shared/WorkspacePagerBar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -13,16 +19,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { TablePagination } from '@/components/shared/TablePagination'
-import { WorkspacePagerBar } from '@/components/shared/WorkspacePagerBar'
 import type { PendingActions } from '@/lib/async-action'
 import { approvalActionKey } from '@/lib/approvals'
 import { useDisplayTimeZone } from '@/lib/display-timezone'
@@ -65,6 +61,8 @@ export function ApprovalsPanel({
   const { locale, t } = useLocale()
   const timeZone = useDisplayTimeZone()
   const [now, setNow] = useState(() => Date.now())
+  const callbacks = useRef({ onApprove, onOpenDetail, onReject })
+  callbacks.current = { onApprove, onOpenDetail, onReject }
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -130,7 +128,7 @@ export function ApprovalsPanel({
         <Button
           aria-label={t('viewDetails')}
           data-approval-action="details"
-          onClick={() => onOpenDetail(approval)}
+          onClick={() => callbacks.current.onOpenDetail(approval)}
           size="sm"
           type="button"
           variant="outline"
@@ -142,7 +140,7 @@ export function ApprovalsPanel({
             aria-label={t('reject')}
             data-approval-action="reject"
             disabled={gated}
-            onClick={() => onReject(approval)}
+            onClick={() => callbacks.current.onReject(approval)}
             size="sm"
             type="button"
             variant="outline"
@@ -161,7 +159,7 @@ export function ApprovalsPanel({
             aria-label={t('approve')}
             data-approval-action="approve"
             disabled={gated}
-            onClick={() => onApprove(approval)}
+            onClick={() => callbacks.current.onApprove(approval)}
             size="sm"
             type="button"
             variant="outline"
@@ -206,191 +204,204 @@ export function ApprovalsPanel({
     })
   }
 
+  function renderCard(approval: ApprovalRequest) {
+    return (
+      <article
+        className="grid min-w-0 gap-3 rounded-lg border bg-card p-3"
+        data-approval-row={approval.approval_id}
+        key={approval.approval_id}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold break-words">
+              {approval.model || '-'}
+            </div>
+            <div className="text-xs break-words text-muted-foreground">
+              {`${approval.user_login_name || '-'} / ${approval.client_key_label || '-'}`}
+            </div>
+          </div>
+          <Badge
+            className={statusClass(approval)}
+            variant={statusVariant(approval)}
+          >
+            {statusLabel(approval)}
+          </Badge>
+        </div>
+        <div className="grid gap-1.5">
+          <div className="grid gap-px">
+            <div className="text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">
+              {t('reviewReason')}
+            </div>
+            <div className="text-xs leading-[1.38] break-words">
+              {approval.review_reason || '-'}
+            </div>
+          </div>
+          <div className="grid gap-px">
+            <div className="text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">
+              {t('createdAt')}
+            </div>
+            <div className="text-xs leading-[1.38] break-words">
+              {formatCreated(approval)}
+            </div>
+          </div>
+          <div className="grid gap-px">
+            <div className="text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">
+              {t('remainingWait')}
+            </div>
+            <div
+              className="text-xs leading-[1.38]"
+              data-approval-remaining={approval.approval_id}
+            >
+              {formatRemaining(approval)}
+            </div>
+          </div>
+        </div>
+        {renderActions(approval, true)}
+      </article>
+    )
+  }
+
+  const columns = useMemo<Array<DataTableColumnDef<ApprovalRequest>>>(
+    () => [
+      {
+        id: 'user',
+        header: t('user'),
+        cell: ({ row }) => (
+          <div className="max-w-48 break-words">
+            {row.original.user_login_name || '-'}
+          </div>
+        ),
+      },
+      {
+        id: 'client-key',
+        header: t('clientKey'),
+        cell: ({ row }) => (
+          <div className="max-w-48 break-words">
+            {row.original.client_key_label || '-'}
+          </div>
+        ),
+      },
+      {
+        id: 'model',
+        header: t('model'),
+        cell: ({ row }) => (
+          <div className="max-w-56 break-words">
+            {row.original.model || '-'}
+          </div>
+        ),
+      },
+      {
+        id: 'review-reason',
+        header: t('reviewReason'),
+        cell: ({ row }) => (
+          <div className="max-w-64">
+            <Button
+              className="max-w-full truncate"
+              data-approval-reason={row.original.approval_id}
+              onClick={() => callbacks.current.onOpenDetail(row.original)}
+              size="sm"
+              type="button"
+              variant="link"
+            >
+              {row.original.review_reason || '-'}
+            </Button>
+          </div>
+        ),
+      },
+      {
+        id: 'created-at',
+        header: t('createdAt'),
+        cell: ({ row }) => (
+          <div className="whitespace-nowrap">{formatCreated(row.original)}</div>
+        ),
+      },
+      {
+        id: 'remaining-wait',
+        header: t('remainingWait'),
+        cell: ({ row }) => (
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            <Clock
+              aria-hidden="true"
+              className="size-4 text-muted-foreground"
+            />
+            <span data-approval-remaining={row.original.approval_id}>
+              {formatRemaining(row.original)}
+            </span>
+          </div>
+        ),
+      },
+      {
+        id: 'status',
+        header: t('status'),
+        cell: ({ row }) => (
+          <Badge
+            className={statusClass(row.original)}
+            variant={statusVariant(row.original)}
+          >
+            {statusLabel(row.original)}
+          </Badge>
+        ),
+      },
+      {
+        id: 'actions',
+        header: () => <span className="sr-only">{t('viewDetails')}</span>,
+        cell: ({ row }) => renderActions(row.original),
+      },
+    ],
+    [locale, now, pendingActions, t, timeZone.effective],
+  )
+
   return (
-    <section className="grid min-w-0 max-w-full gap-3">
+    <section aria-busy={loading} className="grid min-w-0 max-w-full gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-card px-3 py-3 md:hidden">
         <Badge variant="secondary">{`${pageStart}-${pageEnd} / ${total}`}</Badge>
         {renderFilter()}
       </div>
 
-      <div className="grid gap-3 md:hidden" data-approval-mobile>
-        {approvals.length === 0 ? (
-          <div
-            className="rounded-xl border bg-card px-4 py-6 text-sm text-muted-foreground"
-            role={loading ? 'status' : undefined}
-          >
-            {loading ? t('loading') : t('noApprovals')}
-          </div>
-        ) : (
-          approvals.map((approval) => (
-            <article
-              className="grid min-w-0 gap-3 rounded-lg border bg-card p-3"
-              data-approval-row={approval.approval_id}
-              key={approval.approval_id}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold break-words">
-                    {approval.model || '-'}
-                  </div>
-                  <div className="text-xs break-words text-muted-foreground">
-                    {`${approval.user_login_name || '-'} / ${approval.client_key_label || '-'}`}
-                  </div>
-                </div>
-                <Badge
-                  className={statusClass(approval)}
-                  variant={statusVariant(approval)}
-                >
-                  {statusLabel(approval)}
-                </Badge>
-              </div>
-              <div className="grid gap-1.5">
-                <div className="grid gap-px">
-                  <div className="text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">
-                    {t('reviewReason')}
-                  </div>
-                  <div className="text-xs leading-[1.38] break-words">
-                    {approval.review_reason || '-'}
-                  </div>
-                </div>
-                <div className="grid gap-px">
-                  <div className="text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">
-                    {t('createdAt')}
-                  </div>
-                  <div className="text-xs leading-[1.38] break-words">
-                    {formatCreated(approval)}
-                  </div>
-                </div>
-                <div className="grid gap-px">
-                  <div className="text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">
-                    {t('remainingWait')}
-                  </div>
-                  <div
-                    className="text-xs leading-[1.38]"
-                    data-approval-remaining={approval.approval_id}
-                  >
-                    {formatRemaining(approval)}
-                  </div>
-                </div>
-              </div>
-              {renderActions(approval, true)}
-            </article>
-          ))
-        )}
+      <div className="hidden flex-wrap items-center justify-between gap-2 border-b p-3 md:flex">
+        <div className="text-xs text-muted-foreground">
+          {`${pageStart}-${pageEnd} / ${total}`}
+        </div>
+        {renderFilter()}
+      </div>
+
+      <DataTable
+        className="min-w-[64rem]"
+        columns={columns}
+        data={approvals}
+        emptyLabel={t('noApprovals')}
+        getRowId={(approval) => approval.approval_id}
+        label={t('approvals')}
+        loading={loading}
+        renderCard={renderCard}
+        rowAttributes={(approval) => ({
+          'data-approval-row': approval.approval_id,
+        })}
+      />
+
+      <div className="md:hidden" data-approval-mobile-pager>
         {total > rows && (
-          <div data-approval-mobile-pager>
-            <WorkspacePagerBar
-              canNext={canNext}
-              canPrev={canPrev}
-              currentPage={Math.floor(first / rows) + 1}
-              end={pageEnd}
-              onNext={() => mobilePage('next')}
-              onPrev={() => mobilePage('prev')}
-              start={pageStart}
-              total={total}
-            />
-          </div>
+          <WorkspacePagerBar
+            canNext={canNext}
+            canPrev={canPrev}
+            currentPage={Math.floor(first / rows) + 1}
+            end={pageEnd}
+            onNext={() => mobilePage('next')}
+            onPrev={() => mobilePage('prev')}
+            start={pageStart}
+            total={total}
+          />
         )}
       </div>
 
-      <div className="hidden min-w-0 md:block" data-approval-desktop>
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3">
-          <div className="text-xs text-muted-foreground">
-            {`${pageStart}-${pageEnd} / ${total}`}
-          </div>
-          {renderFilter()}
-        </div>
-        <div className="min-w-0 overflow-x-auto">
-          <Table aria-busy={loading} className="min-w-[64rem]">
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t('user')}</TableHead>
-                <TableHead>{t('clientKey')}</TableHead>
-                <TableHead>{t('model')}</TableHead>
-                <TableHead>{t('reviewReason')}</TableHead>
-                <TableHead>{t('createdAt')}</TableHead>
-                <TableHead>{t('remainingWait')}</TableHead>
-                <TableHead>{t('status')}</TableHead>
-                <TableHead>
-                  <span className="sr-only">{t('viewDetails')}</span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {approvals.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    className="py-8 text-center text-muted-foreground"
-                    colSpan={8}
-                  >
-                    {loading ? t('loading') : t('noApprovals')}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                approvals.map((approval) => (
-                  <TableRow
-                    data-approval-row={approval.approval_id}
-                    key={approval.approval_id}
-                  >
-                    <TableCell className="max-w-48 break-words">
-                      {approval.user_login_name || '-'}
-                    </TableCell>
-                    <TableCell className="max-w-48 break-words">
-                      {approval.client_key_label || '-'}
-                    </TableCell>
-                    <TableCell className="max-w-56 break-words">
-                      {approval.model || '-'}
-                    </TableCell>
-                    <TableCell className="max-w-64">
-                      <Button
-                        className="max-w-full truncate"
-                        data-approval-reason={approval.approval_id}
-                        onClick={() => onOpenDetail(approval)}
-                        size="sm"
-                        type="button"
-                        variant="link"
-                      >
-                        {approval.review_reason || '-'}
-                      </Button>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap">
-                      {formatCreated(approval)}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap">
-                      <div className="flex items-center gap-2">
-                        <Clock
-                          aria-hidden="true"
-                          className="size-4 text-muted-foreground"
-                        />
-                        <span data-approval-remaining={approval.approval_id}>
-                          {formatRemaining(approval)}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        className={statusClass(approval)}
-                        variant={statusVariant(approval)}
-                      >
-                        {statusLabel(approval)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{renderActions(approval)}</TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-        <div data-approval-desktop-pager>
-          <TablePagination
-            first={first}
-            onChange={onPage}
-            pageSizeOptions={APPROVAL_PAGE_SIZE_OPTIONS}
-            rows={rows}
-            total={total}
-          />
-        </div>
+      <div className="hidden md:block" data-approval-desktop-pager>
+        <TablePagination
+          first={first}
+          onChange={onPage}
+          pageSizeOptions={APPROVAL_PAGE_SIZE_OPTIONS}
+          rows={rows}
+          total={total}
+        />
       </div>
     </section>
   )

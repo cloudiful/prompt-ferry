@@ -101,6 +101,27 @@ cargo sqlx prepare --workspace -- --all-targets
 The `.sqlx` directory is tracked so GitHub Actions can compile with
 `SQLX_OFFLINE=true`.
 
+## Frontend Standards
+
+The admin UI is React with TypeScript, Bun, shadcn/ui and Tailwind CSS.
+
+- HTTP calls go through the generated admin client in
+  `frontend/src/generated/admin-api/**`. Its TanStack Query integration emits
+  the query options and the mutation options of every endpoint; use those
+  instead of hand-written request wrappers.
+- Server state belongs to TanStack Query. A read is a `useQuery` over a
+  generated query option, a write is a `useMutation` over a generated mutation
+  option, and every server-owned slice belongs in the query key.
+- A business list renders through the shared `DataTable`, which uses native
+  TanStack Table. Pagination, sorting and row actions stay with the domain
+  that owns the resource.
+- A submission form uses TanStack Form. Search filters, URL state and
+  standalone controls are not forms.
+- Do not introduce a private query, table or form abstraction layer.
+
+The admin UI has no test suite. Verify frontend changes with the typecheck,
+the build and a bounded browser check of the affected routes.
+
 ## Version Freeze
 
 Internal library crates and `tools/db-init` stay at `0.1.0` forever.

@@ -1,52 +1,46 @@
 import type { QueryClient } from '@tanstack/react-query'
-import { listUserOptions } from '@/generated/admin-api'
+import { listEndpoints } from '@/generated/admin-api'
 import type {
   EndpointPageResponse,
+  EndpointRequest,
   ProviderEndpoint,
-  User,
-  UserOptionsResponse,
 } from '@/generated/admin-api'
+import {
+  listEndpointsQueryKey,
+  listModelRoutesQueryKey,
+} from '@/generated/admin-api/@tanstack/react-query.gen'
 import { expectData, withData } from '@/api'
 import {
-  deleteEndpointById,
-  fetchEndpointsPage,
-  persistEndpoint,
-  runEndpointTest,
-  updateEndpointEnabled,
-} from '@/stores/endpoints-api'
-import type { EndpointRequest } from '@/generated/admin-api'
-import { MODEL_ROUTE_CACHE_NAMESPACE } from '@/models/endpoints'
+  endpointFormToRequest,
+  endpointToForm,
+} from '@/admin-mappers/forms/endpoint'
 import { refreshPagedQuery } from './paged-query'
 
-const endpointPagesNamespace = ['endpoints-page'] as const
 const endpointRecordsNamespace = ['endpoint-records'] as const
-const endpointUsersNamespace = ['endpoint-user-options'] as const
+
+async function fetchEndpointsPage(
+  first: number,
+  rows: number,
+): Promise<EndpointPageResponse> {
+  return expectData(
+    await listEndpoints<true>(withData({ query: { first, rows } })),
+  )
+}
 
 export function endpointsPageQueryKey(first: number, rows: number) {
-  return [...endpointPagesNamespace, first, rows] as const
+  return listEndpointsQueryKey({ query: { first, rows } })
 }
 
 export function endpointsPagesQueryKey() {
-  return endpointPagesNamespace
+  return listEndpointsQueryKey()
 }
 
 export function endpointRecordsQueryKey() {
   return endpointRecordsNamespace
 }
 
-export function endpointUserOptionsQueryKey(adminId: number) {
-  return [...endpointUsersNamespace, adminId] as const
-}
-
 export function modelRoutePagesQueryKey() {
-  return [MODEL_ROUTE_CACHE_NAMESPACE] as const
-}
-
-export async function listEndpointsPage(
-  first: number,
-  rows: number,
-): Promise<EndpointPageResponse> {
-  return fetchEndpointsPage(first, rows)
+  return listModelRoutesQueryKey()
 }
 
 export async function listAllEndpointRecords(): Promise<ProviderEndpoint[]> {
@@ -74,33 +68,13 @@ export async function listAllEndpointRecords(): Promise<ProviderEndpoint[]> {
   return [...endpoints.values()]
 }
 
-export async function listEndpointUsers(): Promise<User[]> {
-  const result = expectData(
-    await listUserOptions<true>(withData()),
-  ) as UserOptionsResponse
-  return result.users
-}
-
-export async function saveEndpointRecord(
-  endpointId: string | null,
-  body: EndpointRequest,
-): Promise<ProviderEndpoint> {
-  return persistEndpoint(endpointId, body)
-}
-
-export async function removeEndpointRecord(endpointId: string): Promise<void> {
-  return deleteEndpointById(endpointId)
-}
-
-export async function setEndpointEnabled(
+export function buildEndpointEnabledRequest(
   endpoint: ProviderEndpoint,
   enabled: boolean,
-): Promise<ProviderEndpoint> {
-  return updateEndpointEnabled(endpoint, enabled)
-}
-
-export async function testEndpointRecord(endpointId: string) {
-  return runEndpointTest(endpointId)
+): EndpointRequest {
+  const form = endpointToForm(endpoint)
+  form.enabled = enabled
+  return endpointFormToRequest(form)
 }
 
 export async function refreshEndpointsPage(

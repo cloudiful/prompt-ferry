@@ -1,10 +1,5 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { LoaderCircle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -35,10 +30,10 @@ import type {
   TokenPlanQuotaStatus,
   TokenPlanUsageResponse,
 } from '@/generated/admin-api'
+import { tokenPlanUsageOptions } from '@/generated/admin-api/@tanstack/react-query.gen'
 import {
-  getTokenPlanUsageSnapshot,
-  requestTokenPlanUsage,
-  subscribeTokenPlanUsage,
+  TOKEN_PLAN_CACHE_TTL_MS,
+  tokenPlanUsageSnapshot,
 } from '@/lib/quota-cache'
 import { useLocale, type Translate } from '@/lib/i18n'
 import {
@@ -148,30 +143,18 @@ export function TokenPlanUsageDialog({
   const [nowMs, setNowMs] = useState(() => Date.now())
   onErrorRef.current = onError
 
-  const subscribe = useCallback(
-    (listener: () => void) => subscribeTokenPlanUsage(endpointId, listener),
-    [endpointId],
-  )
-  const getSnapshot = useCallback(
-    () => getTokenPlanUsageSnapshot(endpointId),
-    [endpointId],
-  )
-  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  const usageQuery = useQuery({
+    ...tokenPlanUsageOptions({ path: { endpoint_id: endpointId } }),
+    enabled: open && endpointId !== '',
+    staleTime: TOKEN_PLAN_CACHE_TTL_MS,
+    refetchOnWindowFocus: true,
+    refetchInterval: TOKEN_PLAN_CACHE_TTL_MS,
+  })
 
   useEffect(() => {
-    if (!open || !endpointId) return
-    let current = true
-    void requestTokenPlanUsage(endpointId)
-      .then((result) => {
-        if (current && result.failed) onErrorRef.current(result.cause)
-      })
-      .catch((cause: unknown) => {
-        if (current) onErrorRef.current(cause)
-      })
-    return () => {
-      current = false
-    }
-  }, [endpointId, open])
+    if (!open || !endpointId || !usageQuery.error) return
+    onErrorRef.current(usageQuery.error)
+  }, [endpointId, open, usageQuery.error])
 
   useEffect(() => {
     if (!open) return
@@ -180,6 +163,7 @@ export function TokenPlanUsageDialog({
     return () => window.clearInterval(ticker)
   }, [open])
 
+  const snapshot = tokenPlanUsageSnapshot(usageQuery, nowMs)
   const usage: TokenPlanUsageResponse | null = snapshot.usage
   const translate = t as unknown as TranslateFn
   const configuredKeys = (usage?.keys ?? []).map((key) => ({

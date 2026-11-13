@@ -7,8 +7,8 @@ import {
   Unplug,
 } from 'lucide-react'
 import type { McpServer } from '@/generated/admin-api'
+import { getMcpOauthStatusOptions } from '@/generated/admin-api/@tanstack/react-query.gen'
 import { Button } from '@/components/ui/button'
-import { fetchMcpOAuthStatus, mcpOAuthStatusQueryKey } from '@/lib/mcp'
 import { useLocale } from '@/lib/i18n'
 import { useSessionStore } from '@/lib/session'
 
@@ -33,9 +33,10 @@ export function McpOAuthPanel({
     server.scope === 'user' && me != null && server.owner_user_id === me.user_id
   const queryEnabled = server.auth_mode === 'oauth' && server.server_id !== ''
   const statusQuery = useQuery({
+    ...getMcpOauthStatusOptions({
+      path: { server_id: server.server_id },
+    }),
     enabled: queryEnabled,
-    queryKey: mcpOAuthStatusQueryKey(server.server_id),
-    queryFn: () => fetchMcpOAuthStatus(server.server_id),
     retry: false,
     refetchOnWindowFocus: true,
     refetchInterval: (query) =>

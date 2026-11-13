@@ -1,3 +1,5 @@
+import { useStore } from '@tanstack/react-form'
+import type { DeepKeys, DeepValue } from '@tanstack/form-core'
 import { ProviderIcon } from '@/components/providers/ProviderIcon'
 import { Input } from '@/components/ui/input'
 import {
@@ -20,10 +22,10 @@ import type {
   User,
 } from '@/generated/admin-api'
 import type { EndpointForm } from '@/models'
+import type { EndpointFormApi } from '@/models/endpoints/form-api'
 
 type EndpointProviderFieldsProps = {
-  form: EndpointForm
-  onChange: (update: (current: EndpointForm) => EndpointForm) => void
+  form: EndpointFormApi
   users: User[]
 }
 
@@ -58,40 +60,52 @@ const PROTOCOLS: Array<{
 
 export function EndpointProviderFields({
   form,
-  onChange,
   users,
 }: EndpointProviderFieldsProps) {
   const { t } = useLocale()
-  const provider = form.provider
-  const plan = normalizeProviderPlan(form.provider, form.plan)
+  const values = useStore(form.store, (state) => state.values)
+  const provider = values.provider
+  const plan = normalizeProviderPlan(values.provider, values.plan)
   const protocolValue =
-    form.protocol_mode === 'auto'
+    values.protocol_mode === 'auto'
       ? 'auto'
-      : (form.native_api_override ?? 'responses')
-  const hasVersionPath = /\/v1\/?$/.test(form.base_url.trim())
+      : (values.native_api_override ?? 'responses')
+  const hasVersionPath = /\/v1\/?$/.test(values.base_url.trim())
+
+  function setField<K extends DeepKeys<EndpointForm>>(
+    name: K,
+    value: DeepValue<EndpointForm, K>,
+  ): void {
+    form.setFieldValue(name, value)
+  }
 
   function changeProvider(value: EndpointProvider): void {
-    onChange((current) => {
-      const next = { ...current, provider: value }
-      next.plan = normalizeProviderPlan(value, current.plan)
-      clearAdminApiKeyOutsideOpenAi(next)
-      if (value !== 'minimax') {
-        next.provider_region = null
-        next.mcp_enabled = false
-      } else {
-        next.provider_region = current.provider_region ?? 'cn'
-        if (!current.endpoint_id) next.mcp_enabled = true
-      }
-      return next
-    })
+    const next: EndpointForm = { ...values, provider: value }
+    next.plan = normalizeProviderPlan(value, values.plan)
+    clearAdminApiKeyOutsideOpenAi(next)
+    if (value !== 'minimax') {
+      next.provider_region = null
+      next.mcp_enabled = false
+    } else {
+      next.provider_region = values.provider_region ?? 'cn'
+      if (!values.endpoint_id) next.mcp_enabled = true
+    }
+    setField('provider', next.provider)
+    setField('plan', next.plan)
+    setField('admin_api_key', next.admin_api_key)
+    setField('admin_api_key_clear', next.admin_api_key_clear)
+    setField('provider_region', next.provider_region)
+    setField('mcp_enabled', next.mcp_enabled)
   }
 
   function changeProtocol(value: (typeof PROTOCOLS)[number]['value']): void {
-    onChange((current) =>
-      value === 'auto'
-        ? { ...current, protocol_mode: 'auto', native_api_override: null }
-        : { ...current, protocol_mode: 'manual', native_api_override: value },
-    )
+    if (value === 'auto') {
+      setField('protocol_mode', 'auto')
+      setField('native_api_override', null)
+      return
+    }
+    setField('protocol_mode', 'manual')
+    setField('native_api_override', value)
   }
 
   return (
@@ -100,14 +114,11 @@ export function EndpointProviderFields({
         <label className="grid min-w-0 grid-rows-[1rem_auto] gap-1 text-xs font-medium">
           <span className="truncate">{t('scope')}</span>
           <Select
-            onValueChange={(value) =>
-              onChange((current) => ({
-                ...current,
-                scope: value as EndpointForm['scope'],
-                owner_user_id: value === 'admin' ? null : current.owner_user_id,
-              }))
-            }
-            value={form.scope}
+            onValueChange={(value) => {
+              setField('scope', value as EndpointForm['scope'])
+              if (value === 'admin') setField('owner_user_id', null)
+            }}
+            value={values.scope}
           >
             <SelectTrigger aria-label={t('scope')} className="w-full">
               <SelectValue />
@@ -144,15 +155,18 @@ export function EndpointProviderFields({
           htmlFor="endpoint-name"
         >
           <span className="truncate">{t('name')}</span>
-          <Input
-            autoComplete="off"
-            id="endpoint-name"
-            onChange={(event) => {
-              const name = event.currentTarget.value
-              onChange((current) => ({ ...current, name }))
-            }}
-            value={form.name}
-          />
+          <form.Field name="name">
+            {(field) => (
+              <Input
+                autoComplete="off"
+                id="endpoint-name"
+                onChange={(event) =>
+                  field.handleChange(event.currentTarget.value)
+                }
+                value={field.state.value}
+              />
+            )}
+          </form.Field>
         </label>
         <label className="grid min-w-0 grid-rows-[1rem_auto] gap-1 text-xs font-medium">
           <span className="truncate">{t('modelRouteNativeApi')}</span>
@@ -179,19 +193,14 @@ export function EndpointProviderFields({
         </label>
       </div>
 
-      {form.scope === 'user' ? (
+      {values.scope === 'user' ? (
         <SettingsFieldRow label={t('owner')} htmlFor="endpoint-owner">
           <Select
-            onValueChange={(value) =>
-              onChange((current) => ({
-                ...current,
-                owner_user_id: Number(value),
-              }))
-            }
+            onValueChange={(value) => setField('owner_user_id', Number(value))}
             value={
-              form.owner_user_id == null
+              values.owner_user_id == null
                 ? undefined
-                : String(form.owner_user_id)
+                : String(values.owner_user_id)
             }
           >
             <SelectTrigger
@@ -221,16 +230,19 @@ export function EndpointProviderFields({
           htmlFor="endpoint-base-url"
         >
           <div className="grid gap-1">
-            <Input
-              autoComplete="url"
-              id="endpoint-base-url"
-              onChange={(event) => {
-                const baseUrl = event.currentTarget.value
-                onChange((current) => ({ ...current, base_url: baseUrl }))
-              }}
-              placeholder={t('baseUrl')}
-              value={form.base_url}
-            />
+            <form.Field name="base_url">
+              {(field) => (
+                <Input
+                  autoComplete="url"
+                  id="endpoint-base-url"
+                  onChange={(event) =>
+                    field.handleChange(event.currentTarget.value)
+                  }
+                  placeholder={t('baseUrl')}
+                  value={field.state.value}
+                />
+              )}
+            </form.Field>
             {hasVersionPath ? (
               <p className="text-xs text-muted-foreground">
                 {t('baseUrlVersionWarning')}
@@ -244,14 +256,12 @@ export function EndpointProviderFields({
         <SettingsFieldRow label={t('providerRegion')} htmlFor="endpoint-region">
           <Select
             onValueChange={(value) =>
-              onChange((current) => ({
-                ...current,
-                provider_region: value as NonNullable<
-                  EndpointForm['provider_region']
-                >,
-              }))
+              setField(
+                'provider_region',
+                value as NonNullable<EndpointForm['provider_region']>,
+              )
             }
-            value={form.provider_region ?? 'cn'}
+            value={values.provider_region ?? 'cn'}
           >
             <SelectTrigger
               aria-label={t('providerRegion')}
@@ -273,7 +283,7 @@ export function EndpointProviderFields({
       {provider === 'openai' ? (
         <SettingsFieldRow
           hint={
-            form.has_oauth_token
+            values.has_oauth_token
               ? t('endpointPlanHint')
               : t('endpointPlanLoginRequired')
           }
@@ -282,13 +292,10 @@ export function EndpointProviderFields({
         >
           <Select
             onValueChange={(value) =>
-              onChange((current) => ({
-                ...current,
-                plan: normalizeProviderPlan(
-                  current.provider,
-                  value as EndpointPlan,
-                ),
-              }))
+              setField(
+                'plan',
+                normalizeProviderPlan(values.provider, value as EndpointPlan),
+              )
             }
             value={plan}
           >
@@ -304,7 +311,7 @@ export function EndpointProviderFields({
                 {t('endpointPlanPlatformApiKey')}
               </SelectItem>
               <SelectItem
-                disabled={!form.has_oauth_token}
+                disabled={!values.has_oauth_token}
                 value="chatgpt_subscription"
               >
                 {t('endpointPlanChatgptSubscription')}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { LoaderCircle, Plus, RefreshCw } from 'lucide-react'
 import {
   createEmptyMcpForm,
@@ -13,6 +13,19 @@ import type {
   McpTestResponse,
   User,
 } from '@/generated/admin-api'
+import {
+  createMcpServerMutation,
+  deleteMcpServerMutation,
+  disconnectMcpOauthMutation,
+  getMcpCatalogOptions,
+  getMcpCatalogQueryKey,
+  listMcpProvidersOptions,
+  listMcpServersOptions,
+  listUserOptionsOptions,
+  startMcpOauthMutation,
+  testMcpServerMutation,
+  updateMcpServerMutation,
+} from '@/generated/admin-api/@tanstack/react-query.gen'
 import type { McpForm } from '@/models'
 import { McpDialog } from '@/components/mcp/McpDialog'
 import { McpTable } from '@/components/mcp/McpTable'
@@ -24,24 +37,12 @@ import { Button } from '@/components/ui/button'
 import { HeaderActions } from '@/components/layout/HeaderActions'
 import {
   EMPTY_MCP_CATALOG,
-  disconnectMcpOAuth,
-  fetchMcpCatalog,
-  fetchMcpProviders,
-  fetchMcpServerPage,
-  fetchMcpUsers,
   mcpActionKey,
   mcpCatalogFromTest,
   mcpLastPageFirst,
   mcpOAuthStatusQueryKey,
-  mcpProvidersQueryKey,
-  mcpServerPageQueryKey,
   mcpTestKey,
-  mcpUserOptionsQueryKey,
   refreshMcpServerPage,
-  removeMcpServerRecord,
-  saveMcpServerRecord,
-  runMcpServerTest,
-  startMcpOAuth,
 } from '@/lib/mcp'
 import { useAsyncAction } from '@/lib/use-async-action'
 import { useLocale } from '@/lib/i18n'
@@ -58,8 +59,6 @@ import { useStoredPageSize } from '@/components/shared/TablePagination'
 const EMPTY_SERVERS: McpServer[] = []
 const EMPTY_PROVIDERS: McpProviderDescriptor[] = []
 const EMPTY_USERS: User[] = []
-
-type CatalogCache = Record<string, McpCatalogResponse>
 
 type OwnedOAuthPopup = {
   popup: Window
@@ -89,7 +88,6 @@ export function McpPage() {
   const asyncAction = useAsyncAction()
   const { notifyApiError, notifyError, notifySuccess } = useNotifier()
   const me = useSessionStore((state) => state.me)
-  const userId = me?.user_id ?? 0
   const isAdmin = me?.is_admin === true
   const [first, setFirst] = useState(0)
   const [rows, setRows] = useStoredPageSize(
@@ -103,18 +101,11 @@ export function McpPage() {
   const [openTestResultKey, setOpenTestResultKey] = useState<string | null>(
     null,
   )
-  const [, setCatalogs] = useState<CatalogCache>({})
-  const catalogsRef = useRef<CatalogCache>({})
-  const catalogRevisionRef = useRef<Record<string, number>>({})
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [dialogForm, setDialogForm] = useState<McpForm | null>(null)
-  const [dialogOauthServer, setDialogOauthServer] = useState<McpServer | null>(
+  const [dialogInitialForm, setDialogInitialForm] = useState<McpForm | null>(
     null,
   )
-  const [dialogCatalog, setDialogCatalog] =
-    useState<McpCatalogResponse>(EMPTY_MCP_CATALOG)
-  const [dialogCatalogLoading, setDialogCatalogLoading] = useState(false)
-  const [dialogCatalogError, setDialogCatalogError] = useState(false)
+  const [dialogServer, setDialogServer] = useState<McpServer | null>(null)
   const firstRef = useRef(first)
   const rowsRef = useRef(rows)
   const dialogOpenRef = useRef(false)
@@ -139,20 +130,33 @@ export function McpPage() {
   }, [])
 
   const serverPageQuery = useQuery({
+    ...listMcpServersOptions({ query: { first, rows } }),
     enabled: me !== null,
-    queryKey: mcpServerPageQueryKey(first, rows, userId, isAdmin),
-    queryFn: () => fetchMcpServerPage(first, rows),
   })
   const providersQuery = useQuery({
+    ...listMcpProvidersOptions(),
     enabled: me !== null,
-    queryKey: mcpProvidersQueryKey(),
-    queryFn: fetchMcpProviders,
   })
   const usersQuery = useQuery({
+    ...listUserOptionsOptions(),
     enabled: isAdmin && me !== null,
-    queryKey: mcpUserOptionsQueryKey(userId),
-    queryFn: fetchMcpUsers,
   })
+
+  const catalogServerId = dialogServer?.server_id ?? ''
+  const catalogEnabled =
+    dialogOpen && dialogServer?.enabled === true && catalogServerId !== ''
+  const catalogQuery = useQuery({
+    ...getMcpCatalogOptions({ path: { server_id: catalogServerId } }),
+    enabled: catalogEnabled,
+    staleTime: Infinity,
+  })
+
+  const createServer = useMutation(createMcpServerMutation())
+  const updateServer = useMutation(updateMcpServerMutation())
+  const removeServer = useMutation(deleteMcpServerMutation())
+  const probeServer = useMutation(testMcpServerMutation())
+  const startOauth = useMutation(startMcpOauthMutation())
+  const disconnectOauth = useMutation(disconnectMcpOauthMutation())
 
   const reportApiError = useCallback(
     (cause: unknown) => {
@@ -174,6 +178,9 @@ export function McpPage() {
   useEffect(() => {
     if (usersQuery.error) reportApiError(usersQuery.error)
   }, [reportApiError, usersQuery.error])
+  useEffect(() => {
+    if (catalogQuery.error) reportApiError(catalogQuery.error)
+  }, [catalogQuery.error, reportApiError])
 
   const page = serverPageQuery.data
   useEffect(() => {
@@ -198,7 +205,7 @@ export function McpPage() {
 
   const servers = page?.servers ?? EMPTY_SERVERS
   const providers = providersQuery.data ?? EMPTY_PROVIDERS
-  const users = usersQuery.data ?? EMPTY_USERS
+  const users = usersQuery.data?.users ?? EMPTY_USERS
   const labels = useMemo(
     () => ({
       aggregateNamingModePassthroughPreferredShort: t(
@@ -231,92 +238,26 @@ export function McpPage() {
   )
   const pendingActions = asyncAction.pendingActions
 
-  function updateCatalogCache(
-    serverId: string,
-    catalog: McpCatalogResponse,
-  ): void {
-    const next = { ...catalogsRef.current, [serverId]: catalog }
-    catalogsRef.current = next
-    setCatalogs(next)
-  }
+  const catalog: McpCatalogResponse = catalogEnabled
+    ? (catalogQuery.data ?? EMPTY_MCP_CATALOG)
+    : EMPTY_MCP_CATALOG
+  const catalogLoading = catalogEnabled && catalogQuery.isFetching
+  const catalogError = catalogEnabled && catalogQuery.isError
 
   function invalidateCatalog(serverId: string): void {
-    const next = { ...catalogsRef.current }
-    delete next[serverId]
-    catalogsRef.current = next
-    setCatalogs(next)
-    catalogRevisionRef.current[serverId] =
-      (catalogRevisionRef.current[serverId] ?? 0) + 1
-  }
-
-  function setDialogCatalogFor(
-    serverId: string,
-    generation: number,
-    catalog: McpCatalogResponse,
-  ): void {
-    if (
-      dialogOpenRef.current &&
-      dialogGenerationRef.current === generation &&
-      dialogServerIdRef.current === serverId
-    ) {
-      setDialogCatalog(catalog)
-      setDialogCatalogLoading(false)
-      setDialogCatalogError(false)
-    }
-  }
-
-  function loadDialogCatalog(
-    server: McpServer,
-    generation: number,
-    force = false,
-  ): void {
-    const serverId = server.server_id
-    if (!server.enabled) {
-      setDialogCatalog(EMPTY_MCP_CATALOG)
-      setDialogCatalogLoading(false)
-      setDialogCatalogError(false)
-      return
-    }
-    if (!force && catalogsRef.current[serverId]) {
-      setDialogCatalog(catalogsRef.current[serverId]!)
-      setDialogCatalogLoading(false)
-      setDialogCatalogError(false)
-      return
-    }
-
-    const revision = (catalogRevisionRef.current[serverId] ?? 0) + 1
-    catalogRevisionRef.current[serverId] = revision
-    setDialogCatalog(EMPTY_MCP_CATALOG)
-    setDialogCatalogLoading(true)
-    setDialogCatalogError(false)
-    void fetchMcpCatalog(serverId)
-      .then((catalog) => {
-        if (catalogRevisionRef.current[serverId] !== revision) return
-        updateCatalogCache(serverId, catalog)
-        setDialogCatalogFor(serverId, generation, catalog)
-      })
-      .catch((cause) => {
-        if (catalogRevisionRef.current[serverId] !== revision) return
-        if (
-          dialogOpenRef.current &&
-          dialogGenerationRef.current === generation &&
-          dialogServerIdRef.current === serverId
-        ) {
-          setDialogCatalogLoading(false)
-          setDialogCatalogError(true)
-          reportApiError(cause)
-        }
-      })
+    void queryClient.invalidateQueries({
+      queryKey: getMcpCatalogQueryKey({ path: { server_id: serverId } }),
+      exact: true,
+      refetchType: 'none',
+    })
   }
 
   function openCreateDialog(): void {
     dialogGenerationRef.current += 1
     dialogServerIdRef.current = null
     dialogOpenRef.current = true
-    setDialogCatalog(EMPTY_MCP_CATALOG)
-    setDialogCatalogLoading(false)
-    setDialogCatalogError(false)
-    setDialogForm(() => {
+    setDialogServer(null)
+    setDialogInitialForm(() => {
       const form = createEmptyMcpForm()
       if (!isAdmin) {
         form.scope = 'user'
@@ -328,19 +269,12 @@ export function McpPage() {
   }
 
   function openEditDialog(server: McpServer): void {
-    const generation = dialogGenerationRef.current + 1
-    dialogGenerationRef.current = generation
+    dialogGenerationRef.current += 1
     dialogServerIdRef.current = server.server_id
     dialogOpenRef.current = true
-    setDialogOauthServer(server)
-    setDialogForm(mcpServerToForm(server))
-    setDialogCatalog(catalogsRef.current[server.server_id] ?? EMPTY_MCP_CATALOG)
-    setDialogCatalogError(false)
-    setDialogCatalogLoading(
-      server.enabled && !catalogsRef.current[server.server_id],
-    )
+    setDialogServer(server)
+    setDialogInitialForm(mcpServerToForm(server))
     setDialogOpen(true)
-    loadDialogCatalog(server, generation)
   }
 
   function closeDialog(): void {
@@ -350,11 +284,8 @@ export function McpPage() {
     dialogServerIdRef.current = null
     dialogOpenRef.current = false
     setDialogOpen(false)
-    setDialogForm(null)
-    setDialogOauthServer(null)
-    setDialogCatalog(EMPTY_MCP_CATALOG)
-    setDialogCatalogLoading(false)
-    setDialogCatalogError(false)
+    setDialogInitialForm(null)
+    setDialogServer(null)
   }
 
   function changeDialogOpen(open: boolean): void {
@@ -455,7 +386,9 @@ export function McpPage() {
           const entry: OwnedOAuthPopup = { popup, serverId, generation }
           oauthPopupsRef.current.set(serverId, entry)
           try {
-            const started = await startMcpOAuth(serverId)
+            const started = await startOauth.mutateAsync({
+              path: { server_id: serverId },
+            })
             await invalidateOAuthStatus(serverId)
             return {
               kind: 'opened',
@@ -505,7 +438,9 @@ export function McpPage() {
       const outcome = await asyncAction.run(
         mcpActionKey(serverId),
         async () => {
-          await disconnectMcpOAuth(serverId)
+          await disconnectOauth.mutateAsync({
+            path: { server_id: serverId },
+          })
           await invalidateOAuthStatus(serverId)
         },
         'oauth-disconnect',
@@ -522,9 +457,7 @@ export function McpPage() {
     }
   }
 
-  async function submitServer(): Promise<void> {
-    const currentForm = dialogForm
-    if (!currentForm) return
+  async function submitServer(currentForm: McpForm): Promise<void> {
     const serverId = currentForm.server_id || null
     const capturedServerId = serverId
     const generation = dialogGenerationRef.current
@@ -535,17 +468,20 @@ export function McpPage() {
       const outcome = await asyncAction.run(
         mcpActionKey(capturedServerId),
         async () => {
-          const saved = await saveMcpServerRecord(capturedServerId, body)
+          const saved = capturedServerId
+            ? await updateServer.mutateAsync({
+                path: { server_id: capturedServerId },
+                body,
+              })
+            : await createServer.mutateAsync({ body })
           if (capturedServerId) {
             invalidateCatalog(capturedServerId)
-            invalidateOAuthStatus(capturedServerId)
+            void invalidateOAuthStatus(capturedServerId)
           }
           const refreshed = await refreshMcpServerPage(
             queryClient,
             capturedFirst,
             capturedRows,
-            userId,
-            isAdmin,
           )
           setPageAfterRefresh(refreshed, capturedFirst, capturedRows)
           return saved
@@ -577,17 +513,15 @@ export function McpPage() {
       const outcome = await asyncAction.run(
         mcpActionKey(capturedServer.server_id),
         async () => {
-          const updated = await saveMcpServerRecord(
-            capturedServer.server_id,
+          const updated = await updateServer.mutateAsync({
+            path: { server_id: capturedServer.server_id },
             body,
-          )
+          })
           invalidateCatalog(capturedServer.server_id)
           const refreshed = await refreshMcpServerPage(
             queryClient,
             capturedFirst,
             capturedRows,
-            userId,
-            isAdmin,
           )
           setPageAfterRefresh(refreshed, capturedFirst, capturedRows)
           return updated
@@ -609,7 +543,7 @@ export function McpPage() {
       const outcome = await asyncAction.run(
         mcpActionKey(serverId),
         async () => {
-          await removeMcpServerRecord(serverId)
+          await removeServer.mutateAsync({ path: { server_id: serverId } })
           invalidateCatalog(serverId)
           setTestResults((current) => {
             const next = { ...current }
@@ -620,8 +554,6 @@ export function McpPage() {
             queryClient,
             capturedFirst,
             capturedRows,
-            userId,
-            isAdmin,
           )
           setPageAfterRefresh(refreshed, capturedFirst, capturedRows)
         },
@@ -642,7 +574,7 @@ export function McpPage() {
     try {
       const outcome = await asyncAction.run(
         mcpTestKey(serverId),
-        () => runMcpServerTest(serverId),
+        () => probeServer.mutateAsync({ path: { server_id: serverId } }),
         'test',
       )
       if (!outcome.executed) return
@@ -650,14 +582,10 @@ export function McpPage() {
       const catalog = mcpCatalogFromTest(result)
       setTestResults((current) => ({ ...current, [serverId]: result }))
       setOpenTestResultKey(testResultKey(capturedSurface, serverId))
-      updateCatalogCache(serverId, catalog)
-      catalogRevisionRef.current[serverId] =
-        (catalogRevisionRef.current[serverId] ?? 0) + 1
-      if (dialogOpenRef.current && dialogServerIdRef.current === serverId) {
-        setDialogCatalog(catalog)
-        setDialogCatalogLoading(false)
-        setDialogCatalogError(false)
-      }
+      queryClient.setQueryData(
+        getMcpCatalogQueryKey({ path: { server_id: serverId } }),
+        catalog,
+      )
     } catch (cause) {
       reportApiError(cause)
     }
@@ -753,34 +681,28 @@ export function McpPage() {
         rows={currentPage?.rows ?? rows}
         total={currentPage?.total ?? 0}
       />
-      {dialogForm ? (
+      {dialogInitialForm ? (
         <McpDialog
-          catalog={dialogCatalog}
-          catalogError={dialogCatalogError}
-          catalogLoading={dialogCatalogLoading}
-          form={dialogForm}
-          header={dialogForm.server_id ? t('editMcpServer') : t('newMcpServer')}
+          catalog={catalog}
+          catalogError={catalogError}
+          catalogLoading={catalogLoading}
+          header={dialogServer ? t('editMcpServer') : t('newMcpServer')}
+          initialForm={dialogInitialForm}
           isAdmin={isAdmin}
-          onChange={setDialogForm}
+          key={dialogGenerationRef.current}
           onOAuthConnect={connectOAuth}
           onOAuthDisconnect={disconnectOAuth}
           oauthPending={asyncAction.isPending(
-            mcpActionKey(dialogOauthServer?.server_id ?? null),
+            mcpActionKey(dialogServer?.server_id ?? null),
           )}
-          oauthServer={dialogOauthServer}
+          oauthServer={dialogServer}
           onOpenChange={changeDialogOpen}
-          onRefreshCatalog={() => {
-            const serverId = dialogServerIdRef.current
-            if (!serverId) return
-            const server = servers.find((item) => item.server_id === serverId)
-            if (server)
-              loadDialogCatalog(server, dialogGenerationRef.current, true)
-          }}
-          onSave={() => void submitServer()}
+          onRefreshCatalog={() => void catalogQuery.refetch()}
+          onSave={(form) => void submitServer(form)}
           open={dialogOpen}
           providers={providers}
           savePending={asyncAction.isPending(
-            mcpActionKey(dialogForm.server_id || null),
+            mcpActionKey(dialogServer?.server_id ?? null),
           )}
           users={users}
         />

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { HeaderActions } from '@/components/layout/HeaderActions'
 import {
@@ -12,16 +12,7 @@ import {
 import { ApiKeysTable } from '@/components/api-keys/ApiKeysTable'
 import { KeyDialog } from '@/components/api-keys/KeyDialog'
 import { useAsyncAction } from '@/lib/use-async-action'
-import {
-  clientKeyPageQueryKey,
-  clientKeyUsersQueryKey,
-  createClientKeyForUser,
-  deleteClientKeyForUser,
-  listClientKeyUsers,
-  listClientKeysPage,
-  refreshClientKeyPage,
-  updateClientKeyForUser,
-} from '@/lib/api-keys'
+import { clientKeyPageOptions, refreshClientKeyPage } from '@/lib/api-keys'
 import { copyText } from '@/lib/clipboard'
 import { useLocale } from '@/lib/i18n'
 import { useNotifier } from '@/lib/notifier'
@@ -32,7 +23,19 @@ import {
   createApiKeysWorkspaceView,
   SELF_USER_ID,
 } from '@/models/api-keys'
-import type { UpdateClientKeyRequest } from '@/generated/admin-api'
+import type {
+  CreateClientKeyRequest,
+  UpdateClientKeyRequest,
+} from '@/generated/admin-api'
+import {
+  createClientKeyMutation,
+  deleteClientKeyMutation,
+  listUserOptionsOptions,
+  meCreateClientKeyMutation,
+  meDeleteClientKeyMutation,
+  meUpdateClientKeyMutation,
+  updateClientKeyMutation,
+} from '@/generated/admin-api/@tanstack/react-query.gen'
 import { useStoredPageSize } from '@/components/shared/TablePagination'
 
 export function ApiKeysPage() {
@@ -50,7 +53,6 @@ export function ApiKeysPage() {
   >({})
   const [createOpen, setCreateOpen] = useState(false)
   const [dialogOwnerId, setDialogOwnerId] = useState(SELF_USER_ID)
-  const [keyLabel, setKeyLabel] = useState('')
   const [generatedSecret, setGeneratedSecret] = useState('')
   const selectedUserIdRef = useRef(selectedUserId)
   const firstRef = useRef(first)
@@ -77,15 +79,50 @@ export function ApiKeysPage() {
   )
 
   const userOptionsQuery = useQuery({
+    ...listUserOptionsOptions(),
     enabled: isAdmin && me !== null,
-    queryKey: clientKeyUsersQueryKey(me?.user_id ?? SELF_USER_ID),
-    queryFn: listClientKeyUsers,
   })
   const keyPageQuery = useQuery({
+    ...clientKeyPageOptions(selectedUserId, first, rows),
     enabled: me !== null,
-    queryKey: clientKeyPageQueryKey(selectedUserId, first, rows),
-    queryFn: () => listClientKeysPage(selectedUserId, first, rows),
   })
+
+  const createSelfKey = useMutation(meCreateClientKeyMutation())
+  const createOwnerKey = useMutation(createClientKeyMutation())
+  const updateSelfKey = useMutation(meUpdateClientKeyMutation())
+  const updateOwnerKey = useMutation(updateClientKeyMutation())
+  const deleteSelfKey = useMutation(meDeleteClientKeyMutation())
+  const deleteOwnerKey = useMutation(deleteClientKeyMutation())
+
+  async function createKeyForOwner(
+    ownerId: number,
+    body: CreateClientKeyRequest,
+  ) {
+    return ownerId === SELF_USER_ID
+      ? createSelfKey.mutateAsync({ body })
+      : createOwnerKey.mutateAsync({ path: { user_id: ownerId }, body })
+  }
+
+  async function updateKeyForOwner(
+    ownerId: number,
+    keyId: string,
+    body: UpdateClientKeyRequest,
+  ) {
+    return ownerId === SELF_USER_ID
+      ? updateSelfKey.mutateAsync({ path: { key_id: keyId }, body })
+      : updateOwnerKey.mutateAsync({
+          path: { user_id: ownerId, key_id: keyId },
+          body,
+        })
+  }
+
+  async function deleteKeyForOwner(ownerId: number, keyId: string) {
+    return ownerId === SELF_USER_ID
+      ? deleteSelfKey.mutateAsync({ path: { key_id: keyId } })
+      : deleteOwnerKey.mutateAsync({
+          path: { user_id: ownerId, key_id: keyId },
+        })
+  }
 
   useEffect(() => {
     if (userOptionsQuery.error) reportApiError(userOptionsQuery.error)
@@ -109,7 +146,7 @@ export function ApiKeysPage() {
     if (page.rows !== rows) setRows(page.rows)
   }, [first, keyPageQuery.data, rows, setRows])
 
-  const users = userOptionsQuery.data ?? []
+  const users = userOptionsQuery.data?.users ?? []
   const selectedUser =
     selectedUserId === SELF_USER_ID
       ? null
@@ -133,7 +170,6 @@ export function ApiKeysPage() {
     setFirst(0)
     setVisibleKeySecrets({})
     setGeneratedSecret('')
-    setKeyLabel('')
   }
 
   async function refresh(): Promise<void> {
@@ -146,7 +182,6 @@ export function ApiKeysPage() {
     dialogGenerationRef.current += 1
     dialogOwnerRef.current = selectedUserIdRef.current
     setDialogOwnerId(selectedUserIdRef.current)
-    setKeyLabel('')
     setGeneratedSecret('')
     createOpenRef.current = true
     setCreateOpen(true)
@@ -158,7 +193,6 @@ export function ApiKeysPage() {
     setCreateOpen(open)
     if (!open) {
       dialogGenerationRef.current += 1
-      setKeyLabel('')
       setGeneratedSecret('')
     }
   }
@@ -195,8 +229,8 @@ export function ApiKeysPage() {
     )
   }
 
-  async function submitCreateKey(): Promise<void> {
-    const capturedLabel = keyLabel.trim()
+  async function submitCreateKey(label: string): Promise<void> {
+    const capturedLabel = label.trim()
     if (!capturedLabel) {
       notifyError(t('keyLabelRequired'))
       return
@@ -220,8 +254,7 @@ export function ApiKeysPage() {
         ownerId: targetUserId,
         pageFirst: targetFirst,
         pageRows: targetRows,
-        write: () =>
-          createClientKeyForUser(targetUserId, { label: capturedLabel }),
+        write: () => createKeyForOwner(targetUserId, { label: capturedLabel }),
       })
       if (!outcome.executed || !isCurrentDialog()) return
       setGeneratedSecret(outcome.value.secret)
@@ -242,8 +275,7 @@ export function ApiKeysPage() {
         ownerId,
         pageFirst,
         pageRows,
-        write: () =>
-          updateClientKeyForUser(ownerId, keyId, { label: label.trim() }),
+        write: () => updateKeyForOwner(ownerId, keyId, { label: label.trim() }),
       })
       if (!outcome.executed) return false
       notifySuccess(t('saved'))
@@ -268,7 +300,7 @@ export function ApiKeysPage() {
         ownerId,
         pageFirst,
         pageRows,
-        write: () => updateClientKeyForUser(ownerId, keyId, payload),
+        write: () => updateKeyForOwner(ownerId, keyId, payload),
       })
     } catch (cause) {
       reportApiError(cause)
@@ -288,7 +320,7 @@ export function ApiKeysPage() {
         ownerId,
         pageFirst,
         pageRows,
-        write: () => deleteClientKeyForUser(ownerId, keyId),
+        write: () => deleteKeyForOwner(ownerId, keyId),
       })
     } catch (cause) {
       reportApiError(cause)
@@ -390,16 +422,14 @@ export function ApiKeysPage() {
 
       <KeyDialog
         generatedSecret={generatedSecret}
-        keyLabel={keyLabel}
         onCloseAutoFocus={(event) => {
           event.preventDefault()
           const button = createButtonRef.current
           if (button?.isConnected && !button.disabled) button.focus()
         }}
         onCopySecret={() => void copySecret(generatedSecret)}
-        onKeyLabelChange={setKeyLabel}
         onOpenChange={changeCreateDialog}
-        onSubmit={() => void submitCreateKey()}
+        onSubmit={(label) => void submitCreateKey(label)}
         open={createOpen}
         pending={createPending}
       />

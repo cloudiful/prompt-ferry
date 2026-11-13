@@ -1,22 +1,25 @@
 import { useEffect, useRef, useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm } from '@tanstack/react-form'
 import { Eye, EyeOff, RefreshCw } from 'lucide-react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
   HostRole,
   RelayHostResponse,
   RelaySettingsResponse,
   RelayStatusResponse,
 } from '@/generated/admin-api'
+import { formatApiError } from '@/api'
 import {
-  relayGetSettings,
-  relayHost,
-  relayRequestRestart,
-  relaySetHostRole,
-  relaySetSettings,
-  relayStatus,
-} from '@/generated/admin-api'
-import { expectData, formatApiError, withData } from '@/api'
+  relayGetSettingsOptions,
+  relayGetSettingsQueryKey,
+  relayHostOptions,
+  relayHostQueryKey,
+  relayRequestRestartMutation,
+  relaySetHostRoleMutation,
+  relaySetSettingsMutation,
+  relayStatusOptions,
+  relayStatusQueryKey,
+} from '@/generated/admin-api/@tanstack/react-query.gen'
 import {
   createEmptyRelayHostForm,
   createRelayHostRoleRequest,
@@ -51,14 +54,6 @@ import { usePageTitle } from '@/lib/router'
 import { RELAY_SESSION_AUTH_KEY, useRelaySessionStore } from '@/lib/session'
 
 const HOST_ACTION_KEY = 'host:local'
-const HOST_QUERY_KEY = ['relay-host'] as const
-const STATUS_QUERY_KEY = ['relay-status'] as const
-const SETTINGS_QUERY_KEY = ['relay-settings'] as const
-
-const loadHost = async () => expectData(await relayHost<true>(withData()))
-const loadStatus = async () => expectData(await relayStatus<true>(withData()))
-const loadSettings = async () =>
-  expectData(await relayGetSettings<true>(withData()))
 
 const roles: Array<{
   role: HostRole
@@ -106,10 +101,6 @@ export function RelayHostPage() {
   const [showToken, setShowToken] = useState(false)
   const [actionError, setActionError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
-  const [hostForm, setHostForm] = useState<RelayHostForm>(
-    createEmptyRelayHostForm,
-  )
-  const hostFormRef = useRef(hostForm)
   const bindEditGeneration = useRef(0)
   const formInitialized = useRef(false)
   const hostAction = asyncAction.pendingOrigin(HOST_ACTION_KEY)
@@ -117,32 +108,43 @@ export function RelayHostPage() {
 
   usePageTitle('relayHost')
 
-  const { register, handleSubmit, getValues, reset, watch } =
-    useForm<RelayLoginForm>({ defaultValues: { admin_token: '' } })
-  const token = watch('admin_token')
+  const tokenForm = useForm({
+    defaultValues: { admin_token: '' },
+    onSubmit: async ({ value }) => {
+      await onLogin(value)
+    },
+  })
+
+  const hostForm = useForm({
+    defaultValues: createEmptyRelayHostForm(),
+    onSubmit: async ({ value }) => {
+      await saveSettings(value)
+    },
+  })
 
   useEffect(() => {
     if (!bootstrapped) void bootstrap()
   }, [bootstrapped, bootstrap])
 
   const hostQuery = useQuery({
+    ...relayHostOptions(),
     enabled: authenticated,
-    queryKey: HOST_QUERY_KEY,
-    queryFn: loadHost,
     refetchOnWindowFocus: false,
   })
   const statusQuery = useQuery({
+    ...relayStatusOptions(),
     enabled: authenticated,
-    queryKey: STATUS_QUERY_KEY,
-    queryFn: loadStatus,
     refetchOnWindowFocus: false,
   })
   const settingsQuery = useQuery({
+    ...relayGetSettingsOptions(),
     enabled: authenticated,
-    queryKey: SETTINGS_QUERY_KEY,
-    queryFn: loadSettings,
     refetchOnWindowFocus: false,
   })
+
+  const setHostRole = useMutation(relaySetHostRoleMutation())
+  const setSettings = useMutation(relaySetSettingsMutation())
+  const requestRestartMutation = useMutation(relayRequestRestartMutation())
 
   useEffect(() => {
     if (!authenticated) {
@@ -151,54 +153,31 @@ export function RelayHostPage() {
     }
     if (!formInitialized.current && hostQuery.data && settingsQuery.data) {
       const initial = relayHostToForm(hostQuery.data, settingsQuery.data)
-      hostFormRef.current = initial
-      setHostForm(initial)
+      hostForm.reset(initial)
       formInitialized.current = true
     }
   }, [authenticated, hostQuery.data, settingsQuery.data])
-
-  function replaceHostForm(next: RelayHostForm): void {
-    hostFormRef.current = next
-    setHostForm(next)
-  }
-
-  function updateAdminBind(adminBind: string): void {
-    bindEditGeneration.current += 1
-    replaceHostForm({ ...hostFormRef.current, admin_bind: adminBind })
-  }
 
   function syncFormAfterWrite(
     confirmed: RelayHostForm,
     submitted: RelayHostForm,
     submittedBindGeneration: number,
   ): void {
-    const current = hostFormRef.current
-    replaceHostForm({
-      role: current.role === submitted.role ? confirmed.role : current.role,
-      admin_bind:
-        bindEditGeneration.current === submittedBindGeneration
-          ? confirmed.admin_bind
-          : current.admin_bind,
-    })
+    const current = hostForm.state.values
+    hostForm.setFieldValue(
+      'role',
+      current.role === submitted.role ? confirmed.role : current.role,
+    )
+    if (bindEditGeneration.current === submittedBindGeneration) {
+      hostForm.setFieldValue('admin_bind', confirmed.admin_bind)
+    }
   }
 
   function fetchRefreshResult(): Promise<RefreshResult> {
     return Promise.all([
-      queryClient.fetchQuery({
-        queryKey: HOST_QUERY_KEY,
-        queryFn: loadHost,
-        staleTime: 0,
-      }),
-      queryClient.fetchQuery({
-        queryKey: STATUS_QUERY_KEY,
-        queryFn: loadStatus,
-        staleTime: 0,
-      }),
-      queryClient.fetchQuery({
-        queryKey: SETTINGS_QUERY_KEY,
-        queryFn: loadSettings,
-        staleTime: 0,
-      }),
+      queryClient.fetchQuery({ ...relayHostOptions(), staleTime: 0 }),
+      queryClient.fetchQuery({ ...relayStatusOptions(), staleTime: 0 }),
+      queryClient.fetchQuery({ ...relayGetSettingsOptions(), staleTime: 0 }),
     ]).then(([host, status, settings]) => ({ host, status, settings }))
   }
 
@@ -209,8 +188,8 @@ export function RelayHostPage() {
         await fetchRefreshResult()
       })
       if (!outcome.executed) return
-      if (getValues('admin_token').trim() === capturedToken) {
-        reset({ admin_token: '' })
+      if (tokenForm.state.values.admin_token.trim() === capturedToken) {
+        tokenForm.reset({ admin_token: '' })
       }
       notifySuccess(t('saved'))
     } catch {
@@ -224,7 +203,7 @@ export function RelayHostPage() {
     try {
       const refreshed = await fetchRefreshResult()
       formInitialized.current = true
-      replaceHostForm(relayHostToForm(refreshed.host, refreshed.settings))
+      hostForm.reset(relayHostToForm(refreshed.host, refreshed.settings))
     } catch (cause) {
       setActionError(formatApiError(cause))
     } finally {
@@ -234,25 +213,21 @@ export function RelayHostPage() {
 
   async function saveRole(role: HostRole): Promise<void> {
     const host = hostQuery.data
-    if (!host || !hasHostRoleChange({ ...hostFormRef.current, role }, host)) {
+    const submitted = { ...hostForm.state.values }
+    if (!host || !hasHostRoleChange({ ...submitted, role }, host)) {
       return
     }
 
-    const submitted = { ...hostFormRef.current }
     const submittedBindGeneration = bindEditGeneration.current
     try {
       const outcome = await asyncAction.run(
         HOST_ACTION_KEY,
         async () => {
           setActionError('')
-          const saved = expectData(
-            await relaySetHostRole<true>(
-              withData({
-                body: createRelayHostRoleRequest({ ...submitted, role }),
-              }),
-            ),
-          )
-          queryClient.setQueryData(HOST_QUERY_KEY, saved)
+          const saved = await setHostRole.mutateAsync({
+            body: createRelayHostRoleRequest({ ...submitted, role }),
+          })
+          queryClient.setQueryData(relayHostQueryKey(), saved)
           return saved
         },
         `role:${role}`,
@@ -269,9 +244,8 @@ export function RelayHostPage() {
     }
   }
 
-  async function saveSettings(): Promise<void> {
+  async function saveSettings(submitted: RelayHostForm): Promise<void> {
     if (!settingsQuery.data) return
-    const submitted = { ...hostFormRef.current }
     const submittedBindGeneration = bindEditGeneration.current
     const body = createRelaySettingsUpdate(submitted)
     try {
@@ -279,13 +253,14 @@ export function RelayHostPage() {
         HOST_ACTION_KEY,
         async () => {
           setActionError('')
-          const saved = expectData(
-            await relaySetSettings<true>(withData({ body })),
-          )
-          queryClient.setQueryData(SETTINGS_QUERY_KEY, saved)
-          const [host, status] = await Promise.all([loadHost(), loadStatus()])
-          queryClient.setQueryData(HOST_QUERY_KEY, host)
-          queryClient.setQueryData(STATUS_QUERY_KEY, status)
+          const saved = await setSettings.mutateAsync({ body })
+          queryClient.setQueryData(relayGetSettingsQueryKey(), saved)
+          const [host, status] = await Promise.all([
+            queryClient.fetchQuery({ ...relayHostOptions(), staleTime: 0 }),
+            queryClient.fetchQuery({ ...relayStatusOptions(), staleTime: 0 }),
+          ])
+          queryClient.setQueryData(relayHostQueryKey(), host)
+          queryClient.setQueryData(relayStatusQueryKey(), status)
           return { host, saved, status }
         },
         'settings',
@@ -308,7 +283,7 @@ export function RelayHostPage() {
         HOST_ACTION_KEY,
         async () => {
           setActionError('')
-          await relayRequestRestart<true>(withData())
+          await requestRestartMutation.mutateAsync({})
         },
         `restart:${origin}`,
       )
@@ -324,17 +299,23 @@ export function RelayHostPage() {
       const outcome = await logout()
       if (!outcome.executed) return
       await Promise.all([
-        queryClient.removeQueries({ queryKey: HOST_QUERY_KEY, exact: true }),
-        queryClient.removeQueries({ queryKey: STATUS_QUERY_KEY, exact: true }),
         queryClient.removeQueries({
-          queryKey: SETTINGS_QUERY_KEY,
+          queryKey: relayHostQueryKey(),
+          exact: true,
+        }),
+        queryClient.removeQueries({
+          queryKey: relayStatusQueryKey(),
+          exact: true,
+        }),
+        queryClient.removeQueries({
+          queryKey: relayGetSettingsQueryKey(),
           exact: true,
         }),
       ])
       formInitialized.current = false
       bindEditGeneration.current += 1
-      replaceHostForm(createEmptyRelayHostForm())
-      reset({ admin_token: '' })
+      hostForm.reset(createEmptyRelayHostForm())
+      tokenForm.reset({ admin_token: '' })
       setActionError('')
       setShowToken(false)
     } catch (cause) {
@@ -369,21 +350,33 @@ export function RelayHostPage() {
           <form
             className="grid gap-4"
             noValidate
-            onSubmit={handleSubmit(onLogin)}
+            onSubmit={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              void tokenForm.handleSubmit()
+            }}
           >
             <div className="grid gap-2">
               <Label htmlFor="relay-admin-token">
                 {t('relayHostTokenPlaceholder')}
               </Label>
               <div className="flex gap-2">
-                <Input
-                  autoComplete="off"
-                  className="min-w-0 flex-1"
-                  disabled={authBusy}
-                  id="relay-admin-token"
-                  type={showToken ? 'text' : 'password'}
-                  {...register('admin_token', { required: true })}
-                />
+                <tokenForm.Field name="admin_token">
+                  {(field) => (
+                    <Input
+                      autoComplete="off"
+                      className="min-w-0 flex-1"
+                      disabled={authBusy}
+                      id="relay-admin-token"
+                      onBlur={field.handleBlur}
+                      onChange={(event) =>
+                        field.handleChange(event.currentTarget.value)
+                      }
+                      type={showToken ? 'text' : 'password'}
+                      value={field.state.value}
+                    />
+                  )}
+                </tokenForm.Field>
                 <Button
                   aria-label={t(showToken ? 'hidePassword' : 'showPassword')}
                   disabled={authBusy}
@@ -405,13 +398,19 @@ export function RelayHostPage() {
                 <AlertDescription>{authError}</AlertDescription>
               </Alert>
             )}
-            <Button disabled={authBusy || !token.trim()} type="submit">
-              {asyncAction.pendingOrigin(RELAY_SESSION_AUTH_KEY) ===
-                'login' && (
-                <span className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent" />
+            <tokenForm.Subscribe
+              selector={(state) => state.values.admin_token.trim()}
+            >
+              {(token) => (
+                <Button disabled={authBusy || !token} type="submit">
+                  {asyncAction.pendingOrigin(RELAY_SESSION_AUTH_KEY) ===
+                    'login' && (
+                    <span className="size-4 animate-spin rounded-full border-2 border-current border-r-transparent" />
+                  )}
+                  <span>{t('login')}</span>
+                </Button>
               )}
-              <span>{t('login')}</span>
-            </Button>
+            </tokenForm.Subscribe>
           </form>
         </CardContent>
       </Card>
@@ -582,50 +581,63 @@ export function RelayHostPage() {
             {t('relayHostSettingsTitle')}
           </CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-2">
-          <Label htmlFor="relay-host-admin-bind">
-            {t('relayHostAdminBind')}
-          </Label>
-          <Input
-            aria-describedby="relay-host-admin-bind-help"
-            aria-label={t('relayHostAdminBind')}
-            autoComplete="off"
-            disabled={settingsDisabled}
-            id="relay-host-admin-bind"
-            onChange={(event) => updateAdminBind(event.currentTarget.value)}
-            placeholder="127.0.0.1:8790"
-            value={hostForm.admin_bind}
-          />
-          <p
-            className="text-sm text-muted-foreground"
-            id="relay-host-admin-bind-help"
-          >
-            {t('relayHostAdminBindHelp')}
-          </p>
-        </CardContent>
-        <CardFooter className="flex flex-wrap justify-end gap-2">
-          <Button
-            disabled={settingsDisabled}
-            onClick={() => void saveSettings()}
-            type="button"
-          >
-            {hostAction === 'settings' && (
-              <span className="size-3 animate-spin rounded-full border-2 border-current border-r-transparent" />
-            )}
-            <span>{t('save')}</span>
-          </Button>
-          <Button
-            disabled={settingsDisabled}
-            onClick={() => void requestRestart('settings')}
-            type="button"
-            variant="outline"
-          >
-            {hostAction === 'restart:settings' && (
-              <span className="size-3 animate-spin rounded-full border-2 border-current border-r-transparent" />
-            )}
-            <span>{t('relayRestartNow')}</span>
-          </Button>
-        </CardFooter>
+        <form
+          className="grid gap-0"
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            void hostForm.handleSubmit()
+          }}
+        >
+          <CardContent className="grid gap-2">
+            <Label htmlFor="relay-host-admin-bind">
+              {t('relayHostAdminBind')}
+            </Label>
+            <hostForm.Field name="admin_bind">
+              {(field) => (
+                <Input
+                  aria-describedby="relay-host-admin-bind-help"
+                  aria-label={t('relayHostAdminBind')}
+                  autoComplete="off"
+                  disabled={settingsDisabled}
+                  id="relay-host-admin-bind"
+                  onChange={(event) => {
+                    bindEditGeneration.current += 1
+                    field.handleChange(event.currentTarget.value)
+                  }}
+                  placeholder="127.0.0.1:8790"
+                  value={field.state.value}
+                />
+              )}
+            </hostForm.Field>
+            <p
+              className="text-sm text-muted-foreground"
+              id="relay-host-admin-bind-help"
+            >
+              {t('relayHostAdminBindHelp')}
+            </p>
+          </CardContent>
+          <CardFooter className="flex flex-wrap justify-end gap-2">
+            <Button disabled={settingsDisabled} type="submit">
+              {hostAction === 'settings' && (
+                <span className="size-3 animate-spin rounded-full border-2 border-current border-r-transparent" />
+              )}
+              <span>{t('save')}</span>
+            </Button>
+            <Button
+              disabled={settingsDisabled}
+              onClick={() => void requestRestart('settings')}
+              type="button"
+              variant="outline"
+            >
+              {hostAction === 'restart:settings' && (
+                <span className="size-3 animate-spin rounded-full border-2 border-current border-r-transparent" />
+              )}
+              <span>{t('relayRestartNow')}</span>
+            </Button>
+          </CardFooter>
+        </form>
       </Card>
 
       {status && (

@@ -1,3 +1,5 @@
+import { useForm, useStore } from '@tanstack/react-form'
+import type { FormValidateOrFn } from '@tanstack/form-core'
 import { ArrowLeft, LoaderCircle, Save, Settings2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { EndpointApiKeysEditor } from '@/components/endpoints/EndpointApiKeysEditor'
@@ -37,10 +39,9 @@ import { isScheduleRowValid } from '@/models/endpoints/schedule-windows'
 type EndpointDialogProps = {
   dialogGeneration: number
   endpointId: string | null
-  form: EndpointForm
-  onChange: (update: (current: EndpointForm) => EndpointForm) => void
+  initialForm: EndpointForm
   onOpenChange: (open: boolean) => void
-  onSubmit: () => void
+  onSubmit: (form: EndpointForm) => void | Promise<void>
   open: boolean
   pending: boolean
   runOAuthAction: RunOAuthAction
@@ -50,8 +51,7 @@ type EndpointDialogProps = {
 export function EndpointDialog({
   dialogGeneration,
   endpointId,
-  form,
-  onChange,
+  initialForm,
   onOpenChange,
   onSubmit,
   open,
@@ -60,58 +60,110 @@ export function EndpointDialog({
   users,
 }: EndpointDialogProps) {
   const { t } = useLocale()
-  const formRef = useRef(form)
   const userPlanRevisionRef = useRef(0)
-  const identityRef = useRef({ dialogGeneration, endpointId })
-  formRef.current = form
-  if (
-    identityRef.current.dialogGeneration !== dialogGeneration ||
-    identityRef.current.endpointId !== endpointId
-  ) {
-    identityRef.current = { dialogGeneration, endpointId }
-    userPlanRevisionRef.current = 0
-  }
+  const providerPlanRef = useRef({
+    provider: initialForm.provider,
+    plan: initialForm.plan,
+  })
   const [view, setView] = useState<'main' | 'settings'>('main')
+
+  const form = useForm<
+    EndpointForm,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    FormValidateOrFn<EndpointForm>,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    never
+  >({
+    defaultValues: initialForm,
+    onSubmit: async ({ value }) => {
+      await onSubmit(value)
+    },
+    validators: {
+      onSubmit: ({ value }) => {
+        if (
+          value.scope === 'user' &&
+          (value.owner_user_id === null ||
+            !users.some((user) => user.user_id === value.owner_user_id))
+        ) {
+          return t('ownerRequired')
+        }
+        if (!isProxyUrlValid(value.proxy_url)) return t('proxyAddress')
+        if (!value.active_windows.every(isScheduleRowValid)) {
+          return t('scheduleInvalid')
+        }
+        return undefined
+      },
+    },
+  })
+  const values = useStore(form.store, (state) => state.values)
+  const submitAttempts = useStore(
+    form.store,
+    (state) => state.submissionAttempts,
+  )
+  const formAccepted = useStore(
+    form.store,
+    (state) => typeof state.errorMap.onSubmit === 'undefined',
+  )
+  const submitError =
+    submitAttempts > 0 && typeof form.store.state.errorMap.onSubmit === 'string'
+      ? form.store.state.errorMap.onSubmit
+      : undefined
+
   const isSubscription =
-    normalizeProviderPlan(form.provider, form.plan) === 'chatgpt_subscription'
-  const serviceTierEligible = supportsServiceTierFor(endpointFormProtocol(form))
+    normalizeProviderPlan(values.provider, values.plan) ===
+    'chatgpt_subscription'
+  const serviceTierEligible = supportsServiceTierFor(
+    endpointFormProtocol(values),
+  )
   const validOwner =
-    form.scope !== 'user' ||
-    (form.owner_user_id !== null &&
-      users.some((user) => user.user_id === form.owner_user_id))
-  const canSave =
-    !pending &&
-    validOwner &&
-    isProxyUrlValid(form.proxy_url) &&
-    form.active_windows.every(isScheduleRowValid)
+    values.scope !== 'user' ||
+    (values.owner_user_id !== null &&
+      users.some((user) => user.user_id === values.owner_user_id))
+  const clientValid =
+    submitAttempts === 0
+      ? validOwner &&
+        isProxyUrlValid(values.proxy_url) &&
+        values.active_windows.every(isScheduleRowValid)
+      : formAccepted
+  const canSave = !pending && clientValid
   const hasSettings =
-    form.proxy_url.trim() !== '' ||
-    form.has_saved_proxy_url ||
-    form.active_windows.length > 0 ||
-    (form.service_tier ?? '').trim() !== ''
+    values.proxy_url.trim() !== '' ||
+    values.has_saved_proxy_url ||
+    values.active_windows.length > 0 ||
+    (values.service_tier ?? '').trim() !== ''
 
   useEffect(() => {
     if (!open) setView('main')
   }, [open])
 
-  function updateForm(update: (current: EndpointForm) => EndpointForm): void {
-    const current = formRef.current
-    const next = update(current)
-    if (current.provider !== next.provider || current.plan !== next.plan) {
+  useEffect(() => {
+    const previous = providerPlanRef.current
+    if (
+      previous.provider !== values.provider ||
+      previous.plan !== values.plan
+    ) {
       userPlanRevisionRef.current += 1
+      providerPlanRef.current = {
+        provider: values.provider,
+        plan: values.plan,
+      }
     }
-    formRef.current = next
-    onChange(() => next)
-  }
+  }, [values.provider, values.plan])
 
   function captureStatusSnapshot(): OAuthStatusSnapshot {
-    const current = formRef.current
     return {
       endpointId: endpointId ?? '',
       dialogGeneration,
-      provider: current.provider,
-      plan: current.plan,
-      has_oauth_token: current.has_oauth_token,
+      provider: values.provider,
+      plan: values.plan,
+      has_oauth_token: values.has_oauth_token,
       userPlanRevision: userPlanRevisionRef.current,
     }
   }
@@ -122,7 +174,7 @@ export function EndpointDialog({
       endpointId !== null &&
       snapshot.endpointId === endpointId &&
       snapshot.dialogGeneration === dialogGeneration &&
-      formRef.current.provider === 'openai'
+      values.provider === 'openai'
     )
   }
 
@@ -131,15 +183,18 @@ export function EndpointDialog({
     status: { has_oauth_token: boolean; plan: EndpointForm['plan'] },
   ): void {
     if (!isOAuthSnapshotCurrent(snapshot)) return
-    const current = formRef.current
-    const next = applyOAuthStatusToForm(current, snapshot, status, {
+    const next = applyOAuthStatusToForm(values, snapshot, status, {
       endpointId: endpointId ?? '',
       dialogGeneration,
       userPlanRevision: userPlanRevisionRef.current,
     })
-    if (!next || next === current) return
-    formRef.current = next
-    onChange(() => next)
+    if (!next || next === values) return
+    providerPlanRef.current = {
+      provider: next.provider,
+      plan: next.plan,
+    }
+    form.setFieldValue('has_oauth_token', next.has_oauth_token)
+    form.setFieldValue('plan', next.plan)
   }
 
   return (
@@ -164,23 +219,25 @@ export function EndpointDialog({
         </DialogHeader>
         <form
           className="grid min-w-0 gap-4"
+          noValidate
           onSubmit={(event) => {
             event.preventDefault()
-            if (canSave) onSubmit()
+            event.stopPropagation()
+            if (pending) return
+            void form.handleSubmit()
           }}
         >
+          {submitError ? (
+            <p className="text-xs text-destructive" role="alert">
+              {submitError}
+            </p>
+          ) : null}
           <fieldset className="grid min-w-0 gap-4" disabled={pending}>
             {view === 'main' ? (
               <>
-                <EndpointProviderFields
-                  form={form}
-                  onChange={updateForm}
-                  users={users}
-                />
-                {!isSubscription ? (
-                  <EndpointApiKeysEditor form={form} onChange={updateForm} />
-                ) : null}
-                {form.provider === 'openai' ? (
+                <EndpointProviderFields form={form} users={users} />
+                {!isSubscription ? <EndpointApiKeysEditor form={form} /> : null}
+                {values.provider === 'openai' ? (
                   <div className="border-t pt-3">
                     {endpointId ? (
                       <EndpointOAuthSection
@@ -200,17 +257,14 @@ export function EndpointDialog({
                   </div>
                 ) : null}
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
-                  {form.provider === 'minimax' ? (
+                  {values.provider === 'minimax' ? (
                     <label className="inline-flex min-h-8 items-center gap-2 text-sm">
                       <span>{t('minimaxMcp')}</span>
                       <Switch
                         aria-label={t('minimaxMcp')}
-                        checked={form.mcp_enabled}
+                        checked={values.mcp_enabled}
                         onCheckedChange={(checked) =>
-                          updateForm((current) => ({
-                            ...current,
-                            mcp_enabled: checked,
-                          }))
+                          form.setFieldValue('mcp_enabled', checked === true)
                         }
                       />
                     </label>
@@ -248,15 +302,12 @@ export function EndpointDialog({
                     label={t('proxyUrl')}
                   >
                     <ProxySettingsFields
-                      hasSaved={form.has_saved_proxy_url}
-                      onChange={({ proxyUrl, hasSaved }) =>
-                        updateForm((current) => ({
-                          ...current,
-                          proxy_url: proxyUrl,
-                          has_saved_proxy_url: hasSaved,
-                        }))
-                      }
-                      proxyUrl={form.proxy_url}
+                      hasSaved={values.has_saved_proxy_url}
+                      onChange={({ proxyUrl, hasSaved }) => {
+                        form.setFieldValue('proxy_url', proxyUrl)
+                        form.setFieldValue('has_saved_proxy_url', hasSaved)
+                      }}
+                      proxyUrl={values.proxy_url}
                     />
                   </SettingsFieldRow>
                   <SettingsFieldRow
@@ -264,26 +315,22 @@ export function EndpointDialog({
                     label={t('scheduleWindows')}
                   >
                     <ScheduleWindowsFields
-                      onChange={(windows, touched) =>
-                        updateForm((current) => ({
-                          ...current,
-                          active_windows: windows,
-                          active_windows_touched:
-                            current.active_windows_touched || touched,
-                        }))
-                      }
-                      windows={form.active_windows}
+                      onChange={(windows, touched) => {
+                        form.setFieldValue('active_windows', windows)
+                        form.setFieldValue(
+                          'active_windows_touched',
+                          values.active_windows_touched || touched,
+                        )
+                      }}
+                      windows={values.active_windows}
                     />
                   </SettingsFieldRow>
                   {serviceTierEligible ? (
                     <ServiceTierOverrideField
                       onChange={(value) =>
-                        updateForm((current) => ({
-                          ...current,
-                          service_tier: value,
-                        }))
+                        form.setFieldValue('service_tier', value)
                       }
-                      value={form.service_tier}
+                      value={values.service_tier}
                     />
                   ) : null}
                 </div>

@@ -1,9 +1,37 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { HeaderActions } from '@/components/layout/HeaderActions'
-import { useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { ChevronDown, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useLocation } from 'react-router'
-import type { RequestRecordListRow } from '@/generated/admin-api'
+import type {
+  RequestRecordFullResponse,
+  RequestRecordListRow,
+} from '@/generated/admin-api'
+import { requestRecordFull } from '@/generated/admin-api'
+import {
+  clearRequestRecordsMutation,
+  deleteConversationEndpointOverrideMutation,
+  listRequestRecordsOptions,
+  listRequestRecordsQueryKey,
+  listUserOptionsOptions,
+  requestRecordDetailOptions,
+  requestRecordDetailQueryKey,
+  requestRecordFacetsOptions,
+  requestRecordFacetsQueryKey,
+  requestRecordFullQueryKey,
+  requestRecordOverviewOptions,
+  requestRecordOverviewQueryKey,
+  requestRecordResetSessionAffinityMutation,
+  requestRecordSessionRouteOptionsOptions,
+  requestRecordSessionRouteOptionsQueryKey,
+  setConversationEndpointOverrideMutation,
+} from '@/generated/admin-api/@tanstack/react-query.gen'
 import { RequestRecordsOverviewPanel } from '@/components/usage/RequestRecordsOverviewPanel'
 import { RequestRecordsTable } from '@/components/usage/RequestRecordsTable'
 import { RequestRecordsToolbar } from '@/components/usage/RequestRecordsToolbar'
@@ -15,6 +43,7 @@ import {
   UsageRangePicker,
   type UsageRangeApply,
 } from '@/components/usage/UsageRangePicker'
+import { useStoredPageSize } from '@/components/shared/TablePagination'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useLocale } from '@/lib/i18n'
@@ -24,29 +53,77 @@ import { usePageTitle } from '@/lib/router'
 import { useSessionStore } from '@/lib/session'
 import { useAsyncAction } from '@/lib/use-async-action'
 import {
+  refreshUsageFacets,
+  refreshUsageOverview,
+  refreshUsageRecords,
+  refreshUsageUserOptions,
+  type UsageDrilldown,
+} from '@/lib/usage'
+import {
   USAGE_MAINTENANCE_KEY,
-  useUsageDetailStore,
+  USAGE_REQUEST_FULL_ORDER,
+  USAGE_REQUEST_FULL_PAGE_SIZE,
+  usageConversationActionKey,
   usageDetailActionKey,
 } from '@/lib/usage-detail'
-import { usageAffinityNoticeKey } from '@/lib/usage-detail-model'
 import {
-  createDefaultUsageClearForm,
-  isSameUsageClearForm,
+  createUsageDetailView,
+  createUsageOverrideView,
+  createUsageRouteOptionsView,
+  mergeUsageRequestFull,
+  usageAffinityNoticeKey,
+  type UsageConversationOverrideView,
+  type UsageDetailView,
+  type UsageRouteOptionsView,
+} from '@/lib/usage-detail-model'
+import {
+  usageClearPayload,
   usageClearToastMessage,
   type UsageClearForm,
 } from '@/lib/usage-clear'
-import { useUsageStore, type UsageDrilldown } from '@/lib/usage'
 import {
+  DEFAULT_USAGE_PERSPECTIVE,
+  DEFAULT_USAGE_RANGE,
+  DEFAULT_USAGE_ROWS,
+  DEFAULT_USAGE_SCOPE,
+  DEFAULT_USAGE_SORT_FIELD,
+  DEFAULT_USAGE_SORT_ORDER,
+  USAGE_PAGE_SIZE_KEY,
+  USAGE_PAGE_SIZE_OPTIONS,
   USAGE_PERSPECTIVE_KEY,
+  createDefaultUsageFilters,
+  emptyUsageFacets,
+  isUsageEmptyTail,
+  loadUsageMode,
+  nextUsageSortState,
+  saveUsageMode,
+  usageFacetsQuery,
+  usageFiltersForScope,
+  usageIdentityKey,
+  usageLastPageFirst,
+  usageListQuery,
+  usageOverviewQuery,
   type UsageCategory,
   type UsageFilters,
   type UsageMode,
+  type UsageModeStorage,
   type UsagePerspective,
+  type UsageQueryState,
   type UsageScope,
 } from '@/lib/usage-model'
+import { slidingUsageWindow, type LocalUsageRange } from '@/lib/usage-range'
 
 function categoryForPath(pathname: string): UsageCategory {
   return pathname.endsWith('/mcp') ? 'mcp' : 'ai'
+}
+
+function modeStorage(): UsageModeStorage | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
 }
 
 function countActiveFilters(
@@ -71,10 +148,10 @@ function countActiveFilters(
 /**
  * The mounted AI/MCP request-record page.
  *
- * Both routes share this page and derive the category from the path. The legacy
- * usage store owns the list/overview reads and the separate detail store owns
- * the selected record, so nothing is duplicated here: the page only wires the
- * controlled surfaces to the stores, the notifier and the query client.
+ * Both routes share this page and derive the category from the path. Server
+ * reads are native queries keyed by the generated query keys; the remaining
+ * store-free controls own only page, sort, filter, range, mode and dialog UI
+ * state. The session epoch owns identity isolation.
  */
 export function UsagePage() {
   const { t } = useLocale()
@@ -88,73 +165,301 @@ export function UsagePage() {
 
   usePageTitle(category === 'ai' ? 'aiRequests' : 'mcpCalls')
 
-  const mode = useUsageStore((state) => state.mode)
-  const scope = useUsageStore((state) => state.scope)
-  const range = useUsageStore((state) => state.range)
-  const start = useUsageStore((state) => state.start)
-  const end = useUsageStore((state) => state.end)
-  const filters = useUsageStore((state) => state.filters)
-  const first = useUsageStore((state) => state.first)
-  const rows = useUsageStore((state) => state.rows)
-  const total = useUsageStore((state) => state.total)
-  const sortField = useUsageStore((state) => state.sortField)
-  const sortOrder = useUsageStore((state) => state.sortOrder)
-  const perspective = useUsageStore((state) => state.perspective)
-  const records = useUsageStore((state) => state.records)
-  const facets = useUsageStore((state) => state.facets)
-  const overview = useUsageStore((state) => state.overview)
-  const userOptions = useUsageStore((state) => state.userOptions)
-  const recordsLoading = useUsageStore((state) => state.recordsLoading)
-  const overviewLoading = useUsageStore((state) => state.overviewLoading)
-
-  const activeFilterCount = countActiveFilters(filters, scope, category)
-
-  const detail = useUsageDetailStore((state) => state.detail)
-  const detailLoading = useUsageDetailStore((state) => state.detailLoading)
-  const detailRecordId = useUsageDetailStore((state) => state.recordId)
-  const requestFull = useUsageDetailStore((state) => state.requestFull)
-  const requestFullLoading = useUsageDetailStore(
-    (state) => state.requestFullLoading,
+  const [mode, setMode] = useState<UsageMode>(() =>
+    loadUsageMode(modeStorage(), category),
   )
-  const requestFullLoadingMore = useUsageDetailStore(
-    (state) => state.requestFullLoadingMore,
+  const [scope, setScope] = useState<UsageScope>(DEFAULT_USAGE_SCOPE)
+  const [range, setRangeState] = useState<LocalUsageRange>(DEFAULT_USAGE_RANGE)
+  const [start, setStart] = useState('')
+  const [end, setEnd] = useState('')
+  const [windowAnchor, setWindowAnchor] = useState(() => new Date())
+  const [filters, setFilters] = useState<UsageFilters>(
+    createDefaultUsageFilters,
   )
-  const routeOptions = useUsageDetailStore((state) => state.routeOptions)
-  const routeOptionsLoading = useUsageDetailStore(
-    (state) => state.routeOptionsLoading,
+  const [first, setFirst] = useState(0)
+  const [rows, setRows] = useStoredPageSize(
+    USAGE_PAGE_SIZE_KEY,
+    DEFAULT_USAGE_ROWS,
+    USAGE_PAGE_SIZE_OPTIONS,
   )
-  const override = useUsageDetailStore((state) => state.override)
-
+  const [sortField, setSortField] = useState(DEFAULT_USAGE_SORT_FIELD)
+  const [sortOrder, setSortOrder] = useState(DEFAULT_USAGE_SORT_ORDER)
+  const [perspective, setPerspective] = useState<UsagePerspective>(
+    DEFAULT_USAGE_PERSPECTIVE,
+  )
+  const [detailRecordId, setDetailRecordId] = useState<number | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
+  const [transcriptWanted, setTranscriptWanted] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [clearOpen, setClearOpen] = useState(false)
-  const [clearForm, setClearForm] = useState(createDefaultUsageClearForm)
-  const clearFormRef = useRef(clearForm)
-  clearFormRef.current = clearForm
-  const initializedFor = useRef<string | null>(null)
+  const identityRef = useRef(
+    usageIdentityKey({
+      user_id: me?.user_id ?? null,
+      is_admin: isAdmin,
+    }),
+  )
+  const categoryRef = useRef(category)
+  const detailRecordIdRef = useRef(detailRecordId)
+  const notifiedErrors = useRef(new WeakSet<object>())
+  detailRecordIdRef.current = detailRecordId
+
+  const identityKey = usageIdentityKey({
+    user_id: me?.user_id ?? null,
+    is_admin: isAdmin,
+  })
+
+  const queryState = useMemo<UsageQueryState>(
+    () => ({
+      category,
+      scope,
+      range: range === '1h' || range === '5h' ? 'custom' : range,
+      start,
+      end,
+      first,
+      rows,
+      sortField,
+      sortOrder,
+      filters,
+    }),
+    [
+      category,
+      scope,
+      range,
+      start,
+      end,
+      first,
+      rows,
+      sortField,
+      sortOrder,
+      filters,
+    ],
+  )
+  const listQuery = useMemo(() => usageListQuery(queryState), [queryState])
+  const facetsQueryParams = useMemo(
+    () => usageFacetsQuery(queryState, windowAnchor),
+    [queryState, windowAnchor],
+  )
+  const overviewQueryParams = useMemo(
+    () => usageOverviewQuery(queryState, perspective, windowAnchor),
+    [queryState, perspective, windowAnchor],
+  )
+
+  const recordsQuery = useQuery({
+    ...listRequestRecordsOptions({ query: listQuery }),
+    enabled: me !== null,
+    placeholderData: keepPreviousData,
+  })
+  const facetsQuery = useQuery({
+    ...requestRecordFacetsOptions({ query: facetsQueryParams }),
+    enabled: me !== null,
+    placeholderData: keepPreviousData,
+  })
+  const overviewQuery = useQuery({
+    ...requestRecordOverviewOptions({ query: overviewQueryParams }),
+    enabled: me !== null,
+    placeholderData: keepPreviousData,
+  })
+  const userOptionsQuery = useQuery({
+    ...listUserOptionsOptions(),
+    enabled: me !== null && isAdmin,
+  })
+
+  const records = recordsQuery.data?.records ?? []
+  const total = recordsQuery.data?.total ?? 0
+  const currentFirst = recordsQuery.data?.first ?? first
+  const currentRows = recordsQuery.data?.rows ?? rows
+  const facets = facetsQuery.data ?? emptyUsageFacets()
+  const overview = overviewQuery.data ?? null
+  const userOptions = userOptionsQuery.data?.users ?? []
+  const recordsLoading = recordsQuery.isFetching
+  const overviewLoading = overviewQuery.isFetching
+
+  const detailQuery = useQuery({
+    ...requestRecordDetailOptions({ path: { record_id: detailRecordId ?? 0 } }),
+    enabled: detailOpen && detailRecordId !== null,
+  })
+  const detailCount = detailQuery.data?.conversation_id
+  const routeOptionsQuery = useQuery({
+    ...requestRecordSessionRouteOptionsOptions({
+      path: { record_id: detailRecordId ?? 0 },
+    }),
+    enabled: detailOpen && detailRecordId !== null && Boolean(detailCount),
+  })
+  const transcriptQuery = useInfiniteQuery({
+    queryKey: requestRecordFullQueryKey({
+      path: { record_id: detailRecordId ?? 0 },
+    }),
+    queryFn: ({ pageParam, signal }) =>
+      requestRecordFull({
+        path: { record_id: detailRecordId ?? 0 },
+        query: {
+          limit: USAGE_REQUEST_FULL_PAGE_SIZE,
+          order: USAGE_REQUEST_FULL_ORDER,
+          ...(pageParam ? { cursor: pageParam } : {}),
+        },
+        signal,
+        throwOnError: true,
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor ?? null,
+    enabled:
+      detailOpen &&
+      transcriptWanted &&
+      detailRecordId !== null &&
+      detailQuery.data?.has_full_request === true,
+  })
+
+  const detail: UsageDetailView | null = useMemo(
+    () => (detailQuery.data ? createUsageDetailView(detailQuery.data) : null),
+    [detailQuery.data],
+  )
+  const routeOptions: UsageRouteOptionsView | null = useMemo(
+    () =>
+      routeOptionsQuery.data
+        ? createUsageRouteOptionsView(routeOptionsQuery.data)
+        : null,
+    [routeOptionsQuery.data],
+  )
+  const override: UsageConversationOverrideView | null = useMemo(
+    () =>
+      routeOptionsQuery.data
+        ? createUsageOverrideView(routeOptionsQuery.data)
+        : null,
+    [routeOptionsQuery.data],
+  )
+  const requestFull: RequestRecordFullResponse | null = useMemo(() => {
+    const pages = transcriptQuery.data?.pages
+    if (!pages || pages.length === 0) return null
+    return pages.reduce<RequestRecordFullResponse | null>(
+      (merged, page) => (merged ? mergeUsageRequestFull(merged, page) : page),
+      null,
+    )
+  }, [transcriptQuery.data])
+
+  const saveOverrideMutation = useMutation(
+    setConversationEndpointOverrideMutation(),
+  )
+  const clearOverrideMutation = useMutation(
+    deleteConversationEndpointOverrideMutation(),
+  )
+  const resetAffinityMutation = useMutation(
+    requestRecordResetSessionAffinityMutation(),
+  )
+  const clearMutation = useMutation(clearRequestRecordsMutation())
+
+  function reportApiError(cause: unknown): void {
+    if (cause && typeof cause === 'object') {
+      if (notifiedErrors.current.has(cause)) return
+      notifiedErrors.current.add(cause)
+    }
+    notifyApiError(cause)
+  }
 
   useEffect(() => {
     if (!me) return
-    const identity = { user_id: me.user_id, is_admin: me.is_admin === true }
-    const usage = useUsageStore.getState()
-    usage.initializeIdentity(identity)
-    useUsageDetailStore.getState().initializeIdentity(identity)
-    const key = `${useUsageStore.getState().identityKey}:${category}`
-    if (initializedFor.current === key) return
-    initializedFor.current = key
-    const load =
-      useUsageStore.getState().category === category
-        ? useUsageStore.getState().refreshAll(queryClient)
-        : useUsageStore.getState().setCategory(queryClient, category)
-    void load.catch((cause: unknown) => notifyApiError(cause))
-    // One category+refresh per identity/category, never per render.
-  }, [me, category, queryClient, notifyApiError])
+    const identityChanged = identityRef.current !== identityKey
+    const categoryChanged = categoryRef.current !== category
+    if (!identityChanged && !categoryChanged) return
+    identityRef.current = identityKey
+    categoryRef.current = category
+    setScope(DEFAULT_USAGE_SCOPE)
+    setFilters(createDefaultUsageFilters())
+    setFirst(0)
+    setMode(loadUsageMode(modeStorage(), category))
+    setDetailOpen(false)
+    setDetailRecordId(null)
+    setTranscriptWanted(false)
+    if (identityChanged) {
+      setRangeState(DEFAULT_USAGE_RANGE)
+      setStart('')
+      setEnd('')
+      setSortField(DEFAULT_USAGE_SORT_FIELD)
+      setSortOrder(DEFAULT_USAGE_SORT_ORDER)
+      setPerspective(DEFAULT_USAGE_PERSPECTIVE)
+      setWindowAnchor(new Date())
+      return
+    }
+    if (range === '1h' || range === '5h') {
+      const window = slidingUsageWindow(range, Date.now())
+      setStart(window.start)
+      setEnd(window.end)
+    }
+    setWindowAnchor(new Date())
+  }, [me, identityKey, category, range])
+
+  useEffect(() => {
+    const page = recordsQuery.data
+    if (!page || recordsQuery.isPlaceholderData) return
+    if (isUsageEmptyTail(page)) {
+      const corrected = usageLastPageFirst(page.total, page.rows)
+      if (corrected !== first) setFirst(corrected)
+      return
+    }
+    if (page.first !== first) setFirst(page.first)
+    if (page.rows !== rows) setRows(page.rows)
+  }, [recordsQuery.data, recordsQuery.isPlaceholderData, first, rows, setRows])
+
+  useEffect(() => {
+    if (detailQuery.error) reportApiError(detailQuery.error)
+  }, [detailQuery.error])
+  useEffect(() => {
+    if (transcriptQuery.error) reportApiError(transcriptQuery.error)
+  }, [transcriptQuery.error])
+
+  useEffect(() => {
+    if (!detailOpen || !detailQuery.error) return
+    setDetailOpen(false)
+    setDetailRecordId(null)
+  }, [detailOpen, detailQuery.error])
 
   useEffect(() => {
     return () => {
-      useUsageDetailStore.getState().reset()
+      void queryClient.cancelQueries({
+        queryKey: listRequestRecordsQueryKey({ query: listQuery }),
+        exact: true,
+      })
     }
-  }, [])
+  }, [queryClient, listQuery])
+
+  useEffect(() => {
+    return () => {
+      void queryClient.cancelQueries({
+        queryKey: requestRecordFacetsQueryKey({ query: facetsQueryParams }),
+        exact: true,
+      })
+    }
+  }, [queryClient, facetsQueryParams])
+
+  useEffect(() => {
+    return () => {
+      void queryClient.cancelQueries({
+        queryKey: requestRecordOverviewQueryKey({ query: overviewQueryParams }),
+        exact: true,
+      })
+    }
+  }, [queryClient, overviewQueryParams])
+
+  useEffect(() => {
+    if (detailRecordId === null) return
+    const recordId = detailRecordId
+    return () => {
+      void queryClient.cancelQueries({
+        queryKey: requestRecordDetailQueryKey({
+          path: { record_id: recordId },
+        }),
+      })
+      void queryClient.cancelQueries({
+        queryKey: requestRecordSessionRouteOptionsQueryKey({
+          path: { record_id: recordId },
+        }),
+      })
+      void queryClient.cancelQueries({
+        queryKey: requestRecordFullQueryKey({
+          path: { record_id: recordId },
+        }),
+      })
+    }
+  }, [queryClient, detailRecordId])
 
   const conversationId = detail?.conversation_id ?? null
   const detailActionKey =
@@ -165,33 +470,66 @@ export function UsagePage() {
     ? (asyncAction.pendingOrigin(detailActionKey) ?? null)
     : null
   const detailPending = detailPendingOrigin !== null
+  const activeFilterCount = countActiveFilters(filters, scope, category)
 
-  function refresh(): void {
-    void useUsageStore
-      .getState()
-      .refreshAll(queryClient)
-      .catch((cause: unknown) => notifyApiError(cause))
+  async function refreshAll(): Promise<void> {
+    const anchor = new Date()
+    let nextStart = start
+    let nextEnd = end
+    if (range === '1h' || range === '5h') {
+      const window = slidingUsageWindow(range, anchor.getTime())
+      nextStart = window.start
+      nextEnd = window.end
+      setStart(nextStart)
+      setEnd(nextEnd)
+    }
+    setWindowAnchor(anchor)
+    const state: UsageQueryState = {
+      ...queryState,
+      range: range === '1h' || range === '5h' ? 'custom' : range,
+      start: nextStart,
+      end: nextEnd,
+    }
+    const page = await refreshUsageRecords(queryClient, usageListQuery(state))
+    if (page.first !== first) setFirst(page.first)
+    if (page.rows !== rows) setRows(page.rows)
+    await Promise.all([
+      refreshUsageFacets(queryClient, usageFacetsQuery(state, anchor)),
+      refreshUsageOverview(
+        queryClient,
+        usageOverviewQuery(state, perspective, anchor),
+      ),
+      isAdmin ? refreshUsageUserOptions(queryClient) : Promise.resolve([]),
+    ])
   }
 
-  function applyRange(input: UsageRangeApply): void {
-    void useUsageStore
-      .getState()
-      .setRange(queryClient, input.range, input.start, input.end)
-      .catch((cause: unknown) => notifyApiError(cause))
+  function refresh(): void {
+    void refreshAll().catch((cause: unknown) => reportApiError(cause))
   }
 
   function changeMode(next: UsageMode): void {
-    void useUsageStore
-      .getState()
-      .setMode(next, queryClient)
-      .catch((cause: unknown) => notifyApiError(cause))
+    saveUsageMode(modeStorage(), category, next)
+    setMode(next)
+    if (range === '1h' || range === '5h') refresh()
+  }
+
+  function applyRange(input: UsageRangeApply): void {
+    const nextRange = input.range
+    let nextStart = input.start ?? ''
+    let nextEnd = input.end ?? ''
+    if (nextRange === '1h' || nextRange === '5h') {
+      const window = slidingUsageWindow(nextRange, Date.now())
+      nextStart = window.start
+      nextEnd = window.end
+    }
+    setRangeState(nextRange)
+    setStart(nextStart)
+    setEnd(nextEnd)
+    setWindowAnchor(new Date())
   }
 
   function changeFilters(patch: Partial<UsageFilters>): void {
-    void useUsageStore
-      .getState()
-      .setFilters(queryClient, patch)
-      .catch((cause: unknown) => notifyApiError(cause))
+    setFilters((current) => ({ ...current, ...patch }))
   }
 
   function changeSearch(search: string | null): void {
@@ -199,85 +537,92 @@ export function UsagePage() {
   }
 
   function changeScope(next: UsageScope): void {
-    void useUsageStore
-      .getState()
-      .setScope(queryClient, next)
-      .catch((cause: unknown) => notifyApiError(cause))
+    if (scope === next) return
+    setScope(next)
+    setFirst(0)
+    setFilters((current) => usageFiltersForScope(current, category, next))
   }
 
   function changeSort(field: string): void {
-    void useUsageStore
-      .getState()
-      .setSort(queryClient, field)
-      .catch((cause: unknown) => notifyApiError(cause))
+    const next = nextUsageSortState(
+      { field: sortField, order: sortOrder },
+      field,
+    )
+    setSortField(next.field)
+    setSortOrder(next.order)
   }
 
   function changePage(nextFirst: number, nextRows: number): void {
-    void useUsageStore
-      .getState()
-      .setPage(queryClient, nextFirst, nextRows)
-      .catch((cause: unknown) => notifyApiError(cause))
+    setRows(nextRows)
+    setFirst(Math.max(0, nextFirst))
   }
 
   function changePerspective(next: UsagePerspective): void {
-    void useUsageStore
-      .getState()
-      .setPerspective(queryClient, next)
-      .catch((cause: unknown) => notifyApiError(cause))
+    if (perspective === next) return
+    void (async () => {
+      try {
+        await asyncAction.run(
+          USAGE_PERSPECTIVE_KEY,
+          async () => {
+            setPerspective(next)
+            await refreshUsageOverview(
+              queryClient,
+              usageOverviewQuery(queryState, next, windowAnchor),
+            )
+          },
+          'perspective',
+        )
+      } catch (cause) {
+        reportApiError(cause)
+      }
+    })()
   }
 
   function drilldown(next: UsageDrilldown): void {
-    void useUsageStore
-      .getState()
-      .applyDrilldown(queryClient, next)
-      .catch((cause: unknown) => notifyApiError(cause))
+    const nextFilters = {
+      ...filters,
+      search: null,
+      endpoint_id: next.endpoint_id ?? null,
+      mcp_server_id: next.mcp_server_id ?? null,
+      mcp_bearer_token_slot: next.mcp_bearer_token_slot ?? null,
+      model: next.model ?? null,
+    }
+    const nextScope = next.mcp_scope ?? null
+    setFilters(
+      nextScope !== null && nextScope !== scope
+        ? usageFiltersForScope(nextFilters, category, nextScope)
+        : nextFilters,
+    )
+    setFirst(0)
+    if (nextScope !== null) setScope(nextScope)
+    setMode('records')
+    saveUsageMode(modeStorage(), category, 'records')
   }
 
-  async function openDetail(record: RequestRecordListRow): Promise<void> {
-    const recordId = record.record_id
+  function openDetail(record: RequestRecordListRow): void {
+    setTranscriptWanted(false)
+    setDetailRecordId(record.record_id)
     setDetailOpen(true)
-    try {
-      await useUsageDetailStore.getState().loadDetail(recordId)
-    } catch (cause) {
-      if (useUsageDetailStore.getState().recordId === recordId) {
-        useUsageDetailStore.getState().reset()
-        setDetailOpen(false)
-      }
-      notifyApiError(cause)
-    }
   }
 
   function changeDetailOpen(open: boolean): void {
     if (!open && detailPending) return
     setDetailOpen(open)
-    if (!open) useUsageDetailStore.getState().reset()
-  }
-
-  function loadFirstTranscript(): void {
-    if (detailRecordId === null) return
-    void useUsageDetailStore
-      .getState()
-      .loadRequestFull(detailRecordId)
-      .catch((cause: unknown) => notifyApiError(cause))
-  }
-
-  function loadMoreTranscript(): void {
-    if (detailRecordId === null) return
-    void useUsageDetailStore
-      .getState()
-      .loadMoreRequestFull(detailRecordId)
-      .catch((cause: unknown) => notifyApiError(cause))
+    if (!open) {
+      setDetailRecordId(null)
+      setTranscriptWanted(false)
+    }
   }
 
   async function runRoutingWrite(
-    write: () => Promise<{ executed: boolean; value?: unknown }>,
+    write: () => Promise<{ executed: boolean }>,
     successKey: 'overrideSaved' | 'overrideCleared',
   ): Promise<void> {
     try {
       const outcome = await write()
       if (outcome.executed) notifySuccess(t(successKey))
     } catch (cause) {
-      notifyApiError(cause)
+      reportApiError(cause)
     }
   }
 
@@ -286,41 +631,105 @@ export function UsagePage() {
     endpointKeyId: string | null,
   ): void {
     if (!conversationId) return
+    const recordId = detailRecordId
+    const capturedEndpointId = endpointId
+    const capturedEndpointKeyId = endpointKeyId
     void runRoutingWrite(
       () =>
-        useUsageDetailStore
-          .getState()
-          .saveOverride(conversationId, endpointId, endpointKeyId),
+        asyncAction.run(
+          usageConversationActionKey(conversationId),
+          async () => {
+            await saveOverrideMutation.mutateAsync({
+              path: { conversation_id: conversationId },
+              body: {
+                endpoint_id: capturedEndpointId,
+                endpoint_key_id: capturedEndpointKeyId,
+              },
+            })
+            if (recordId !== null) {
+              await queryClient.invalidateQueries({
+                queryKey: requestRecordSessionRouteOptionsQueryKey({
+                  path: { record_id: recordId },
+                }),
+              })
+            }
+          },
+          'save',
+        ),
       'overrideSaved',
     )
   }
 
   function clearOverride(): void {
     if (!conversationId) return
+    const recordId = detailRecordId
     void runRoutingWrite(
-      () => useUsageDetailStore.getState().clearOverride(conversationId),
+      () =>
+        asyncAction.run(
+          usageConversationActionKey(conversationId),
+          async () => {
+            await clearOverrideMutation.mutateAsync({
+              path: { conversation_id: conversationId },
+            })
+            if (recordId !== null) {
+              await queryClient.invalidateQueries({
+                queryKey: requestRecordSessionRouteOptionsQueryKey({
+                  path: { record_id: recordId },
+                }),
+              })
+            }
+          },
+          'clear',
+        ),
       'overrideCleared',
     )
   }
 
   async function resetAffinity(): Promise<void> {
     if (detailRecordId === null) return
+    const recordId = detailRecordId
+    const conversation = conversationId
+    const key = usageDetailActionKey(conversation, recordId)
     try {
-      const outcome = await useUsageDetailStore
-        .getState()
-        .resetAffinity(detailRecordId)
+      const outcome = await asyncAction.run(
+        key,
+        async () => {
+          const response = await resetAffinityMutation.mutateAsync({
+            path: { record_id: recordId },
+          })
+          if (detailRecordIdRef.current === recordId) {
+            await queryClient.invalidateQueries({
+              queryKey: requestRecordSessionRouteOptionsQueryKey({
+                path: { record_id: recordId },
+              }),
+            })
+          }
+          return response
+        },
+        'reset',
+      )
       if (!outcome.executed) return
       notifySuccess(t(usageAffinityNoticeKey(outcome.value)))
     } catch (cause) {
-      notifyApiError(cause)
+      reportApiError(cause)
     }
+  }
+
+  function loadFirstTranscript(): void {
+    setTranscriptWanted(true)
+  }
+
+  function loadMoreTranscript(): void {
+    if (!transcriptQuery.hasNextPage || transcriptQuery.isFetchingNextPage) {
+      return
+    }
+    void transcriptQuery.fetchNextPage().catch((cause: unknown) => {
+      reportApiError(cause)
+    })
   }
 
   function openClearDialog(): void {
     if (asyncAction.isPending(USAGE_MAINTENANCE_KEY)) return
-    const next = createDefaultUsageClearForm()
-    clearFormRef.current = next
-    setClearForm(next)
     setClearOpen(true)
   }
 
@@ -331,19 +740,21 @@ export function UsagePage() {
 
   async function submitClear(submitted: UsageClearForm): Promise<void> {
     try {
-      const outcome = await useUsageStore
-        .getState()
-        .clearHistory(queryClient, submitted)
+      const body = usageClearPayload(submitted)
+      const outcome = await asyncAction.run(
+        USAGE_MAINTENANCE_KEY,
+        async () => {
+          const result = await clearMutation.mutateAsync({ body })
+          await refreshAll()
+          return result
+        },
+        'clear',
+      )
       if (!outcome.executed) return
       notifySuccess(usageClearToastMessage(t, outcome.value.deleted))
-      if (isSameUsageClearForm(submitted, clearFormRef.current)) {
-        setClearOpen(false)
-        const reset = createDefaultUsageClearForm()
-        clearFormRef.current = reset
-        setClearForm(reset)
-      }
+      setClearOpen(false)
     } catch (cause) {
-      notifyApiError(cause)
+      reportApiError(cause)
     }
   }
 
@@ -454,14 +865,14 @@ export function UsagePage() {
           </div>
           <RequestRecordsTable
             category={category}
-            first={first}
+            first={currentFirst}
             isAdmin={isAdmin}
             loading={recordsLoading}
-            onOpenDetail={(record) => void openDetail(record)}
+            onOpenDetail={openDetail}
             onPage={changePage}
             onSort={changeSort}
             records={records}
-            rows={rows}
+            rows={currentRows}
             sortField={sortField}
             sortOrder={sortOrder}
             total={total}
@@ -472,7 +883,7 @@ export function UsagePage() {
       {category === 'ai' ? (
         <UsageDetailDialog
           detail={detail}
-          detailLoading={detailLoading}
+          detailLoading={detailQuery.isFetching && !detail}
           isAdmin={isAdmin}
           onClearOverride={clearOverride}
           onLoadFirst={loadFirstTranscript}
@@ -485,15 +896,17 @@ export function UsagePage() {
           pending={detailPending}
           pendingOrigin={detailPendingOrigin}
           requestFull={requestFull}
-          requestFullLoading={requestFullLoading}
-          requestFullLoadingMore={requestFullLoadingMore}
+          requestFullLoading={transcriptQuery.isLoading}
+          requestFullLoadingMore={transcriptQuery.isFetchingNextPage}
           routeOptions={routeOptions}
-          routeOptionsLoading={routeOptionsLoading}
+          routeOptionsLoading={
+            routeOptionsQuery.isFetching && !routeOptionsQuery.data
+          }
         />
       ) : (
         <McpUsageDetailDialog
           detail={detail}
-          detailLoading={detailLoading}
+          detailLoading={detailQuery.isFetching && !detail}
           onOpenChange={changeDetailOpen}
           open={detailOpen}
         />
@@ -501,12 +914,7 @@ export function UsagePage() {
 
       <UsageClearDialog
         currentUserLabel={me ? `${me.display_name} / ${me.login_name}` : ''}
-        form={clearForm}
         isAdmin={isAdmin}
-        onFormChange={(next) => {
-          clearFormRef.current = next
-          setClearForm(next)
-        }}
         onOpenChange={changeClearOpen}
         onSubmit={(submitted) => void submitClear(submitted)}
         open={clearOpen}

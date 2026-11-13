@@ -1,55 +1,40 @@
 import type { QueryClient } from '@tanstack/react-query'
+import { listModelRoutes } from '@/generated/admin-api'
 import type {
   ModelEndpointRule,
   ModelRoutePageResponse,
   ModelRouteRequest,
 } from '@/generated/admin-api'
-import {
-  deleteModelRouteById,
-  fetchModelRoutesPage,
-  persistModelRoute,
-  runModelRouteProbe,
-  updateModelRouteEnabled,
-} from '@/stores/endpoints-api'
+import { listModelRoutesQueryKey } from '@/generated/admin-api/@tanstack/react-query.gen'
+import { expectData, withData } from '@/api'
 import {
   modelRouteFormToRequest,
   modelRouteToForm,
 } from '@/admin-mappers/forms/model-route'
 import { capturePayload } from '@/stores/record-action-types'
-import { modelRoutePagesQueryKey } from '@/lib/endpoints'
+import { refreshPagedQuery } from './paged-query'
 import { modelRouteTargetIndex } from '@/models/endpoints/model-route-item'
 
-export function modelRoutePageQueryKey(first: number, rows: number) {
-  return [...modelRoutePagesQueryKey(), first, rows] as const
-}
-
-export async function listModelRoutePage(
+async function fetchModelRoutesPage(
   first: number,
   rows: number,
 ): Promise<ModelRoutePageResponse> {
-  return fetchModelRoutesPage(first, rows)
+  return expectData(
+    await listModelRoutes<true>(withData({ query: { first, rows } })),
+  )
 }
 
-export async function saveModelRoute(
-  ruleId: string | null,
-  body: ModelRouteRequest,
-): Promise<ModelEndpointRule> {
-  return persistModelRoute(ruleId, body)
+export function modelRoutePageQueryKey(first: number, rows: number) {
+  return listModelRoutesQueryKey({ query: { first, rows } })
 }
 
-export async function removeModelRoute(ruleId: string): Promise<void> {
-  return deleteModelRouteById(ruleId)
-}
-
-export async function testModelRoute(ruleId: string) {
-  return runModelRouteProbe(ruleId)
-}
-
-export async function setModelRouteEnabled(
+export function buildModelRouteEnabledRequest(
   route: ModelEndpointRule,
   enabled: boolean,
-): Promise<ModelEndpointRule> {
-  return updateModelRouteEnabled(route, enabled)
+): ModelRouteRequest {
+  const form = modelRouteToForm(route)
+  form.enabled = enabled
+  return capturePayload(modelRouteFormToRequest(form))
 }
 
 /**
@@ -59,21 +44,18 @@ export async function setModelRouteEnabled(
  * the stored route: only the addressed target changes and every other target
  * keeps its configuration, its order and its omit-when-untouched secrets.
  */
-export async function setModelRouteTargetEnabled(
+export function buildModelRouteTargetEnabledRequest(
   route: ModelEndpointRule,
   targetId: string,
   enabled: boolean,
-): Promise<ModelEndpointRule> {
+): ModelRouteRequest {
   const index = modelRouteTargetIndex(route, targetId)
   if (index < 0) throw new Error(`model route target ${targetId} not found`)
   const form = modelRouteToForm(route)
   const target = form.targets[index]
   if (!target) throw new Error(`model route target ${targetId} not found`)
   target.enabled = enabled
-  return persistModelRoute(
-    route.rule_id,
-    capturePayload(modelRouteFormToRequest(form)),
-  )
+  return capturePayload(modelRouteFormToRequest(form))
 }
 
 export async function refreshModelRoutePage(
@@ -81,37 +63,17 @@ export async function refreshModelRoutePage(
   first: number,
   rows: number,
 ): Promise<ModelRoutePageResponse> {
-  await queryClient.cancelQueries({
-    queryKey: modelRoutePageQueryKey(first, rows),
-    exact: true,
-  })
-  await queryClient.invalidateQueries({
-    queryKey: modelRoutePagesQueryKey(),
-    refetchType: 'none',
-  })
-
-  let requestedFirst = first
-  while (true) {
-    const page = await queryClient.fetchQuery({
-      queryKey: modelRoutePageQueryKey(requestedFirst, rows),
-      queryFn: () => listModelRoutePage(requestedFirst, rows),
-      staleTime: 0,
-    })
-    const pageRows = page.rows > 0 ? page.rows : rows
-    if (
-      pageRows > 0 &&
-      page.routes.length === 0 &&
-      requestedFirst >= page.total
-    ) {
-      const correctedFirst =
-        page.total > 0 ? Math.floor((page.total - 1) / pageRows) * pageRows : 0
-      if (correctedFirst !== requestedFirst) {
-        requestedFirst = correctedFirst
-        continue
-      }
-    }
-    return page
-  }
+  return refreshPagedQuery<ModelRoutePageResponse, ModelEndpointRule>(
+    queryClient,
+    {
+      queryKey: modelRoutePageQueryKey,
+      namespaceKey: listModelRoutesQueryKey(),
+      fetchPage: fetchModelRoutesPage,
+      items: (page) => page.routes,
+    },
+    first,
+    rows,
+  )
 }
 
 export function patchModelRoutePages(
@@ -119,7 +81,7 @@ export function patchModelRoutePages(
   route: ModelEndpointRule,
 ): void {
   queryClient.setQueriesData<ModelRoutePageResponse>(
-    { queryKey: modelRoutePagesQueryKey() },
+    { queryKey: listModelRoutesQueryKey() },
     (page) =>
       page
         ? {
