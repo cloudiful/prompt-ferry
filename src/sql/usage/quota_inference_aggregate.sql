@@ -33,6 +33,7 @@ WITH intervals AS (
     GROUP BY effective_model
 ), buckets AS (
     SELECT s.*, CASE WHEN s.effective_model IS NULL THEN 'unknown'
+                     WHEN r.rank IS NULL THEN 'unranked'
                      WHEN r.rank <= 32 THEN 'model' ELSE 'overflow' END AS bucket,
            CASE WHEN r.rank <= 32 THEN s.effective_model END AS bucket_model
     FROM source s LEFT JOIN ranked r ON r.effective_model = s.effective_model

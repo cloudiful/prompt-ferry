@@ -1,0 +1,104 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH intervals AS (\n    SELECT starts.at AS start_at, ends.at AS end_at, starts.ordinality AS interval_index\n    FROM unnest($4::timestamptz[]) WITH ORDINALITY AS starts(at, ordinality)\n    JOIN unnest($5::timestamptz[]) WITH ORDINALITY AS ends(at, ordinality)\n      USING (ordinality)\n), source AS (\n    SELECT rr.*,\n           COALESCE(NULLIF(BTRIM(rr.upstream_model), ''), NULLIF(BTRIM(rr.model), '')) AS effective_model,\n           rr.duration_ms IS NOT NULL AND rr.duration_ms BETWEEN 0 AND 86400000 AS valid_duration,\n           CASE WHEN rr.duration_ms BETWEEN 0 AND 86400000\n                THEN rr.created_at + rr.duration_ms * INTERVAL '1 millisecond'\n                ELSE rr.created_at END AS attributed_at,\n           rr.ok IS TRUE AND rr.request_state IS NOT DISTINCT FROM 'completed' AS successful,\n           (rr.input_tokens IS NOT NULL OR rr.output_tokens IS NOT NULL OR\n            rr.cache_read_tokens IS NOT NULL OR rr.cached_tokens IS NOT NULL OR\n            rr.cache_write_tokens IS NOT NULL) AS has_usage,\n           CASE WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0\n                     AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)\n                     AND COALESCE(rr.input_tokens, 0) >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)\n                THEN GREATEST(COALESCE(rr.input_tokens, 0) - GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0) - GREATEST(COALESCE(rr.cache_write_tokens, 0), 0), 0)\n                ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0) END::bigint AS fresh,\n           COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)::bigint AS cache_read,\n           COALESCE(rr.cache_write_tokens, 0)::bigint AS cache_write,\n           COALESCE(rr.output_tokens, 0)::bigint AS output\n    FROM request_records rr\n    WHERE rr.endpoint_id = $1 AND rr.event_kind = 'request' AND rr.request_category = 'ai'\n      AND rr.created_at >= $2::timestamptz - INTERVAL '24 hours' AND rr.created_at <= $3\n), ranked AS (\n    SELECT effective_model, row_number() OVER (ORDER BY SUM(fresh + cache_read + cache_write + output) DESC, effective_model ASC) AS rank\n    FROM source, intervals i\n    WHERE i.interval_index = 1 AND attributed_at > i.start_at AND attributed_at <= i.end_at\n      AND valid_duration AND successful AND has_usage AND effective_model IS NOT NULL\n    GROUP BY effective_model\n), buckets AS (\n    SELECT s.*, CASE WHEN s.effective_model IS NULL THEN 'unknown'\n                     WHEN r.rank IS NULL THEN 'unranked'\n                     WHEN r.rank <= 32 THEN 'model' ELSE 'overflow' END AS bucket,\n           CASE WHEN r.rank <= 32 THEN s.effective_model END AS bucket_model\n    FROM source s LEFT JOIN ranked r ON r.effective_model = s.effective_model\n), grouped AS (\n    SELECT i.interval_index, b.bucket, b.bucket_model AS model,\n           COUNT(*) FILTER (WHERE b.valid_duration AND b.successful AND b.has_usage)::bigint AS request_count,\n           COUNT(*) FILTER (WHERE NOT b.valid_duration)::bigint AS invalid_duration_count,\n           COUNT(*) FILTER (WHERE b.valid_duration AND NOT b.successful)::bigint AS error_count,\n           COUNT(*) FILTER (WHERE b.valid_duration AND b.successful AND NOT b.has_usage)::bigint AS missing_usage_count,\n           COALESCE(SUM(b.fresh) FILTER (WHERE b.valid_duration AND b.successful AND b.has_usage), 0)::bigint AS fresh_tokens,\n           COALESCE(SUM(b.cache_read) FILTER (WHERE b.valid_duration AND b.successful AND b.has_usage), 0)::bigint AS cache_read_tokens,\n           COALESCE(SUM(b.cache_write) FILTER (WHERE b.valid_duration AND b.successful AND b.has_usage), 0)::bigint AS cache_write_tokens,\n           COALESCE(SUM(b.output) FILTER (WHERE b.valid_duration AND b.successful AND b.has_usage), 0)::bigint AS output_tokens\n    FROM intervals i JOIN buckets b ON b.attributed_at > i.start_at AND b.attributed_at <= i.end_at\n    GROUP BY i.interval_index, b.bucket, b.bucket_model\n)\nSELECT interval_index AS \"interval_index!\", bucket AS \"bucket!\", model,\n       request_count AS \"request_count!\", invalid_duration_count AS \"invalid_duration_count!\",\n       error_count AS \"error_count!\", missing_usage_count AS \"missing_usage_count!\",\n       fresh_tokens AS \"fresh_tokens!\", cache_read_tokens AS \"cache_read_tokens!\",\n       cache_write_tokens AS \"cache_write_tokens!\", output_tokens AS \"output_tokens!\",\n       (SELECT COUNT(*) FROM ranked)::bigint AS \"distinct_models!\"\nFROM grouped ORDER BY interval_index, bucket, model\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "interval_index!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "bucket!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "model",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "request_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "invalid_duration_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "error_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "missing_usage_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "fresh_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "cache_read_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "cache_write_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "output_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "distinct_models!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz",
+        "TimestamptzArray",
+        "TimestamptzArray"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "df0624d1c382e1976460782de45ad9e0e679aa5c7049463544d56aa726461a87"
+}

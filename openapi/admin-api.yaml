@@ -5125,6 +5125,11 @@ components:
     Estimate:
       type: object
       properties:
+        blocks:
+          type:
+          - integer
+          - 'null'
+          minimum: 0
         capacity_millions:
           type:
           - number
@@ -5139,6 +5144,11 @@ components:
           type:
           - string
           - 'null'
+        required_blocks:
+          type:
+          - integer
+          - 'null'
+          minimum: 0
         upper_millions:
           type:
           - number
