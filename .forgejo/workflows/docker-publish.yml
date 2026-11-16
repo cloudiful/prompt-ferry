@@ -33,28 +33,18 @@ jobs:
         working-directory: frontend
         shell: bash
         run: |
-          set -euo pipefail
           bun install --no-save --minimum-release-age 604800
           bun run openapi-ts
           bun run build
           test -f dist/index.html
 
       - name: Build Rust artifact
-        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/build-rust-artifacts@v0.4.4
+        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/build-rust-artifacts@v0.4.6
         with:
           build_command: cargo build --release --bin prompt-ferry --timings
           binary_mappings: >-
             [{"source":"target/release/prompt-ferry","destination":"prompt-ferry"}]
           show_sccache_stats: "true"
-
-      - name: Upload Cargo timings
-        if: always()
-        uses: https://data.forgejo.org/forgejo/upload-artifact@v4
-        with:
-          name: cargo-timings
-          path: target/cargo-timings/
-          if-no-files-found: warn
-          retention-days: 7
 
       - name: Prepare Docker build input
         shell: bash
@@ -64,7 +54,7 @@ jobs:
         run: ci-image-input/prompt-ferry openapi export
 
       - name: Build and push Docker image
-        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-targets@v0.4.4
+        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-targets@v0.4.6
         with:
           context: .
           dockerfile: ./forgejo.Dockerfile
@@ -79,7 +69,7 @@ jobs:
           password: ${{ secrets.REGISTRY_TOKEN }}
 
       - name: Publish Docker manifest
-        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-manifests@v0.4.4
+        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-manifests@v0.4.6
         with:
           architectures: amd64
           targets: >-
