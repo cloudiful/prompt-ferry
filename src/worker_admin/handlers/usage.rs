@@ -10,45 +10,13 @@ pub(super) async fn bridge_status(State(state): State<AdminState>, headers: Head
     if let Err(response) = current_user(&state, &headers).await {
         return response.into_response();
     }
-    if state.managed_mode {
-        let relays = match db::list_managed_relays(&state.pool).await {
-            Ok(relays) => relays,
-            Err(err) => return internal(&state, err),
-        };
-        let statuses = state.managed_relay_statuses.read().await.clone();
-        let relays = relays
-            .into_iter()
-            .map(|relay| {
-                let runtime = statuses.get(&relay.relay_id).cloned().unwrap_or_default();
-                RelayBridgeStatus {
-                    relay_id: Some(relay.relay_id),
-                    relay_url: relay.relay_url,
-                    enabled: relay.enabled,
-                    connected: runtime.connected,
-                    last_error: runtime.last_error,
-                    last_snapshot_version: runtime.last_snapshot_version,
-                }
-            })
-            .collect::<Vec<_>>();
-        return Json(BridgeStatus {
-            configured_relays: relays.iter().filter(|relay| relay.enabled).count(),
-            connected_relays: relays.iter().filter(|relay| relay.connected).count(),
-            snapshot_version: state.snapshot_version.load(Ordering::SeqCst),
-            relays,
-        })
-        .into_response();
-    }
     let relay_senders = state.relay_senders.lock().await;
     let relays = state
         .configured_relays
         .iter()
         .map(|relay_url| RelayBridgeStatus {
-            relay_id: None,
             relay_url: relay_url.clone(),
-            enabled: true,
             connected: relay_senders.contains_key(relay_url),
-            last_error: None,
-            last_snapshot_version: None,
         })
         .collect::<Vec<_>>();
     Json(BridgeStatus {

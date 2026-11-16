@@ -349,7 +349,6 @@ mod tests {
                 worker: worker.clone(),
                 queued_bytes: 0,
                 response_started: true,
-                awaiting_approval: false,
             },
         );
 

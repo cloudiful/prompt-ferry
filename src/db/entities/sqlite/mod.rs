@@ -9,6 +9,5 @@ pub mod standalone_mcp_servers;
 pub mod standalone_model_route_targets;
 pub mod standalone_model_routes;
 pub mod standalone_provider_endpoints;
-pub mod standalone_relays;
 pub mod standalone_settings;
 pub mod standalone_users;

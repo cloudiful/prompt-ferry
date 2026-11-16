@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Read the persisted revision of a shared setting without touching its\n-- secret envelope. The revision is a plain field of the stored JSON; a row\n-- written before the revision existed counts as revision zero.\n--\n-- The row is only returned when the setting exists, so a missing setting and\n-- a stored revision of zero stay distinguishable for the compare-and-set\n-- write.\nselect coalesce((setting_value->>'revision')::bigint, 0) as revision\nfrom worker_settings\nwhere setting_key = $1\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "revision",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4c05acbcce4328ef317852aa7ea8c0a4009962960c9ec212ff56f61e14f7c0a0"
+}

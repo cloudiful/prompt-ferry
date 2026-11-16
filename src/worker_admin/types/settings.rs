@@ -105,14 +105,8 @@ pub struct UsageRetentionSettings {
     pub metadata_retention_days: i32,
     pub content_retention_days: i32,
     pub raw_retention_days: i32,
-    #[serde(default = "default_approval_retention_days")]
-    pub approval_retention_days: i32,
     pub replay_enabled: bool,
     pub raw_backend: String,
-}
-
-fn default_approval_retention_days() -> i32 {
-    90
 }
 
 impl Default for UsageRetentionSettings {
@@ -121,7 +115,6 @@ impl Default for UsageRetentionSettings {
             metadata_retention_days: 90,
             content_retention_days: 3,
             raw_retention_days: 3,
-            approval_retention_days: default_approval_retention_days(),
             replay_enabled: true,
             raw_backend: "object_store".to_string(),
         }
@@ -133,7 +126,6 @@ impl UsageRetentionSettings {
         self.metadata_retention_days = self.metadata_retention_days.max(1);
         self.content_retention_days = self.content_retention_days.max(1);
         self.raw_retention_days = self.raw_retention_days.max(1);
-        self.approval_retention_days = self.approval_retention_days.max(1);
         // Raw payloads are always stored in the managed object store; the
         // legacy `postgres` backend (and any unknown value) normalizes to it.
         self.raw_backend = "object_store".to_string();
@@ -169,6 +161,35 @@ pub struct RawObjectStoreSettingsRequest {
     pub s3_secret_key: Option<RawObjectStoreSecretPatch>,
 }
 
+/// Write-only patch for the encrypted shared Valkey URL.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case", tag = "mode")]
+pub enum SharedValkeySecretPatch {
+    Keep,
+    Clear,
+    Replace { value: String },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct SharedValkeySettingsRequest {
+    #[serde(default)]
+    pub ttl_seconds: u64,
+    pub url: Option<SharedValkeySecretPatch>,
+}
+
+/// Read response: the URL is masked and the revisions expose whether this
+/// worker (and how many live workers) still run an older shared revision.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SharedValkeySettingsResponse {
+    pub configured: bool,
+    pub url_masked: Option<String>,
+    pub ttl_seconds: u64,
+    pub desired_revision: Option<i64>,
+    pub applied_revision: Option<i64>,
+    pub restart_required: bool,
+    pub workers_restart_required: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RelayIpPolicyResponse {
     pub allowed_cidrs: Vec<String>,
@@ -186,9 +207,23 @@ impl From<RelayIpPolicy> for RelayIpPolicyResponse {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::UsageRetentionSettings;
+
+    #[test]
+    fn usage_retention_ignores_the_removed_approval_field() {
+        let settings: UsageRetentionSettings = serde_json::from_value(serde_json::json!({
+            "metadata_retention_days": 90,
+            "content_retention_days": 3,
+            "raw_retention_days": 7,
+            "approval_retention_days": 90,
+            "replay_enabled": true,
+            "raw_backend": "object_store"
+        }))
+        .expect("stored usage retention from before the approval removal should deserialize");
+
+        assert_eq!(settings.raw_retention_days, 7);
+        assert_eq!(settings.metadata_retention_days, 90);
+    }
 
     #[test]
     fn usage_retention_normalizes_bounds_and_backend() {
@@ -196,7 +231,6 @@ mod tests {
             metadata_retention_days: 0,
             content_retention_days: -1,
             raw_retention_days: 0,
-            approval_retention_days: 0,
             replay_enabled: true,
             raw_backend: " unsupported ".to_string(),
         }
@@ -205,7 +239,6 @@ mod tests {
         assert_eq!(normalized.metadata_retention_days, 1);
         assert_eq!(normalized.content_retention_days, 1);
         assert_eq!(normalized.raw_retention_days, 1);
-        assert_eq!(normalized.approval_retention_days, 1);
         // The legacy postgres backend no longer stores raw bodies.
         assert_eq!(normalized.raw_backend, "object_store");
     }
@@ -230,19 +263,5 @@ mod tests {
         .normalized();
 
         assert_eq!(normalized.raw_backend, "object_store");
-    }
-
-    #[test]
-    fn legacy_usage_retention_defaults_approval_days() {
-        let settings: UsageRetentionSettings = serde_json::from_value(json!({
-            "metadata_retention_days": 90,
-            "content_retention_days": 3,
-            "raw_retention_days": 3,
-            "replay_enabled": true,
-            "raw_backend": "object_store"
-        }))
-        .expect("legacy usage retention should deserialize");
-
-        assert_eq!(settings.approval_retention_days, 90);
     }
 }

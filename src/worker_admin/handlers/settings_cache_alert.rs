@@ -29,7 +29,14 @@ pub(super) async fn set_cache_alert_setting(
     // blank: the write-only DingTalk secret, the SMTP password, and the whole
     // SMTP object when an older client omits it. Validation runs on the merged
     // policy so a kept password still satisfies the credential pair.
-    let stored = state.cache_alert.read().await.clone();
+    //
+    // The stored policy is read from the database, not from the in-memory
+    // state: another worker may have written a newer policy and a stale copy
+    // would silently overwrite its credentials.
+    let stored = match db::get_cache_alert_settings(pool).await {
+        Ok(stored) => stored,
+        Err(err) => return internal(&state, err),
+    };
     let next = body.into_settings(&stored);
     if let Err(err) = next.validate() {
         return bad_request(&err.to_string());

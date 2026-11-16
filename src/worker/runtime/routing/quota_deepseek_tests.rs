@@ -65,7 +65,6 @@ fn request() -> BufferedBridgeRequest {
         headers: Vec::new(),
         body: br#"{"model":"deepseek-chat","messages":[{"role":"user","content":"ping"}]}"#
             .to_vec(),
-        request_deadline_unix_ms: 0,
         user_id: Some(1),
         client_key_hash: Some("client-key".to_string()),
         request_user_agent: None,

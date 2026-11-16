@@ -1,6 +1,5 @@
 export const REQUEST_RECORD_PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
 export const STANDARD_PAGE_SIZE_OPTIONS = [10, 20, 50]
-export const APPROVAL_PAGE_SIZE_OPTIONS = [10, 25, 50]
 
 export type TablePageChange = {
   first: number

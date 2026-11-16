@@ -52,8 +52,8 @@ pub(crate) fn format_error_chain(err: &Error) -> String {
 /// Reports a host that currently has no relay to connect to.
 ///
 /// Having no connection is not a startup failure and never changes the role: the
-/// worker keeps serving and connects as soon as an enabled relay appears. The
-/// report is per transition, because the reconcilers run on a timer.
+/// worker keeps serving and connects as soon as a relay target is configured.
+/// The report is per transition, so a restart with no target logs it once.
 #[derive(Debug, Default)]
 pub(crate) struct MissingRelayTarget {
     reported: bool,
@@ -72,8 +72,8 @@ impl MissingRelayTarget {
         }
         info!(
             source,
-            "no enabled relay connection is available; the worker stays up and connects once one is \
-             configured"
+            "no relay target is configured; the worker stays up and connects once \
+             worker.relay_urls names one"
         );
     }
 }
@@ -118,13 +118,13 @@ mod tests {
         // checked through the flag it keeps: the first empty observation
         // reports, a repeated one does not, and a connection in between arms
         // the next report.
-        target.observe(false, "remote relay list");
+        target.observe(false, "local relay targets");
         assert!(target.reported, "the first empty reconcile must report");
-        target.observe(false, "remote relay list");
+        target.observe(false, "local relay targets");
         assert!(target.reported, "a repeated empty reconcile stays reported");
-        target.observe(true, "remote relay list");
+        target.observe(true, "local relay targets");
         assert!(!target.reported, "a connected host has nothing to report");
-        target.observe(false, "remote relay list");
+        target.observe(false, "local relay targets");
         assert!(
             target.reported,
             "losing the connection again reports once more"

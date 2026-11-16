@@ -3,8 +3,8 @@
 //! The relay's management page can change two things that belong to this
 //! machine alone: which services it starts, and the token that guards its own
 //! management API. Both live in a small overlay next to the main
-//! configuration rather than in the main file or in the shared configuration a
-//! managed relay list can carry between hosts.
+//! configuration rather than in the main file or in the shared configuration
+//! PostgreSQL keeps for every worker.
 //!
 //! Every field is optional, and an absent field simply is not part of the
 //! overlay: a file that only carries a role leaves the management bind and token

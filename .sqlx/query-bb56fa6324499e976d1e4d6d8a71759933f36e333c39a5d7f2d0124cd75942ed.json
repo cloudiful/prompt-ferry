@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Serialize worker registry registrations.\n--\n-- The lock is transaction scoped, so a crashed registrar never leaves the\n-- registry locked and two registrars never decide concurrently who owns an\n-- identity.\nselect pg_advisory_xact_lock($1)\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pg_advisory_xact_lock",
+        "type_info": "Void",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "bb56fa6324499e976d1e4d6d8a71759933f36e333c39a5d7f2d0124cd75942ed"
+}

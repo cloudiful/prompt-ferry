@@ -3,7 +3,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::config::{BridgeEncryptionMode, NativeApi, NativeApiSource, TlsMode};
+use crate::config::{NativeApi, NativeApiSource};
 
 #[derive(Debug)]
 pub enum StandaloneConfigError {
@@ -223,50 +223,6 @@ impl RoutingStrategy {
                 "unknown routing strategy {value:?}"
             ))),
         }
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ManagedRelayConfig {
-    pub relay_id: Uuid,
-    pub name: String,
-    pub relay_url: String,
-    pub enabled: bool,
-    pub tls_mode: TlsMode,
-    pub bridge_encryption_mode: BridgeEncryptionMode,
-    pub relay_ca_pem: Option<String>,
-    pub client_cert_pem: Option<String>,
-    pub client_key_pem: Option<String>,
-    pub bridge_encryption_key: Option<String>,
-}
-
-impl fmt::Debug for ManagedRelayConfig {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ManagedRelayConfig")
-            .field("relay_id", &self.relay_id)
-            .field("name", &self.name)
-            .field("relay_url", &self.relay_url)
-            .field("enabled", &self.enabled)
-            .field("tls_mode", &self.tls_mode)
-            .field("bridge_encryption_mode", &self.bridge_encryption_mode)
-            .field(
-                "relay_ca_pem",
-                &redacted_optional_secret(self.relay_ca_pem.as_deref()),
-            )
-            .field(
-                "client_cert_pem",
-                &redacted_optional_secret(self.client_cert_pem.as_deref()),
-            )
-            .field(
-                "client_key_pem",
-                &redacted_optional_secret(self.client_key_pem.as_deref()),
-            )
-            .field(
-                "bridge_encryption_key",
-                &redacted_optional_secret(self.bridge_encryption_key.as_deref()),
-            )
-            .finish()
     }
 }
 
@@ -520,7 +476,6 @@ pub struct SettingConfig {
 
 #[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct StandaloneConfig {
-    pub relays: Vec<ManagedRelayConfig>,
     pub endpoints: Vec<ProviderEndpointConfig>,
     pub routes: Vec<ModelRouteConfig>,
     pub client_keys: Vec<ClientKeyConfig>,
@@ -531,7 +486,6 @@ impl fmt::Debug for StandaloneConfig {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("StandaloneConfig")
-            .field("relays", &self.relays)
             .field("endpoints", &self.endpoints)
             .field("routes", &self.routes)
             .field("client_keys", &self.client_keys)
@@ -542,13 +496,6 @@ impl fmt::Debug for StandaloneConfig {
 
 #[derive(Clone)]
 pub struct BootstrapSeed {
-    pub relay_urls: Vec<String>,
-    pub tls_mode: TlsMode,
-    pub relay_ca_pem: Option<String>,
-    pub client_cert_pem: Option<String>,
-    pub client_key_pem: Option<String>,
-    pub bridge_encryption_mode: BridgeEncryptionMode,
-    pub bridge_encryption_key: Option<String>,
     pub upstream_base_url: String,
     pub upstream_api_key: String,
     pub upstream_native_api: NativeApi,
@@ -558,25 +505,6 @@ impl fmt::Debug for BootstrapSeed {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("BootstrapSeed")
-            .field("relay_urls", &self.relay_urls)
-            .field("tls_mode", &self.tls_mode)
-            .field(
-                "relay_ca_pem",
-                &redacted_optional_secret(self.relay_ca_pem.as_deref()),
-            )
-            .field(
-                "client_cert_pem",
-                &redacted_optional_secret(self.client_cert_pem.as_deref()),
-            )
-            .field(
-                "client_key_pem",
-                &redacted_optional_secret(self.client_key_pem.as_deref()),
-            )
-            .field("bridge_encryption_mode", &self.bridge_encryption_mode)
-            .field(
-                "bridge_encryption_key",
-                &redacted_optional_secret(self.bridge_encryption_key.as_deref()),
-            )
             .field("upstream_base_url", &self.upstream_base_url)
             .field("upstream_api_key", &redacted_secret(&self.upstream_api_key))
             .field("upstream_native_api", &self.upstream_native_api)

@@ -8,6 +8,7 @@ mod bridge_tests;
 mod cache_alert_monitor;
 mod chatgpt_quota_collector;
 pub(super) mod compaction;
+mod config_refresh;
 mod connect;
 mod context;
 mod error_handling;
@@ -22,6 +23,7 @@ mod mcp_support;
 mod prompt_log;
 mod quota_observation_collector;
 mod raw_maintenance;
+mod registry;
 mod request_assembly;
 mod routing;
 mod standalone;
@@ -98,12 +100,28 @@ impl WorkerShutdown {
     }
 
     pub fn trigger(&self) {
-        let _ = self.tx.send(true);
+        // The value is replaced instead of sent: a trigger must not be lost
+        // when no service subscribed to the signal yet.
+        self.tx.send_replace(true);
     }
 
     pub fn is_triggered(&self) -> bool {
         *self.tx.borrow()
     }
+}
+
+/// The stop signal an outer role can send to the worker.
+///
+/// The integrated role uses it when its own half ends: the worker must stop
+/// together with it, and the way it stops depends on why the other half
+/// ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExternalStop {
+    /// The other half stopped cleanly: the accepted work is drained.
+    Graceful,
+    /// The other half failed: the worker cannot serve any more, so the
+    /// accepted work is cancelled instead of drained.
+    FailClosed,
 }
 
 #[derive(Clone)]
@@ -114,6 +132,10 @@ pub(super) struct WorkerRuntimeState {
     mcp_request_cancellations: Arc<Mutex<HashMap<String, RequestCancellation>>>,
     pending_realtime_sessions:
         Arc<Mutex<HashMap<String, tokio::sync::mpsc::Sender<RealtimeInboundMessage>>>>,
+    /// Every accepted request task is owned here until it finishes, so a
+    /// fail-closed or timed-out drain can cancel and join the actual task
+    /// instead of waiting on a guard that may outlive it.
+    accepted_tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     control: RuntimeControl,
 }
 
@@ -134,6 +156,7 @@ impl Default for WorkerRuntimeState {
             request_cancellations: Arc::new(Mutex::new(HashMap::new())),
             mcp_request_cancellations: Arc::new(Mutex::new(HashMap::new())),
             pending_realtime_sessions: Arc::new(Mutex::new(HashMap::new())),
+            accepted_tasks: Arc::new(Mutex::new(Vec::new())),
             control: RuntimeControl::new(),
         }
     }
@@ -146,6 +169,27 @@ impl WorkerRuntimeState {
 
     fn try_track_request(&self) -> Option<ActiveRequestGuard> {
         self.control.try_track_request()
+    }
+
+    /// Spawn an accepted request under the runtime's ownership.
+    ///
+    /// The handle is retained until the task finishes, so the shutdown path
+    /// can abort and join the real task. Completed handles are dropped while
+    /// the registry is pruned, which never detaches a task that still runs.
+    async fn spawn_accepted<F>(&self, task: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let handle = tokio::spawn(task);
+        let mut tasks = self.accepted_tasks.lock().await;
+        tasks.retain(|task| !task.is_finished());
+        tasks.push(handle);
+    }
+
+    /// Take the owned accepted request tasks so the shutdown path can join or
+    /// abort them.
+    async fn take_accepted_tasks(&self) -> Vec<tokio::task::JoinHandle<()>> {
+        std::mem::take(&mut *self.accepted_tasks.lock().await)
     }
 
     fn spawn_request_lease_guard(
@@ -178,10 +222,6 @@ impl WorkerRuntimeState {
             .cloned()
     }
 
-    fn is_shutting_down(&self) -> bool {
-        self.control.is_shutting_down()
-    }
-
     fn begin_shutdown(&self) {
         self.control.begin_shutdown();
     }
@@ -192,11 +232,23 @@ impl WorkerRuntimeState {
 }
 
 pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
-    connect::run_embedded(config).await
+    connect::run_embedded(config, None).await
 }
 
 pub async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
-    connect::run_embedded(config).await
+    connect::run_embedded(config, None).await
+}
+
+/// Run the worker with an additional stop signal.
+///
+/// The signal is the internal shutdown signal of the process: the caller
+/// (the integrated role) asks the worker to stop when its own half stops, so
+/// the two halves of the integrated role always end together.
+pub async fn run_embedded_with_shutdown(
+    config: WorkerConfig,
+    external_shutdown: Option<tokio::sync::watch::Receiver<ExternalStop>>,
+) -> anyhow::Result<()> {
+    connect::run_embedded(config, external_shutdown).await
 }
 
 pub async fn connect_for_test(config: WorkerConfig, client: Client) -> anyhow::Result<()> {

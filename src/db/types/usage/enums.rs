@@ -41,7 +41,6 @@ impl RequestRecordCategory {
 #[sqlx(rename_all = "snake_case")]
 pub enum RequestRecordState {
     Received,
-    AwaitingApproval,
     UpstreamProcessing,
     Completed,
     Failed,
@@ -52,7 +51,6 @@ impl RequestRecordState {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Received => "received",
-            Self::AwaitingApproval => "awaiting_approval",
             Self::UpstreamProcessing => "upstream_processing",
             Self::Completed => "completed",
             Self::Failed => "failed",

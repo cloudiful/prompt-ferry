@@ -20,7 +20,6 @@ mod responses_summary_events;
 mod responses_summary_stream;
 #[cfg(test)]
 mod responses_summary_stream_tests;
-pub(super) mod review;
 mod stream_restore;
 #[cfg(test)]
 #[path = "stream_restore/property_tests.rs"]
@@ -35,4 +34,3 @@ pub(super) mod upstream_restore;
 pub(super) mod upstream_text_fields;
 
 pub(in crate::worker::runtime) use request::process_request;
-pub(in crate::worker::runtime) use review::abort_waiting_approvals;

@@ -1,20 +1,13 @@
 use anyhow::anyhow;
-use base64::{Engine as _, engine::general_purpose::STANDARD};
-use sha2::{Digest, Sha256};
-use uuid::Uuid;
 
 use crate::{
-    config::{self, BridgeEncryptionMode, HostRole, TlsMode, WorkerConfig, normalize_relay_url},
-    standalone_config::ManagedRelayConfig,
-    tls, worker_admin,
+    config::{BridgeEncryptionMode, TlsMode, WorkerConfig, normalize_relay_url},
+    tls,
 };
-
-use crate::worker::runtime::standalone::StandaloneRuntimeState;
 
 #[derive(Clone)]
 pub(super) struct RelayConnectionConfig {
     pub(super) relay_key: String,
-    pub(super) relay_id: Option<Uuid>,
     pub(super) relay_url: String,
     pub(super) worker_token: String,
     pub(super) connect_timeout_seconds: u64,
@@ -26,151 +19,23 @@ pub(super) struct RelayConnectionConfig {
     pub(super) bridge_encryption_key: String,
 }
 
-/// Where this process gets its relay connection targets from.
+/// Resolve every local relay target this worker dials.
 ///
-/// A host that runs no local relay of its own — the `worker` role — dials only
-/// the enabled remote relay list. The static `worker.relay_urls` list names the
-/// in-process bridge of the `integrated` role, which such a host does not run,
-/// so it is not a target here. Every other startup keeps that list as the
-/// fallback for a configuration store that holds no relay yet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RelayTargets {
-    /// Only the enabled remote relay list.
-    RemoteRelayList,
-    /// The enabled remote relay list, falling back to the static
-    /// `worker.relay_urls` list.
-    RemoteRelayListOrConfiguredFallback,
-}
-
-/// Resolve the connection sources for this process' startup.
-pub(super) fn relay_targets() -> RelayTargets {
-    match config::host_startup::active() {
-        Some(HostRole::Worker) => RelayTargets::RemoteRelayList,
-        _ => RelayTargets::RemoteRelayListOrConfiguredFallback,
-    }
-}
-
-pub(super) fn simple_relay_connection_configs(
+/// Connection targets are always the worker's own `worker.relay_urls` list; no
+/// database row or admin surface adds, removes or edits them. An empty list is
+/// a valid state: the worker stays up without a bridge and never falls back to
+/// another role.
+pub(super) fn relay_connection_configs(
     config: &WorkerConfig,
 ) -> anyhow::Result<Vec<RelayConnectionConfig>> {
     config
         .relay_urls
         .iter()
-        .map(|relay_url| simple_relay_connection_config(config, relay_url))
+        .map(|relay_url| relay_connection_config(config, relay_url))
         .collect()
 }
 
-pub(super) async fn managed_relay_connection_config(
-    config: &WorkerConfig,
-    admin_state: &worker_admin::AdminState,
-    relay: &crate::db::ManagedRelayRow,
-) -> anyhow::Result<RelayConnectionConfig> {
-    let manager = admin_state.relay_secret_manager()?;
-    let relay_url = normalize_relay_url(&relay.relay_url);
-    let tls_mode = relay.tls_mode();
-    let bridge_encryption_mode = relay.bridge_encryption_mode();
-    let relay_ca_pem = relay
-        .relay_ca_envelope()
-        .map(|value| manager.decrypt(&value))
-        .transpose()?;
-    let client_cert_pem = relay
-        .client_cert_envelope()
-        .map(|value| manager.decrypt(&value))
-        .transpose()?;
-    let client_key_pem = relay
-        .client_key_envelope()
-        .map(|value| manager.decrypt(&value))
-        .transpose()?;
-    let bridge_encryption_key = relay
-        .bridge_encryption_key_envelope()
-        .map(|value| manager.decrypt(&value))
-        .transpose()?
-        .unwrap_or_default();
-
-    tls::validate_worker_relay_material(
-        &relay_url,
-        tls_mode,
-        relay_ca_pem.as_deref(),
-        client_cert_pem.as_deref(),
-        client_key_pem.as_deref(),
-    )?;
-    crate::bridge_crypto::validate_settings(
-        "worker",
-        bridge_encryption_mode,
-        &bridge_encryption_key,
-    )?;
-
-    Ok(RelayConnectionConfig {
-        relay_key: relay.relay_id.to_string(),
-        relay_id: Some(relay.relay_id),
-        relay_url,
-        worker_token: config.worker_token.clone(),
-        connect_timeout_seconds: config.connect_timeout_seconds,
-        tls_mode,
-        relay_ca_pem,
-        client_cert_pem,
-        client_key_pem,
-        bridge_encryption_mode,
-        bridge_encryption_key,
-    })
-}
-
-/// The enabled remote relay list, plus the static `worker.relay_urls` list when
-/// this startup accepts it as a fallback.
-///
-/// An empty result is a valid state: the worker stays up and connects once a
-/// relay is added, and never falls back to another role.
-pub(super) async fn standalone_relay_connection_configs(
-    config: &WorkerConfig,
-    state: &StandaloneRuntimeState,
-    targets: RelayTargets,
-) -> anyhow::Result<Vec<RelayConnectionConfig>> {
-    let snapshot = state.snapshot().await;
-    let persisted = snapshot
-        .relays
-        .iter()
-        .filter(|relay| relay.enabled)
-        .map(|relay| standalone_relay_connection_config(config, relay))
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    if persisted.is_empty() && targets == RelayTargets::RemoteRelayListOrConfiguredFallback {
-        return simple_relay_connection_configs(config);
-    }
-    Ok(persisted)
-}
-
-fn standalone_relay_connection_config(
-    config: &WorkerConfig,
-    relay: &ManagedRelayConfig,
-) -> anyhow::Result<RelayConnectionConfig> {
-    let relay_url = normalize_relay_url(&relay.relay_url);
-    tls::validate_worker_relay_material(
-        &relay_url,
-        relay.tls_mode,
-        relay.relay_ca_pem.as_deref(),
-        relay.client_cert_pem.as_deref(),
-        relay.client_key_pem.as_deref(),
-    )?;
-    crate::bridge_crypto::validate_settings(
-        "worker",
-        relay.bridge_encryption_mode,
-        relay.bridge_encryption_key.as_deref().unwrap_or_default(),
-    )?;
-    Ok(RelayConnectionConfig {
-        relay_key: relay.relay_id.to_string(),
-        relay_id: Some(relay.relay_id),
-        relay_url,
-        worker_token: config.worker_token.clone(),
-        connect_timeout_seconds: config.connect_timeout_seconds,
-        tls_mode: relay.tls_mode,
-        relay_ca_pem: relay.relay_ca_pem.clone(),
-        client_cert_pem: relay.client_cert_pem.clone(),
-        client_key_pem: relay.client_key_pem.clone(),
-        bridge_encryption_mode: relay.bridge_encryption_mode,
-        bridge_encryption_key: relay.bridge_encryption_key.clone().unwrap_or_default(),
-    })
-}
-
-pub(super) fn simple_relay_connection_config(
+pub(super) fn relay_connection_config(
     config: &WorkerConfig,
     relay_url: &str,
 ) -> anyhow::Result<RelayConnectionConfig> {
@@ -188,7 +53,6 @@ pub(super) fn simple_relay_connection_config(
     )?;
     Ok(RelayConnectionConfig {
         relay_key: relay_url.clone(),
-        relay_id: None,
         relay_url,
         worker_token: config.worker_token.clone(),
         connect_timeout_seconds: config.connect_timeout_seconds,
@@ -201,39 +65,6 @@ pub(super) fn simple_relay_connection_config(
     })
 }
 
-pub(super) fn relay_fingerprint(relay: &crate::db::ManagedRelayRow) -> String {
-    let mut digest = Sha256::new();
-    digest.update(relay.name.as_bytes());
-    digest.update(relay.relay_url.as_bytes());
-    digest.update([relay.enabled as u8]);
-    digest.update(relay.tls_mode.as_bytes());
-    digest.update(relay.bridge_encryption_mode.as_bytes());
-    for maybe_bytes in [
-        relay.relay_ca_ciphertext.as_deref(),
-        relay.relay_ca_nonce.as_deref(),
-        relay.client_cert_ciphertext.as_deref(),
-        relay.client_cert_nonce.as_deref(),
-        relay.client_key_ciphertext.as_deref(),
-        relay.client_key_nonce.as_deref(),
-        relay.bridge_encryption_key_ciphertext.as_deref(),
-        relay.bridge_encryption_key_nonce.as_deref(),
-    ] {
-        if let Some(bytes) = maybe_bytes {
-            digest.update(bytes);
-        }
-        digest.update([0xff]);
-    }
-    for maybe_version in [
-        relay.relay_ca_key_version,
-        relay.client_cert_key_version,
-        relay.client_key_key_version,
-        relay.bridge_encryption_key_key_version,
-    ] {
-        digest.update(maybe_version.unwrap_or_default().to_be_bytes());
-    }
-    STANDARD.encode(digest.finalize())
-}
-
 fn optional_file_pem(path: &str) -> anyhow::Result<Option<String>> {
     let path = path.trim();
     if path.is_empty() {
@@ -243,10 +74,10 @@ fn optional_file_pem(path: &str) -> anyhow::Result<Option<String>> {
     }
 }
 
-pub(super) fn first_simple_relay_connection_config(
+pub(super) fn first_relay_connection_config(
     config: &WorkerConfig,
 ) -> anyhow::Result<RelayConnectionConfig> {
-    simple_relay_connection_configs(config)?
+    relay_connection_configs(config)?
         .into_iter()
         .next()
         .ok_or_else(|| anyhow!("at least one relay URL is required"))

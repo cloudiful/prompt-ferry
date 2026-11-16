@@ -1,9 +1,6 @@
 use utoipa::OpenApi;
 
 use super::{
-    approvals::{
-        __path_approve_approval, __path_get_approval, __path_list_approvals, __path_reject_approval,
-    },
     auth::{__path_auth_login, __path_auth_logout, __path_auth_me},
     bridge::__path_bridge_status,
     config_audit::__path_list_config_audit,
@@ -32,22 +29,19 @@ use super::{
         __path_create_model_route, __path_delete_model_route, __path_list_model_routes,
         __path_test_model_route, __path_update_model_route,
     },
-    relays::{
-        __path_create_relay, __path_delete_relay, __path_get_relay, __path_list_relays,
-        __path_reconnect_relay, __path_update_relay,
-    },
     schemas::*,
     settings::{
-        __path_get_cache_alert_setting, __path_get_endpoint_setting, __path_get_llm_review_setting,
+        __path_get_cache_alert_setting, __path_get_endpoint_setting,
         __path_get_model_route_whitelist, __path_get_raw_object_store,
         __path_get_redaction_setting, __path_get_relay_ip_whitelist,
-        __path_get_request_content_logging, __path_get_stream_delta_batching,
-        __path_get_usage_retention, __path_list_redaction_custom_strings, __path_preview_redaction,
-        __path_set_cache_alert_setting, __path_set_endpoint_setting, __path_set_llm_review_setting,
+        __path_get_request_content_logging, __path_get_shared_valkey,
+        __path_get_stream_delta_batching, __path_get_usage_retention,
+        __path_list_redaction_custom_strings, __path_preview_redaction,
+        __path_set_cache_alert_setting, __path_set_endpoint_setting,
         __path_set_model_route_whitelist, __path_set_raw_object_store,
         __path_set_redaction_setting, __path_set_relay_ip_whitelist,
-        __path_set_request_content_logging, __path_set_stream_delta_batching,
-        __path_set_usage_retention,
+        __path_set_request_content_logging, __path_set_shared_valkey,
+        __path_set_stream_delta_batching, __path_set_usage_retention,
     },
     usage::{
         __path_clear_request_records, __path_delete_conversation_endpoint_override,
@@ -63,6 +57,7 @@ use super::{
         __path_list_client_keys, __path_list_user_options, __path_list_users,
         __path_reset_password, __path_update_client_key, __path_update_user,
     },
+    workers::__path_list_workers,
 };
 use crate::db::config_repository::{
     ConfigAuditAction, ConfigAuditDomainCount, ConfigAuditEntry, ConfigAuditPage,
@@ -70,22 +65,19 @@ use crate::db::config_repository::{
 };
 use crate::{
     db,
-    llm_review::LlmReviewSettings,
     protocol::RelayIpPolicy,
     worker_admin::{
         openai_org_usage::OpenAiOrganizationUsageResponse,
         quota_inference::response::{Estimate, InferenceResponse, ModelRow},
     },
     worker_admin_types::{
-        ApprovalPageResponse, AvailableModel, AvailableModelsResponse, BridgeStatus,
-        CacheAlertSettings, CacheAlertSettingsResponse, ClientKey, ClientKeyPageResponse,
-        CommandCodeBalances, CommandCodeWindowUsage, ConfigExportDomainSummary,
-        ConfigExportMetadata, ConfigExportRequest, ConfigImportRequest,
-        ConversationEndpointOverrideRequest, CreateClientKeyRequest, CreateClientKeyResponse,
-        CreateUserRequest, DeepSeekBalance, EndpointModelsResponse, EndpointOAuthStatusResponse,
-        EndpointPageResponse, EndpointRequest, EndpointSettingRequest, EndpointTestResponse,
-        ManagedRelay, ManagedRelayListResponse, ManagedRelayPatchRequest, ManagedRelayRequest,
-        ManagedRelaySecretPatch, ManagedRelayStatus, McpCatalogItem, McpCatalogResponse,
+        AvailableModel, AvailableModelsResponse, BridgeStatus, CacheAlertSettings,
+        CacheAlertSettingsResponse, ClientKey, ClientKeyPageResponse, CommandCodeBalances,
+        CommandCodeWindowUsage, ConfigExportDomainSummary, ConfigExportMetadata,
+        ConfigExportRequest, ConfigImportRequest, ConversationEndpointOverrideRequest,
+        CreateClientKeyRequest, CreateClientKeyResponse, CreateUserRequest, DeepSeekBalance,
+        EndpointModelsResponse, EndpointOAuthStatusResponse, EndpointPageResponse, EndpointRequest,
+        EndpointSettingRequest, EndpointTestResponse, McpCatalogItem, McpCatalogResponse,
         McpProviderDescriptor, McpServer, McpServerPageResponse, McpServerRequest, McpTestResponse,
         MeResponse, ModelRoutePageResponse, ModelRouteRequest, ModelRouteTargetRequest,
         ModelRouteTestRequest, ModelRouteTestResponse, ModelRouteTestTargetResult,
@@ -100,10 +92,12 @@ use crate::{
         RequestRecordFullMessage, RequestRecordFullResponse, RequestRecordOverviewRange,
         RequestRecordPruneResponse, RequestRecordsClearRequest, RequestRecordsClearResponse,
         ResetPasswordRequest, SessionAffinityResetResponse, SessionAffinityState,
-        SessionAffinityStatus, SessionRouteOptionsResponse, SubscriptionQuotaObservation,
+        SessionAffinityStatus, SessionRouteOptionsResponse, SharedValkeySecretPatch,
+        SharedValkeySettingsRequest, SharedValkeySettingsResponse, SubscriptionQuotaObservation,
         SubscriptionWindowAvailability, SubscriptionWindowUsage, TokenPlanKeyUsage,
         TokenPlanModelUsage, TokenPlanQuotaState, TokenPlanQuotaStatus, TokenPlanUsageResponse,
         TokenPlanWindowUsage, UpdateClientKeyRequest, UserOptionsResponse, UserPageResponse,
+        WorkerListResponse, WorkerSummary,
     },
 };
 
@@ -192,12 +186,7 @@ pub(super) struct IdentityApiDoc;
         mcp_oauth_callback,
         refresh_mcp_oauth,
         disconnect_mcp_oauth,
-        list_relays,
-        create_relay,
-        get_relay,
-        update_relay,
-        delete_relay,
-        reconnect_relay,
+        list_workers,
         get_endpoint_setting,
         set_endpoint_setting,
         get_model_route_whitelist,
@@ -252,12 +241,8 @@ pub(super) struct IdentityApiDoc;
             McpServerPageResponse,
             McpServerRequest,
             McpTestResponse,
-            ManagedRelay,
-            ManagedRelayListResponse,
-            ManagedRelayPatchRequest,
-            ManagedRelayRequest,
-            ManagedRelaySecretPatch,
-            ManagedRelayStatus,
+            WorkerListResponse,
+            WorkerSummary,
             ModelRoutePageResponse,
             ModelRouteRequest,
             ModelRouteTargetRequest,
@@ -279,7 +264,7 @@ pub(super) struct IdentityApiDoc;
         (name = "endpoints", description = "Provider endpoints"),
         (name = "model-routes", description = "Model route rules"),
         (name = "mcp", description = "MCP server management"),
-        (name = "relays", description = "Managed relay topology")
+        (name = "workers", description = "Worker discovery")
     )
 )]
 pub(super) struct RoutingApiDoc;
@@ -313,14 +298,10 @@ pub(super) struct RoutingApiDoc;
             set_stream_delta_batching,
             get_relay_ip_whitelist,
             set_relay_ip_whitelist,
-            get_llm_review_setting,
-            set_llm_review_setting,
             get_raw_object_store,
             set_raw_object_store,
-        list_approvals,
-        get_approval,
-        approve_approval,
-        reject_approval,
+            get_shared_valkey,
+            set_shared_valkey,
         bridge_status,
         get_cache_alert_setting,
         set_cache_alert_setting,
@@ -333,7 +314,6 @@ pub(super) struct RoutingApiDoc;
     components(
         schemas(
             AppliedReplacementSchema,
-            ApprovalPageResponse,
             BridgeStatus,
             CacheAlertSettings,
             CacheAlertSettingsResponse,
@@ -344,11 +324,13 @@ pub(super) struct RoutingApiDoc;
             CustomStringScopeSchema,
             ErrorBody,
             ErrorEnvelope,
-            LlmReviewSettings,
             RawObjectStoreBackend,
             RawObjectStoreSecretPatch,
             RawObjectStoreSettingsRequest,
             RawObjectStoreSettingsResponse,
+            SharedValkeySecretPatch,
+            SharedValkeySettingsRequest,
+            SharedValkeySettingsResponse,
             RedactionConfigSchema,
             RedactionFindingSchema,
             RedactionInputKindSchema,
@@ -375,9 +357,6 @@ pub(super) struct RoutingApiDoc;
             RequestRecordOverviewRange,
             db::StreamDeltaBatchingSettings,
             ConversationEndpointOverrideRequest,
-            db::ApprovalRequest,
-            db::ApprovalRequestPage,
-            db::ApprovalStatusFilter,
             db::ConversationEndpointOverride,
             db::SessionRouteOption,
             db::RequestRecordBucket,
@@ -403,7 +382,6 @@ pub(super) struct RoutingApiDoc;
     tags(
         (name = "request-records", description = "Request record reporting"),
         (name = "settings", description = "Worker and admin settings"),
-        (name = "approvals", description = "Manual approval workflow"),
         (name = "bridge", description = "Bridge runtime status"),
         (name = "config", description = "Encrypted configuration migration")
     )

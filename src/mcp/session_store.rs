@@ -1,12 +1,13 @@
 use std::{sync::Arc, time::Duration};
 
+use anyhow::Result;
 use redis::{AsyncCommands, aio::ConnectionManager};
 use rmcp::transport::streamable_http_server::session::{
     SessionState, SessionStore, SessionStoreError,
 };
 use tracing::warn;
 
-use crate::config::WorkerConfig;
+use crate::{config::WorkerConfig, db::SharedValkeyConfig};
 
 pub const MCP_SESSION_VALKEY_KEY_PREFIX: &str = "pfy:mcp-session:";
 
@@ -16,6 +17,20 @@ pub const MCP_SESSION_VALKEY_KEY_PREFIX: &str = "pfy:mcp-session:";
 /// already ready; on timeout we fall back to the process-local rmcp
 /// session store so the first request can still proceed.
 const VALKEY_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The TTL of a session stored in the shared Valkey.
+///
+/// The shared TTL is the coordination contract between the workers: a session
+/// must expire everywhere at the same time, so the local session TTL does not
+/// apply to the shared backend.
+pub(super) fn valkey_session_ttl_seconds(shared: &SharedValkeyConfig) -> u64 {
+    shared.ttl_seconds().max(1)
+}
+
+/// The TTL of a session stored in the standalone SQLite coordinator.
+pub(super) fn sqlite_session_ttl_seconds(config: &WorkerConfig) -> u64 {
+    config.session_ttl_seconds.max(1)
+}
 
 #[derive(Clone)]
 pub struct McpSessionStore {
@@ -30,15 +45,19 @@ enum McpSessionBackend {
 }
 
 impl McpSessionStore {
-    pub async fn from_config(config: &WorkerConfig) -> Option<Arc<dyn SessionStore>> {
-        Self::from_config_with_sqlite(config, None).await
+    pub async fn from_config(
+        config: &WorkerConfig,
+        shared: &SharedValkeyConfig,
+    ) -> Result<Option<Arc<dyn SessionStore>>> {
+        Self::from_config_with_sqlite(config, shared, None).await
     }
 
     pub async fn from_config_with_sqlite(
         config: &WorkerConfig,
+        shared: &SharedValkeyConfig,
         sqlite_pool: Option<sqlx::SqlitePool>,
-    ) -> Option<Arc<dyn SessionStore>> {
-        let url = config.valkey_url.trim();
+    ) -> Result<Option<Arc<dyn SessionStore>>> {
+        let url = shared.url_or_empty().trim();
         if url.is_empty() {
             if let Some(pool) = sqlite_pool {
                 warn!(
@@ -47,12 +66,12 @@ impl McpSessionStore {
                     network_filesystem_safe = false,
                     "using WAL-backed SQLite coordinator for MCP sessions"
                 );
-                return Some(Arc::new(Self {
+                return Ok(Some(Arc::new(Self {
                     backend: McpSessionBackend::Sqlite(
                         crate::standalone_config::StandaloneCoordinatorStore::new(pool),
                     ),
-                    ttl_seconds: config.session_ttl_seconds.max(1),
-                }));
+                    ttl_seconds: sqlite_session_ttl_seconds(config),
+                })));
             }
             warn!(
                 backend = "memory",
@@ -60,81 +79,38 @@ impl McpSessionStore {
                 capability = "mcp_session_cache",
                 "using rmcp process-local MCP sessions; session loss on restart is accepted"
             );
-            return None;
+            return Ok(None);
         }
-        let client = match redis::Client::open(url) {
-            Ok(client) => client,
-            Err(err) => {
-                warn!(error = %err, valkey_url = url, "failed to open valkey client for MCP sessions");
-                if let Some(pool) = sqlite_pool {
-                    return Some(Arc::new(Self {
-                        backend: McpSessionBackend::Sqlite(
-                            crate::standalone_config::StandaloneCoordinatorStore::new(pool),
-                        ),
-                        ttl_seconds: config.session_ttl_seconds.max(1),
-                    }));
+        let client = redis::Client::open(url).map_err(|_| {
+            crate::db::shared_valkey_failure(crate::db::SharedValkeyFailure::ClientOpen, url)
+        })?;
+        let manager =
+            match tokio::time::timeout(VALKEY_CONNECT_TIMEOUT, client.get_connection_manager())
+                .await
+            {
+                Ok(Ok(manager)) => manager,
+                Ok(Err(_)) => {
+                    // A configured shared Valkey is authoritative: a consumer that
+                    // cannot reach it must fail instead of silently degrading to
+                    // process-local sessions.
+                    return Err(crate::db::shared_valkey_failure(
+                        crate::db::SharedValkeyFailure::Connect,
+                        url,
+                    ));
                 }
-                warn!(
-                    backend = "memory",
-                    scope = "single-process",
-                    capability = "mcp_session_cache",
-                    "Valkey unavailable; using rmcp process-local MCP sessions"
-                );
-                return None;
-            }
-        };
-        let manager = match tokio::time::timeout(
-            VALKEY_CONNECT_TIMEOUT,
-            client.get_connection_manager(),
-        )
-        .await
-        {
-            Ok(Ok(manager)) => manager,
-            Ok(Err(err)) => {
-                warn!(error = %err, valkey_url = url, "failed to connect valkey for MCP sessions");
-                if let Some(pool) = sqlite_pool {
-                    return Some(Arc::new(Self {
-                        backend: McpSessionBackend::Sqlite(
-                            crate::standalone_config::StandaloneCoordinatorStore::new(pool),
-                        ),
-                        ttl_seconds: config.session_ttl_seconds.max(1),
-                    }));
+                Err(_) => {
+                    return Err(crate::db::shared_valkey_failure(
+                        crate::db::SharedValkeyFailure::Timeout,
+                        url,
+                    ));
                 }
-                warn!(
-                    backend = "memory",
-                    scope = "single-process",
-                    capability = "mcp_session_cache",
-                    "Valkey unavailable; using rmcp process-local MCP sessions"
-                );
-                return None;
-            }
-            Err(_) => {
-                warn!(
-                    timeout_seconds = VALKEY_CONNECT_TIMEOUT.as_secs(),
-                    valkey_url = url,
-                    "timed out connecting to valkey for MCP sessions; falling back",
-                );
-                if let Some(pool) = sqlite_pool {
-                    return Some(Arc::new(Self {
-                        backend: McpSessionBackend::Sqlite(
-                            crate::standalone_config::StandaloneCoordinatorStore::new(pool),
-                        ),
-                        ttl_seconds: config.session_ttl_seconds.max(1),
-                    }));
-                }
-                warn!(
-                    backend = "memory",
-                    scope = "single-process",
-                    capability = "mcp_session_cache",
-                    "Valkey timed out; using rmcp process-local MCP sessions"
-                );
-                return None;
-            }
-        };
-        Some(Arc::new(Self {
+            };
+        Ok(Some(Arc::new(Self {
             backend: McpSessionBackend::Valkey(manager),
-            ttl_seconds: config.session_ttl_seconds.max(1),
-        }))
+            // The shared TTL is the coordination contract between the workers:
+            // a session must expire everywhere at the same time.
+            ttl_seconds: valkey_session_ttl_seconds(shared),
+        })))
     }
 }
 
@@ -293,4 +269,20 @@ impl std::error::Error for RedisSessionError {
 
 fn mcp_session_cache_key(session_id: &str) -> String {
     format!("{MCP_SESSION_VALKEY_KEY_PREFIX}{session_id}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_shared_valkey_session_uses_the_shared_ttl_instead_of_the_local_one() {
+        let config = WorkerConfig {
+            session_ttl_seconds: 42,
+            ..WorkerConfig::default()
+        };
+        let shared = SharedValkeyConfig::resolved(None, 900, Some(3));
+        assert_eq!(valkey_session_ttl_seconds(&shared), 900);
+        assert_eq!(sqlite_session_ttl_seconds(&config), 42);
+    }
 }

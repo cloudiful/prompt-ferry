@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into workers (\n  worker_id,\n  role,\n  version,\n  incarnation,\n  started_at,\n  last_heartbeat_at,\n  stopped_at,\n  config_applied_revision,\n  config_restart_required,\n  coordination_mode\n)\nvalues ($1, $2, $3, $4, now(), now(), null, $5, $6, $7)\non conflict (worker_id) do update set\n  role = excluded.role,\n  version = excluded.version,\n  incarnation = excluded.incarnation,\n  started_at = now(),\n  last_heartbeat_at = now(),\n  stopped_at = null,\n  config_applied_revision = excluded.config_applied_revision,\n  config_restart_required = excluded.config_restart_required,\n  coordination_mode = excluded.coordination_mode\nwhere workers.incarnation = excluded.incarnation\n  or workers.stopped_at is not null\n  or workers.last_heartbeat_at < now() - ($8::bigint * interval '1 second')\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Int8",
+        "Bool",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "72579dae0a4140555bd215cf55be67ca10fd7e45da3c41addaf6a1f8a7b3a0e7"
+}

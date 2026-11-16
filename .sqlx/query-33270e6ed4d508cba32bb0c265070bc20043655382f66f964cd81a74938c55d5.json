@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Try to enter the relay snapshot publication boundary without waiting.\n--\n-- The lock is transaction scoped, so the boundary is held only while the\n-- snapshot contents are read and the version is assigned. A caller that does\n-- not get the lock rolls its transaction back and retries later, so a waiting\n-- publisher never holds a database connection while it waits.\nselect pg_try_advisory_xact_lock($1) as acquired\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "acquired",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "33270e6ed4d508cba32bb0c265070bc20043655382f66f964cd81a74938c55d5"
+}

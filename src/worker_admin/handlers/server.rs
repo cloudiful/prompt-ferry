@@ -16,6 +16,7 @@ use tower_http::compression::{
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::config;
+use crate::worker_admin::state::AdminExecutionTracker;
 
 /// Hard ceiling on how long the admin HTTP server waits for in-flight
 /// requests to drain before forcing shutdown. Sized to fit inside the
@@ -50,6 +51,7 @@ pub async fn run_admin_server(
     let bound_addr = listener.local_addr()?;
     config::integrated_startup::publish_bound(bound_addr);
     tracing::info!(%bound_addr, configured_bind = %bind_address, "worker admin listening");
+    let executions = state.admin_executions.clone();
     let app = router(state);
     // Both the graceful-shutdown future and the drain budget need to watch
     // the same fired signal. A single watch channel keeps them in sync.
@@ -74,8 +76,17 @@ pub async fn run_admin_server(
     tokio::select! {
         result = serve => result.map_err(anyhow::Error::from),
         _ = drain_deadline(drain_rx, ADMIN_SHUTDOWN_BUDGET) => {
+            // Axum spawns the connection tasks separately from this serve
+            // future. Cancelling the tracked handlers is what actually stops
+            // an in-progress admin mutation; dropping the serve future alone
+            // would leave it running.
+            executions.cancel();
+            let remaining = executions
+                .wait_for_idle(Duration::from_secs(1))
+                .await;
             tracing::warn!(
                 budget_seconds = ADMIN_SHUTDOWN_BUDGET.as_secs(),
+                remaining,
                 "admin server exceeded graceful shutdown budget; forcing exit"
             );
             Ok(())
@@ -285,12 +296,7 @@ fn api_router(state: AdminState) -> Router<AdminState> {
             get(list_mcp_servers).post(create_mcp_server),
         )
         .route("/admin/mcp-providers", get(list_mcp_providers))
-        .route("/admin/relays", get(list_relays).post(create_relay))
-        .route(
-            "/admin/relays/{relay_id}",
-            get(get_relay).patch(update_relay).delete(delete_relay),
-        )
-        .route("/admin/relays/{relay_id}/reconnect", post(reconnect_relay))
+        .route("/admin/workers", get(list_workers))
         .route(
             "/admin/mcp-servers/{server_id}",
             patch(update_mcp_server).delete(delete_mcp_server),
@@ -399,12 +405,12 @@ fn api_router(state: AdminState) -> Router<AdminState> {
             get(get_relay_ip_whitelist).patch(set_relay_ip_whitelist),
         )
         .route(
-            "/settings/llm-review",
-            get(get_llm_review_setting).patch(set_llm_review_setting),
-        )
-        .route(
             "/settings/raw-object-store",
             get(get_raw_object_store).patch(set_raw_object_store),
+        )
+        .route(
+            "/settings/shared-valkey",
+            get(get_shared_valkey).patch(set_shared_valkey),
         )
         .route("/admin/config-export", post(export_config))
         .route(
@@ -415,22 +421,16 @@ fn api_router(state: AdminState) -> Router<AdminState> {
         // The configuration archive travels base64-encoded in a JSON body, so
         // these two routes carry their own body limit instead of the default.
         .merge(config_import_routes())
-        .route("/admin/approvals", get(list_approvals))
-        .route("/admin/approvals/{approval_id}", get(get_approval))
-        .route(
-            "/admin/approvals/{approval_id}/approve",
-            post(approve_approval),
-        )
-        .route(
-            "/admin/approvals/{approval_id}/reject",
-            post(reject_approval),
-        )
         .route("/bridge/status", get(bridge_status))
         // Issue #599 R2b: per-endpoint ChatGPT OAuth login, refresh, and clear.
         .merge(oauth::routes())
         .layer(middleware::from_fn_with_state(
             state.clone(),
             reject_unsupported_sqlite_capabilities,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            track_admin_execution,
         ))
         .fallback(admin_api_fallback)
 }
@@ -485,6 +485,45 @@ async fn reject_unsupported_sqlite_capabilities(
         }
     }
     next.run(request).await
+}
+
+/// Track one admin API handler and cancel it when shutdown asks.
+///
+/// Axum runs each connection in a separately spawned task, so the serve future
+/// and its `JoinHandle` cannot prove that a business handler stopped. The
+/// tracker owns the real handler future here and the shutdown path waits for
+/// its count to reach zero before releasing the registry row.
+async fn track_admin_execution(
+    State(state): State<AdminState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    await_admin_execution(state.admin_executions.clone(), next.run(request)).await
+}
+
+async fn await_admin_execution<F>(tracker: AdminExecutionTracker, execution: F) -> Response
+where
+    F: std::future::Future<Output = Response>,
+{
+    let Some(_guard) = tracker.try_track() else {
+        return admin_shutting_down_response();
+    };
+    // Cancellation is polled before the handler and stays first on every
+    // wake-up: a handler admitted just before the close is dropped, never
+    // polled after the cancellation branch is ready.
+    tokio::select! {
+        biased;
+        _ = tracker.cancelled() => admin_shutting_down_response(),
+        response = execution => response,
+    }
+}
+
+fn admin_shutting_down_response() -> Response {
+    error(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "worker_shutting_down",
+        "the worker is shutting down",
+    )
 }
 
 fn normalize_admin_path(path: &str) -> &str {
@@ -547,8 +586,7 @@ mod admin_routing_tests {
                 Some(Capability::Endpoints),
             ),
             ("/admin/model-routes", Some(Capability::ModelRoutes)),
-            ("/admin/relays", Some(Capability::Relays)),
-            ("/admin/relays/abc/reconnect", Some(Capability::Relays)),
+            ("/admin/workers", Some(Capability::Workers)),
             ("/me/client-keys", Some(Capability::ClientKeys)),
             ("/admin/users/7/client-keys", Some(Capability::ClientKeys)),
             ("/settings/endpoint", Some(Capability::EndpointSetting)),
@@ -558,6 +596,7 @@ mod admin_routing_tests {
                 "/settings/raw-object-store",
                 Some(Capability::RawObjectStore),
             ),
+            ("/settings/shared-valkey", Some(Capability::SharedValkey)),
             (
                 "/admin/conversations/abc/endpoint-override",
                 Some(Capability::ConversationEndpointOverride),
@@ -569,7 +608,6 @@ mod admin_routing_tests {
             // The read-only provider registry is served from memory and stays
             // available on SQLite; it must not map to an unsupported capability.
             ("/admin/mcp-providers", None),
-            ("/admin/approvals", Some(Capability::Approvals)),
             ("/admin/billing/summary", Some(Capability::Billing)),
             ("/me/models", Some(Capability::AvailableModels)),
             ("/admin/config-export", Some(Capability::ConfigExport)),
@@ -601,7 +639,104 @@ mod tests {
         body::Body,
         http::{Request, StatusCode},
     };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn cancelling_shutdown_drops_the_tracked_admin_handler() {
+        struct DropProbe(Arc<AtomicUsize>);
+        impl Drop for DropProbe {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let probe = dropped.clone();
+        let tracker = AdminExecutionTracker::default();
+        let task_tracker = tracker.clone();
+        let task = tokio::spawn(async move {
+            await_admin_execution(task_tracker, async move {
+                let _probe = DropProbe(probe);
+                std::future::pending::<Response>().await
+            })
+            .await
+        });
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(tracker.active(), 1, "the handler is tracked");
+        tracker.cancel();
+
+        let response = task.await.expect("tracked handler task ran");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            dropped.load(Ordering::SeqCst),
+            1,
+            "cancellation drops the real handler future"
+        );
+        assert_eq!(tracker.active(), 0, "the tracked count returned to zero");
+    }
+
+    #[tokio::test]
+    async fn a_closed_admin_tracker_refuses_admission_without_polling_the_handler() {
+        let tracker = AdminExecutionTracker::default();
+        let polls = Arc::new(AtomicUsize::new(0));
+        tracker.cancel();
+
+        let handler_polls = polls.clone();
+        let response = await_admin_execution(tracker.clone(), async move {
+            handler_polls.fetch_add(1, Ordering::SeqCst);
+            StatusCode::OK.into_response()
+        })
+        .await;
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            polls.load(Ordering::SeqCst),
+            0,
+            "a refused admission never polls the business handler"
+        );
+        assert_eq!(tracker.active(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_handler_admitted_just_before_the_close_is_dropped_before_it_is_polled_again() {
+        let tracker = AdminExecutionTracker::default();
+        let started = Arc::new(AtomicUsize::new(0));
+        let finished = Arc::new(AtomicUsize::new(0));
+
+        let handler_started = started.clone();
+        let handler_finished = finished.clone();
+        let task = tokio::spawn({
+            let tracker = tracker.clone();
+            async move {
+                await_admin_execution(tracker, async move {
+                    handler_started.fetch_add(1, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    handler_finished.fetch_add(1, Ordering::SeqCst);
+                    StatusCode::OK.into_response()
+                })
+                .await
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(started.load(Ordering::SeqCst), 1, "the handler was polled");
+        assert_eq!(tracker.active(), 1);
+
+        tracker.cancel();
+        let response = task.await.expect("tracked handler task ran");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            finished.load(Ordering::SeqCst),
+            0,
+            "the cancelled handler future was dropped, not completed"
+        );
+        assert_eq!(tracker.active(), 0);
+    }
 
     #[tokio::test]
     async fn response_compression_layer_compresses_json_but_not_sse_or_upgrade() {

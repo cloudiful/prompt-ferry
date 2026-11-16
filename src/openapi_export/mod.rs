@@ -4,7 +4,6 @@
 // intentionally relaxed for this scaffolding-only subtree.
 #![allow(dead_code)]
 
-mod approvals;
 mod auth;
 mod billing;
 mod bridge;
@@ -18,10 +17,10 @@ mod mcp;
 mod me;
 mod model_routes;
 mod relay_management;
-mod relays;
 mod schemas;
 mod settings;
 mod usage;
 mod users;
+mod workers;
 
 pub use doc::export_admin_api;

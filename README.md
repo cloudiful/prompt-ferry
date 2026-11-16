@@ -22,15 +22,25 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
 - Upstream presets for MiniMax, CommandCode, OpencodeGo, OpenRouter, GLM, DeepSeek and OpenAI Platform; other OpenAI-compatible hosts use the Generic provider with an explicit base URL.
 - Per-request reasoning controls, including Chat `reasoning_effort`, Responses `reasoning.effort`, and Anthropic `output_config.effort`.
 - First-class Embeddings forwarding with per-target dimension overrides, fail-closed redaction and input-only metering.
-- Users, client API keys, upstream endpoints, model routes, key balancing, and multiple relays.
+- Users, client API keys, upstream endpoints, model routes, key balancing, and locally configured relay targets.
+- A read-only Workers view of every process registered against the same PostgreSQL database.
 - Configurable redaction for forwarded content, logs and usage details.
 - Admin console with effective default-text quota summaries, per-key detail, and 30-day OpenAI subscription history on PostgreSQL.
 - MCP aggregation for HTTP and stdio servers, with per-credential and shared quota budgets.
 - TLS, mutual TLS and application-layer encryption for relay-worker traffic.
 
 Dependencies: PostgreSQL for business data, and optionally Valkey for
-coordination and response affinity. Raw request and response payloads are
-written to an S3-compatible bucket when one is configured.
+coordination and response affinity. The shared Valkey URL is stored encrypted
+in the database and edited from Admin → Settings → Storage; it is never read
+from the environment, CLI or configuration file. A change to the shared Valkey
+setting is a coordinated restart: while one existing worker still serves the
+admin console, apply the edit there; then stop every old worker; then start all
+workers so each resolves and applies the new desired revision. Do not stop
+every worker before the edit, because the admin editor is served by a worker.
+Admission rejects a worker whose coordination mode or applied revision differs
+from the live registry, so a bootstrap-mode process and a coordinated process
+never run side by side. Raw request and response payloads are written to an
+S3-compatible bucket when one is configured.
 
 ## Quick start with Docker Compose (recommended)
 
@@ -59,6 +69,12 @@ application:
 ```bash
 docker compose up -d prompt-ferry
 ```
+
+Then open Admin → Settings → Storage in the running worker, set the shared
+Valkey URL to `redis://valkey:6379`, then stop the worker and start it again so
+the new revision is applied. With several workers, stop all of them after the
+edit and then start all of them on the new revision. Until it is configured the
+worker runs in the documented single-worker degraded mode.
 
 - Admin console: <http://127.0.0.1:8789> — log in as `admin`.
 - OpenAI-compatible base URL: `http://127.0.0.1:8787/v1`.

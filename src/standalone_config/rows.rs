@@ -5,17 +5,17 @@ use sqlx::{Row, sqlite::SqliteRow};
 use uuid::Uuid;
 
 use super::models::{
-    ClientKeyConfig, EndpointApiKeyConfig, EndpointProvider, EndpointRegion, ManagedRelayConfig,
-    ModelRouteConfig, ModelRouteTargetConfig, ProviderEndpointConfig, Result, RouteScope,
-    RoutingStrategy, SettingConfig, StandaloneConfigError,
+    ClientKeyConfig, EndpointApiKeyConfig, EndpointProvider, EndpointRegion, ModelRouteConfig,
+    ModelRouteTargetConfig, ProviderEndpointConfig, Result, RouteScope, RoutingStrategy,
+    SettingConfig, StandaloneConfigError,
 };
 use crate::{
-    config::{BridgeEncryptionMode, NativeApi, NativeApiSource, TlsMode},
+    config::{NativeApi, NativeApiSource},
     db::McpServer,
     db::entities::sqlite::{
         standalone_client_keys, standalone_endpoint_keys, standalone_mcp_servers,
         standalone_model_route_targets, standalone_model_routes, standalone_provider_endpoints,
-        standalone_relays, standalone_settings,
+        standalone_settings,
     },
     relay_secrets::EncryptedSecretEnvelope,
 };
@@ -178,35 +178,6 @@ pub(crate) fn envelope_opt(
     }
 }
 
-pub(crate) fn relay(
-    row: &SqliteRow,
-) -> Result<(ManagedRelayConfig, [Option<EncryptedSecretEnvelope>; 4])> {
-    let envelopes = [
-        envelope(row, "relay_ca")?,
-        envelope(row, "client_cert")?,
-        envelope(row, "client_key")?,
-        envelope(row, "bridge_encryption_key")?,
-    ];
-    let tls_mode = parse_tls_mode(&required_string(row, "tls_mode")?)?;
-    let bridge_encryption_mode =
-        parse_bridge_mode(&required_string(row, "bridge_encryption_mode")?)?;
-    Ok((
-        ManagedRelayConfig {
-            relay_id: uuid(row, "relay_id")?,
-            name: required_string(row, "name")?,
-            relay_url: required_string(row, "relay_url")?,
-            enabled: bool_value(row, "enabled")?,
-            tls_mode,
-            bridge_encryption_mode,
-            relay_ca_pem: None,
-            client_cert_pem: None,
-            client_key_pem: None,
-            bridge_encryption_key: None,
-        },
-        envelopes,
-    ))
-}
-
 fn model_required_string(value: &str, column: &str) -> Result<String> {
     if value.trim().is_empty() {
         return Err(StandaloneConfigError::CorruptDatabase(format!(
@@ -233,58 +204,6 @@ fn model_optional_timestamp(
     value
         .map(|value| parse_timestamp(value, column))
         .transpose()
-}
-
-pub(crate) fn relay_envelopes_from_model(
-    model: &standalone_relays::Model,
-) -> Result<[Option<EncryptedSecretEnvelope>; 4]> {
-    Ok([
-        envelope_from_parts(
-            "relay_ca",
-            model.relay_ca_ciphertext.clone(),
-            model.relay_ca_nonce.clone(),
-            model.relay_ca_key_version,
-        )?,
-        envelope_from_parts(
-            "client_cert",
-            model.client_cert_ciphertext.clone(),
-            model.client_cert_nonce.clone(),
-            model.client_cert_key_version,
-        )?,
-        envelope_from_parts(
-            "client_key",
-            model.client_key_ciphertext.clone(),
-            model.client_key_nonce.clone(),
-            model.client_key_key_version,
-        )?,
-        envelope_from_parts(
-            "bridge_encryption_key",
-            model.bridge_encryption_key_ciphertext.clone(),
-            model.bridge_encryption_key_nonce.clone(),
-            model.bridge_encryption_key_key_version,
-        )?,
-    ])
-}
-
-pub(crate) fn relay_from_model(
-    model: &standalone_relays::Model,
-) -> Result<(ManagedRelayConfig, [Option<EncryptedSecretEnvelope>; 4])> {
-    let relay = ManagedRelayConfig {
-        relay_id: model_uuid(&model.relay_id, "relay_id")?,
-        name: model_required_string(&model.name, "name")?,
-        relay_url: model_required_string(&model.relay_url, "relay_url")?,
-        enabled: model_bool(model.enabled, "enabled")?,
-        tls_mode: parse_tls_mode(&model_required_string(&model.tls_mode, "tls_mode")?)?,
-        bridge_encryption_mode: parse_bridge_mode(&model_required_string(
-            &model.bridge_encryption_mode,
-            "bridge_encryption_mode",
-        )?)?,
-        relay_ca_pem: None,
-        client_cert_pem: None,
-        client_key_pem: None,
-        bridge_encryption_key: None,
-    };
-    Ok((relay, relay_envelopes_from_model(model)?))
 }
 
 pub(crate) fn endpoint(
@@ -706,27 +625,6 @@ pub(crate) fn setting(row: &SqliteRow) -> Result<SettingConfig> {
         version: row.try_get("value_version")?,
         value: serde_json::from_str(&json)?,
     })
-}
-
-fn parse_tls_mode(value: &str) -> Result<TlsMode> {
-    match value {
-        "off" => Ok(TlsMode::Off),
-        "server" => Ok(TlsMode::Server),
-        "mtls" => Ok(TlsMode::Mtls),
-        _ => Err(StandaloneConfigError::CorruptDatabase(format!(
-            "unknown TLS mode {value:?}"
-        ))),
-    }
-}
-
-fn parse_bridge_mode(value: &str) -> Result<BridgeEncryptionMode> {
-    match value {
-        "off" => Ok(BridgeEncryptionMode::Off),
-        "required" => Ok(BridgeEncryptionMode::Required),
-        _ => Err(StandaloneConfigError::CorruptDatabase(format!(
-            "unknown bridge encryption mode {value:?}"
-        ))),
-    }
 }
 
 fn parse_native_api(value: &str) -> Result<NativeApi> {

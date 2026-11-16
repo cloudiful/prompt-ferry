@@ -1,4 +1,3 @@
-mod approvals;
 mod auth;
 mod billing;
 // Issue #599 R2c: the ChatGPT (Codex) private-interface mapping layer is
@@ -27,10 +26,6 @@ mod oauth_client;
 mod oauth_session;
 mod quota_inference;
 mod quota_key_observations;
-mod relay_input;
-mod relay_secrets;
-mod relay_validation;
-mod relays;
 mod server;
 mod session_routing;
 mod settings;
@@ -39,6 +34,7 @@ mod support;
 mod usage;
 mod usage_support;
 mod users;
+mod workers;
 
 use std::net::SocketAddr;
 
@@ -64,10 +60,6 @@ pub(super) use crate::{
     db::{self, EndpointCreate, UserCreate, UserUpdate},
     ip_acl,
     keys::{hash_password, verify_password},
-    llm_review::{
-        ApprovalResolution, ApprovalStatus, LLM_REVIEW_SETTINGS_KEY, LlmReviewSettings,
-        spawn_approval_webhook,
-    },
     naming::{MODEL_ROUTE_TEST_SESSION_KEY, SESSION_COOKIE_NAME},
     protocol::{BridgeMessage, ConfigSnapshot, RelayIpPolicy},
     redact,
@@ -83,15 +75,15 @@ pub(super) use crate::{
 use tower_http::cors::CorsLayer;
 
 use self::{
-    approvals::*, auth::*, billing::*, config_audit::*, config_export::*, config_import::*,
-    endpoint_usage::*, endpoints::*, mcp::*, mcp_oauth::*, model_routes::*, quota_inference::*,
-    quota_key_observations::*, relays::*, session_routing::*, settings::*, settings_cache_alert::*,
-    usage::*, users::*,
+    auth::*, billing::*, config_audit::*, config_export::*, config_import::*, endpoint_usage::*,
+    endpoints::*, mcp::*, mcp_oauth::*, model_routes::*, quota_inference::*,
+    quota_key_observations::*, session_routing::*, settings::*, settings_cache_alert::*, usage::*,
+    users::*, workers::*,
 };
 
 pub(super) use self::support::*;
 pub use self::{
     server::{router, run_admin_server},
-    support::{publish_snapshot, set_bridge_sender},
+    support::{publish_snapshot, publish_snapshot_if_changed, set_bridge_sender},
 };
 pub use crate::worker_admin_state::AdminState;

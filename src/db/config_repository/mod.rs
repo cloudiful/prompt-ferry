@@ -9,7 +9,7 @@
 //! Each domain lives in its own sibling module:
 //!   - `endpoints.rs` for provider endpoint CRUD and endpoint API keys
 //!   - `model_routes.rs` for model route rules and route targets
-//!   - `relays.rs` for managed relays and snapshot publication
+//!   - `relay_snapshot.rs` for runtime snapshot publication to relays
 //!   - `client_keys.rs` for per-user client keys (admin and self-service)
 //!   - `settings.rs` for worker-level JSON settings
 //!   - `capabilities.rs` for per-path capability gating
@@ -28,8 +28,8 @@ pub mod mcp;
 pub mod mcp_oauth;
 pub mod model_routes;
 pub mod model_routes_map;
-pub mod relays;
-pub mod relays_map;
+pub mod relay_snapshot;
+pub mod relay_snapshot_map;
 pub mod settings;
 pub mod snapshot;
 mod snapshot_pg_map;
@@ -54,13 +54,12 @@ pub use import::{
     ImportError, apply_config_import, preview_config_import,
 };
 pub use model_routes::{UnifiedModelRoute, UnifiedModelRoutePage, UnifiedModelRouteTarget};
-pub use relays::{ManagedRelaySecrets, UnifiedManagedRelay, relay_secrets_for_state};
 pub use settings::UnifiedSetting;
 pub use snapshot::{
     ClientKeySnapshot, ConfigBackendKind, ConfigSnapshot, EndpointApiKeySnapshot,
     EndpointOAuthSnapshot, EndpointSnapshot, McpCredentialSnapshot, McpServerSnapshot,
-    ModelRouteSnapshot, ModelRouteTargetSnapshot, RelaySnapshot, SNAPSHOT_FORMAT_VERSION,
-    SecretRecovery, SettingSnapshot, SnapshotDomainSummary, SnapshotDomains, SnapshotManifest,
+    ModelRouteSnapshot, ModelRouteTargetSnapshot, SNAPSHOT_FORMAT_VERSION, SecretRecovery,
+    SettingSnapshot, SnapshotDomainSummary, SnapshotDomains, SnapshotManifest,
     UserRedactionConfigSnapshot, UserSnapshot,
 };
 pub use snapshot_source::build_config_snapshot;
@@ -175,7 +174,6 @@ mod tests {
         assert!(Capability::SnapshotPublication.sqlite_supported());
         assert!(Capability::Endpoints.sqlite_supported());
         assert!(Capability::ModelRoutes.sqlite_supported());
-        assert!(Capability::Relays.sqlite_supported());
         assert!(Capability::ClientKeys.sqlite_supported());
         assert!(Capability::Settings.sqlite_supported());
         assert!(Capability::EndpointSetting.sqlite_supported());
@@ -183,7 +181,6 @@ mod tests {
         assert!(Capability::McpCredentials.sqlite_supported());
         assert!(Capability::McpCatalog.sqlite_supported());
         assert!(!Capability::RequestRecords.sqlite_supported());
-        assert!(!Capability::Approvals.sqlite_supported());
         assert!(!Capability::Billing.sqlite_supported());
         assert!(!Capability::ConversationEndpointOverride.sqlite_supported());
         assert!(!Capability::AvailableModels.sqlite_supported());

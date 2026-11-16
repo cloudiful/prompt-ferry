@@ -13,7 +13,10 @@ use tokio::sync::RwLock;
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::{config::WorkerConfig, db::McpServer};
+use crate::{
+    config::WorkerConfig,
+    db::{McpServer, SharedValkeyConfig},
+};
 
 use super::freshness::{CatalogFreshness, CatalogFreshnessPolicy, content_fingerprint};
 use lease::LocalRefreshRegistry;
@@ -206,82 +209,62 @@ impl McpCatalogCache {
         self.coordinator.configure_capacity(concurrency);
     }
 
-    pub async fn from_config(config: &WorkerConfig) -> Self {
-        Self::from_config_with_sqlite(config, None).await
+    pub async fn from_config(
+        _config: &WorkerConfig,
+        shared: &SharedValkeyConfig,
+    ) -> anyhow::Result<Self> {
+        Self::from_config_with_sqlite(_config, shared, None).await
     }
 
     pub async fn from_config_with_sqlite(
-        config: &WorkerConfig,
+        _config: &WorkerConfig,
+        shared: &SharedValkeyConfig,
         sqlite_pool: Option<sqlx::SqlitePool>,
-    ) -> Self {
-        let url = config.valkey_url.trim();
+    ) -> anyhow::Result<Self> {
+        let url = shared.url_or_empty().trim();
+        let ttl_seconds = shared.ttl_seconds();
         if url.is_empty() {
             if let Some(pool) = sqlite_pool {
-                return Self::sqlite(pool, config.valkey_ttl_seconds, "valkey_not_configured");
+                return Ok(Self::sqlite(pool, ttl_seconds, "valkey_not_configured"));
             }
-            return Self::new();
+            return Ok(Self::new());
         }
 
-        let client = match redis::Client::open(url) {
-            Ok(client) => client,
-            Err(err) => {
-                warn!(error = %err, valkey_url = url, "failed to open valkey client for MCP catalog");
-                if let Some(pool) = sqlite_pool {
-                    return Self::sqlite(
-                        pool,
-                        config.valkey_ttl_seconds,
-                        "valkey_client_open_failed",
-                    );
+        let client = redis::Client::open(url).map_err(|_| {
+            crate::db::shared_valkey_failure(crate::db::SharedValkeyFailure::ClientOpen, url)
+        })?;
+        let manager =
+            match tokio::time::timeout(VALKEY_CONNECT_TIMEOUT, client.get_connection_manager())
+                .await
+            {
+                Ok(Ok(manager)) => manager,
+                Ok(Err(_)) => {
+                    // A configured shared Valkey is authoritative: the catalog
+                    // cache must not degrade to a process-local cache.
+                    return Err(crate::db::shared_valkey_failure(
+                        crate::db::SharedValkeyFailure::Connect,
+                        url,
+                    ));
                 }
-                return Self::new();
-            }
-        };
-        let manager = match tokio::time::timeout(
-            VALKEY_CONNECT_TIMEOUT,
-            client.get_connection_manager(),
-        )
-        .await
-        {
-            Ok(Ok(manager)) => manager,
-            Ok(Err(err)) => {
-                warn!(error = %err, valkey_url = url, "failed to connect valkey for MCP catalog");
-                if let Some(pool) = sqlite_pool {
-                    return Self::sqlite(
-                        pool,
-                        config.valkey_ttl_seconds,
-                        "valkey_connection_failed",
-                    );
+                Err(_) => {
+                    return Err(crate::db::shared_valkey_failure(
+                        crate::db::SharedValkeyFailure::Timeout,
+                        url,
+                    ));
                 }
-                return Self::new();
-            }
-            Err(_) => {
-                warn!(
-                    timeout_seconds = VALKEY_CONNECT_TIMEOUT.as_secs(),
-                    valkey_url = url,
-                    "timed out connecting to valkey for MCP catalog; falling back to local cache",
-                );
-                if let Some(pool) = sqlite_pool {
-                    return Self::sqlite(
-                        pool,
-                        config.valkey_ttl_seconds,
-                        "valkey_connection_timeout",
-                    );
-                }
-                return Self::new();
-            }
-        };
+            };
 
-        Self {
+        Ok(Self {
             backend: CacheBackend::Valkey {
                 manager,
-                ttl_seconds: config.valkey_ttl_seconds.max(1),
+                ttl_seconds: ttl_seconds.max(1),
             },
             local: Arc::new(RwLock::new(HashMap::new())),
             policy: CatalogFreshnessPolicy::production(),
             refresh_registry: LocalRefreshRegistry::default(),
             failure_backoff: Arc::new(RwLock::new(HashMap::new())),
             coordinator: Arc::new(CatalogRefreshCoordinator::new()),
-        }
+        })
     }
 
     fn sqlite(pool: sqlx::SqlitePool, ttl_seconds: u64, reason: &str) -> Self {

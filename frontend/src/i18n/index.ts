@@ -1,4 +1,3 @@
-import { approvalMessages } from './modules/approvals'
 import { authMessages } from './modules/auth'
 import { billingMessages } from './modules/billing'
 import { coreMessages } from './modules/core'
@@ -10,6 +9,7 @@ import { redactionMessages } from './modules/redaction'
 import { settingsMessages } from './modules/settings'
 import { usageMessages } from './modules/usage'
 import { userMessages } from './modules/users'
+import { workerMessages } from './modules/workers'
 
 export type Locale = 'zh-CN' | 'en-US'
 
@@ -27,10 +27,10 @@ const modules = [
   mcpMessages,
   relayMessages,
   redactionMessages,
-  approvalMessages,
   settingsMessages,
   usageMessages,
   billingMessages,
+  workerMessages,
 ] as const
 
 function mergeLocale(locale: Locale) {

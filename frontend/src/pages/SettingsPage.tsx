@@ -4,7 +4,7 @@ import { SettingsConfigArchiveTab } from '@/components/settings/SettingsConfigAr
 import { SettingsGeneralTab } from '@/components/settings/SettingsGeneralTab'
 import { SettingsNetworkTab } from '@/components/settings/SettingsNetworkTab'
 import { SettingsRequestsTab } from '@/components/settings/SettingsRequestsTab'
-import { SettingsReviewTab } from '@/components/settings/SettingsReviewTab'
+import { SettingsSharedValkeyCard } from '@/components/settings/SettingsSharedValkeyCard'
 import { SettingsStorageTab } from '@/components/settings/SettingsStorageTab'
 import { useLocale } from '@/lib/i18n'
 import { usePageTitle } from '@/lib/router'
@@ -19,7 +19,7 @@ function currentSettingsTab(pathname: string): string | null {
 /**
  * The mounted settings route.
  *
- * The general tab and all six admin tabs (requests, network, review, storage,
+ * The general tab and all five admin tabs (requests, network, storage,
  * cache alert, config archive) are ported; a path that names any other tab
  * renders nothing rather than a stub.
  * The resolver is applied on every path, so an unauthenticated or non-admin
@@ -38,15 +38,13 @@ export function SettingsPage() {
       ? 'settingsUsage'
       : tab === 'network'
         ? 'settingsNetwork'
-        : tab === 'review'
-          ? 'settingsReview'
-          : tab === 'storage'
-            ? 'settingsStorage'
-            : tab === 'cache-alert'
-              ? 'settingsCacheAlert'
-              : tab === 'config-archive'
-                ? 'settingsConfigArchive'
-                : 'settingsGeneral',
+        : tab === 'storage'
+          ? 'settingsStorage'
+          : tab === 'cache-alert'
+            ? 'settingsCacheAlert'
+            : tab === 'config-archive'
+              ? 'settingsConfigArchive'
+              : 'settingsGeneral',
   )
 
   if (requested === 'requests' && tab === 'requests') {
@@ -75,19 +73,6 @@ export function SettingsPage() {
     )
   }
 
-  if (requested === 'review' && tab === 'review') {
-    return (
-      <section
-        aria-label={t('settingsReview')}
-        className="grid min-w-0 gap-3"
-        data-foundation-route-id="R-SETTINGS-REVIEW"
-        data-settings-tab={tab}
-      >
-        <SettingsReviewTab />
-      </section>
-    )
-  }
-
   if (requested === 'storage' && tab === 'storage') {
     return (
       <section
@@ -97,6 +82,7 @@ export function SettingsPage() {
         data-settings-tab={tab}
       >
         <SettingsStorageTab />
+        <SettingsSharedValkeyCard />
       </section>
     )
   }

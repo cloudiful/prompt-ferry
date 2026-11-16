@@ -1,4 +1,3 @@
-mod approvals;
 mod billing;
 pub mod config_repository;
 mod connection;
@@ -13,27 +12,22 @@ mod pool_wait;
 pub mod quota_inference;
 pub mod quota_key_observations;
 pub mod quota_snapshots;
-mod relays;
 mod routes;
 mod routing_state;
 pub mod seaorm;
 mod settings;
+mod shared_valkey;
 mod types;
 mod usage;
 mod users;
+mod workers;
 
-pub use approvals::run_approval_retention_maintenance;
-pub use approvals::{
-    abort_pending_approval_requests, approval_request_status, create_approval_request,
-    create_flagged_approval_request, get_approval_request, list_approval_requests_page,
-    record_approval_webhook_result, resolve_approval_request,
-};
 pub use billing::*;
 pub use config_repository::{
-    Capability, ConfigRepository, ManagedRelaySecrets, PostgresConfigRepository,
-    SqliteConfigRepository, UnifiedClientKey, UnifiedClientKeyCreated, UnifiedEndpointApiKey,
-    UnifiedEndpointPage, UnifiedManagedRelay, UnifiedModelRoute, UnifiedModelRoutePage,
-    UnifiedModelRouteTarget, UnifiedProviderEndpoint, UnifiedSetting,
+    Capability, ConfigRepository, PostgresConfigRepository, SqliteConfigRepository,
+    UnifiedClientKey, UnifiedClientKeyCreated, UnifiedEndpointApiKey, UnifiedEndpointPage,
+    UnifiedModelRoute, UnifiedModelRoutePage, UnifiedModelRouteTarget, UnifiedProviderEndpoint,
+    UnifiedSetting,
 };
 pub use connection::{
     connect, connect_sqlite, connect_sqlite_with_max_connections, connect_with_max_connections,
@@ -66,10 +60,6 @@ pub use mcp_credentials::{
     list_credentials_by_server, list_firecrawl_credentials, sync_credentials_from_tokens,
     update_credential_token,
 };
-pub use relays::{
-    create_managed_relay, delete_managed_relay, get_managed_relay, list_enabled_managed_relays,
-    list_managed_relays, list_managed_relays_page, update_managed_relay,
-};
 pub use routes::{
     ActiveWindow, candidate_target_is_active, cleanup_orphan_model_routes,
     create_model_endpoint_rule, delete_model_endpoint_rule, effective_route,
@@ -87,15 +77,26 @@ pub use routing_state::{
     get_conversation_endpoint_override, upsert_conversation_endpoint_override,
 };
 pub use settings::{
-    RAW_OBJECT_STORE_SETTINGS_KEY, REQUEST_CONTENT_LOGGING_SETTINGS_KEY,
+    INTERNAL_COORDINATION_SETTING_KEYS, RAW_OBJECT_STORE_SETTINGS_KEY,
+    RELAY_SNAPSHOT_VERSION_SETTINGS_KEY, REQUEST_CONTENT_LOGGING_SETTINGS_KEY,
     RedactionCustomStringRuleListItem, STREAM_DELTA_BATCHING_SETTINGS_KEY,
-    USAGE_RETENTION_SETTINGS_KEY, get_bool_setting, get_json_setting, get_raw_object_store_config,
-    get_raw_object_store_persisted, get_redaction_config, get_redaction_config_updated_at,
-    get_request_content_logging, get_stream_delta_batching, get_usage_retention,
-    get_user_redaction_config, list_redaction_custom_string_rules, list_user_redaction_configs,
-    set_bool_setting, set_json_setting, set_raw_object_store_config,
-    set_raw_object_store_persisted, set_redaction_config, set_request_content_logging,
-    set_stream_delta_batching, set_usage_retention, set_user_redaction_config,
+    USAGE_RETENTION_SETTINGS_KEY, begin_snapshot_publication, get_bool_setting, get_json_setting,
+    get_raw_object_store_config, get_raw_object_store_persisted, get_redaction_config,
+    get_redaction_config_updated_at, get_request_content_logging, get_stream_delta_batching,
+    get_usage_retention, get_user_redaction_config, list_redaction_custom_string_rules,
+    list_user_redaction_configs, next_relay_snapshot_version, set_bool_setting, set_json_setting,
+    set_raw_object_store_config, set_raw_object_store_persisted, set_redaction_config,
+    set_request_content_logging, set_stream_delta_batching, set_usage_retention,
+    set_user_redaction_config,
+};
+pub use shared_valkey::{
+    DEFAULT_SHARED_VALKEY_TTL_SECONDS, MAX_SHARED_VALKEY_TTL_SECONDS,
+    MIN_SHARED_VALKEY_TTL_SECONDS, SECRET_MASK, SHARED_VALKEY_SETTINGS_KEY, SharedValkeyConfig,
+    SharedValkeyFailure, SharedValkeyPersisted, SharedValkeyWriteOutcome,
+    count_workers_requiring_restart, desired_shared_valkey_revision, get_shared_valkey_persisted,
+    load_shared_valkey_config, lock_shared_valkey_setting, mask_shared_valkey_url,
+    next_shared_valkey_revision, read_shared_valkey_revision, save_shared_valkey_settings,
+    shared_valkey_failure, validate_shared_valkey_ttl, validate_shared_valkey_url,
 };
 pub use types::*;
 pub(crate) use usage::get_visible_usage_event_detail_with_raw_store;
@@ -136,4 +137,9 @@ pub use users::{
     get_client_key_label_by_hash, get_user_endpoint_setting, get_user_password_by_login,
     list_client_keys, list_client_keys_page, list_users, list_users_page, reset_password,
     update_client_key, update_user,
+};
+pub use workers::{
+    CoordinationSnapshot, LiveWorkerCompatibility, RegisterOutcome, WORKER_HEARTBEAT_SECONDS,
+    WORKER_OFFLINE_AFTER_SECONDS, WorkerCoordinationMode, WorkerRecord, WorkerStatus,
+    count_live_workers, heartbeat_worker, list_workers, register_worker, stop_worker,
 };

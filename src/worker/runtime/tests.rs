@@ -123,7 +123,6 @@ fn request_execution_context_preserves_usage_fields() {
         path: "/v1/responses".to_string(),
         headers: Vec::new(),
         body: br#"{"model":"gpt-5","input":"hello"}"#.to_vec(),
-        request_deadline_unix_ms: 0,
         user_id: Some(7),
         client_key_hash: None,
         request_user_agent: Some("Codex Desktop".to_string()),
@@ -539,7 +538,6 @@ pub(super) fn sample_request() -> BufferedBridgeRequest {
         path: "/v1/responses".to_string(),
         headers: Vec::new(),
         body: br#"{"model":"gpt-5.4","input":"ping"}"#.to_vec(),
-        request_deadline_unix_ms: 0,
         user_id: Some(1),
         client_key_hash: Some("key-a".to_string()),
         request_user_agent: Some("Codex Desktop".to_string()),
@@ -1073,4 +1071,257 @@ fn minimax_custom_base_and_non_allowlisted_paths_stay_plain() {
             format!("https://api.minimaxi.com{path}")
         );
     }
+}
+
+#[tokio::test]
+async fn accepted_request_tasks_are_owned_and_aborted_when_they_do_not_stop() {
+    let runtime_state = WorkerRuntimeState::default();
+    let task_state = runtime_state.clone();
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    runtime_state
+        .spawn_accepted(async move {
+            let _guard = task_state.try_track_request().expect("admission is open");
+            let _ = started_tx.send(());
+            std::future::pending::<()>().await;
+        })
+        .await;
+    started_rx.await.expect("the accepted task started");
+    assert_eq!(
+        runtime_state
+            .control
+            .wait_for_drain(std::time::Duration::from_millis(1))
+            .await,
+        1,
+        "the accepted task holds a drain guard"
+    );
+
+    let mut tasks = runtime_state.take_accepted_tasks().await;
+    super::lifecycle::join_owned_tasks(
+        &mut tasks,
+        std::time::Duration::from_millis(20),
+        &runtime_state.control,
+    )
+    .await;
+
+    assert!(tasks.is_empty(), "the owned task handle was consumed");
+    assert_eq!(
+        runtime_state
+            .control
+            .wait_for_drain(std::time::Duration::ZERO)
+            .await,
+        0,
+        "aborting the owned task released its drain guard"
+    );
+}
+
+#[tokio::test]
+async fn fail_closed_stops_owned_accepted_tasks_without_waiting_for_a_teardown_budget() {
+    let runtime_state = WorkerRuntimeState::default();
+    let task_state = runtime_state.clone();
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    runtime_state
+        .spawn_accepted(async move {
+            let _guard = task_state.try_track_request().expect("admission is open");
+            let _ = started_tx.send(());
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        })
+        .await;
+    started_rx.await.expect("the accepted task started");
+    assert_eq!(
+        runtime_state
+            .control
+            .wait_for_drain(std::time::Duration::from_millis(1))
+            .await,
+        1
+    );
+
+    runtime_state.control.begin_fail_closed_shutdown();
+    let started = std::time::Instant::now();
+    super::lifecycle::stop_accepted_tasks(&runtime_state, std::time::Duration::from_secs(10)).await;
+
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(1),
+        "a fail-closed stop aborts the accepted task instead of consuming the allowance"
+    );
+    assert_eq!(
+        runtime_state
+            .control
+            .wait_for_drain(std::time::Duration::ZERO)
+            .await,
+        0,
+        "no accepted execution survives the fail-closed stop"
+    );
+}
+
+async fn spawn_sleeping_accepted_task(
+    runtime_state: &WorkerRuntimeState,
+) -> tokio::sync::oneshot::Receiver<()> {
+    let task_state = runtime_state.clone();
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    runtime_state
+        .spawn_accepted(async move {
+            let _guard = task_state.try_track_request().expect("admission is open");
+            let _ = started_tx.send(());
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        })
+        .await;
+    started_rx
+}
+
+#[tokio::test]
+async fn the_fail_closed_monitor_keeps_handle_ownership_when_the_shutdown_branch_wins() {
+    let runtime_state = WorkerRuntimeState::default();
+    let started_rx = spawn_sleeping_accepted_task(&runtime_state).await;
+    started_rx.await.expect("the accepted task started");
+
+    let tracker = crate::worker_admin::state::AdminExecutionTracker::default();
+    let admin_guard = tracker.try_track().expect("admin admission is open");
+    let mut monitor = super::connect::FailClosedMonitor::spawn(
+        runtime_state.clone(),
+        Some(tracker.clone()),
+        super::connect::AcceptedStopGate::default(),
+    );
+
+    // The ordinary shutdown branch completes first. The monitor is a separate
+    // owned task, so losing this select cannot abandon a future that owns the
+    // accepted handles.
+    tokio::select! {
+        biased;
+        _ = tokio::task::yield_now() => {}
+        _ = monitor.handle_mut() => panic!("the monitor must not finish before an escalation"),
+    }
+    assert_eq!(
+        runtime_state
+            .control
+            .wait_for_drain(std::time::Duration::ZERO)
+            .await,
+        1,
+        "the accepted task is still running before the escalation"
+    );
+
+    runtime_state.control.begin_fail_closed_shutdown();
+    let started = std::time::Instant::now();
+    monitor.finish().await;
+
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(1),
+        "the monitor aborts the accepted task without consuming its allowance"
+    );
+    assert_eq!(
+        runtime_state
+            .control
+            .wait_for_drain(std::time::Duration::ZERO)
+            .await,
+        0,
+        "the monitor stopped the accepted task it owned"
+    );
+    assert!(tracker.is_closed(), "the monitor closed admin admission");
+    assert_eq!(
+        tracker
+            .wait_for_idle(std::time::Duration::from_millis(10))
+            .await,
+        1,
+        "a pre-existing admin handler is not reported as stopped"
+    );
+    drop(admin_guard);
+    assert_eq!(
+        tracker
+            .wait_for_idle(std::time::Duration::from_secs(1))
+            .await,
+        0
+    );
+}
+
+#[tokio::test]
+async fn an_escalation_during_the_teardown_joins_stops_business_execution() {
+    let runtime_state = WorkerRuntimeState::default();
+    let started_rx = spawn_sleeping_accepted_task(&runtime_state).await;
+    started_rx.await.expect("the accepted task started");
+
+    let tracker = crate::worker_admin::state::AdminExecutionTracker::default();
+    let admin_guard = tracker.try_track().expect("admin admission is open");
+    let monitor = super::connect::FailClosedMonitor::spawn(
+        runtime_state.clone(),
+        Some(tracker.clone()),
+        super::connect::AcceptedStopGate::default(),
+    );
+
+    // This future stands in for the relay and admin joins that follow the
+    // drain. The escalation arrives while they are still waiting.
+    let teardown = tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    });
+    runtime_state.control.begin_fail_closed_shutdown();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    assert!(
+        tracker.is_closed(),
+        "the monitor cancels admin business execution during the joins"
+    );
+    assert_eq!(
+        runtime_state
+            .control
+            .wait_for_drain(std::time::Duration::ZERO)
+            .await,
+        0,
+        "the monitor stops accepted work during the joins"
+    );
+
+    teardown.await.expect("the teardown join ran");
+    drop(admin_guard);
+    monitor.finish().await;
+}
+
+#[tokio::test]
+async fn sqlite_admin_lifecycle_cancels_the_monitor_without_postgres_runtime_state() {
+    // A SQLite worker has no PostgreSQL runtime admin state, but it starts the
+    // same admin server. Its lifecycle tracker must still reach the monitor,
+    // the cancellation and the terminal idle check, or an in-progress admin
+    // mutation would survive a fail-closed shutdown.
+    let runtime_state = WorkerRuntimeState::default();
+    let started_rx = spawn_sleeping_accepted_task(&runtime_state).await;
+    started_rx.await.expect("the accepted task started");
+
+    let tracker = crate::worker_admin::state::AdminExecutionTracker::default();
+    let admin_guard = tracker.try_track().expect("admin admission is open");
+    let lifecycle =
+        super::connect::AdminExecutionLifecycle::without_postgres_runtime_state(tracker.clone());
+    assert!(
+        lifecycle.monitor_tracker().is_some(),
+        "the actual admin server tracker is wired for the backend without PostgreSQL state"
+    );
+    let monitor = super::connect::FailClosedMonitor::spawn(
+        runtime_state.clone(),
+        lifecycle.monitor_tracker(),
+        super::connect::AcceptedStopGate::default(),
+    );
+
+    runtime_state.control.begin_fail_closed_shutdown();
+    monitor.finish().await;
+
+    assert!(
+        tracker.is_closed(),
+        "the SQLite admin server tracker is closed on fail-closed"
+    );
+    assert_eq!(
+        lifecycle
+            .wait_for_idle(std::time::Duration::from_millis(10))
+            .await,
+        1,
+        "a pre-existing SQLite admin handler is not reported as stopped"
+    );
+    assert_eq!(
+        runtime_state
+            .control
+            .wait_for_drain(std::time::Duration::ZERO)
+            .await,
+        0
+    );
+    drop(admin_guard);
+    assert_eq!(
+        lifecycle
+            .wait_for_idle(std::time::Duration::from_secs(1))
+            .await,
+        0
+    );
 }

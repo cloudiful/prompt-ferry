@@ -1,9 +1,7 @@
 use crate::{
     bridge_crypto::{self},
     config::{WorkerConfig, normalize_relay_url},
-    db,
-    llm_review::{self},
-    redact,
+    db, redact,
     relay_secrets::{self, BOOTSTRAP_ADMIN_PASSWORD_FILE, RelaySecretManager},
     replay_cache::ReplayCache,
     runtime_env,
@@ -12,7 +10,7 @@ use crate::{
     worker::runtime::WorkerShutdown,
     worker_admin::{self, AdminState},
 };
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use sqlx::postgres::PgPoolOptions;
 use std::{path::Path, sync::Arc, time::Duration};
 use tracing::{error, info, warn};
@@ -67,8 +65,7 @@ fn publish_bootstrap_password(
 pub(super) fn validate_config(config: &WorkerConfig) -> anyhow::Result<()> {
     // An empty worker token intentionally disables relay worker authentication;
     // the relay logs a warning when this mode is active.
-    let contract = config.storage_contract();
-    if contract.backend.is_sqlite() {
+    if config.storage_backend().is_sqlite() {
         runtime_env::resolve_standalone_database_path(&config.standalone_database_path)?;
         let relay_urls = config
             .relay_urls
@@ -139,25 +136,8 @@ pub(super) async fn build_standalone_state(
         })?;
     }
     let store = Arc::new(StandaloneConfigStore::open(&path).await?);
-    if !config.relay_urls.is_empty() && !config.upstream_api_key.is_empty() {
-        let tls_mode = config
-            .relay_urls
-            .first()
-            .map(|url| tls::worker_tls_mode(config, url))
-            .transpose()?;
+    if !config.upstream_api_key.is_empty() {
         let seed = BootstrapSeed {
-            relay_urls: config
-                .relay_urls
-                .iter()
-                .map(|url| normalize_relay_url(url))
-                .collect(),
-            tls_mode: tls_mode.unwrap_or_default(),
-            relay_ca_pem: optional_file_pem(&config.relay_ca)?,
-            client_cert_pem: optional_file_pem(&config.client_cert)?,
-            client_key_pem: optional_file_pem(&config.client_key)?,
-            bridge_encryption_mode: config.bridge_encryption_mode,
-            bridge_encryption_key: (!config.bridge_encryption_key.trim().is_empty())
-                .then(|| config.bridge_encryption_key.clone()),
             upstream_base_url: config.upstream_base_url.clone(),
             upstream_api_key: config.upstream_api_key.clone(),
             upstream_native_api: config.upstream_native_api,
@@ -165,11 +145,6 @@ pub(super) async fn build_standalone_state(
         store.bootstrap_if_empty(&manager, seed).await?;
     }
     let snapshot = store.load_snapshot(&manager).await?;
-    if snapshot.relays.iter().all(|relay| !relay.enabled) && config.relay_urls.is_empty() {
-        return Err(anyhow!(
-            "standalone configuration has no enabled persisted relays or static relay URLs"
-        ));
-    }
     // First startup may have no endpoint yet: the worker stays up and the
     // Admin setup flow creates the first endpoint. Upstream requests are not
     // possible until an enabled endpoint exists.
@@ -186,8 +161,12 @@ pub(super) async fn build_standalone_state(
     let catalog_cache = match catalog_cache {
         Some(cache) => cache,
         None => {
-            crate::mcp::McpCatalogCache::from_config_with_sqlite(config, Some(store.pool().clone()))
-                .await
+            crate::mcp::McpCatalogCache::from_config_with_sqlite(
+                config,
+                &crate::db::SharedValkeyConfig::not_configured(),
+                Some(store.pool().clone()),
+            )
+            .await?
         }
     };
     let mcp_runtime = crate::mcp::McpRuntimeState::sqlite(
@@ -209,7 +188,7 @@ pub(super) async fn build_standalone_state(
     .await;
     let state =
         crate::worker::runtime::standalone::StandaloneRuntimeState::new(store, manager, snapshot)
-            .with_mcp_runtime(mcp_runtime);
+            .with_mcp_runtime(mcp_runtime?);
     state.hydrate_usage().await;
     Ok(state)
 }
@@ -253,12 +232,16 @@ fn attach_mcp_oauth(state: AdminState, config: &crate::config::WorkerConfig) -> 
 /// failure has already been reported by the time this runs. The standalone
 /// worker passes `None` and the server binds `admin_bind` itself, keeping its
 /// existing behaviour of staying up and logging a failure.
-fn start_admin_server(
+///
+/// The task handle is returned so the caller can await the graceful
+/// completion of the server, or abort and join it, before the worker
+/// releases its registry row.
+pub(super) fn start_admin_server(
     state: AdminState,
     config: &WorkerConfig,
     admin_listener: Option<tokio::net::TcpListener>,
     worker_shutdown: Option<&WorkerShutdown>,
-) {
+) -> tokio::task::JoinHandle<()> {
     let admin_config = config.clone();
     let shutdown_rx = worker_shutdown.map(WorkerShutdown::subscribe);
     tokio::spawn(async move {
@@ -272,24 +255,17 @@ fn start_admin_server(
         if let Err(err) = served {
             error!(error = %err, "worker admin server stopped");
         }
-    });
+    })
 }
 
-fn optional_file_pem(path: &str) -> anyhow::Result<Option<String>> {
-    let path = path.trim();
-    if path.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(tls::read_pem_file(path)?))
-    }
-}
-
+/// Build the admin state without starting any service.
+///
+/// The admin HTTP server is started by the caller, after the worker was
+/// admitted to the registry: a worker that may not serve must not expose an
+/// admin listener either.
 pub(super) async fn build_admin_state(
     config: &WorkerConfig,
-    spawn_admin_server: bool,
     secrets_dir: Option<&Path>,
-    worker_shutdown: Option<&WorkerShutdown>,
-    admin_listener: Option<tokio::net::TcpListener>,
 ) -> anyhow::Result<Option<AdminState>> {
     let relay_secret_manager = relay_secrets::load_or_create_worker_config_key_for(
         config.effective_encryption_key(),
@@ -328,6 +304,16 @@ pub(super) async fn build_admin_state(
             Some(sqlite_pool),
         )
     };
+    // Shared Valkey ownership is database-only. A missing row is the degraded
+    // single-worker state; a decryption or parse failure aborts startup instead
+    // of silently falling back to process-local coordination.
+    let shared_valkey = if is_postgres {
+        db::load_shared_valkey_config(&pool, &relay_secret_manager)
+            .await
+            .context("failed to resolve the shared Valkey configuration")?
+    } else {
+        db::SharedValkeyConfig::not_configured()
+    };
     // When no active user exists and no password is configured, a strong
     // random candidate password is atomically published to the protected file
     // (create-if-absent) BEFORE the admin user is committed; if another
@@ -359,11 +345,19 @@ pub(super) async fn build_admin_state(
         // The SQLite path has no Valkey backend; each `from_config_with_sqlite`
         // call only touches the embedded store so they can run together
         // without changing semantics.
-        let (mcp_catalog_cache, replay_cache, mcp_session_store) = tokio::join!(
-            crate::mcp::McpCatalogCache::from_config_with_sqlite(config, sqlite_pool.clone()),
-            ReplayCache::from_config_with_sqlite(config, sqlite_pool.clone()),
-            crate::mcp::McpSessionStore::from_config_with_sqlite(config, sqlite_pool),
-        );
+        let (mcp_catalog_cache, replay_cache, mcp_session_store) = tokio::try_join!(
+            crate::mcp::McpCatalogCache::from_config_with_sqlite(
+                config,
+                &shared_valkey,
+                sqlite_pool.clone()
+            ),
+            ReplayCache::from_config_with_sqlite(config, &shared_valkey, sqlite_pool.clone()),
+            crate::mcp::McpSessionStore::from_config_with_sqlite(
+                config,
+                &shared_valkey,
+                sqlite_pool
+            ),
+        )?;
         let stream_delta_batching: db::StreamDeltaBatchingSettings = config_repository
             .get_json_setting::<db::StreamDeltaBatchingSettings>("stream_delta_batching")
             .await?
@@ -392,7 +386,6 @@ pub(super) async fn build_admin_state(
             usage_retention: crate::worker_admin_types::UsageRetentionSettings::default(),
             raw_payload_store: None,
             stream_delta_batching,
-            llm_review_settings: llm_review::LlmReviewSettings::default(),
             mcp_catalog_cache: mcp_catalog_cache.clone(),
             mcp_catalog_service: crate::mcp::McpCatalogService::new_with_repository(
                 config_repository.clone(),
@@ -403,13 +396,11 @@ pub(super) async fn build_admin_state(
             endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(
                 Duration::from_secs(config.endpoint_model_cache_ttl_seconds.max(1)),
             ),
+            shared_valkey,
         })
         .with_user_store(user_store)
         .with_config_repository(config_repository);
         let state = attach_mcp_oauth(state, config);
-        if spawn_admin_server {
-            start_admin_server(state.clone(), config, admin_listener, worker_shutdown);
-        }
         return Ok(Some(state));
     }
 
@@ -445,45 +436,29 @@ pub(super) async fn build_admin_state(
     let (
         redaction_config,
         user_redaction_configs,
-        llm_review_settings,
         model_route_whitelist_enabled,
         request_content_logging,
         stream_delta_batching,
     ) = tokio::join!(
         db::get_redaction_config(&pool),
         db::list_user_redaction_configs(&pool),
-        async {
-            Ok::<_, anyhow::Error>(
-                db::get_json_setting(&pool, llm_review::LLM_REVIEW_SETTINGS_KEY)
-                    .await?
-                    .unwrap_or_default(),
-            )
-        },
         async { db::get_bool_setting(&pool, "model_route_whitelist_enabled", true).await },
         db::get_request_content_logging(&pool),
         db::get_stream_delta_batching(&pool),
     );
     let redaction_config = redaction_config?;
     let user_redaction_configs = user_redaction_configs?;
-    let llm_review_settings = llm_review_settings?;
     let model_route_whitelist_enabled = model_route_whitelist_enabled?;
     let mut request_content_logging = request_content_logging?;
     request_content_logging.raw_retention_days = usage_retention.raw_retention_days;
     let stream_delta_batching = stream_delta_batching?;
     redact::apply_configs(&redaction_config, user_redaction_configs)?;
     let redaction_enabled = redact::has_any_enabled();
-    let aborted_count = db::abort_pending_approval_requests(&pool).await?;
-    if aborted_count > 0 {
-        warn!(
-            count = aborted_count,
-            "aborted stale pending approval requests on startup"
-        );
-    }
-    let (mcp_catalog_cache, replay_cache, mcp_session_store) = tokio::join!(
-        crate::mcp::McpCatalogCache::from_config(config),
-        ReplayCache::from_config(config),
-        crate::mcp::McpSessionStore::from_config(config),
-    );
+    let (mcp_catalog_cache, replay_cache, mcp_session_store) = tokio::try_join!(
+        crate::mcp::McpCatalogCache::from_config(config, &shared_valkey),
+        ReplayCache::from_config(config, &shared_valkey),
+        crate::mcp::McpSessionStore::from_config(config, &shared_valkey),
+    )?;
     let mcp_catalog_cache = mcp_catalog_cache;
     let replay_cache = replay_cache;
     let mcp_session_store = mcp_session_store;
@@ -502,7 +477,6 @@ pub(super) async fn build_admin_state(
         usage_retention,
         raw_payload_store,
         stream_delta_batching,
-        llm_review_settings,
         mcp_catalog_cache,
         mcp_catalog_service,
         mcp_session_store,
@@ -510,6 +484,7 @@ pub(super) async fn build_admin_state(
         endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(Duration::from_secs(
             config.endpoint_model_cache_ttl_seconds.max(1),
         )),
+        shared_valkey,
     })
     .with_user_store(user_store)
     .with_cache_alert(cache_alert);
@@ -522,11 +497,6 @@ pub(super) async fn build_admin_state(
         ),
     );
     let state = state.with_chatgpt_quota_service(quota_service);
-    if spawn_admin_server {
-        start_admin_server(state.clone(), config, admin_listener, worker_shutdown);
-
-        let _ = &state.pool;
-    }
     Ok(Some(state))
 }
 

@@ -1,3 +1,5 @@
+use anyhow::Result;
+
 mod aggregate;
 mod builtin;
 mod cache;
@@ -175,12 +177,16 @@ impl McpRuntimeState {
         storage: McpRuntimeStorage,
         sqlite_pool: sqlx::SqlitePool,
         catalog_cache: McpCatalogCache,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        Ok(Self {
             storage,
             catalog_cache,
-            session_store: McpSessionStore::from_config_with_sqlite(config, Some(sqlite_pool))
-                .await,
+            session_store: McpSessionStore::from_config_with_sqlite(
+                config,
+                &crate::db::SharedValkeyConfig::not_configured(),
+                Some(sqlite_pool),
+            )
+            .await?,
             allowed_origins: config.mcp_allowed_origins.clone(),
             request_content_logging: std::sync::Arc::new(tokio::sync::RwLock::new(
                 crate::worker_admin_types::RequestContentLoggingResponse {
@@ -188,7 +194,7 @@ impl McpRuntimeState {
                     raw_retention_days: 3,
                 },
             )),
-        }
+        })
     }
 }
 

@@ -1,23 +1,17 @@
 /**
  * Pure model for the admin Requests settings tab.
  *
- * The tab edits four independent stored settings. Everything here is a value
+ * The tab edits three independent stored settings. Everything here is a value
  * transform — defaults, the sorted-key snapshot the autosave compares, integer
  * bounds, and the "apply only what the operator did not touch" response merges —
  * so the store stays about lifecycle and the request contract stays testable
  * without a component.
- *
- * The two retention forms are deliberately not merged with each other here: the
- * logging save writes a read-modify-write of the usage-retention record, so the
- * mirroring runs through `mirrorSharedRawRetention` and keeps the stored raw
- * value in step with whoever still holds the original value.
  */
 
 import type {
   ModelRouteWhitelistResponse,
   RequestContentLoggingMode,
   RequestContentLoggingResponse,
-  UsageRetentionSettings,
 } from '@/generated/admin-api'
 import type { MessageKey } from '@/i18n'
 import type { StreamDeltaBatchingForm } from '@/models'
@@ -38,23 +32,17 @@ export const REQUEST_CONTENT_LOGGING_MODES: ReadonlyArray<{
 ]
 
 export const RAW_RETENTION_DAYS_RANGE = { min: 1, max: 30 } as const
-export const APPROVAL_RETENTION_DAYS_RANGE = { min: 1 } as const
 export const FLUSH_WINDOW_MS_RANGE = { min: 1, max: 1000 } as const
 export const MAX_BUFFER_CHARS_RANGE = { min: 1, max: 8192 } as const
 export const MAX_BUFFER_BYTES_RANGE = { min: 1, max: 65536 } as const
 
-/** The editable integer bounds of the two retention controls. */
+/** The editable integer bounds of the raw-retention control. */
 export const SETTING_FORM_RANGES = {
   rawRetentionDays: RAW_RETENTION_DAYS_RANGE,
-  approvalRetentionDays: APPROVAL_RETENTION_DAYS_RANGE,
 } as const
 
 export function createRequestContentLoggingForm(): RequestContentLoggingResponse {
   return { mode: 'off', raw_retention_days: RAW_RETENTION_DAYS_RANGE.min }
-}
-
-export function createUsageRetentionForm(): UsageRetentionSettings {
-  return { approval_retention_days: APPROVAL_RETENTION_DAYS_RANGE.min }
 }
 
 export function createStreamDeltaBatchingForm(): StreamDeltaBatchingForm {
@@ -140,45 +128,6 @@ export function mergeRequestContentLoggingResponse(
     )
       ? response.raw_retention_days
       : current.raw_retention_days,
-  }
-}
-
-/** Apply a usage-retention response to the fields the operator has not changed. */
-export function mergeUsageRetentionResponse(
-  current: UsageRetentionSettings,
-  submitted: UsageRetentionSettings,
-  response: UsageRetentionSettings,
-): UsageRetentionSettings {
-  const merged: UsageRetentionSettings = { ...current }
-  for (const key of Object.keys(submitted) as Array<
-    keyof UsageRetentionSettings
-  >) {
-    if (Object.is(current[key], submitted[key])) {
-      Object.assign(merged, { [key]: response[key] })
-    }
-  }
-  return merged
-}
-
-/**
- * Mirror the stored raw-retention days into a form that still holds the value
- * that was submitted with the write.
- *
- * The fallback keeps the shared value when the response omits the field, so a
- * partial retention response can never blank the number both forms display.
- */
-export function mirrorSharedRawRetention<
-  T extends { raw_retention_days?: number },
->(
-  current: T,
-  submittedRawRetention: number | undefined,
-  responseRawRetention: number | undefined,
-): T {
-  if (!Object.is(current.raw_retention_days, submittedRawRetention))
-    return current
-  return {
-    ...current,
-    raw_retention_days: responseRawRetention ?? submittedRawRetention,
   }
 }
 

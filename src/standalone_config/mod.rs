@@ -27,10 +27,9 @@ pub(crate) use coordinator::StandaloneCoordinatorStore;
 pub use import::{ImportEndpointAdminKey, ImportEndpointOAuth, ImportMcpServer, ImportUser};
 pub use models::{
     BootstrapSeed, ClientKeyConfig, EndpointApiKeyConfig, EndpointProvider, EndpointRegion,
-    ManagedRelayConfig, ModelRouteConfig, ModelRouteTargetConfig, ProviderEndpointConfig,
-    ReplaySnapshotUpsertOutcome, Result, RouteScope, RoutingStrategy, SettingConfig,
-    StandaloneConfig, StandaloneConfigError, StandaloneReplaySnapshotRecord,
-    StandaloneUsageSummaryRecord, default_target_native_api,
+    ModelRouteConfig, ModelRouteTargetConfig, ProviderEndpointConfig, ReplaySnapshotUpsertOutcome,
+    Result, RouteScope, RoutingStrategy, SettingConfig, StandaloneConfig, StandaloneConfigError,
+    StandaloneReplaySnapshotRecord, StandaloneUsageSummaryRecord, default_target_native_api,
 };
 pub(crate) use request_leases::{RequestLeaseAcquireOutcome, StandaloneRequestLeaseStore};
 pub use store::{BootstrapOutcome, StandaloneConfigStore};

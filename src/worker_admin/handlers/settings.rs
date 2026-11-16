@@ -457,40 +457,13 @@ pub(super) async fn set_relay_ip_whitelist(
     {
         return internal(&state, err);
     }
-    let _ = publish_snapshot(&state).await;
-    Json(RelayIpPolicyResponse::from(policy)).into_response()
-}
-
-pub(super) async fn get_llm_review_setting(
-    State(state): State<AdminState>,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
-        return response.into_response();
-    }
-    Json(state.llm_review_settings.read().await.clone()).into_response()
-}
-
-pub(super) async fn set_llm_review_setting(
-    State(state): State<AdminState>,
-    headers: HeaderMap,
-    Json(body): Json<LlmReviewSettings>,
-) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
-        return response.into_response();
-    }
-    if let Err(err) = body.validate() {
-        return bad_request(&err.to_string());
-    }
-    if let Err(err) = state
-        .config_repository
-        .set_json_setting(LLM_REVIEW_SETTINGS_KEY, &body)
-        .await
-    {
+    // The access policy is committed. A failed publication would leave the
+    // relays running with the previous policy, so it is reported instead of
+    // being ignored.
+    if let Err(err) = publish_snapshot(&state).await {
         return internal(&state, err);
     }
-    *state.llm_review_settings.write().await = body.clone();
-    Json(body).into_response()
+    Json(RelayIpPolicyResponse::from(policy)).into_response()
 }
 
 pub(super) async fn get_model_route_whitelist(
@@ -712,4 +685,155 @@ fn resolve_raw_secret_patch(
             Ok(Some(trimmed))
         }
     }
+}
+
+async fn shared_valkey_response(
+    state: &AdminState,
+    configured: bool,
+    url: Option<&str>,
+    ttl_seconds: u64,
+    desired_revision: Option<i64>,
+) -> Response {
+    let applied_revision = state.shared_valkey.revision();
+    let restart_required =
+        desired_revision.is_some_and(|desired| Some(desired) != applied_revision);
+    let workers_restart_required =
+        match db::count_workers_requiring_restart(&state.pool, desired_revision).await {
+            Ok(count) => count,
+            Err(err) => return internal(state, err),
+        };
+    Json(SharedValkeySettingsResponse {
+        configured,
+        url_masked: url.map(db::mask_shared_valkey_url),
+        ttl_seconds,
+        desired_revision,
+        applied_revision,
+        restart_required,
+        workers_restart_required,
+    })
+    .into_response()
+}
+
+pub(super) async fn get_shared_valkey(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(response) = ensure_admin(&state, &headers).await {
+        return response.into_response();
+    }
+    if state.config_repository.is_sqlite() {
+        return state.capability_unavailable(db::Capability::SharedValkey);
+    }
+    let Some(manager) = state.relay_secret_manager.as_ref() else {
+        return internal(
+            &state,
+            anyhow::anyhow!("worker encryption key is unavailable"),
+        );
+    };
+    let persisted = match db::get_shared_valkey_persisted(&state.pool).await {
+        Ok(value) => value,
+        Err(err) => return internal(&state, err),
+    };
+    let config = match db::SharedValkeyConfig::from_persisted(persisted, manager) {
+        Ok(config) => config,
+        Err(err) => return internal(&state, err),
+    };
+    shared_valkey_response(
+        &state,
+        config.is_configured(),
+        config.url(),
+        config.ttl_seconds(),
+        config.revision(),
+    )
+    .await
+}
+
+pub(super) async fn set_shared_valkey(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+    Json(body): Json<SharedValkeySettingsRequest>,
+) -> Response {
+    if let Err(response) = ensure_admin(&state, &headers).await {
+        return response.into_response();
+    }
+    if state.config_repository.is_sqlite() {
+        return state.capability_unavailable(db::Capability::SharedValkey);
+    }
+    let Some(manager) = state.relay_secret_manager.as_ref() else {
+        return internal(
+            &state,
+            anyhow::anyhow!("worker encryption key is unavailable"),
+        );
+    };
+    let existing_persisted = match db::get_shared_valkey_persisted(&state.pool).await {
+        Ok(value) => value,
+        Err(err) => return internal(&state, err),
+    };
+    let existing_config = if matches!(
+        &body.url,
+        Some(SharedValkeySecretPatch::Replace { .. } | SharedValkeySecretPatch::Clear)
+    ) {
+        None
+    } else {
+        match db::SharedValkeyConfig::from_persisted(existing_persisted.clone(), manager) {
+            Ok(config) => Some(config),
+            Err(err) => return internal(&state, err),
+        }
+    };
+    if let Err(err) = db::validate_shared_valkey_ttl(body.ttl_seconds) {
+        return bad_request(&err.to_string());
+    }
+    if let Some(SharedValkeySecretPatch::Replace { value }) = &body.url
+        && let Err(err) = db::validate_shared_valkey_url(value.trim())
+    {
+        return bad_request(&err.to_string());
+    }
+    let url_plaintext = match &body.url {
+        Some(SharedValkeySecretPatch::Clear) => None,
+        Some(SharedValkeySecretPatch::Replace { value }) => Some(value.trim().to_string()),
+        _ => existing_config
+            .as_ref()
+            .and_then(|config| config.url())
+            .map(str::to_string),
+    };
+    // The write is serialized inside the database and carries the revision
+    // this request read. A concurrent writer wins the lock first and this
+    // request reports a conflict instead of overwriting the newer value.
+    let expected_revision = existing_persisted
+        .as_ref()
+        .map(|persisted| persisted.revision);
+    let outcome = match db::save_shared_valkey_settings(
+        &state.pool,
+        manager,
+        url_plaintext.as_deref(),
+        body.ttl_seconds,
+        expected_revision,
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(err) => return internal(&state, err),
+    };
+    let persisted = match outcome {
+        db::SharedValkeyWriteOutcome::Written(persisted) => persisted,
+        db::SharedValkeyWriteOutcome::Conflict { current_revision } => {
+            return error(
+                StatusCode::CONFLICT,
+                "shared_valkey_conflict",
+                &format!(
+                    "the shared Valkey settings changed concurrently (current revision {:?}); \
+                     reload and retry",
+                    current_revision
+                ),
+            );
+        }
+    };
+    shared_valkey_response(
+        &state,
+        persisted.url.is_some(),
+        url_plaintext.as_deref(),
+        persisted.ttl_seconds,
+        Some(persisted.revision),
+    )
+    .await
 }

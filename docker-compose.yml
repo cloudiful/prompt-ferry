@@ -110,7 +110,8 @@ services:
       # Storage endpoints are service names on the Compose network. The
       # host-loopback URLs in .env apply to a host-run binary, not here.
       DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
-      PROMPT_FERRY_WORKER__VALKEY_URL: "redis://valkey:6379"
+      # The shared Valkey URL is database configuration: set it in the admin
+      # console after first start and restart the worker to apply it.
       PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ENDPOINT: "http://rustfs:9000"
       # Credentials and bucket come from .env so the host and container setups
       # store payloads in the same place.

@@ -75,7 +75,6 @@ pub(crate) async fn forward_to_worker(
             worker: selection.sender.clone(),
             queued_bytes: 0,
             response_started: false,
-            awaiting_approval: false,
         },
     );
     spawn_response_pump(

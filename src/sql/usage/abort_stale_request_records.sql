@@ -3,7 +3,7 @@ WITH stale AS (
     FROM request_records rr
     JOIN request_record_leases lease ON lease.request_id = rr.request_id
     WHERE rr.event_kind = 'request'
-      AND rr.request_state IN ('received', 'awaiting_approval', 'upstream_processing')
+      AND rr.request_state IN ('received', 'upstream_processing')
       AND lease.lease_expires_at <= NOW()
 ), cleaned AS (
     DELETE FROM request_record_leases lease

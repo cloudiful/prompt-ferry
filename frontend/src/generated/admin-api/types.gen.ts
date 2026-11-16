@@ -20,45 +20,6 @@ export type AppliedReplacementSchema = {
     strategy: string;
 };
 
-export type ApprovalPageResponse = {
-    approvals: Array<ApprovalRequest>;
-    first: number;
-    rows: number;
-    total: number;
-};
-
-export type ApprovalRequest = {
-    approval_id: string;
-    approval_status: string;
-    client_key_label?: string | null;
-    created_at: string;
-    decided_at?: string | null;
-    decided_by_login_name?: string | null;
-    decided_by_user_id?: number | null;
-    model?: string | null;
-    path: string;
-    request_deadline_unix_ms: number;
-    request_id: string;
-    request_payload_json?: unknown;
-    request_preview: string;
-    review_categories: Array<string>;
-    review_decision: string;
-    review_reason: string;
-    updated_at: string;
-    user_id?: number | null;
-    user_login_name?: string | null;
-    wait_deadline_unix_ms: number;
-};
-
-export type ApprovalRequestPage = {
-    approvals: Array<ApprovalRequest>;
-    first: number;
-    rows: number;
-    total: number;
-};
-
-export type ApprovalStatusFilter = 'pending' | 'resolved';
-
 export type AvailableModel = {
     id: string;
     name: string;
@@ -181,8 +142,6 @@ export type BillingSummaryResponse = {
     unknown_count: number;
     unpriced_count: number;
 };
-
-export type BridgeEncryptionMode = 'off' | 'required';
 
 export type BridgeStatus = {
     configured_relays: number;
@@ -783,103 +742,9 @@ export type InferenceResponse = {
     usable_blocks: number;
 };
 
-export type LlmReviewSettings = {
-    custom_policy_text: string;
-    enabled: boolean;
-    failure_policy: ReviewFailurePolicy;
-    pending_ttl_seconds: number;
-    review_api_key: string;
-    review_base_url: string;
-    review_model: string;
-    review_timeout_ms: number;
-    webhook?: LlmReviewWebhookSettings;
-};
-
-export type LlmReviewWebhookSettings = {
-    bearer_token: string;
-    enabled: boolean;
-    extra_headers?: {
-        [key: string]: string;
-    };
-    url: string;
-};
-
 export type LoginRequest = {
     login_name: string;
     password: string;
-};
-
-export type ManagedRelay = {
-    bridge_encryption_mode: BridgeEncryptionMode;
-    connected: boolean;
-    created_at: string;
-    enabled: boolean;
-    has_bridge_key: boolean;
-    has_client_cert: boolean;
-    has_client_key: boolean;
-    has_relay_ca: boolean;
-    last_connected_at?: string | null;
-    last_disconnected_at?: string | null;
-    last_error?: string | null;
-    last_snapshot_version?: number | null;
-    name: string;
-    relay_id: string;
-    relay_url: string;
-    tls_mode: TlsMode;
-    updated_at: string;
-};
-
-export type ManagedRelayListResponse = {
-    connected_count: number;
-    enabled_count: number;
-    first: number;
-    relays: Array<ManagedRelay>;
-    rows: number;
-    total: number;
-};
-
-export type ManagedRelayPatchRequest = {
-    bridge_encryption_key?: null | ManagedRelaySecretPatch;
-    bridge_encryption_mode?: null | BridgeEncryptionMode;
-    client_cert_pem?: null | ManagedRelaySecretPatch;
-    client_key_pem?: null | ManagedRelaySecretPatch;
-    enabled?: boolean | null;
-    name?: string | null;
-    relay_ca_pem?: null | ManagedRelaySecretPatch;
-    relay_url?: string | null;
-    tls_mode?: null | TlsMode;
-};
-
-export type ManagedRelayRequest = {
-    bridge_encryption_key?: null | ManagedRelaySecretPatch;
-    bridge_encryption_mode: BridgeEncryptionMode;
-    client_cert_pem?: null | ManagedRelaySecretPatch;
-    client_key_pem?: null | ManagedRelaySecretPatch;
-    enabled?: boolean | null;
-    name: string;
-    relay_ca_pem?: null | ManagedRelaySecretPatch;
-    relay_url: string;
-    tls_mode: TlsMode;
-};
-
-export type ManagedRelaySecretPatch = {
-    mode: 'keep';
-} | {
-    mode: 'clear';
-} | {
-    mode: 'replace';
-    value: string;
-};
-
-export type ManagedRelayStatus = {
-    connected: boolean;
-    enabled: boolean;
-    last_connected_at?: string | null;
-    last_disconnected_at?: string | null;
-    last_error?: string | null;
-    last_snapshot_version?: number | null;
-    relay_id: string;
-    relay_url: string;
 };
 
 export type McpBearerToken = {
@@ -1706,10 +1571,6 @@ export type RelayAuthResponse = {
 
 export type RelayBridgeStatus = {
     connected: boolean;
-    enabled: boolean;
-    last_error?: string | null;
-    last_snapshot_version?: number | null;
-    relay_id?: string | null;
     relay_url: string;
 };
 
@@ -2233,7 +2094,7 @@ export type RequestRecordRedactionSummary = {
     types: Array<string>;
 };
 
-export type RequestRecordState = 'received' | 'awaiting_approval' | 'upstream_processing' | 'completed' | 'failed' | 'aborted';
+export type RequestRecordState = 'received' | 'upstream_processing' | 'completed' | 'failed' | 'aborted';
 
 export type RequestRecordSummary = {
     avg_duration_ms?: number | null;
@@ -2282,8 +2143,6 @@ export type ResetPasswordRequest = {
     password: string;
 };
 
-export type ReviewFailurePolicy = 'fail_open' | 'fail_closed';
-
 export type RouteSelectionReason = 'default' | 'session_affinity' | 'session_load_balance' | 'conversation_override' | 'quota_failover' | 'new_session_preference';
 
 export type SessionAffinityResetResponse = {
@@ -2325,6 +2184,37 @@ export type SessionRouteOptionsResponse = {
     override_endpoint_id?: string | null;
     override_endpoint_key_id?: string | null;
     override_endpoint_key_label?: string | null;
+};
+
+/**
+ * Write-only patch for the encrypted shared Valkey URL.
+ */
+export type SharedValkeySecretPatch = {
+    mode: 'keep';
+} | {
+    mode: 'clear';
+} | {
+    mode: 'replace';
+    value: string;
+};
+
+export type SharedValkeySettingsRequest = {
+    ttl_seconds?: number;
+    url?: null | SharedValkeySecretPatch;
+};
+
+/**
+ * Read response: the URL is masked and the revisions expose whether this
+ * worker (and how many live workers) still run an older shared revision.
+ */
+export type SharedValkeySettingsResponse = {
+    applied_revision?: number | null;
+    configured: boolean;
+    desired_revision?: number | null;
+    restart_required: boolean;
+    ttl_seconds: number;
+    url_masked?: string | null;
+    workers_restart_required: number;
 };
 
 export type StreamDeltaBatchingSettings = {
@@ -2388,8 +2278,6 @@ export type SubscriptionWindowUsage = {
      */
     window_seconds?: number | null;
 };
-
-export type TlsMode = 'off' | 'server' | 'mtls';
 
 export type TokenPlanKeyUsage = {
     balances?: null | CommandCodeBalances;
@@ -2479,7 +2367,6 @@ export type UpdateClientKeyRequest = {
 export type UsageClearScope = 'current_user' | 'all_users' | 'target_user';
 
 export type UsageRetentionSettings = {
-    approval_retention_days?: number;
     content_retention_days?: number;
     metadata_retention_days?: number;
     raw_backend?: string;
@@ -2514,6 +2401,38 @@ export type UserUpdate = {
     is_admin?: boolean | null;
 };
 
+export type WorkerCoordinationState = {
+    /**
+     * Whether the deployment runs in the degraded single-worker mode.
+     */
+    degraded: boolean;
+    /**
+     * Why the deployment is degraded, when it is.
+     */
+    degraded_reason?: string | null;
+    /**
+     * The number of live workers in the registry.
+     */
+    live_worker_count: number;
+    /**
+     * The coordinator the workers use to share state across processes.
+     */
+    mode: string;
+    /**
+     * Whether the shared Valkey coordination is configured.
+     */
+    shared_valkey_configured: boolean;
+};
+
+export type WorkerListResponse = {
+    coordination: WorkerCoordinationState;
+    first: number;
+    online_count: number;
+    rows: number;
+    total: number;
+    workers: Array<WorkerSummary>;
+};
+
 /**
  * What the relay knows about the worker attached to it.
  *
@@ -2527,88 +2446,18 @@ export type WorkerStatusResponse = {
     connected_workers: number;
 };
 
-export type ListApprovalsData = {
-    body?: never;
-    path?: never;
-    query?: {
-        status?: ApprovalStatusFilter;
-        first?: number;
-        rows?: number;
-    };
-    url: '/api/v1/admin/approvals';
+export type WorkerSummary = {
+    config_applied_revision?: number | null;
+    config_restart_required: boolean;
+    incarnation: string;
+    last_heartbeat_at: string;
+    role: string;
+    started_at: string;
+    status: string;
+    stopped_at?: string | null;
+    version: string;
+    worker_id: string;
 };
-
-export type ListApprovalsResponses = {
-    /**
-     * Approval page
-     */
-    200: ApprovalPageResponse;
-};
-
-export type ListApprovalsResponse = ListApprovalsResponses[keyof ListApprovalsResponses];
-
-export type GetApprovalData = {
-    body?: never;
-    path: {
-        /**
-         * Approval ID
-         */
-        approval_id: string;
-    };
-    query?: never;
-    url: '/api/v1/admin/approvals/{approval_id}';
-};
-
-export type GetApprovalResponses = {
-    /**
-     * Approval detail
-     */
-    200: ApprovalRequest;
-};
-
-export type GetApprovalResponse = GetApprovalResponses[keyof GetApprovalResponses];
-
-export type ApproveApprovalData = {
-    body?: never;
-    path: {
-        /**
-         * Approval ID
-         */
-        approval_id: string;
-    };
-    query?: never;
-    url: '/api/v1/admin/approvals/{approval_id}/approve';
-};
-
-export type ApproveApprovalResponses = {
-    /**
-     * Approved request
-     */
-    200: ApprovalRequest;
-};
-
-export type ApproveApprovalResponse = ApproveApprovalResponses[keyof ApproveApprovalResponses];
-
-export type RejectApprovalData = {
-    body?: never;
-    path: {
-        /**
-         * Approval ID
-         */
-        approval_id: string;
-    };
-    query?: never;
-    url: '/api/v1/admin/approvals/{approval_id}/reject';
-};
-
-export type RejectApprovalResponses = {
-    /**
-     * Rejected request
-     */
-    200: ApprovalRequest;
-};
-
-export type RejectApprovalResponse = RejectApprovalResponses[keyof RejectApprovalResponses];
 
 export type ListBillingChargesData = {
     body?: never;
@@ -3922,156 +3771,6 @@ export type UpdateModelRouteResponses = {
 
 export type UpdateModelRouteResponse = UpdateModelRouteResponses[keyof UpdateModelRouteResponses];
 
-export type ListRelaysData = {
-    body?: never;
-    path?: never;
-    query?: {
-        first?: number;
-        rows?: number;
-    };
-    url: '/api/v1/admin/relays';
-};
-
-export type ListRelaysResponses = {
-    /**
-     * Managed relay list
-     */
-    200: ManagedRelayListResponse;
-};
-
-export type ListRelaysResponse = ListRelaysResponses[keyof ListRelaysResponses];
-
-export type CreateRelayData = {
-    body: ManagedRelayRequest;
-    path?: never;
-    query?: never;
-    url: '/api/v1/admin/relays';
-};
-
-export type CreateRelayErrors = {
-    400: ErrorEnvelope;
-};
-
-export type CreateRelayError = CreateRelayErrors[keyof CreateRelayErrors];
-
-export type CreateRelayResponses = {
-    /**
-     * Created relay
-     */
-    200: ManagedRelay;
-};
-
-export type CreateRelayResponse = CreateRelayResponses[keyof CreateRelayResponses];
-
-export type DeleteRelayData = {
-    body?: never;
-    path: {
-        /**
-         * Relay ID
-         */
-        relay_id: string;
-    };
-    query?: never;
-    url: '/api/v1/admin/relays/{relay_id}';
-};
-
-export type DeleteRelayErrors = {
-    404: ErrorEnvelope;
-};
-
-export type DeleteRelayError = DeleteRelayErrors[keyof DeleteRelayErrors];
-
-export type DeleteRelayResponses = {
-    /**
-     * Deleted relay
-     */
-    204: void;
-};
-
-export type DeleteRelayResponse = DeleteRelayResponses[keyof DeleteRelayResponses];
-
-export type GetRelayData = {
-    body?: never;
-    path: {
-        /**
-         * Relay ID
-         */
-        relay_id: string;
-    };
-    query?: never;
-    url: '/api/v1/admin/relays/{relay_id}';
-};
-
-export type GetRelayErrors = {
-    404: ErrorEnvelope;
-};
-
-export type GetRelayError = GetRelayErrors[keyof GetRelayErrors];
-
-export type GetRelayResponses = {
-    /**
-     * Managed relay detail
-     */
-    200: ManagedRelay;
-};
-
-export type GetRelayResponse = GetRelayResponses[keyof GetRelayResponses];
-
-export type UpdateRelayData = {
-    body: ManagedRelayPatchRequest;
-    path: {
-        /**
-         * Relay ID
-         */
-        relay_id: string;
-    };
-    query?: never;
-    url: '/api/v1/admin/relays/{relay_id}';
-};
-
-export type UpdateRelayErrors = {
-    404: ErrorEnvelope;
-};
-
-export type UpdateRelayError = UpdateRelayErrors[keyof UpdateRelayErrors];
-
-export type UpdateRelayResponses = {
-    /**
-     * Updated relay
-     */
-    200: ManagedRelay;
-};
-
-export type UpdateRelayResponse = UpdateRelayResponses[keyof UpdateRelayResponses];
-
-export type ReconnectRelayData = {
-    body?: never;
-    path: {
-        /**
-         * Relay ID
-         */
-        relay_id: string;
-    };
-    query?: never;
-    url: '/api/v1/admin/relays/{relay_id}/reconnect';
-};
-
-export type ReconnectRelayErrors = {
-    400: ErrorEnvelope;
-    404: ErrorEnvelope;
-};
-
-export type ReconnectRelayError = ReconnectRelayErrors[keyof ReconnectRelayErrors];
-
-export type ReconnectRelayResponses = {
-    /**
-     * Reconnect requested
-     */
-    200: ManagedRelay;
-};
-
-export type ReconnectRelayResponse = ReconnectRelayResponses[keyof ReconnectRelayResponses];
-
 export type ListRequestRecordsData = {
     body?: never;
     path?: never;
@@ -4648,6 +4347,36 @@ export type ResetPasswordResponses = {
 
 export type ResetPasswordResponse = ResetPasswordResponses[keyof ResetPasswordResponses];
 
+export type ListWorkersData = {
+    body?: never;
+    path?: never;
+    query?: {
+        first?: number;
+        rows?: number;
+    };
+    url: '/api/v1/admin/workers';
+};
+
+export type ListWorkersErrors = {
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Administrator access required
+     */
+    403: unknown;
+};
+
+export type ListWorkersResponses = {
+    /**
+     * Workers registered against this database
+     */
+    200: WorkerListResponse;
+};
+
+export type ListWorkersResponse = ListWorkersResponses[keyof ListWorkersResponses];
+
 export type AuthLoginData = {
     body: LoginRequest;
     path?: never;
@@ -5164,38 +4893,6 @@ export type SetEndpointSettingResponses = {
 
 export type SetEndpointSettingResponse = SetEndpointSettingResponses[keyof SetEndpointSettingResponses];
 
-export type GetLlmReviewSettingData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/settings/llm-review';
-};
-
-export type GetLlmReviewSettingResponses = {
-    /**
-     * LLM review settings
-     */
-    200: LlmReviewSettings;
-};
-
-export type GetLlmReviewSettingResponse = GetLlmReviewSettingResponses[keyof GetLlmReviewSettingResponses];
-
-export type SetLlmReviewSettingData = {
-    body: LlmReviewSettings;
-    path?: never;
-    query?: never;
-    url: '/api/v1/settings/llm-review';
-};
-
-export type SetLlmReviewSettingResponses = {
-    /**
-     * Updated LLM review settings
-     */
-    200: LlmReviewSettings;
-};
-
-export type SetLlmReviewSettingResponse = SetLlmReviewSettingResponses[keyof SetLlmReviewSettingResponses];
-
 export type GetModelRouteWhitelistData = {
     body?: never;
     path?: never;
@@ -5426,6 +5123,38 @@ export type SetRequestContentLoggingResponses = {
 };
 
 export type SetRequestContentLoggingResponse = SetRequestContentLoggingResponses[keyof SetRequestContentLoggingResponses];
+
+export type GetSharedValkeyData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/settings/shared-valkey';
+};
+
+export type GetSharedValkeyResponses = {
+    /**
+     * Shared Valkey settings; the URL is masked and the desired/applied revisions expose restart status
+     */
+    200: SharedValkeySettingsResponse;
+};
+
+export type GetSharedValkeyResponse = GetSharedValkeyResponses[keyof GetSharedValkeyResponses];
+
+export type SetSharedValkeyData = {
+    body: SharedValkeySettingsRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/settings/shared-valkey';
+};
+
+export type SetSharedValkeyResponses = {
+    /**
+     * Persisted shared Valkey settings; every running worker stays on its applied revision until it restarts
+     */
+    200: SharedValkeySettingsResponse;
+};
+
+export type SetSharedValkeyResponse = SetSharedValkeyResponses[keyof SetSharedValkeyResponses];
 
 export type GetStreamDeltaBatchingData = {
     body?: never;

@@ -457,7 +457,6 @@ async fn proxy_request_with_options(options: ProxyRequestOptions) -> Response {
             worker: selection.sender.clone(),
             queued_bytes: 0,
             response_started: false,
-            awaiting_approval: false,
         },
     );
     spawn_response_pump(

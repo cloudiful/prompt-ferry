@@ -303,15 +303,70 @@ async fn run_integrated(
 
     // Every listener was reserved above, so the relay serves on exactly the
     // addresses the worker was told about.
-    let relay = relay::run_with_listeners(
+    //
+    // The relay and the worker share one shutdown: whichever half ends first
+    // asks the other one to stop, so the integrated role never keeps a half
+    // running that lost its partner.
+    let (relay_stop_tx, relay_stop_rx) = tokio::sync::watch::channel(false);
+    let relay = relay::run_with_listeners_and_shutdown(
         relay_config,
         public.into_listener()?,
         worker_bridge.into_listener()?,
         relay_admin.into_listener()?,
+        Some(relay_stop_rx),
     );
     report_worker_admin_ready(startup, Some(relay_admin_url), None);
-    tokio::try_join!(relay, worker::run_embedded(worker_config))?;
-    Ok(())
+    tokio::pin!(relay);
+    let (worker_stop_tx, worker_stop_rx) =
+        tokio::sync::watch::channel(worker::ExternalStop::Graceful);
+    let worker = worker::run_embedded_with_shutdown(worker_config, Some(worker_stop_rx));
+    tokio::pin!(worker);
+    let outcome = tokio::select! {
+        result = &mut worker => IntegratedOutcome::Worker(result),
+        result = &mut relay => IntegratedOutcome::Relay(result),
+    };
+    match outcome {
+        IntegratedOutcome::Worker(result) => {
+            // The worker stopped: the integrated relay stops with it.
+            let _ = relay_stop_tx.send_replace(true);
+            let relay_result = relay.await;
+            result?;
+            relay_result?;
+            Ok(())
+        }
+        IntegratedOutcome::Relay(result) => {
+            // The relay stopped or failed: the worker is asked to stop as
+            // well, so a healthy worker never keeps running next to a relay
+            // that is gone. A failed relay stops the worker fail closed,
+            // because the accepted work cannot reach it any more.
+            let stop = worker_stop_for_relay(result.is_err());
+            let _ = worker_stop_tx.send_replace(stop);
+            let worker_result = worker.await;
+            // The failure of the relay is the failure of the integrated role.
+            result?;
+            worker_result?;
+            Ok(())
+        }
+    }
+}
+
+/// Which half of the integrated role stopped first.
+enum IntegratedOutcome {
+    Worker(anyhow::Result<()>),
+    Relay(anyhow::Result<()>),
+}
+
+/// The stop signal the worker receives when the relay half ended first.
+///
+/// A failed relay leaves the worker without a bridge: the accepted work
+/// cannot reach the relay any more, so it is cancelled instead of drained.
+/// A relay that stopped cleanly leaves the worker a graceful drain.
+fn worker_stop_for_relay(relay_failed: bool) -> worker::ExternalStop {
+    if relay_failed {
+        worker::ExternalStop::FailClosed
+    } else {
+        worker::ExternalStop::Graceful
+    }
 }
 
 /// Report a detectable mismatch between the integrated halves' configured

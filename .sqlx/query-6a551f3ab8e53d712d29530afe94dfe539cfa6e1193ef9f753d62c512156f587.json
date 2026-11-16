@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Persist a shared setting row with its revision.\n--\n-- The write happens inside the caller's transaction, so the advisory lock\n-- taken there covers the read of the previous revision and this write.\ninsert into worker_settings (setting_key, setting_value, updated_at)\nvalues ($1, $2::jsonb, now())\non conflict (setting_key) do update set\n  setting_value = excluded.setting_value,\n  updated_at = now()\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6a551f3ab8e53d712d29530afe94dfe539cfa6e1193ef9f753d62c512156f587"
+}

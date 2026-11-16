@@ -9,11 +9,11 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{
-    ApprovalPending, BridgeMessage, BridgeRequestCancel, BridgeRequestChunk, BridgeRequestEnd,
-    BridgeRequestStart, ConfigSnapshot, McpRequestCancel, McpRequestChunk, McpRequestEnd,
-    McpRequestStart, McpResponseChunk, McpResponseEnd, McpResponseStart,
-    RealtimeClientEventMessage, RealtimeServerEventMessage, RealtimeSessionClose,
-    RealtimeSessionStart, ResponseChunk, ResponseEnd, ResponseError, ResponseStart,
+    BridgeMessage, BridgeRequestCancel, BridgeRequestChunk, BridgeRequestEnd, BridgeRequestStart,
+    ConfigSnapshot, McpRequestCancel, McpRequestChunk, McpRequestEnd, McpRequestStart,
+    McpResponseChunk, McpResponseEnd, McpResponseStart, RealtimeClientEventMessage,
+    RealtimeServerEventMessage, RealtimeSessionClose, RealtimeSessionStart, ResponseChunk,
+    ResponseEnd, ResponseError, ResponseStart,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -22,7 +22,6 @@ enum WirePayload {
     RequestChunk(BridgeRequestChunk),
     RequestEnd(BridgeRequestEnd),
     RequestCancel(BridgeRequestCancel),
-    ApprovalPending(ApprovalPending),
     RealtimeSessionStart(RealtimeSessionStart),
     RealtimeClientEvent(RealtimeClientEventMessage),
     RealtimeServerEvent(RealtimeServerEventMessage),
@@ -50,7 +49,6 @@ impl From<&BridgeMessage> for WirePayload {
             BridgeMessage::RequestChunk(value) => Self::RequestChunk(value.clone()),
             BridgeMessage::RequestEnd(value) => Self::RequestEnd(value.clone()),
             BridgeMessage::RequestCancel(value) => Self::RequestCancel(value.clone()),
-            BridgeMessage::ApprovalPending(value) => Self::ApprovalPending(value.clone()),
             BridgeMessage::RealtimeSessionStart(value) => Self::RealtimeSessionStart(value.clone()),
             BridgeMessage::RealtimeClientEvent(value) => Self::RealtimeClientEvent(value.clone()),
             BridgeMessage::RealtimeServerEvent(value) => Self::RealtimeServerEvent(value.clone()),
@@ -80,7 +78,6 @@ impl WirePayload {
             Self::RequestChunk(value) => BridgeMessage::RequestChunk(value),
             Self::RequestEnd(value) => BridgeMessage::RequestEnd(value),
             Self::RequestCancel(value) => BridgeMessage::RequestCancel(value),
-            Self::ApprovalPending(value) => BridgeMessage::ApprovalPending(value),
             Self::RealtimeSessionStart(value) => BridgeMessage::RealtimeSessionStart(value),
             Self::RealtimeClientEvent(value) => BridgeMessage::RealtimeClientEvent(value),
             Self::RealtimeServerEvent(value) => BridgeMessage::RealtimeServerEvent(value),

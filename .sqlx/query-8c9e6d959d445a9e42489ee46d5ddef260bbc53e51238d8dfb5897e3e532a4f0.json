@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Count the live rows that already own a worker identity.\n--\n-- A live row of another incarnation is a collision: the identity is taken and\n-- must not be replaced by a second live process.\nselect count(*)::bigint as live_count\nfrom workers\nwhere worker_id = $1\n  and stopped_at is null\n  and last_heartbeat_at >= now() - ($2::bigint * interval '1 second')\n  and incarnation <> $3\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "live_count",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8c9e6d959d445a9e42489ee46d5ddef260bbc53e51238d8dfb5897e3e532a4f0"
+}

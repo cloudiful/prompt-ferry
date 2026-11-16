@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update workers\nset stopped_at = now(),\n    last_heartbeat_at = now()\nwhere worker_id = $1\n  and incarnation = $2\n  and stopped_at is null\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4c472a0c9bfb983cefb9f90920076d87cb3794abdfe1682d67c18cb0da5c56b0"
+}

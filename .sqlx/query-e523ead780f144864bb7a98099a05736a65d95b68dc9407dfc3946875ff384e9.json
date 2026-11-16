@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Replace the restorable settings rows.\n--\n-- The internal coordination rows are kept: the snapshot version counter\n-- belongs to the running deployment and an import must never reset it.\ndelete from worker_settings\nwhere setting_key <> all($1)\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e523ead780f144864bb7a98099a05736a65d95b68dc9407dfc3946875ff384e9"
+}

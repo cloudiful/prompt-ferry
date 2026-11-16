@@ -6,7 +6,7 @@
 //! validation and then replaces the restorable domains inside a single
 //! backend transaction so a failure leaves no half-restored instance.
 //!
-//! Nothing here reads request/usage/billing/approval/session data, and no
+//! Nothing here reads request/usage/billing/session data, and no
 //! secret, passphrase, or archive byte is ever logged, echoed, or placed in a
 //! URL. The passphrase exists only inside the request scope.
 //!
@@ -30,14 +30,13 @@ use crate::relay_secrets::RelaySecretManager;
 
 /// The fixed set of restorable domains, in manifest order. Used to reject an
 /// archive whose manifest declares an unknown or missing domain.
-const DOMAIN_NAMES: [&str; 10] = [
+const DOMAIN_NAMES: [&str; 9] = [
     "users",
     "client_keys",
     "endpoints",
     "model_routes",
     "mcp_servers",
     "mcp_credentials",
-    "relays",
     "settings",
     "user_redaction_configs",
     "raw_object_store",

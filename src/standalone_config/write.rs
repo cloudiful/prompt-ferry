@@ -12,19 +12,10 @@ use crate::db::entities::sqlite::standalone_model_routes::{
 use crate::db::seaorm::SqliteNativeConnection;
 
 use super::{
-    ClientKeyConfig, EndpointApiKeyConfig, ManagedRelayConfig, ModelRouteConfig,
-    ModelRouteTargetConfig, ProviderEndpointConfig, Result, SettingConfig, StandaloneConfig,
-    StandaloneConfigError,
+    ClientKeyConfig, EndpointApiKeyConfig, ModelRouteConfig, ModelRouteTargetConfig,
+    ProviderEndpointConfig, Result, SettingConfig, StandaloneConfig, StandaloneConfigError,
 };
 use crate::relay_secrets::{EncryptedSecretEnvelope, RelaySecretManager};
-
-pub(crate) struct EncryptedRelay {
-    relay: ManagedRelayConfig,
-    relay_ca: Option<EncryptedSecretEnvelope>,
-    client_cert: Option<EncryptedSecretEnvelope>,
-    client_key: Option<EncryptedSecretEnvelope>,
-    bridge_encryption_key: Option<EncryptedSecretEnvelope>,
-}
 
 pub(crate) struct EncryptedEndpoint {
     pub(super) endpoint: ProviderEndpointConfig,
@@ -49,7 +40,6 @@ pub(crate) struct EncryptedClientKey {
 }
 
 pub(crate) struct EncryptedConfig {
-    pub(crate) relays: Vec<EncryptedRelay>,
     pub(crate) endpoints: Vec<EncryptedEndpoint>,
     routes: Vec<EncryptedRoute>,
     pub(crate) client_keys: Vec<EncryptedClientKey>,
@@ -62,22 +52,6 @@ impl EncryptedConfig {
         snapshot: &StandaloneConfig,
     ) -> Result<Self> {
         Ok(Self {
-            relays: snapshot
-                .relays
-                .iter()
-                .map(|relay| {
-                    Ok(EncryptedRelay {
-                        relay: relay.clone(),
-                        relay_ca: encrypt_optional(manager, relay.relay_ca_pem.as_deref())?,
-                        client_cert: encrypt_optional(manager, relay.client_cert_pem.as_deref())?,
-                        client_key: encrypt_optional(manager, relay.client_key_pem.as_deref())?,
-                        bridge_encryption_key: encrypt_optional(
-                            manager,
-                            relay.bridge_encryption_key.as_deref(),
-                        )?,
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?,
             endpoints: snapshot
                 .endpoints
                 .iter()
@@ -164,9 +138,6 @@ pub(crate) async fn delete_all(transaction: &mut sqlx::Transaction<'_, Sqlite>) 
     standalone_query!("src/sql/standalone/delete_endpoints.sql")
         .execute(&mut **transaction)
         .await?;
-    standalone_query!("src/sql/standalone/delete_relays.sql")
-        .execute(&mut **transaction)
-        .await?;
     standalone_query!("src/sql/standalone/delete_settings.sql")
         .execute(&mut **transaction)
         .await?;
@@ -177,9 +148,6 @@ pub(crate) async fn insert_all(
     transaction: &mut sqlx::Transaction<'_, Sqlite>,
     config: &EncryptedConfig,
 ) -> Result<()> {
-    for relay in &config.relays {
-        insert_relay(transaction, relay).await?;
-    }
     for endpoint in &config.endpoints {
         insert_endpoint(transaction, endpoint).await?;
     }
@@ -197,41 +165,6 @@ pub(crate) async fn insert_all(
             .execute(&mut **transaction)
             .await?;
     }
-    Ok(())
-}
-
-pub(crate) async fn insert_relay(
-    transaction: &mut sqlx::Transaction<'_, Sqlite>,
-    relay: &EncryptedRelay,
-) -> Result<()> {
-    let query = standalone_query!("src/sql/standalone/save_relay.sql");
-    query
-        .bind(relay.relay.relay_id.to_string())
-        .bind(&relay.relay.name)
-        .bind(&relay.relay.relay_url)
-        .bind(bool_i64(relay.relay.enabled))
-        .bind(relay.relay.tls_mode.as_str())
-        .bind(relay.relay.bridge_encryption_mode.as_str())
-        .bind(envelope_part(&relay.relay_ca, EnvelopePart::Ciphertext))
-        .bind(envelope_part(&relay.relay_ca, EnvelopePart::Nonce))
-        .bind(envelope_version(&relay.relay_ca))
-        .bind(envelope_part(&relay.client_cert, EnvelopePart::Ciphertext))
-        .bind(envelope_part(&relay.client_cert, EnvelopePart::Nonce))
-        .bind(envelope_version(&relay.client_cert))
-        .bind(envelope_part(&relay.client_key, EnvelopePart::Ciphertext))
-        .bind(envelope_part(&relay.client_key, EnvelopePart::Nonce))
-        .bind(envelope_version(&relay.client_key))
-        .bind(envelope_part(
-            &relay.bridge_encryption_key,
-            EnvelopePart::Ciphertext,
-        ))
-        .bind(envelope_part(
-            &relay.bridge_encryption_key,
-            EnvelopePart::Nonce,
-        ))
-        .bind(envelope_version(&relay.bridge_encryption_key))
-        .execute(&mut **transaction)
-        .await?;
     Ok(())
 }
 

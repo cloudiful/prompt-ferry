@@ -90,7 +90,6 @@ fn opencode_go_request() -> BufferedBridgeRequest {
         path: "/v1/responses".to_string(),
         headers: Vec::new(),
         body: br#"{"model":"opencode-go","input":"ping"}"#.to_vec(),
-        request_deadline_unix_ms: 0,
         user_id: Some(1),
         client_key_hash: Some("client-key".to_string()),
         request_user_agent: None,

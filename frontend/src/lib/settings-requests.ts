@@ -1,14 +1,12 @@
 /**
- * The admin Requests settings tab: four reads, four guarded writes and the
+ * The admin Requests settings tab: three reads, three guarded writes and the
  * autosave schedule that decides when a write is owed.
  *
  * The tab has no Save button. Every control edit arms a per-form debounce, and
  * the flush claims that form's resource key through the shared async-action
- * guard. The two retention controls share one key because the server keeps them
- * in one record: only one of them may be in flight, and the form that lost the
- * race retries once the key is released rather than spinning.
+ * guard.
  *
- * TanStack Query owns the four server reads; the native form owns the four
+ * TanStack Query owns the three server reads; the native form owns the three
  * editable drafts. A read applies to a form only while that form still matches
  * its last accepted value, so a response that lands after an edit can never
  * revert the newer draft. The autosave and the in-memory handoff live inside
@@ -23,7 +21,6 @@ import type {
   MeResponse,
   ModelRouteWhitelistResponse,
   RequestContentLoggingResponse,
-  UsageRetentionSettings,
 } from '@/generated/admin-api'
 import {
   getModelRouteWhitelistOptions,
@@ -32,12 +29,9 @@ import {
   getRequestContentLoggingQueryKey,
   getStreamDeltaBatchingOptions,
   getStreamDeltaBatchingQueryKey,
-  getUsageRetentionOptions,
-  getUsageRetentionQueryKey,
   setModelRouteWhitelistMutation,
   setRequestContentLoggingMutation,
   setStreamDeltaBatchingMutation,
-  setUsageRetentionMutation,
 } from '@/generated/admin-api/@tanstack/react-query.gen'
 import {
   streamDeltaBatchingFormToRequest,
@@ -57,12 +51,9 @@ import {
   createModelRouteWhitelistForm,
   createRequestContentLoggingForm,
   createStreamDeltaBatchingForm,
-  createUsageRetentionForm,
   mergeModelRouteWhitelistResponse,
   mergeRequestContentLoggingResponse,
   mergeStreamDeltaBatchingResponse,
-  mergeUsageRetentionResponse,
-  mirrorSharedRawRetention,
   settingsSnapshot,
   type ModelRouteWhitelistForm,
 } from './settings-requests-model'
@@ -75,7 +66,6 @@ import {
 /** The debounce each form's autosave uses, in milliseconds. */
 export const SETTINGS_AUTOSAVE_DELAYS: Readonly<Record<SettingForm, number>> = {
   requestContentLogging: 250,
-  usageRetention: 250,
   streamDeltaBatching: 300,
   modelRouteWhitelist: 150,
 }
@@ -115,7 +105,6 @@ export function isRetiredEpochError(cause: unknown): boolean {
 
 export type SettingsRequestsValues = {
   requestContentLogging: RequestContentLoggingResponse
-  usageRetention: UsageRetentionSettings
   streamDeltaBatching: StreamDeltaBatchingForm
   modelRouteWhitelist: ModelRouteWhitelistForm
 }
@@ -137,7 +126,6 @@ let retainedDraft: RetainedRequestsDraft | null = null
 function createValues(): SettingsRequestsValues {
   return {
     requestContentLogging: createRequestContentLoggingForm(),
-    usageRetention: createUsageRetentionForm(),
     streamDeltaBatching: createStreamDeltaBatchingForm(),
     modelRouteWhitelist: createModelRouteWhitelistForm(),
   }
@@ -150,7 +138,6 @@ function cloneValues(values: SettingsRequestsValues): SettingsRequestsValues {
 function snapshotsOf(values: SettingsRequestsValues): Snapshots {
   return {
     requestContentLogging: settingsSnapshot(values.requestContentLogging),
-    usageRetention: settingsSnapshot(values.usageRetention),
     streamDeltaBatching: settingsSnapshot(values.streamDeltaBatching),
     modelRouteWhitelist: settingsSnapshot(values.modelRouteWhitelist),
   }
@@ -159,7 +146,6 @@ function snapshotsOf(values: SettingsRequestsValues): Snapshots {
 function emptyFlags(): FormFlags {
   return {
     requestContentLogging: false,
-    usageRetention: false,
     streamDeltaBatching: false,
     modelRouteWhitelist: false,
   }
@@ -254,11 +240,6 @@ export function useSettingsRequests() {
     enabled: identityKey !== '',
     staleTime: Number.POSITIVE_INFINITY,
   })
-  const usageRetentionQuery = useQuery({
-    ...getUsageRetentionOptions(),
-    enabled: identityKey !== '',
-    staleTime: Number.POSITIVE_INFINITY,
-  })
   const streamDeltaBatchingQuery = useQuery({
     ...getStreamDeltaBatchingOptions(),
     enabled: identityKey !== '',
@@ -273,7 +254,6 @@ export function useSettingsRequests() {
   const requestContentLoggingMutation = useMutation(
     setRequestContentLoggingMutation(),
   )
-  const usageRetentionMutation = useMutation(setUsageRetentionMutation())
   const streamDeltaBatchingMutation = useMutation(
     setStreamDeltaBatchingMutation(),
   )
@@ -283,7 +263,6 @@ export function useSettingsRequests() {
 
   const queries = [
     requestContentLoggingQuery,
-    usageRetentionQuery,
     streamDeltaBatchingQuery,
     modelRouteWhitelistQuery,
   ]
@@ -295,8 +274,6 @@ export function useSettingsRequests() {
     requestContentLogging:
       settingsSnapshot(values.requestContentLogging) !==
       saved.requestContentLogging,
-    usageRetention:
-      settingsSnapshot(values.usageRetention) !== saved.usageRetention,
     streamDeltaBatching:
       settingsSnapshot(values.streamDeltaBatching) !==
       saved.streamDeltaBatching,
@@ -337,11 +314,6 @@ export function useSettingsRequests() {
       RequestContentLoggingResponse | undefined
     if (data) applyRead('requestContentLogging', data)
   }, [requestContentLoggingQuery.data])
-
-  useEffect(() => {
-    const data = usageRetentionQuery.data as UsageRetentionSettings | undefined
-    if (data) applyRead('usageRetention', data)
-  }, [usageRetentionQuery.data])
 
   useEffect(() => {
     const data = streamDeltaBatchingQuery.data
@@ -391,10 +363,6 @@ export function useSettingsRequests() {
         return requestContentLoggingMutation.mutateAsync({
           body: submitted as RequestContentLoggingResponse,
         })
-      case 'usageRetention':
-        return usageRetentionMutation.mutateAsync({
-          body: submitted as UsageRetentionSettings,
-        })
       case 'streamDeltaBatching':
         return streamDeltaBatchingMutation.mutateAsync({
           body: streamDeltaBatchingFormToRequest(
@@ -412,7 +380,6 @@ export function useSettingsRequests() {
     formKey: SettingForm,
     submitted: SettingsRequestsValues[SettingForm],
     response: unknown,
-    sharedRawRetention: number | undefined,
   ): void {
     const latest = valuesRef.current
     switch (formKey) {
@@ -426,38 +393,8 @@ export function useSettingsRequests() {
             accepted,
           ),
         )
-        setFormValue(
-          'usageRetention',
-          mirrorSharedRawRetention(
-            latest.usageRetention,
-            sharedRawRetention,
-            accepted.raw_retention_days,
-          ),
-        )
         setSavedValue('requestContentLogging', submitted)
         queryClient.setQueryData(getRequestContentLoggingQueryKey(), accepted)
-        break
-      }
-      case 'usageRetention': {
-        const accepted = response as UsageRetentionSettings
-        setFormValue(
-          'usageRetention',
-          mergeUsageRetentionResponse(
-            latest.usageRetention,
-            submitted as UsageRetentionSettings,
-            accepted,
-          ),
-        )
-        setFormValue(
-          'requestContentLogging',
-          mirrorSharedRawRetention(
-            latest.requestContentLogging,
-            sharedRawRetention,
-            accepted.raw_retention_days ?? sharedRawRetention,
-          ),
-        )
-        setSavedValue('usageRetention', submitted)
-        queryClient.setQueryData(getUsageRetentionQueryKey(), accepted)
         break
       }
       case 'streamDeltaBatching': {
@@ -525,8 +462,6 @@ export function useSettingsRequests() {
     }
     if (snapshot === savedRef.current[formKey]) return
 
-    const sharedRawRetention =
-      valuesRef.current.usageRetention.raw_retention_days
     savingRef.current[formKey] = true
     inFlightRef.current[formKey] = snapshot
     try {
@@ -535,7 +470,7 @@ export function useSettingsRequests() {
         async () => {
           const response = await dispatchMutation(formKey, submitted)
           if (isRetired()) return
-          applySaveResponse(formKey, submitted, response, sharedRawRetention)
+          applySaveResponse(formKey, submitted, response)
         },
         formKey,
       )
@@ -643,7 +578,7 @@ export function useSettingsRequests() {
   }, [])
 
   /**
-   * The manual refresh of the four settings reads.
+   * The manual refresh of the three settings reads.
    *
    * The group stays pending until every parallel read settled, so a failure
    * never releases the indicator while another read still runs. A failure of
@@ -663,10 +598,6 @@ export function useSettingsRequests() {
       const settled = await Promise.allSettled([
         queryClient.fetchQuery({
           ...getRequestContentLoggingOptions(),
-          staleTime: 0,
-        }),
-        queryClient.fetchQuery({
-          ...getUsageRetentionOptions(),
           staleTime: 0,
         }),
         queryClient.fetchQuery({

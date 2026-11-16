@@ -14,7 +14,7 @@ use super::domains::{SecretRecovery, SnapshotDomains};
 /// Version of the snapshot/manifest payload shape. Bumped whenever a domain
 /// record gains an incompatible meaning so old archives are rejected instead
 /// of being misread.
-pub const SNAPSHOT_FORMAT_VERSION: u16 = 1;
+pub const SNAPSHOT_FORMAT_VERSION: u16 = 2;
 
 /// Storage backend a snapshot was read from. Import only accepts a matching
 /// backend so backend-specific secret wrapping is never silently destroyed.
@@ -152,20 +152,6 @@ impl ConfigSnapshot {
                 name: "mcp_credentials".to_string(),
                 records: self.domains.mcp_credentials.len(),
                 unrecoverable_secrets: 0,
-            },
-            SnapshotDomainSummary {
-                name: "relays".to_string(),
-                records: self.domains.relays.len(),
-                unrecoverable_secrets: self
-                    .domains
-                    .relays
-                    .iter()
-                    .filter(|relay| {
-                        relay.tls_mode != "off" && relay.client_key_pem.is_none()
-                            || relay.bridge_encryption_mode == "required"
-                                && relay.bridge_encryption_key.is_none()
-                    })
-                    .count(),
             },
             SnapshotDomainSummary {
                 name: "settings".to_string(),

@@ -33,6 +33,12 @@ pub fn read_app_config() -> Result<AppConfig, std::io::Error> {
     if let Some(database_url) = database_url_from_env() {
         app_config.worker.database_url = database_url;
     }
+    // The registry identity is resolved from the configured bind before any
+    // listener reservation replaces it with an ephemeral address, so a
+    // restart keeps the same Workers row.
+    if app_config.worker.worker_identity.trim().is_empty() {
+        app_config.worker.worker_identity = app_config.worker.resolved_worker_identity();
+    }
     // The host-local overlay is applied last: it is the writable surface the
     // relay control plane owns, so it decides the keys it defines and leaves
     // everything else to the main configuration above.

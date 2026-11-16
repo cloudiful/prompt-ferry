@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, queryOptions, type UseMutationOptions } from '@tanstack/react-query';
 
 import { client } from '../client.gen';
-import { approveApproval, authLogin, authLogout, authMe, billingChargeDetail, billingSummary, bridgeStatus, clearRequestRecords, configExportMetadata, createBillingPriceRule, createClientKey, createEndpoint, createMcpServer, createModelRoute, createRelay, createUser, deleteBillingPriceRule, deleteClientKey, deleteConversationEndpointOverride, deleteEndpoint, deleteMcpServer, deleteModelRoute, deleteRelay, deleteUser, disconnectMcpOauth, endpointModels, exportBilling, exportConfig, getApproval, getCacheAlertSetting, getConversationEndpointOverride, getEndpointSetting, getLlmReviewSetting, getMcpCatalog, getMcpOauthStatus, getModelRouteWhitelist, getRawObjectStore, getRedactionSetting, getRelay, getRelayIpWhitelist, getRequestContentLogging, getStreamDeltaBatching, getUsageRetention, importConfig, listApprovals, listBillingCharges, listBillingPriceRules, listClientKeys, listConfigAudit, listEndpoints, listMcpProviders, listMcpServers, listModelRoutes, listRedactionCustomStrings, listRelays, listRequestRecords, listUserOptions, listUsers, mcpOauthCallback, meCreateClientKey, meDeleteClientKey, meListClientKeys, meListModels, meUpdateClientKey, oauthBrowserComplete, oauthBrowserStart, oauthClear, oauthDevicePoll, oauthDeviceStart, oauthRefresh, oauthStatus, type Options, organizationUsage, patchBillingPriceRule, previewConfigImport, previewRedaction, pruneRequestRecords, quotaInference, quotaKeyObservationHistory, quotaKeyObservationTrend, reconnectRelay, refreshMcpOauth, rejectApproval, relayAuthLogin, relayAuthLogout, relayAuthMe, relayGetSettings, relayHost, relayRequestRestart, relaySetHostRole, relaySetSettings, relayStatus, repriceBilling, requestRecordDetail, requestRecordFacets, requestRecordFull, requestRecordOverview, requestRecordResetSessionAffinity, requestRecordSeries, requestRecordSessionRouteOptions, requestRecordSummary, resetPassword, setCacheAlertSetting, setConversationEndpointOverride, setEndpointSetting, setLlmReviewSetting, setModelRouteWhitelist, setRawObjectStore, setRedactionSetting, setRelayIpWhitelist, setRequestContentLogging, setStreamDeltaBatching, setUsageRetention, startMcpOauth, testEndpoint, testMcpServer, testModelRoute, tokenPlanUsage, updateBillingPriceRule, updateClientKey, updateEndpoint, updateMcpServer, updateModelRoute, updateRelay, updateUser } from '../sdk.gen';
-import type { ApproveApprovalData, ApproveApprovalResponse, AuthLoginData, AuthLoginError, AuthLoginResponse, AuthLogoutData, AuthLogoutResponse, AuthMeData, AuthMeError, AuthMeResponse, BillingChargeDetailData, BillingChargeDetailResponse2, BillingSummaryData, BillingSummaryResponse2, BridgeStatusData, BridgeStatusResponse, ClearRequestRecordsData, ClearRequestRecordsResponse, ConfigExportMetadataData, ConfigExportMetadataResponse, CreateBillingPriceRuleData, CreateBillingPriceRuleResponse, CreateClientKeyData, CreateClientKeyError, CreateClientKeyResponse2, CreateEndpointData, CreateEndpointError, CreateEndpointResponse, CreateMcpServerData, CreateMcpServerResponse, CreateModelRouteData, CreateModelRouteResponse, CreateRelayData, CreateRelayError, CreateRelayResponse, CreateUserData, CreateUserError, CreateUserResponse, DeleteBillingPriceRuleData, DeleteBillingPriceRuleResponse, DeleteClientKeyData, DeleteClientKeyError, DeleteClientKeyResponse, DeleteConversationEndpointOverrideData, DeleteConversationEndpointOverrideError, DeleteConversationEndpointOverrideResponse, DeleteEndpointData, DeleteEndpointError, DeleteEndpointResponse, DeleteMcpServerData, DeleteMcpServerResponse, DeleteModelRouteData, DeleteModelRouteError, DeleteModelRouteResponse, DeleteRelayData, DeleteRelayError, DeleteRelayResponse, DeleteUserData, DeleteUserError, DeleteUserResponse, DisconnectMcpOauthData, DisconnectMcpOauthResponse, EndpointModelsData, EndpointModelsError, EndpointModelsResponse2, ExportBillingData, ExportBillingResponse, ExportConfigData, ExportConfigResponse, GetApprovalData, GetApprovalResponse, GetCacheAlertSettingData, GetCacheAlertSettingResponse, GetConversationEndpointOverrideData, GetConversationEndpointOverrideError, GetConversationEndpointOverrideResponse, GetEndpointSettingData, GetEndpointSettingResponse, GetLlmReviewSettingData, GetLlmReviewSettingResponse, GetMcpCatalogData, GetMcpCatalogResponse, GetMcpOauthStatusData, GetMcpOauthStatusResponse, GetModelRouteWhitelistData, GetModelRouteWhitelistResponse, GetRawObjectStoreData, GetRawObjectStoreResponse, GetRedactionSettingData, GetRedactionSettingResponse, GetRelayData, GetRelayError, GetRelayIpWhitelistData, GetRelayIpWhitelistResponse, GetRelayResponse, GetRequestContentLoggingData, GetRequestContentLoggingResponse, GetStreamDeltaBatchingData, GetStreamDeltaBatchingResponse, GetUsageRetentionData, GetUsageRetentionResponse, ImportConfigData, ImportConfigResponse, ListApprovalsData, ListApprovalsResponse, ListBillingChargesData, ListBillingChargesResponse, ListBillingPriceRulesData, ListBillingPriceRulesResponse, ListClientKeysData, ListClientKeysError, ListClientKeysResponse, ListConfigAuditData, ListConfigAuditResponse, ListEndpointsData, ListEndpointsResponse, ListMcpProvidersData, ListMcpProvidersResponse, ListMcpServersData, ListMcpServersResponse, ListModelRoutesData, ListModelRoutesResponse, ListRedactionCustomStringsData, ListRedactionCustomStringsResponse, ListRelaysData, ListRelaysResponse, ListRequestRecordsData, ListRequestRecordsResponse, ListUserOptionsData, ListUserOptionsError, ListUserOptionsResponse, ListUsersData, ListUsersError, ListUsersResponse, McpOauthCallbackData, MeCreateClientKeyData, MeCreateClientKeyError, MeCreateClientKeyResponse, MeDeleteClientKeyData, MeDeleteClientKeyError, MeDeleteClientKeyResponse, MeListClientKeysData, MeListClientKeysError, MeListClientKeysResponse, MeListModelsData, MeListModelsError, MeListModelsResponse, MeUpdateClientKeyData, MeUpdateClientKeyError, MeUpdateClientKeyResponse, OauthBrowserCompleteData, OauthBrowserCompleteError, OauthBrowserCompleteResponse, OauthBrowserStartData, OauthBrowserStartError, OauthBrowserStartResponse, OauthClearData, OauthClearError, OauthClearResponse, OauthDevicePollData, OauthDevicePollError, OauthDevicePollResponse, OauthDeviceStartData, OauthDeviceStartError, OauthDeviceStartResponse, OauthRefreshData, OauthRefreshError, OauthRefreshResponse, OauthStatusData, OauthStatusError, OauthStatusResponse, OrganizationUsageData, OrganizationUsageError, OrganizationUsageResponse, PatchBillingPriceRuleData, PatchBillingPriceRuleResponse, PreviewConfigImportData, PreviewConfigImportResponse, PreviewRedactionData, PreviewRedactionResponse, PruneRequestRecordsData, PruneRequestRecordsResponse, QuotaInferenceData, QuotaInferenceError, QuotaInferenceResponse, QuotaKeyObservationHistoryData, QuotaKeyObservationHistoryError, QuotaKeyObservationHistoryResponse2, QuotaKeyObservationTrendData, QuotaKeyObservationTrendError, QuotaKeyObservationTrendResponse2, ReconnectRelayData, ReconnectRelayError, ReconnectRelayResponse, RefreshMcpOauthData, RefreshMcpOauthResponse, RejectApprovalData, RejectApprovalResponse, RelayAuthLoginData, RelayAuthLoginError, RelayAuthLoginResponse, RelayAuthLogoutData, RelayAuthLogoutResponse, RelayAuthMeData, RelayAuthMeResponse, RelayGetSettingsData, RelayGetSettingsError, RelayGetSettingsResponse, RelayHostData, RelayHostError, RelayHostResponse2, RelayRequestRestartData, RelayRequestRestartError, RelaySetHostRoleData, RelaySetHostRoleError, RelaySetHostRoleResponse, RelaySetSettingsData, RelaySetSettingsError, RelaySetSettingsResponse, RelayStatusData, RelayStatusError, RelayStatusResponse2, RepriceBillingData, RepriceBillingResponse, RequestRecordDetailData, RequestRecordDetailResponse, RequestRecordFacetsData, RequestRecordFacetsResponse, RequestRecordFullData, RequestRecordFullResponse2, RequestRecordOverviewData, RequestRecordOverviewResponse2, RequestRecordResetSessionAffinityData, RequestRecordResetSessionAffinityError, RequestRecordResetSessionAffinityResponse, RequestRecordSeriesData, RequestRecordSeriesResponse, RequestRecordSessionRouteOptionsData, RequestRecordSessionRouteOptionsResponse, RequestRecordSummaryData, RequestRecordSummaryResponse, ResetPasswordData, ResetPasswordError, ResetPasswordResponse, SetCacheAlertSettingData, SetCacheAlertSettingResponse, SetConversationEndpointOverrideData, SetConversationEndpointOverrideError, SetConversationEndpointOverrideResponse, SetEndpointSettingData, SetEndpointSettingResponse, SetLlmReviewSettingData, SetLlmReviewSettingResponse, SetModelRouteWhitelistData, SetModelRouteWhitelistResponse, SetRawObjectStoreData, SetRawObjectStoreResponse, SetRedactionSettingData, SetRedactionSettingResponse, SetRelayIpWhitelistData, SetRelayIpWhitelistResponse, SetRequestContentLoggingData, SetRequestContentLoggingResponse, SetStreamDeltaBatchingData, SetStreamDeltaBatchingResponse, SetUsageRetentionData, SetUsageRetentionResponse, StartMcpOauthData, StartMcpOauthResponse, TestEndpointData, TestEndpointError, TestEndpointResponse, TestMcpServerData, TestMcpServerResponse, TestModelRouteData, TestModelRouteResponse, TokenPlanUsageData, TokenPlanUsageResponse2, UpdateBillingPriceRuleData, UpdateBillingPriceRuleError, UpdateBillingPriceRuleResponse, UpdateClientKeyData, UpdateClientKeyError, UpdateClientKeyResponse, UpdateEndpointData, UpdateEndpointError, UpdateEndpointResponse, UpdateMcpServerData, UpdateMcpServerResponse, UpdateModelRouteData, UpdateModelRouteResponse, UpdateRelayData, UpdateRelayError, UpdateRelayResponse, UpdateUserData, UpdateUserError, UpdateUserResponse } from '../types.gen';
+import { authLogin, authLogout, authMe, billingChargeDetail, billingSummary, bridgeStatus, clearRequestRecords, configExportMetadata, createBillingPriceRule, createClientKey, createEndpoint, createMcpServer, createModelRoute, createUser, deleteBillingPriceRule, deleteClientKey, deleteConversationEndpointOverride, deleteEndpoint, deleteMcpServer, deleteModelRoute, deleteUser, disconnectMcpOauth, endpointModels, exportBilling, exportConfig, getCacheAlertSetting, getConversationEndpointOverride, getEndpointSetting, getMcpCatalog, getMcpOauthStatus, getModelRouteWhitelist, getRawObjectStore, getRedactionSetting, getRelayIpWhitelist, getRequestContentLogging, getSharedValkey, getStreamDeltaBatching, getUsageRetention, importConfig, listBillingCharges, listBillingPriceRules, listClientKeys, listConfigAudit, listEndpoints, listMcpProviders, listMcpServers, listModelRoutes, listRedactionCustomStrings, listRequestRecords, listUserOptions, listUsers, listWorkers, mcpOauthCallback, meCreateClientKey, meDeleteClientKey, meListClientKeys, meListModels, meUpdateClientKey, oauthBrowserComplete, oauthBrowserStart, oauthClear, oauthDevicePoll, oauthDeviceStart, oauthRefresh, oauthStatus, type Options, organizationUsage, patchBillingPriceRule, previewConfigImport, previewRedaction, pruneRequestRecords, quotaInference, quotaKeyObservationHistory, quotaKeyObservationTrend, refreshMcpOauth, relayAuthLogin, relayAuthLogout, relayAuthMe, relayGetSettings, relayHost, relayRequestRestart, relaySetHostRole, relaySetSettings, relayStatus, repriceBilling, requestRecordDetail, requestRecordFacets, requestRecordFull, requestRecordOverview, requestRecordResetSessionAffinity, requestRecordSeries, requestRecordSessionRouteOptions, requestRecordSummary, resetPassword, setCacheAlertSetting, setConversationEndpointOverride, setEndpointSetting, setModelRouteWhitelist, setRawObjectStore, setRedactionSetting, setRelayIpWhitelist, setRequestContentLogging, setSharedValkey, setStreamDeltaBatching, setUsageRetention, startMcpOauth, testEndpoint, testMcpServer, testModelRoute, tokenPlanUsage, updateBillingPriceRule, updateClientKey, updateEndpoint, updateMcpServer, updateModelRoute, updateUser } from '../sdk.gen';
+import type { AuthLoginData, AuthLoginError, AuthLoginResponse, AuthLogoutData, AuthLogoutResponse, AuthMeData, AuthMeError, AuthMeResponse, BillingChargeDetailData, BillingChargeDetailResponse2, BillingSummaryData, BillingSummaryResponse2, BridgeStatusData, BridgeStatusResponse, ClearRequestRecordsData, ClearRequestRecordsResponse, ConfigExportMetadataData, ConfigExportMetadataResponse, CreateBillingPriceRuleData, CreateBillingPriceRuleResponse, CreateClientKeyData, CreateClientKeyError, CreateClientKeyResponse2, CreateEndpointData, CreateEndpointError, CreateEndpointResponse, CreateMcpServerData, CreateMcpServerResponse, CreateModelRouteData, CreateModelRouteResponse, CreateUserData, CreateUserError, CreateUserResponse, DeleteBillingPriceRuleData, DeleteBillingPriceRuleResponse, DeleteClientKeyData, DeleteClientKeyError, DeleteClientKeyResponse, DeleteConversationEndpointOverrideData, DeleteConversationEndpointOverrideError, DeleteConversationEndpointOverrideResponse, DeleteEndpointData, DeleteEndpointError, DeleteEndpointResponse, DeleteMcpServerData, DeleteMcpServerResponse, DeleteModelRouteData, DeleteModelRouteError, DeleteModelRouteResponse, DeleteUserData, DeleteUserError, DeleteUserResponse, DisconnectMcpOauthData, DisconnectMcpOauthResponse, EndpointModelsData, EndpointModelsError, EndpointModelsResponse2, ExportBillingData, ExportBillingResponse, ExportConfigData, ExportConfigResponse, GetCacheAlertSettingData, GetCacheAlertSettingResponse, GetConversationEndpointOverrideData, GetConversationEndpointOverrideError, GetConversationEndpointOverrideResponse, GetEndpointSettingData, GetEndpointSettingResponse, GetMcpCatalogData, GetMcpCatalogResponse, GetMcpOauthStatusData, GetMcpOauthStatusResponse, GetModelRouteWhitelistData, GetModelRouteWhitelistResponse, GetRawObjectStoreData, GetRawObjectStoreResponse, GetRedactionSettingData, GetRedactionSettingResponse, GetRelayIpWhitelistData, GetRelayIpWhitelistResponse, GetRequestContentLoggingData, GetRequestContentLoggingResponse, GetSharedValkeyData, GetSharedValkeyResponse, GetStreamDeltaBatchingData, GetStreamDeltaBatchingResponse, GetUsageRetentionData, GetUsageRetentionResponse, ImportConfigData, ImportConfigResponse, ListBillingChargesData, ListBillingChargesResponse, ListBillingPriceRulesData, ListBillingPriceRulesResponse, ListClientKeysData, ListClientKeysError, ListClientKeysResponse, ListConfigAuditData, ListConfigAuditResponse, ListEndpointsData, ListEndpointsResponse, ListMcpProvidersData, ListMcpProvidersResponse, ListMcpServersData, ListMcpServersResponse, ListModelRoutesData, ListModelRoutesResponse, ListRedactionCustomStringsData, ListRedactionCustomStringsResponse, ListRequestRecordsData, ListRequestRecordsResponse, ListUserOptionsData, ListUserOptionsError, ListUserOptionsResponse, ListUsersData, ListUsersError, ListUsersResponse, ListWorkersData, ListWorkersResponse, McpOauthCallbackData, MeCreateClientKeyData, MeCreateClientKeyError, MeCreateClientKeyResponse, MeDeleteClientKeyData, MeDeleteClientKeyError, MeDeleteClientKeyResponse, MeListClientKeysData, MeListClientKeysError, MeListClientKeysResponse, MeListModelsData, MeListModelsError, MeListModelsResponse, MeUpdateClientKeyData, MeUpdateClientKeyError, MeUpdateClientKeyResponse, OauthBrowserCompleteData, OauthBrowserCompleteError, OauthBrowserCompleteResponse, OauthBrowserStartData, OauthBrowserStartError, OauthBrowserStartResponse, OauthClearData, OauthClearError, OauthClearResponse, OauthDevicePollData, OauthDevicePollError, OauthDevicePollResponse, OauthDeviceStartData, OauthDeviceStartError, OauthDeviceStartResponse, OauthRefreshData, OauthRefreshError, OauthRefreshResponse, OauthStatusData, OauthStatusError, OauthStatusResponse, OrganizationUsageData, OrganizationUsageError, OrganizationUsageResponse, PatchBillingPriceRuleData, PatchBillingPriceRuleResponse, PreviewConfigImportData, PreviewConfigImportResponse, PreviewRedactionData, PreviewRedactionResponse, PruneRequestRecordsData, PruneRequestRecordsResponse, QuotaInferenceData, QuotaInferenceError, QuotaInferenceResponse, QuotaKeyObservationHistoryData, QuotaKeyObservationHistoryError, QuotaKeyObservationHistoryResponse2, QuotaKeyObservationTrendData, QuotaKeyObservationTrendError, QuotaKeyObservationTrendResponse2, RefreshMcpOauthData, RefreshMcpOauthResponse, RelayAuthLoginData, RelayAuthLoginError, RelayAuthLoginResponse, RelayAuthLogoutData, RelayAuthLogoutResponse, RelayAuthMeData, RelayAuthMeResponse, RelayGetSettingsData, RelayGetSettingsError, RelayGetSettingsResponse, RelayHostData, RelayHostError, RelayHostResponse2, RelayRequestRestartData, RelayRequestRestartError, RelaySetHostRoleData, RelaySetHostRoleError, RelaySetHostRoleResponse, RelaySetSettingsData, RelaySetSettingsError, RelaySetSettingsResponse, RelayStatusData, RelayStatusError, RelayStatusResponse2, RepriceBillingData, RepriceBillingResponse, RequestRecordDetailData, RequestRecordDetailResponse, RequestRecordFacetsData, RequestRecordFacetsResponse, RequestRecordFullData, RequestRecordFullResponse2, RequestRecordOverviewData, RequestRecordOverviewResponse2, RequestRecordResetSessionAffinityData, RequestRecordResetSessionAffinityError, RequestRecordResetSessionAffinityResponse, RequestRecordSeriesData, RequestRecordSeriesResponse, RequestRecordSessionRouteOptionsData, RequestRecordSessionRouteOptionsResponse, RequestRecordSummaryData, RequestRecordSummaryResponse, ResetPasswordData, ResetPasswordError, ResetPasswordResponse, SetCacheAlertSettingData, SetCacheAlertSettingResponse, SetConversationEndpointOverrideData, SetConversationEndpointOverrideError, SetConversationEndpointOverrideResponse, SetEndpointSettingData, SetEndpointSettingResponse, SetModelRouteWhitelistData, SetModelRouteWhitelistResponse, SetRawObjectStoreData, SetRawObjectStoreResponse, SetRedactionSettingData, SetRedactionSettingResponse, SetRelayIpWhitelistData, SetRelayIpWhitelistResponse, SetRequestContentLoggingData, SetRequestContentLoggingResponse, SetSharedValkeyData, SetSharedValkeyResponse, SetStreamDeltaBatchingData, SetStreamDeltaBatchingResponse, SetUsageRetentionData, SetUsageRetentionResponse, StartMcpOauthData, StartMcpOauthResponse, TestEndpointData, TestEndpointError, TestEndpointResponse, TestMcpServerData, TestMcpServerResponse, TestModelRouteData, TestModelRouteResponse, TokenPlanUsageData, TokenPlanUsageResponse2, UpdateBillingPriceRuleData, UpdateBillingPriceRuleError, UpdateBillingPriceRuleResponse, UpdateClientKeyData, UpdateClientKeyError, UpdateClientKeyResponse, UpdateEndpointData, UpdateEndpointError, UpdateEndpointResponse, UpdateMcpServerData, UpdateMcpServerResponse, UpdateModelRouteData, UpdateModelRouteResponse, UpdateUserData, UpdateUserError, UpdateUserResponse } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -37,52 +37,6 @@ const createQueryKey = <TOptions extends Options>(id: string, options?: TOptions
         params.query = options.query;
     }
     return [params];
-};
-
-export const listApprovalsQueryKey = (options?: Options<ListApprovalsData>) => createQueryKey('listApprovals', options);
-
-export const listApprovalsOptions = (options?: Options<ListApprovalsData>) => queryOptions<ListApprovalsResponse, DefaultError, ListApprovalsResponse, ReturnType<typeof listApprovalsQueryKey>>({
-    queryFn: async ({ queryKey, signal }) => await listApprovals({
-        ...options,
-        ...queryKey[0],
-        signal,
-        throwOnError: true
-    }),
-    queryKey: listApprovalsQueryKey(options)
-});
-
-export const getApprovalQueryKey = (options: Options<GetApprovalData>) => createQueryKey('getApproval', options);
-
-export const getApprovalOptions = (options: Options<GetApprovalData>) => queryOptions<GetApprovalResponse, DefaultError, GetApprovalResponse, ReturnType<typeof getApprovalQueryKey>>({
-    queryFn: async ({ queryKey, signal }) => await getApproval({
-        ...options,
-        ...queryKey[0],
-        signal,
-        throwOnError: true
-    }),
-    queryKey: getApprovalQueryKey(options)
-});
-
-export const approveApprovalMutation = (options?: Partial<Options<ApproveApprovalData>>): UseMutationOptions<ApproveApprovalResponse, DefaultError, Options<ApproveApprovalData>> => {
-    const mutationOptions: UseMutationOptions<ApproveApprovalResponse, DefaultError, Options<ApproveApprovalData>> = {
-        mutationFn: async (fnOptions) => await approveApproval({
-            ...options,
-            ...fnOptions,
-            throwOnError: true
-        })
-    };
-    return mutationOptions;
-};
-
-export const rejectApprovalMutation = (options?: Partial<Options<RejectApprovalData>>): UseMutationOptions<RejectApprovalResponse, DefaultError, Options<RejectApprovalData>> => {
-    const mutationOptions: UseMutationOptions<RejectApprovalResponse, DefaultError, Options<RejectApprovalData>> = {
-        mutationFn: async (fnOptions) => await rejectApproval({
-            ...options,
-            ...fnOptions,
-            throwOnError: true
-        })
-    };
-    return mutationOptions;
 };
 
 export const listBillingChargesQueryKey = (options?: Options<ListBillingChargesData>) => createQueryKey('listBillingCharges', options);
@@ -689,74 +643,6 @@ export const updateModelRouteMutation = (options?: Partial<Options<UpdateModelRo
     return mutationOptions;
 };
 
-export const listRelaysQueryKey = (options?: Options<ListRelaysData>) => createQueryKey('listRelays', options);
-
-export const listRelaysOptions = (options?: Options<ListRelaysData>) => queryOptions<ListRelaysResponse, DefaultError, ListRelaysResponse, ReturnType<typeof listRelaysQueryKey>>({
-    queryFn: async ({ queryKey, signal }) => await listRelays({
-        ...options,
-        ...queryKey[0],
-        signal,
-        throwOnError: true
-    }),
-    queryKey: listRelaysQueryKey(options)
-});
-
-export const createRelayMutation = (options?: Partial<Options<CreateRelayData>>): UseMutationOptions<CreateRelayResponse, CreateRelayError, Options<CreateRelayData>> => {
-    const mutationOptions: UseMutationOptions<CreateRelayResponse, CreateRelayError, Options<CreateRelayData>> = {
-        mutationFn: async (fnOptions) => await createRelay({
-            ...options,
-            ...fnOptions,
-            throwOnError: true
-        })
-    };
-    return mutationOptions;
-};
-
-export const deleteRelayMutation = (options?: Partial<Options<DeleteRelayData>>): UseMutationOptions<DeleteRelayResponse, DeleteRelayError, Options<DeleteRelayData>> => {
-    const mutationOptions: UseMutationOptions<DeleteRelayResponse, DeleteRelayError, Options<DeleteRelayData>> = {
-        mutationFn: async (fnOptions) => await deleteRelay({
-            ...options,
-            ...fnOptions,
-            throwOnError: true
-        })
-    };
-    return mutationOptions;
-};
-
-export const getRelayQueryKey = (options: Options<GetRelayData>) => createQueryKey('getRelay', options);
-
-export const getRelayOptions = (options: Options<GetRelayData>) => queryOptions<GetRelayResponse, GetRelayError, GetRelayResponse, ReturnType<typeof getRelayQueryKey>>({
-    queryFn: async ({ queryKey, signal }) => await getRelay({
-        ...options,
-        ...queryKey[0],
-        signal,
-        throwOnError: true
-    }),
-    queryKey: getRelayQueryKey(options)
-});
-
-export const updateRelayMutation = (options?: Partial<Options<UpdateRelayData>>): UseMutationOptions<UpdateRelayResponse, UpdateRelayError, Options<UpdateRelayData>> => {
-    const mutationOptions: UseMutationOptions<UpdateRelayResponse, UpdateRelayError, Options<UpdateRelayData>> = {
-        mutationFn: async (fnOptions) => await updateRelay({
-            ...options,
-            ...fnOptions,
-            throwOnError: true
-        })
-    };
-    return mutationOptions;
-};
-
-export const reconnectRelayMutation = (options?: Partial<Options<ReconnectRelayData>>): UseMutationOptions<ReconnectRelayResponse, ReconnectRelayError, Options<ReconnectRelayData>> => {
-    const mutationOptions: UseMutationOptions<ReconnectRelayResponse, ReconnectRelayError, Options<ReconnectRelayData>> = {
-        mutationFn: async (fnOptions) => await reconnectRelay({
-            ...options,
-            ...fnOptions,
-            throwOnError: true
-        })
-    };
-    return mutationOptions;
-};
-
 export const listRequestRecordsQueryKey = (options?: Options<ListRequestRecordsData>) => createQueryKey('listRequestRecords', options);
 
 export const listRequestRecordsOptions = (options?: Options<ListRequestRecordsData>) => queryOptions<ListRequestRecordsResponse, DefaultError, ListRequestRecordsResponse, ReturnType<typeof listRequestRecordsQueryKey>>({
@@ -1158,6 +1044,18 @@ export const resetPasswordMutation = (options?: Partial<Options<ResetPasswordDat
     return mutationOptions;
 };
 
+export const listWorkersQueryKey = (options?: Options<ListWorkersData>) => createQueryKey('listWorkers', options);
+
+export const listWorkersOptions = (options?: Options<ListWorkersData>) => queryOptions<ListWorkersResponse, DefaultError, ListWorkersResponse, ReturnType<typeof listWorkersQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => await listWorkers({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true
+    }),
+    queryKey: listWorkersQueryKey(options)
+});
+
 export const authLoginMutation = (options?: Partial<Options<AuthLoginData>>): UseMutationOptions<AuthLoginResponse, AuthLoginError, Options<AuthLoginData>> => {
     const mutationOptions: UseMutationOptions<AuthLoginResponse, AuthLoginError, Options<AuthLoginData>> = {
         mutationFn: async (fnOptions) => await authLogin({
@@ -1410,29 +1308,6 @@ export const setEndpointSettingMutation = (options?: Partial<Options<SetEndpoint
     return mutationOptions;
 };
 
-export const getLlmReviewSettingQueryKey = (options?: Options<GetLlmReviewSettingData>) => createQueryKey('getLlmReviewSetting', options);
-
-export const getLlmReviewSettingOptions = (options?: Options<GetLlmReviewSettingData>) => queryOptions<GetLlmReviewSettingResponse, DefaultError, GetLlmReviewSettingResponse, ReturnType<typeof getLlmReviewSettingQueryKey>>({
-    queryFn: async ({ queryKey, signal }) => await getLlmReviewSetting({
-        ...options,
-        ...queryKey[0],
-        signal,
-        throwOnError: true
-    }),
-    queryKey: getLlmReviewSettingQueryKey(options)
-});
-
-export const setLlmReviewSettingMutation = (options?: Partial<Options<SetLlmReviewSettingData>>): UseMutationOptions<SetLlmReviewSettingResponse, DefaultError, Options<SetLlmReviewSettingData>> => {
-    const mutationOptions: UseMutationOptions<SetLlmReviewSettingResponse, DefaultError, Options<SetLlmReviewSettingData>> = {
-        mutationFn: async (fnOptions) => await setLlmReviewSetting({
-            ...options,
-            ...fnOptions,
-            throwOnError: true
-        })
-    };
-    return mutationOptions;
-};
-
 export const getModelRouteWhitelistQueryKey = (options?: Options<GetModelRouteWhitelistData>) => createQueryKey('getModelRouteWhitelist', options);
 
 export const getModelRouteWhitelistOptions = (options?: Options<GetModelRouteWhitelistData>) => queryOptions<GetModelRouteWhitelistResponse, DefaultError, GetModelRouteWhitelistResponse, ReturnType<typeof getModelRouteWhitelistQueryKey>>({
@@ -1563,6 +1438,29 @@ export const getRequestContentLoggingOptions = (options?: Options<GetRequestCont
 export const setRequestContentLoggingMutation = (options?: Partial<Options<SetRequestContentLoggingData>>): UseMutationOptions<SetRequestContentLoggingResponse, DefaultError, Options<SetRequestContentLoggingData>> => {
     const mutationOptions: UseMutationOptions<SetRequestContentLoggingResponse, DefaultError, Options<SetRequestContentLoggingData>> = {
         mutationFn: async (fnOptions) => await setRequestContentLogging({
+            ...options,
+            ...fnOptions,
+            throwOnError: true
+        })
+    };
+    return mutationOptions;
+};
+
+export const getSharedValkeyQueryKey = (options?: Options<GetSharedValkeyData>) => createQueryKey('getSharedValkey', options);
+
+export const getSharedValkeyOptions = (options?: Options<GetSharedValkeyData>) => queryOptions<GetSharedValkeyResponse, DefaultError, GetSharedValkeyResponse, ReturnType<typeof getSharedValkeyQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => await getSharedValkey({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true
+    }),
+    queryKey: getSharedValkeyQueryKey(options)
+});
+
+export const setSharedValkeyMutation = (options?: Partial<Options<SetSharedValkeyData>>): UseMutationOptions<SetSharedValkeyResponse, DefaultError, Options<SetSharedValkeyData>> => {
+    const mutationOptions: UseMutationOptions<SetSharedValkeyResponse, DefaultError, Options<SetSharedValkeyData>> = {
+        mutationFn: async (fnOptions) => await setSharedValkey({
             ...options,
             ...fnOptions,
             throwOnError: true

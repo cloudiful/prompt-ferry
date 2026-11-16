@@ -1,13 +1,15 @@
 use super::background_job::{
-    connect_coordinated_store, coordinated_scheduler, run_coordinated_scheduler, run_scheduler,
-    try_postgres_advisory_lease,
+    coordinated_scheduler, run_coordinated_scheduler, run_scheduler, try_postgres_advisory_lease,
 };
 use super::lifecycle::RuntimeControl;
+use crate::db;
 use crate::raw_payload_store::RawPayloadStore;
 use crate::worker_admin_types::UsageRetentionSettings;
-use crate::{config::WorkerConfig, db};
 use rand::RngExt;
-use scheduler::{InMemoryStateStore, Job, Schedule, Scheduler, SchedulerConfig, Task, TaskContext};
+use scheduler::{
+    InMemoryStateStore, Job, Schedule, Scheduler, SchedulerConfig, Task, TaskContext,
+    ValkeyCoordinatedStateStore,
+};
 use sqlx::PgPool;
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::RwLock, task::JoinHandle};
@@ -29,13 +31,14 @@ struct MaintenanceDependencies {
 const POSTGRES_MAINTENANCE_LOCK_KEY: i64 = 0x7066_6d61_696e_746e;
 
 pub(super) fn spawn(
-    config: &WorkerConfig,
+    shared_valkey: &crate::db::SharedValkeyConfig,
     pool: PgPool,
     retention: Arc<RwLock<UsageRetentionSettings>>,
     raw_store: Arc<RwLock<Option<Arc<RawPayloadStore>>>>,
     control: RuntimeControl,
+    coordinated_store: Option<ValkeyCoordinatedStateStore>,
 ) -> JoinHandle<()> {
-    let valkey_url = config.valkey_url.trim().to_string();
+    let valkey_url = shared_valkey.url_or_empty().trim().to_string();
     tokio::spawn(async move {
         let dependencies = Arc::new(MaintenanceDependencies {
             pool,
@@ -44,11 +47,10 @@ pub(super) fn spawn(
             postgres_coordination: valkey_url.is_empty(),
         });
 
-        if !wait_for_initial_delay(&control).await {
-            return;
-        }
-
         if valkey_url.is_empty() {
+            if !wait_for_initial_delay(&control).await {
+                return;
+            }
             if let Err(error) = run_once(&dependencies).await {
                 warn!(error = %error, "initial partition maintenance failed");
             }
@@ -56,9 +58,22 @@ pub(super) fn spawn(
             return;
         }
 
-        let Some(store) = connect_coordinated_store(&valkey_url).await else {
+        // The coordinated store is required: the readiness of the worker
+        // depends on it, so it is initialized before the worker starts serving
+        // and the job runs with exactly that store.
+        let Some(store) = coordinated_store else {
+            warn!(
+                category = "coordinated_store_unavailable",
+                capability = "maintenance_coordination",
+                "the coordinated maintenance store was not initialized; stopping the worker"
+            );
+            control.begin_fail_closed_shutdown();
             return;
         };
+
+        if !wait_for_initial_delay(&control).await {
+            return;
+        }
 
         if let Err(error) = run_once(&dependencies).await {
             warn!(error = %error, "initial partition maintenance failed");
@@ -78,6 +93,7 @@ pub(super) fn spawn(
                 capability = "maintenance_coordination",
                 "coordinated maintenance scheduler stopped; local scheduling is not safe"
             );
+            control.begin_fail_closed_shutdown();
         }
     })
 }
@@ -180,20 +196,6 @@ async fn run_once(dependencies: &MaintenanceDependencies) -> anyhow::Result<()> 
             "redaction session cleanup completed"
         ),
         Err(error) => warn!(error = %error, "redaction session cleanup failed"),
-    }
-    match db::run_approval_retention_maintenance(
-        &dependencies.pool,
-        i64::from(retention.approval_retention_days),
-    )
-    .await
-    {
-        Ok(Some(deleted)) => info!(
-            approval_rows_deleted = deleted,
-            approval_retention_days = retention.approval_retention_days,
-            "approval retention maintenance completed"
-        ),
-        Ok(None) => {}
-        Err(error) => warn!(error = %error, "approval retention maintenance failed"),
     }
     if let Some(lease) = postgres_lease.take() {
         lease.release().await?;

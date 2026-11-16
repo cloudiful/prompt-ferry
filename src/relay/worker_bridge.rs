@@ -1,7 +1,7 @@
 use crate::{
     auth::check_bearer,
     bridge_wire, ip_acl,
-    protocol::{ApprovalPending, BridgeMessage, ConfigSnapshot, ResponseError},
+    protocol::{BridgeMessage, ConfigSnapshot, ResponseError},
 };
 
 mod connection;
@@ -123,10 +123,13 @@ async fn handle_worker_socket(state: AppState, socket: WebSocket) {
     if last_worker_gone {
         // The relay is no longer serviceable. Drop the stale snapshot so
         // `/ready` flips red immediately and a managed key is never matched
-        // against routes from a worker that is gone.
+        // against routes from a worker that is gone. The version lock is held
+        // across the reset, so the reset cannot interleave with a snapshot
+        // that is applied at the same time.
+        let mut applied_version = state.inner.config_version.lock().await;
         state.inner.routes.lock().await.clear();
         *state.inner.relay_ip_policy.lock().await = ip_acl::CompiledRelayIpPolicy::default();
-        *state.inner.config_version.lock().await = None;
+        *applied_version = None;
     }
     warn!(
         category = "mcp_bridge_diag",
@@ -148,6 +151,21 @@ async fn handle_worker_socket(state: AppState, socket: WebSocket) {
 
 pub(super) async fn handle_config_snapshot(state: &AppState, snapshot: ConfigSnapshot) {
     let version = snapshot.version;
+    // Several workers publish snapshots for the same relay. The versions come
+    // from a shared database counter, so a snapshot that is not newer than the
+    // applied one is stale and must not undo it.
+    //
+    // The version check and the whole apply are one serialized section: the
+    // configuration version lock is held while the routes, the IP policy and
+    // the version itself are replaced, so two concurrent snapshots can never
+    // interleave and let an older one win.
+    let mut applied_version = state.inner.config_version.lock().await;
+    if let Some(current) = *applied_version
+        && version <= current
+    {
+        warn!(version, current, "ignoring a stale relay config snapshot");
+        return;
+    }
     let routes = snapshot
         .keys
         .into_iter()
@@ -163,7 +181,7 @@ pub(super) async fn handle_config_snapshot(state: &AppState, snapshot: ConfigSna
     };
     *state.inner.routes.lock().await = routes;
     *state.inner.relay_ip_policy.lock().await = relay_ip_policy;
-    *state.inner.config_version.lock().await = Some(version);
+    *applied_version = Some(version);
     info!(version, route_count, "relay config snapshot applied");
 }
 
@@ -184,7 +202,6 @@ async fn register_worker(state: &AppState, worker_id: usize, tx: WorkerSender) -
 
 async fn handle_worker_bridge_message(state: &AppState, message: BridgeMessage) {
     match message {
-        BridgeMessage::ApprovalPending(pending) => mark_approval_pending(state, pending).await,
         BridgeMessage::ResponseStart(start) => handle_response_start(state, start).await,
         BridgeMessage::ResponseChunk(chunk) => handle_response_chunk(state, chunk).await,
         BridgeMessage::ResponseEnd(end) => handle_response_end(state, end).await,
@@ -218,13 +235,6 @@ async fn handle_worker_bridge_message(state: &AppState, message: BridgeMessage) 
     }
 }
 
-async fn mark_approval_pending(state: &AppState, pending: ApprovalPending) {
-    let mut requests = state.inner.pending.lock().await;
-    if let Some(entry) = requests.get_mut(&pending.request_id) {
-        entry.awaiting_approval = true;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::{response_forward::fail_pending_for_worker, state::test_state};
@@ -232,7 +242,7 @@ mod tests {
     use tokio::sync::oneshot;
 
     #[tokio::test]
-    async fn fail_pending_for_worker_uses_approval_interrupted_for_flagged_waiters() {
+    async fn fail_pending_for_worker_reports_disconnect_to_waiting_requests() {
         let state = test_state();
         let (start_tx, start_rx) = oneshot::channel();
         let (chunk_tx, _chunk_rx) = mpsc::channel(1);
@@ -248,7 +258,6 @@ mod tests {
                 worker,
                 queued_bytes: 0,
                 response_started: false,
-                awaiting_approval: true,
             },
         );
 
@@ -265,8 +274,9 @@ mod tests {
         .await;
 
         let err = start_rx.await.unwrap().unwrap_err();
-        assert_eq!(err.status, StatusCode::SERVICE_UNAVAILABLE.as_u16());
-        assert_eq!(err.code, "approval_interrupted");
+        assert_eq!(err.status, StatusCode::BAD_GATEWAY.as_u16());
+        assert_eq!(err.code, "worker_disconnected");
+        assert_eq!(err.request_id, "req-1");
     }
 
     #[tokio::test]

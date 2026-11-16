@@ -8,8 +8,8 @@ use crate::relay_secrets::RelaySecretManager;
 use crate::standalone_config::rows;
 use crate::standalone_config::write::{self, EncryptedConfig};
 use crate::standalone_config::{
-    BootstrapSeed, ClientKeyConfig, ManagedRelayConfig, ModelRouteConfig, ProviderEndpointConfig,
-    Result, SettingConfig, StandaloneConfig, StandaloneConfigError,
+    BootstrapSeed, ClientKeyConfig, ModelRouteConfig, ProviderEndpointConfig, Result,
+    SettingConfig, StandaloneConfig, StandaloneConfigError,
 };
 
 use super::{BootstrapOutcome, StandaloneConfigStore};
@@ -18,7 +18,6 @@ impl StandaloneConfigStore {
     pub async fn load_snapshot(&self, manager: &RelaySecretManager) -> Result<StandaloneConfig> {
         let mut transaction = self.pool.begin().await?;
         let snapshot = StandaloneConfig {
-            relays: Self::load_relays(&mut transaction, manager).await?,
             endpoints: Self::load_endpoints(&mut transaction, manager).await?,
             routes: Self::load_routes(&mut transaction, manager).await?,
             client_keys: Self::load_client_keys(&mut transaction, manager).await?,
@@ -74,26 +73,6 @@ impl StandaloneConfigStore {
         write::insert_all(&mut transaction, &encrypted).await?;
         transaction.commit().await?;
         Ok(BootstrapOutcome { seeded: true })
-    }
-
-    async fn load_relays(
-        transaction: &mut sqlx::Transaction<'_, Sqlite>,
-        manager: &RelaySecretManager,
-    ) -> Result<Vec<ManagedRelayConfig>> {
-        let rows = standalone_query!("src/sql/standalone/list_relays.sql")
-            .fetch_all(&mut **transaction)
-            .await?;
-        rows.into_iter()
-            .map(|row| {
-                let (mut relay, envelopes) = rows::relay(&row)?;
-                relay.relay_ca_pem = write::decrypt_optional(manager, envelopes[0].as_ref())?;
-                relay.client_cert_pem = write::decrypt_optional(manager, envelopes[1].as_ref())?;
-                relay.client_key_pem = write::decrypt_optional(manager, envelopes[2].as_ref())?;
-                relay.bridge_encryption_key =
-                    write::decrypt_optional(manager, envelopes[3].as_ref())?;
-                Ok(relay)
-            })
-            .collect()
     }
 
     async fn load_endpoints(

@@ -10,11 +10,9 @@ pub enum Capability {
     Endpoints,
     ModelRoutes,
     ModelRouteTest,
-    Relays,
     ClientKeys,
     Settings,
     RequestRecords,
-    Approvals,
     Billing,
     EndpointSetting,
     McpServers,
@@ -24,9 +22,11 @@ pub enum Capability {
     AvailableModels,
     SnapshotPublication,
     RawObjectStore,
+    SharedValkey,
     ConfigExport,
     ConfigImport,
     ConfigAudit,
+    Workers,
 }
 
 impl Capability {
@@ -35,11 +35,9 @@ impl Capability {
             Self::Endpoints => "sqlite_endpoints_unavailable",
             Self::ModelRoutes => "sqlite_model_routes_unavailable",
             Self::ModelRouteTest => "sqlite_model_route_test_unavailable",
-            Self::Relays => "sqlite_relays_unavailable",
             Self::ClientKeys => "sqlite_client_keys_unavailable",
             Self::Settings => "sqlite_settings_unavailable",
             Self::RequestRecords => "sqlite_request_records_unavailable",
-            Self::Approvals => "sqlite_approvals_unavailable",
             Self::Billing => "sqlite_billing_unavailable",
             Self::EndpointSetting => "sqlite_endpoint_setting_unavailable",
             Self::McpServers => "sqlite_mcp_servers_unavailable",
@@ -51,9 +49,11 @@ impl Capability {
             Self::AvailableModels => "sqlite_available_models_unavailable",
             Self::SnapshotPublication => "sqlite_snapshot_publication_unavailable",
             Self::RawObjectStore => "sqlite_raw_object_store_unavailable",
+            Self::SharedValkey => "sqlite_shared_valkey_unavailable",
             Self::ConfigExport => "sqlite_config_export_unavailable",
             Self::ConfigImport => "sqlite_config_import_unavailable",
             Self::ConfigAudit => "sqlite_config_audit_unavailable",
+            Self::Workers => "sqlite_workers_unavailable",
         }
     }
 
@@ -62,13 +62,11 @@ impl Capability {
             Self::Endpoints => "endpoint CRUD is available on SQLite",
             Self::ModelRoutes => "model route CRUD is available on SQLite",
             Self::ModelRouteTest => "model route resolution test is not yet available on SQLite",
-            Self::Relays => "relay CRUD is available on SQLite",
             Self::ClientKeys => "client key CRUD is available on SQLite",
             Self::Settings => "settings CRUD is available on SQLite",
             Self::RequestRecords => {
                 "durable request records and usage history are not available on SQLite"
             }
-            Self::Approvals => "approval workflows are not available on SQLite",
             Self::Billing => "billing persistence is not available on SQLite",
             Self::EndpointSetting => "user endpoint setting is available on SQLite",
             Self::McpServers => "MCP server configuration is available on SQLite",
@@ -80,21 +78,22 @@ impl Capability {
             Self::AvailableModels => "available model discovery is not yet available on SQLite",
             Self::SnapshotPublication => "snapshot publication is available on SQLite",
             Self::RawObjectStore => "raw object store configuration is not available on SQLite",
+            Self::SharedValkey => "shared Valkey configuration is not available on SQLite",
             Self::ConfigExport => "encrypted configuration export is available on SQLite",
             Self::ConfigImport => "encrypted configuration import is available on SQLite",
             Self::ConfigAudit => "the configuration archive audit trail is available on SQLite",
+            Self::Workers => "worker discovery is not available on SQLite",
         }
     }
 
     pub fn sqlite_supported(self) -> bool {
         // Core configuration and supported MCP domains use the unified
-        // repository. Durable usage, approvals, billing, and quota ledgers
+        // repository. Durable usage, billing, and quota ledgers
         // remain PostgreSQL-only until their SQLite retention semantics exist.
         matches!(
             self,
             Self::Endpoints
                 | Self::ModelRoutes
-                | Self::Relays
                 | Self::ClientKeys
                 | Self::Settings
                 | Self::EndpointSetting
@@ -136,11 +135,8 @@ impl Capability {
         if path.starts_with("/admin/model-routes/") {
             return Some(Self::ModelRoutes);
         }
-        if path == "/admin/relays" {
-            return Some(Self::Relays);
-        }
-        if path.starts_with("/admin/relays/") {
-            return Some(Self::Relays);
+        if path == "/admin/workers" {
+            return Some(Self::Workers);
         }
         if path == "/me/client-keys" || path.starts_with("/me/client-keys/") {
             return Some(Self::ClientKeys);
@@ -158,9 +154,9 @@ impl Capability {
             | "/settings/cache-alert"
             | "/settings/stream-delta-batching"
             | "/settings/model-route-whitelist"
-            | "/settings/relay-ip-whitelist"
-            | "/settings/llm-review" => return Some(Self::Settings),
+            | "/settings/relay-ip-whitelist" => return Some(Self::Settings),
             "/settings/raw-object-store" => return Some(Self::RawObjectStore),
+            "/settings/shared-valkey" => return Some(Self::SharedValkey),
             _ => {}
         }
         if path.starts_with("/admin/conversations/") && path.ends_with("/endpoint-override") {
@@ -168,9 +164,6 @@ impl Capability {
         }
         if path == "/admin/request-records" || path.starts_with("/admin/request-records/") {
             return Some(Self::RequestRecords);
-        }
-        if path == "/admin/approvals" || path.starts_with("/admin/approvals/") {
-            return Some(Self::Approvals);
         }
         if path == "/admin/billing" || path.starts_with("/admin/billing/") {
             return Some(Self::Billing);
@@ -221,12 +214,8 @@ mod tests {
             Some(Capability::ModelRouteTest)
         );
         assert_eq!(
-            Capability::for_path("/admin/relays"),
-            Some(Capability::Relays)
-        );
-        assert_eq!(
-            Capability::for_path("/admin/relays/abc/reconnect"),
-            Some(Capability::Relays)
+            Capability::for_path("/admin/workers"),
+            Some(Capability::Workers)
         );
         assert_eq!(
             Capability::for_path("/me/client-keys"),
@@ -255,6 +244,10 @@ mod tests {
         assert_eq!(
             Capability::for_path("/settings/raw-object-store"),
             Some(Capability::RawObjectStore)
+        );
+        assert_eq!(
+            Capability::for_path("/settings/shared-valkey"),
+            Some(Capability::SharedValkey)
         );
         assert_eq!(
             Capability::for_path("/admin/conversations/abc/endpoint-override"),
@@ -312,10 +305,6 @@ mod tests {
             Some(Capability::RequestRecords)
         );
         assert_eq!(
-            Capability::for_path("/admin/approvals/abc/approve"),
-            Some(Capability::Approvals)
-        );
-        assert_eq!(
             Capability::for_path("/admin/billing/summary"),
             Some(Capability::Billing)
         );
@@ -327,7 +316,6 @@ mod tests {
         assert!(Capability::SnapshotPublication.sqlite_supported());
         assert!(Capability::Endpoints.sqlite_supported());
         assert!(Capability::ModelRoutes.sqlite_supported());
-        assert!(Capability::Relays.sqlite_supported());
         assert!(Capability::ClientKeys.sqlite_supported());
         assert!(Capability::Settings.sqlite_supported());
         assert!(Capability::EndpointSetting.sqlite_supported());
@@ -335,12 +323,13 @@ mod tests {
         assert!(Capability::McpCredentials.sqlite_supported());
         assert!(Capability::McpCatalog.sqlite_supported());
         assert!(!Capability::RequestRecords.sqlite_supported());
-        assert!(!Capability::Approvals.sqlite_supported());
+        assert!(!Capability::Workers.sqlite_supported());
         assert!(!Capability::Billing.sqlite_supported());
         assert!(!Capability::ConversationEndpointOverride.sqlite_supported());
         assert!(!Capability::AvailableModels.sqlite_supported());
         assert!(!Capability::ModelRouteTest.sqlite_supported());
         assert!(!Capability::RawObjectStore.sqlite_supported());
+        assert!(!Capability::SharedValkey.sqlite_supported());
         // The encrypted configuration export reads the active backend, so it
         // must stay reachable on both PostgreSQL and SQLite.
         assert!(Capability::ConfigExport.sqlite_supported());

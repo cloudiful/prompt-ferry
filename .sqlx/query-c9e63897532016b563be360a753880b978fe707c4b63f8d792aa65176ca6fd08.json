@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Allocate the next global relay snapshot fence on the publication connection.\n--\n-- The sequence is non-transactional: the token survives a rollback, is never\n-- reused, and cannot be minted on a second connection after the publication\n-- boundary was lost.\nselect nextval('relay_snapshot_version_seq') as version\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "version",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c9e63897532016b563be360a753880b978fe707c4b63f8d792aa65176ca6fd08"
+}

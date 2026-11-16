@@ -23,8 +23,6 @@ export function requestRecordStateLabelKey(
   switch (state) {
     case 'received':
       return 'requestStateReceived'
-    case 'awaiting_approval':
-      return 'requestStateAwaitingApproval'
     case 'upstream_processing':
       return 'requestStateUpstreamProcessing'
     case 'completed':
@@ -41,8 +39,6 @@ export function requestRecordStateTagSeverity(
 ): RequestRecordStateSeverity {
   switch (state) {
     case 'received':
-      return 'secondary'
-    case 'awaiting_approval':
       return 'secondary'
     case 'upstream_processing':
       return 'secondary'

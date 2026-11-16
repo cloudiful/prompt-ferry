@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Read the live registry members that admission must be compatible with.\n--\n-- `incompatible_count` counts every live worker that is not in shared mode or\n-- that applied a different shared-Valkey revision than the candidate. A\n-- bootstrap candidate uses the total live count and must stay alone.\nselect\n    count(*)::bigint as live_count,\n    count(*) filter (\n        where coordination_mode <> 'shared'\n           or config_applied_revision is distinct from $3\n    )::bigint as incompatible_count\nfrom workers\nwhere stopped_at is null\n  and last_heartbeat_at >= now() - ($1::bigint * interval '1 second')\n  and incarnation <> $2\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "live_count",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "incompatible_count",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "29963662779fc4dc0894e05e9ecade3d198ddc7d3ac24f82a8d4812087007737"
+}

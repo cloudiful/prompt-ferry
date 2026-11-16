@@ -19,9 +19,8 @@ use super::super::snapshot::{
 use super::ImportError;
 use super::sqlite_rows;
 use crate::standalone_config::{
-    ClientKeyConfig, EndpointApiKeyConfig, ManagedRelayConfig, ModelRouteConfig,
-    ModelRouteTargetConfig, ProviderEndpointConfig, SettingConfig, StandaloneConfig,
-    StandaloneConfigStore,
+    ClientKeyConfig, EndpointApiKeyConfig, ModelRouteConfig, ModelRouteTargetConfig,
+    ProviderEndpointConfig, SettingConfig, StandaloneConfig, StandaloneConfigStore,
 };
 
 /// Parse a snapshot string into its typed enum. The archive stores the enum's
@@ -55,27 +54,6 @@ pub(super) async fn apply(
 
 fn build_config(domains: &SnapshotDomains) -> Result<StandaloneConfig, ImportError> {
     Ok(StandaloneConfig {
-        relays: domains
-            .relays
-            .iter()
-            .map(|relay| {
-                Ok(ManagedRelayConfig {
-                    relay_id: relay.relay_id,
-                    name: relay.name.clone(),
-                    relay_url: relay.relay_url.clone(),
-                    enabled: relay.enabled,
-                    tls_mode: parse_enum(&relay.tls_mode, "relay TLS mode")?,
-                    bridge_encryption_mode: parse_enum(
-                        &relay.bridge_encryption_mode,
-                        "bridge encryption mode",
-                    )?,
-                    relay_ca_pem: relay.relay_ca_pem.clone(),
-                    client_cert_pem: relay.client_cert_pem.clone(),
-                    client_key_pem: relay.client_key_pem.clone(),
-                    bridge_encryption_key: relay.bridge_encryption_key.clone(),
-                })
-            })
-            .collect::<Result<Vec<_>, ImportError>>()?,
         endpoints: domains
             .endpoints
             .iter()

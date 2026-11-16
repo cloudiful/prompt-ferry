@@ -7,8 +7,7 @@ use super::{
     safe_error, send_worker_shutdown_mcp_response, send_worker_shutdown_response,
 };
 use crate::protocol::{
-    ApprovalPending, BridgeMessage, McpResponseChunk, McpResponseEnd, McpResponseStart,
-    ResponseError,
+    BridgeMessage, McpResponseChunk, McpResponseEnd, McpResponseStart, ResponseError,
 };
 use reqwest::StatusCode;
 use tokio::sync::{mpsc, oneshot};
@@ -48,72 +47,88 @@ pub(super) async fn handle_relay_bridge_message(
                 .insert(request.request_id.clone(), cancellation.clone());
             let config = config.clone();
             let services = services.clone();
-            tokio::spawn(async move {
-                let _active_guard = active_guard;
-                let (body, stats) = collect_request_chunks(
-                    &services.runtime_state.pending_requests,
-                    &request.request_id,
-                    chunk_rx,
-                    end_rx,
-                    crate::bridge_wire::PUBLIC_API_BODY_LIMIT_BYTES,
-                )
-                .await;
-                let ChunkCollection::Complete(body) = body else {
-                    send_too_large_response(&services.out_tx, &request.request_id).await;
-                    services
-                        .runtime_state
-                        .request_cancellations
-                        .lock()
-                        .await
-                        .remove(&request.request_id);
-                    return;
-                };
-                if cancellation.is_cancelled() {
-                    services
-                        .runtime_state
-                        .request_cancellations
-                        .lock()
-                        .await
-                        .remove(&request.request_id);
-                    return;
-                }
-                let request_id = request.request_id.clone();
-                let request = BufferedBridgeRequest::from_parts(request, body, stats);
-                tokio::select! {
-                    _ = cancellation.cancelled() => {}
-                    result = process_request(request.clone(), &config, &services) => {
-                        if let Err(err) = result {
-                            let redact_enabled = services.admin_state().is_some_and(|state| {
-                                state
-                                    .redaction_enabled
-                                    .load(std::sync::atomic::Ordering::SeqCst)
-                            }) || services
-                                .standalone_state()
-                                .is_some_and(|state| state.redaction_enabled());
-                            let error_code = if is_bridge_send_error(&err) {
-                                "relay_bridge_error"
-                            } else {
-                                "upstream_error"
-                            };
-                            let _ = services
-                                .out_tx
-                                .send(BridgeMessage::ResponseError(ResponseError {
-                                    request_id: request_id.clone(),
-                                    status: StatusCode::BAD_GATEWAY.as_u16(),
-                                    code: error_code.to_string(),
-                                    message: safe_error(&err, redact_enabled, request.user_id),
-                                }))
-                                .await;
+            let runtime_state = services.runtime_state.clone();
+            runtime_state
+                .spawn_accepted(async move {
+                    let _active_guard = active_guard;
+                    let (body, stats) = collect_request_chunks(
+                        &services.runtime_state.pending_requests,
+                        &request.request_id,
+                        chunk_rx,
+                        end_rx,
+                        crate::bridge_wire::PUBLIC_API_BODY_LIMIT_BYTES,
+                        &cancellation,
+                    )
+                    .await;
+                    let body = match body {
+                        ChunkCollection::Complete(body) => body,
+                        ChunkCollection::TooLarge => {
+                            send_too_large_response(&services.out_tx, &request.request_id).await;
+                            services
+                                .runtime_state
+                                .request_cancellations
+                                .lock()
+                                .await
+                                .remove(&request.request_id);
+                            return;
+                        }
+                        ChunkCollection::Cancelled => {
+                            services
+                                .runtime_state
+                                .request_cancellations
+                                .lock()
+                                .await
+                                .remove(&request.request_id);
+                            return;
+                        }
+                    };
+                    if cancellation.is_cancelled() {
+                        services
+                            .runtime_state
+                            .request_cancellations
+                            .lock()
+                            .await
+                            .remove(&request.request_id);
+                        return;
+                    }
+                    let request_id = request.request_id.clone();
+                    let request = BufferedBridgeRequest::from_parts(request, body, stats);
+                    tokio::select! {
+                        _ = cancellation.cancelled() => {}
+                        result = process_request(request.clone(), &config, &services) => {
+                            if let Err(err) = result {
+                                let redact_enabled = services.admin_state().is_some_and(|state| {
+                                    state
+                                        .redaction_enabled
+                                        .load(std::sync::atomic::Ordering::SeqCst)
+                                }) || services
+                                    .standalone_state()
+                                    .is_some_and(|state| state.redaction_enabled());
+                                let error_code = if is_bridge_send_error(&err) {
+                                    "relay_bridge_error"
+                                } else {
+                                    "upstream_error"
+                                };
+                                let _ = services
+                                    .out_tx
+                                    .send(BridgeMessage::ResponseError(ResponseError {
+                                        request_id: request_id.clone(),
+                                        status: StatusCode::BAD_GATEWAY.as_u16(),
+                                        code: error_code.to_string(),
+                                        message: safe_error(&err, redact_enabled, request.user_id),
+                                    }))
+                                    .await;
+                            }
                         }
                     }
-                }
-                services
-                    .runtime_state
-                    .request_cancellations
-                    .lock()
-                    .await
-                    .remove(&request_id);
-            });
+                    services
+                        .runtime_state
+                        .request_cancellations
+                        .lock()
+                        .await
+                        .remove(&request_id);
+                })
+                .await;
         }
         BridgeMessage::RequestChunk(chunk) => {
             forward_request_chunk(
@@ -176,49 +191,67 @@ pub(super) async fn handle_relay_bridge_message(
                 .await
                 .insert(request.request_id.clone(), cancellation.clone());
             let services = services.clone();
-            tokio::spawn(async move {
-                let _active_guard = active_guard;
-                let (body, stats) = collect_request_chunks(
-                    &services.runtime_state.pending_mcp_requests,
-                    &request.request_id,
-                    chunk_rx,
-                    end_rx,
-                    crate::mcp::MAX_MCP_REQUEST_BODY_BYTES,
-                )
+            let runtime_state = services.runtime_state.clone();
+            runtime_state
+                .spawn_accepted(async move {
+                    let _active_guard = active_guard;
+                    let (body, stats) = collect_request_chunks(
+                        &services.runtime_state.pending_mcp_requests,
+                        &request.request_id,
+                        chunk_rx,
+                        end_rx,
+                        crate::mcp::MAX_MCP_REQUEST_BODY_BYTES,
+                        &cancellation,
+                    )
+                    .await;
+                    let body = match body {
+                        ChunkCollection::Complete(body) => body,
+                        ChunkCollection::TooLarge => {
+                            send_mcp_too_large_response(&services.out_tx, &request.request_id)
+                                .await;
+                            services
+                                .runtime_state
+                                .mcp_request_cancellations
+                                .lock()
+                                .await
+                                .remove(&request.request_id);
+                            return;
+                        }
+                        ChunkCollection::Cancelled => {
+                            services
+                                .runtime_state
+                                .mcp_request_cancellations
+                                .lock()
+                                .await
+                                .remove(&request.request_id);
+                            return;
+                        }
+                    };
+                    if cancellation.is_cancelled() {
+                        services
+                            .runtime_state
+                            .mcp_request_cancellations
+                            .lock()
+                            .await
+                            .remove(&request.request_id);
+                        return;
+                    }
+                    let request_id = request.request_id.clone();
+                    let request = super::request_assembly::BufferedMcpRequest::from_parts(
+                        request, body, stats,
+                    );
+                    tokio::select! {
+                        _ = cancellation.cancelled() => {}
+                        _ = mcp::handle_mcp_request(request, &services) => {}
+                    }
+                    services
+                        .runtime_state
+                        .mcp_request_cancellations
+                        .lock()
+                        .await
+                        .remove(&request_id);
+                })
                 .await;
-                let ChunkCollection::Complete(body) = body else {
-                    send_mcp_too_large_response(&services.out_tx, &request.request_id).await;
-                    services
-                        .runtime_state
-                        .mcp_request_cancellations
-                        .lock()
-                        .await
-                        .remove(&request.request_id);
-                    return;
-                };
-                if cancellation.is_cancelled() {
-                    services
-                        .runtime_state
-                        .mcp_request_cancellations
-                        .lock()
-                        .await
-                        .remove(&request.request_id);
-                    return;
-                }
-                let request_id = request.request_id.clone();
-                let request =
-                    super::request_assembly::BufferedMcpRequest::from_parts(request, body, stats);
-                tokio::select! {
-                    _ = cancellation.cancelled() => {}
-                    _ = mcp::handle_mcp_request(request, &services) => {}
-                }
-                services
-                    .runtime_state
-                    .mcp_request_cancellations
-                    .lock()
-                    .await
-                    .remove(&request_id);
-            });
         }
         BridgeMessage::McpRequestChunk(chunk) => {
             forward_request_chunk(
@@ -268,13 +301,16 @@ pub(super) async fn handle_relay_bridge_message(
                 .insert(request.request_id.clone(), event_tx);
             let config = config.clone();
             let services = services.clone();
-            tokio::spawn(async move {
-                let _active_guard = active_guard;
-                Box::pin(start_realtime_session(
-                    request, event_rx, &config, &services,
-                ))
+            let runtime_state = services.runtime_state.clone();
+            runtime_state
+                .spawn_accepted(async move {
+                    let _active_guard = active_guard;
+                    Box::pin(start_realtime_session(
+                        request, event_rx, &config, &services,
+                    ))
+                    .await;
+                })
                 .await;
-            });
         }
         BridgeMessage::RealtimeClientEvent(event) => {
             let sender = services
@@ -310,8 +346,7 @@ pub(super) async fn handle_relay_bridge_message(
             let _ = services.out_tx.send(BridgeMessage::Pong).await;
         }
         BridgeMessage::Pong => {}
-        BridgeMessage::ApprovalPending(ApprovalPending { .. })
-        | BridgeMessage::RealtimeServerEvent(_)
+        BridgeMessage::RealtimeServerEvent(_)
         | BridgeMessage::ResponseStart(_)
         | BridgeMessage::ResponseChunk(_)
         | BridgeMessage::ResponseEnd(_)

@@ -74,7 +74,7 @@ function RetrySection({
 }
 
 /**
- * The admin requests settings: content logging, raw/approval retention, stream
+ * The admin requests settings: content logging with raw retention, stream
  * delta batching and the model-route whitelist.
  *
  * Every control autosaves through the form's debounce, so the tab deliberately
@@ -270,7 +270,7 @@ export function SettingsRequestsTab() {
                 </div>
               )}
             </form.Field>
-            <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+            <div className="grid min-w-0 gap-3">
               <form.Field name="requestContentLogging.raw_retention_days">
                 {(field) => (
                   <div className="grid min-w-0 gap-1">
@@ -299,51 +299,6 @@ export function SettingsRequestsTab() {
                       type="number"
                       value={field.state.value}
                     />
-                  </div>
-                )}
-              </form.Field>
-              <form.Field name="usageRetention.approval_retention_days">
-                {(field) => (
-                  <div className="grid min-w-0 gap-1">
-                    <Label
-                      className="inline-flex items-center gap-1 text-xs text-muted-foreground"
-                      htmlFor="settings-approval-retention-days"
-                    >
-                      {t('approvalRetentionDays')}
-                      {retentionOrigin === 'usageRetention' &&
-                      activeClaim !== 'usageRetention' ? (
-                        <PendingSpinner label={t('loading')} />
-                      ) : null}
-                    </Label>
-                    <Input
-                      className="h-8 text-sm tabular-nums"
-                      disabled={!controlsReady || retentionPending}
-                      id="settings-approval-retention-days"
-                      inputMode="numeric"
-                      min={SETTING_FORM_RANGES.approvalRetentionDays.min}
-                      name="settings-approval-retention-days"
-                      onChange={(event) => {
-                        const parsed = parseSettingInteger(
-                          event.target.value,
-                          SETTING_FORM_RANGES.approvalRetentionDays,
-                        )
-                        if (parsed !== null) field.handleChange(parsed)
-                      }}
-                      step={1}
-                      type="number"
-                      value={field.state.value ?? ''}
-                    />
-                    {settings.failed.usageRetention ? (
-                      <div>
-                        <RetrySection
-                          disabled={retentionPending}
-                          label={t('retry')}
-                          loadingLabel={t('loading')}
-                          onRetry={() => retry('usageRetention')}
-                          pending={activeClaim === 'usageRetention'}
-                        />
-                      </div>
-                    ) : null}
                   </div>
                 )}
               </form.Field>

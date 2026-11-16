@@ -3,9 +3,8 @@
 //! Reads only restorable configuration: users (Argon2id hashes, never
 //! plaintext passwords), client keys, provider endpoints with their API keys,
 //! proxy, OpenAI admin key and ChatGPT OAuth token, model routes and targets,
-//! MCP servers and credentials, managed relays with their sealed secrets, all
-//! worker settings, per-user redaction configs, and the raw object-store
-//! configuration. Request/usage/billing/approval/session tables are never
+//! MCP servers and credentials, all worker settings, per-user redaction configs, and the raw object-store
+//! configuration. Request/usage/billing/session tables are never
 //! touched.
 //!
 //! The orchestration stays here; the pure row-to-record conversions live in
@@ -15,7 +14,7 @@ use anyhow::{Context, Result};
 
 use super::snapshot::{
     ClientKeySnapshot, EndpointOAuthSnapshot, EndpointSnapshot, McpCredentialSnapshot,
-    McpServerSnapshot, ModelRouteSnapshot, RelaySnapshot, SettingSnapshot, SnapshotDomains,
+    McpServerSnapshot, ModelRouteSnapshot, SettingSnapshot, SnapshotDomains,
     UserRedactionConfigSnapshot, UserSnapshot,
 };
 use super::snapshot_pg_map;
@@ -39,7 +38,6 @@ pub(super) async fn read(
     let model_routes = read_model_routes(&pool).await?;
     let mcp_servers = read_mcp_servers(&pool).await?;
     let mcp_credentials = read_mcp_credentials(repository).await?;
-    let relays = read_relays(&pool, manager).await?;
     let settings = read_settings(&pool).await?;
     let user_redaction_configs = read_user_redaction_configs(&pool).await?;
     let raw_object_store = read_raw_object_store(&pool, manager).await?;
@@ -51,7 +49,6 @@ pub(super) async fn read(
         model_routes,
         mcp_servers,
         mcp_credentials,
-        relays,
         settings,
         user_redaction_configs,
         raw_object_store,
@@ -122,18 +119,6 @@ async fn read_mcp_credentials(repository: &ConfigRepository) -> Result<Vec<McpCr
         .into_iter()
         .map(snapshot_pg_map::convert_mcp_credential)
         .collect())
-}
-
-async fn read_relays(
-    pool: &sqlx::PgPool,
-    manager: Option<&RelaySecretManager>,
-) -> Result<Vec<RelaySnapshot>> {
-    let mut relays = Vec::new();
-    for row in db::list_managed_relays(pool).await? {
-        let secrets = super::relays_map::managed_secrets_from_row(&row);
-        relays.push(snapshot_pg_map::convert_relay(row, secrets, manager)?);
-    }
-    Ok(relays)
 }
 
 async fn read_settings(pool: &sqlx::PgPool) -> Result<Vec<SettingSnapshot>> {

@@ -14,12 +14,8 @@ pub struct BridgeStatus {
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct RelayBridgeStatus {
-    pub relay_id: Option<uuid::Uuid>,
     pub relay_url: String,
-    pub enabled: bool,
     pub connected: bool,
-    pub last_error: Option<String>,
-    pub last_snapshot_version: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

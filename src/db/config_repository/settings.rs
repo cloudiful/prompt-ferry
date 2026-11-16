@@ -2,7 +2,7 @@
 //!
 //! The repository handles every JSON-backed setting the worker reads at
 //! startup (request content logging, usage retention, redaction config,
-//! relay IP whitelist, model route whitelist, LLM review, etc.) and persists
+//! relay IP whitelist, model route whitelist, etc.) and persists
 //! them through the matching backend.
 
 use anyhow::{Context, Result};
@@ -82,6 +82,9 @@ impl super::ConfigRepository {
 
 /// Every row of `worker_settings`, used by the encrypted configuration export.
 /// Settings are configuration, never runtime history.
+///
+/// The internal coordination rows are excluded: the snapshot version counter
+/// belongs to the running deployment and must never travel in an archive.
 pub(super) async fn list_all_settings_postgres(
     pool: &sqlx::PgPool,
 ) -> Result<Vec<SettingSnapshot>> {
@@ -95,6 +98,9 @@ pub(super) async fn list_all_settings_postgres(
         .map_err(crate::db::seaorm::native_error)?;
     Ok(rows
         .into_iter()
+        .filter(|row| {
+            !crate::db::INTERNAL_COORDINATION_SETTING_KEYS.contains(&row.setting_key.as_str())
+        })
         .map(|row| SettingSnapshot {
             key: row.setting_key,
             // `worker_settings` has no per-row version; the standalone

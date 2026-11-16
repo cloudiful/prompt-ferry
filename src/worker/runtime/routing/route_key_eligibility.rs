@@ -220,7 +220,6 @@ mod tests {
             path: "/v1/responses".to_string(),
             headers: Vec::new(),
             body: br#"{"model":"gpt-5","input":"ping"}"#.to_vec(),
-            request_deadline_unix_ms: 0,
             user_id: Some(1),
             client_key_hash: None,
             request_user_agent: None,

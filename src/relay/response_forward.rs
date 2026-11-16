@@ -523,11 +523,6 @@ pub(crate) async fn fail_pending_for_worker(
     };
     for (request_id, mut entry) in drained {
         err.request_id = request_id;
-        if entry.awaiting_approval {
-            err.status = StatusCode::SERVICE_UNAVAILABLE.as_u16();
-            err.code = "approval_interrupted".to_string();
-            err.message = "approval wait was interrupted".to_string();
-        }
         if entry.response_started {
             let _ = entry
                 .forward_tx
@@ -815,7 +810,6 @@ mod tests {
                 worker,
                 queued_bytes: 0,
                 response_started: false,
-                awaiting_approval: false,
             },
         );
 
@@ -868,7 +862,6 @@ mod tests {
                 worker,
                 queued_bytes: 0,
                 response_started: false,
-                awaiting_approval: false,
             },
         );
 
@@ -913,7 +906,6 @@ mod tests {
                 worker,
                 queued_bytes: 0,
                 response_started: false,
-                awaiting_approval: false,
             },
         );
 

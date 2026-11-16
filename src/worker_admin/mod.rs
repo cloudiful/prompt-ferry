@@ -34,4 +34,4 @@ pub(crate) mod token_plan_weight;
 pub mod types;
 
 pub use handlers::*;
-pub use state::{AdminState, ManagedRelaySupervisorHandle, RelaySupervisorCommand};
+pub use state::AdminState;

@@ -22,14 +22,17 @@ Codex 和其他 API 客户端。请求经由 relay-worker 通道转发到一个�
 - 内置 MiniMax、CommandCode、OpencodeGo、OpenRouter、GLM、DeepSeek 和 OpenAI Platform 上游预设；其他 OpenAI 兼容服务使用显式填写 base URL 的通用 provider。
 - 按请求控制思考强度，包括 Chat `reasoning_effort`、Responses `reasoning.effort` 和 Anthropic `output_config.effort`。
 - 一等公民的 Embeddings 转发：目标级向量维度覆盖、失效即拒绝的脱敏与仅输入计费。
-- 用户、客户端 API key、上游端点、模型路由、key 分流以及多 relay。
+- 用户、客户端 API key、上游端点、模型路由、key 分流，以及本地配置的 relay 目标。
+- 只读的 Worker 列表，展示同一 PostgreSQL 数据库中注册的所有进程。
 - 可配置的转发内容、日志和用量明细脱敏。
 - 管理控制台提供默认文本额度汇总与逐 key 明细；在 PostgreSQL 下还包含 OpenAI 订阅的 30 天历史快照。
 - 聚合 HTTP 与 stdio MCP 服务，支持按凭据与共享配额预算。
 - relay-worker 之间支持 TLS、双向 TLS 和应用层加密。
 
-依赖：业务数据使用 PostgreSQL；协调与响应亲和缓存可选 Valkey。配置了
-S3 兼容存储桶后，原始请求与响应载荷会写入该存储桶。
+依赖：业务数据使用 PostgreSQL；协调与响应亲和缓存可选 Valkey。共享 Valkey
+地址以加密形式保存在数据库中，在“管理 → 设置 → 存储”中编辑；它不会从环境变量、
+命令行或配置文件读取，修改后必须重启每个 worker 才会生效。配置了 S3 兼容存储桶
+后，原始请求与响应载荷会写入该存储桶。
 
 ## 使用 Docker Compose 快速开始（推荐）
 
@@ -55,6 +58,10 @@ docker compose up -d postgres valkey rustfs
 ```bash
 docker compose up -d prompt-ferry
 ```
+
+随后打开“管理 → 设置 → 存储”，把共享 Valkey 地址设为
+`redis://valkey:6379`，并重启 worker 以应用新版本。在配置之前，worker 运行在
+文档说明的单 worker 降级模式。
 
 - 管理控制台：<http://127.0.0.1:8789>，使用 `admin` 登录。
 - OpenAI 兼容 base URL：`http://127.0.0.1:8787/v1`。

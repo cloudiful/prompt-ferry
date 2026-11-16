@@ -6,7 +6,7 @@ use crate::db::config_repository::archive::{
     ARCHIVE_FORMAT_VERSION, ArchiveError, MAX_ARCHIVE_BYTES, MIN_PASSPHRASE_LEN, decode_archive,
     decode_archive_for_backend, encode_archive, validate_passphrase,
 };
-use crate::db::config_repository::snapshot::ConfigBackendKind;
+use crate::db::config_repository::snapshot::{ConfigBackendKind, SNAPSHOT_FORMAT_VERSION};
 
 #[test]
 fn archive_round_trip_preserves_the_manifest_and_domains() {
@@ -18,7 +18,7 @@ fn archive_round_trip_preserves_the_manifest_and_domains() {
 
     let decoded = decode_archive(PASSPHRASE, &encoded.bytes).expect("decode archive");
     assert_eq!(decoded.manifest.backend_kind, ConfigBackendKind::Postgres);
-    assert_eq!(decoded.manifest.format_version, ARCHIVE_FORMAT_VERSION);
+    assert_eq!(decoded.manifest.format_version, SNAPSHOT_FORMAT_VERSION);
     assert_eq!(
         decoded.manifest.payload_fingerprint,
         encoded.payload_fingerprint
