@@ -31,16 +31,31 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
 
 Dependencies: PostgreSQL for business data, and optionally Valkey for
 coordination and response affinity. The shared Valkey URL is stored encrypted
-in the database and edited from Admin → Settings → Storage; it is never read
-from the environment, CLI or configuration file. A change to the shared Valkey
-setting is a coordinated restart: while one existing worker still serves the
-admin console, apply the edit there; then stop every old worker; then start all
-workers so each resolves and applies the new desired revision. Do not stop
-every worker before the edit, because the admin editor is served by a worker.
-Admission rejects a worker whose coordination mode or applied revision differs
-from the live registry, so a bootstrap-mode process and a coordinated process
-never run side by side. Raw request and response payloads are written to an
-S3-compatible bucket when one is configured.
+in the database, and the database row is always authoritative. A new deployment
+can initialize that row once from `PROMPT_FERRY_WORKER__VALKEY_URL`: it is read
+only during PostgreSQL bootstrap after the `.env` file is loaded, only when no
+`shared_valkey` row exists, and it never overrides a saved or deliberately
+cleared setting. A blank value means no seed; an invalid value with no row fails
+startup. The seed is written with the same worker-config key as other stored
+secrets, so every worker sharing the database must use the same explicit
+`PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY`. A saved URL is probed
+before use: an unreachable configured Valkey fails startup instead of silently
+falling back or reseeding, so repair connectivity or the Admin → Settings →
+Storage value. After the first start, edit the setting in Admin → Settings →
+Storage; a change is a coordinated restart: while one existing worker still
+serves the admin console, apply the edit there; then stop every old worker; then
+start all workers so each resolves and applies the new desired revision. Do not
+stop every worker before the edit, because the admin editor is served by a
+worker. Admission rejects a worker whose coordination mode or applied revision
+differs from the live registry, so a bootstrap-mode process and a coordinated
+process never run side by side. Raw request and response payloads are written to
+an S3-compatible bucket when one is configured.
+
+Without a shared Valkey, PostgreSQL runs the documented single-worker degraded
+mode. Its bounded admin sessions live in process memory (session TTL and entry
+limits apply), so a restart logs administrators out, and replay snapshots remain
+unavailable. The database configuration persists across restart, but the local
+sessions do not.
 
 ## Quick start with Docker Compose (recommended)
 
@@ -70,11 +85,18 @@ application:
 docker compose up -d prompt-ferry
 ```
 
-Then open Admin → Settings → Storage in the running worker, set the shared
-Valkey URL to `redis://valkey:6379`, then stop the worker and start it again so
-the new revision is applied. With several workers, stop all of them after the
-edit and then start all of them on the new revision. Until it is configured the
-worker runs in the documented single-worker degraded mode.
+Then open Admin → Settings → Storage in the running worker, optionally change
+the shared Valkey URL, and restart the worker so the new revision is applied.
+Compose seeds `redis://valkey:6379` on the first start when
+`PROMPT_FERRY_WORKER__VALKEY_URL` is unset or empty, so no manual SQL or console
+edit is required for a fresh stack. Once a row exists — including a cleared one
+— the environment seed is ignored and the database value wins. With several
+workers, stop all of them after an edit and then start all of them on the new
+revision. When no URL is configured, or the URL was deliberately cleared, the
+worker runs in the documented single-worker degraded mode with process-local
+admin sessions. A configured but unreachable URL is different: startup fails
+instead of entering that degraded mode, so repair connectivity or the stored
+value.
 
 - Admin console: <http://127.0.0.1:8789> — log in as `admin`.
 - OpenAI-compatible base URL: `http://127.0.0.1:8787/v1`.
@@ -95,7 +117,9 @@ docker compose exec prompt-ferry cat /var/lib/prompt-ferry/prompt-ferry/bootstra
 ## Running the binary directly
 
 Download a release binary from [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases).
-It needs the same PostgreSQL, Valkey and bucket, and it reads the same `.env`:
+It needs the same PostgreSQL, Valkey and bucket, and it reads the same `.env`.
+For the first start, set `PROMPT_FERRY_WORKER__VALKEY_URL=redis://127.0.0.1:6379`
+there; leave it blank when using Compose, which defaults to its service address.
 
 ```bash
 PROMPT_FERRY_DOTENV=.env prompt-ferry

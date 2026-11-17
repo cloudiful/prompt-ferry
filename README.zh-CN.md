@@ -30,9 +30,24 @@ Codex 和其他 API 客户端。请求经由 relay-worker 通道转发到一个�
 - relay-worker 之间支持 TLS、双向 TLS 和应用层加密。
 
 依赖：业务数据使用 PostgreSQL；协调与响应亲和缓存可选 Valkey。共享 Valkey
-地址以加密形式保存在数据库中，在“管理 → 设置 → 存储”中编辑；它不会从环境变量、
-命令行或配置文件读取，修改后必须重启每个 worker 才会生效。配置了 S3 兼容存储桶
-后，原始请求与响应载荷会写入该存储桶。
+地址以加密形式保存在数据库中，并且数据库记录始终优先。全新部署可在首次启动时
+用 `PROMPT_FERRY_WORKER__VALKEY_URL` 初始化该记录：它在 `.env` 加载完成后、
+仅由 PostgreSQL 引导流程读取，而且只在尚不存在 `shared_valkey` 记录时生效，
+不会覆盖已保存或被有意清空的设置。留空表示不播种；没有记录时提供无效值会直接
+启动失败。播种值与其他已存密钥使用同一个 worker 配置密钥加密，因此共用同一
+数据库的所有 worker 必须配置相同的显式
+`PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY`。已保存的地址会先探测再使用：
+配置了 Valkey 但无法连接时启动失败，不会静默回退或重新播种；请修复连通性或
+“管理 → 设置 → 存储”中的值。首次启动后，在“管理 → 设置 → 存储”中编辑该设置；
+修改后必须协调重启：先由仍在运行并托管管理控制台的 worker 完成编辑，再停止所有
+旧 worker，最后启动所有 worker 以应用新的期望修订。不要在编辑前停止全部 worker，
+因为管理编辑器由 worker 提供。准入会拒绝协调模式或已应用修订与在线注册表不一致
+的 worker，因此引导模式进程与协调模式进程不会并行运行。配置了 S3 兼容存储桶后，
+原始请求与响应载荷会写入该存储桶。
+
+未配置共享 Valkey 时，PostgreSQL 运行文档说明的单 worker 降级模式。其有界管理
+会话保存在进程内存中（会话 TTL 与条目上限仍然生效），因此重启会让管理员退出，
+重放快照也保持不可用。数据库配置会跨重启保留，但本地会话不会。
 
 ## 使用 Docker Compose 快速开始（推荐）
 
@@ -59,9 +74,13 @@ docker compose up -d postgres valkey rustfs
 docker compose up -d prompt-ferry
 ```
 
-随后打开“管理 → 设置 → 存储”，把共享 Valkey 地址设为
-`redis://valkey:6379`，并重启 worker 以应用新版本。在配置之前，worker 运行在
-文档说明的单 worker 降级模式。
+随后打开“管理 → 设置 → 存储”，按需修改共享 Valkey 地址，并重启 worker 以
+应用新版本。Compose 在首次启动且 `PROMPT_FERRY_WORKER__VALKEY_URL` 未设置或为空时
+会自动播种 `redis://valkey:6379`，因此全新环境无需手工 SQL 或控制台编辑。记录一旦
+存在（包括被清空的记录），环境变量播种就会被忽略，数据库值优先。多 worker 部署在
+编辑后应先停止所有 worker，再用新修订启动全部 worker。未配置地址或地址被有意清空
+时，worker 运行在文档说明的单 worker 降级模式，并使用进程内管理会话。配置了地址但
+无法连接则不同：启动会直接失败，而不会进入该降级模式，请修复连通性或已存值。
 
 - 管理控制台：<http://127.0.0.1:8789>，使用 `admin` 登录。
 - OpenAI 兼容 base URL：`http://127.0.0.1:8787/v1`。
@@ -83,7 +102,9 @@ docker compose exec prompt-ferry cat /var/lib/prompt-ferry/prompt-ferry/bootstra
 
 从 [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases) 下载
 对应平台的二进制。它需要同样的 PostgreSQL、Valkey 和存储桶，并读取同一份
-`.env`：
+`.env`。首次启动可在其中设置
+`PROMPT_FERRY_WORKER__VALKEY_URL=redis://127.0.0.1:6379`；使用 Compose 时请留空，
+它会默认使用自身的服务地址。
 
 ```bash
 PROMPT_FERRY_DOTENV=.env prompt-ferry

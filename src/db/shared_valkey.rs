@@ -9,6 +9,7 @@
 use anyhow::{Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use tracing::info;
 
 use crate::relay_secrets::{EncryptedSecretEnvelope, RelaySecretManager};
 
@@ -16,6 +17,12 @@ use super::entities::postgres::{worker_settings, workers};
 
 /// `worker_settings` key holding [`SharedValkeyPersisted`].
 pub const SHARED_VALKEY_SETTINGS_KEY: &str = "shared_valkey";
+
+/// Optional first-start seed for the shared Valkey URL.
+///
+/// It is not a runtime override: the database row stays authoritative and the
+/// seed is read only when that row is absent.
+pub const SHARED_VALKEY_SEED_ENV: &str = "PROMPT_FERRY_WORKER__VALKEY_URL";
 
 /// Replay snapshots, MCP catalog entries, sessions and request leases keep the
 /// historical one-day default unless the shared setting says otherwise.
@@ -157,6 +164,87 @@ pub async fn load_shared_valkey_config(
 ) -> Result<SharedValkeyConfig> {
     let persisted = get_shared_valkey_persisted(pool).await?;
     SharedValkeyConfig::from_persisted(persisted, manager)
+}
+
+/// What a first-start seed should do against the persisted settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SharedValkeySeedDecision {
+    /// No nonblank seed, or no seed was supplied.
+    None,
+    /// A seed was supplied, but a database row already exists and wins.
+    Ignored,
+    /// The trimmed, validated URL that may be persisted.
+    Seed(String),
+}
+
+/// Decide whether an environment seed may initialize the shared Valkey setting.
+///
+/// The persisted row always wins, including a row whose URL was cleared: a
+/// cleared setting must stay cleared and never be resurrected by the
+/// environment. Only an absent row lets a nonblank seed be validated and used.
+pub fn decide_shared_valkey_seed(
+    persisted: Option<&SharedValkeyPersisted>,
+    seed: Option<&str>,
+) -> Result<SharedValkeySeedDecision> {
+    let Some(seed) = seed.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(SharedValkeySeedDecision::None);
+    };
+    if persisted.is_some() {
+        return Ok(SharedValkeySeedDecision::Ignored);
+    }
+    validate_shared_valkey_url(seed)?;
+    Ok(SharedValkeySeedDecision::Seed(seed.to_string()))
+}
+
+/// Persist a first-start seed only when no shared Valkey row exists yet.
+///
+/// A concurrent starter may win the advisory-locked CAS; that conflict is
+/// tolerated because the caller resolves the winning database value right
+/// after this returns. The seed never overwrites an existing or cleared row,
+/// and a valid URL is persisted before any connectivity probe: an unreachable
+/// configured Valkey is a fail-closed operator error, not a reason to reseed.
+pub async fn seed_shared_valkey_from_env(
+    pool: &PgPool,
+    manager: &RelaySecretManager,
+    seed: Option<&str>,
+) -> Result<()> {
+    let persisted = get_shared_valkey_persisted(pool).await?;
+    match decide_shared_valkey_seed(persisted.as_ref(), seed)? {
+        SharedValkeySeedDecision::None => Ok(()),
+        SharedValkeySeedDecision::Ignored => {
+            info!(
+                "ignoring the shared Valkey environment seed because a database setting \
+                 already exists"
+            );
+            Ok(())
+        }
+        SharedValkeySeedDecision::Seed(url) => {
+            match save_shared_valkey_settings(
+                pool,
+                manager,
+                Some(&url),
+                DEFAULT_SHARED_VALKEY_TTL_SECONDS,
+                None,
+            )
+            .await?
+            {
+                SharedValkeyWriteOutcome::Written(persisted) => {
+                    info!(
+                        revision = persisted.revision,
+                        "seeded the shared Valkey setting from the environment"
+                    );
+                }
+                SharedValkeyWriteOutcome::Conflict { current_revision } => {
+                    info!(
+                        current_revision,
+                        "another starter seeded the shared Valkey setting first; reloading the \
+                         database value"
+                    );
+                }
+            }
+            Ok(())
+        }
+    }
 }
 
 /// Desired revision straight from `worker_settings`. It stays readable without
@@ -623,5 +711,58 @@ mod tests {
         assert!(validate_shared_valkey_ttl(MAX_SHARED_VALKEY_TTL_SECONDS).is_ok());
         assert!(validate_shared_valkey_ttl(MIN_SHARED_VALKEY_TTL_SECONDS - 1).is_err());
         assert!(validate_shared_valkey_ttl(MAX_SHARED_VALKEY_TTL_SECONDS + 1).is_err());
+    }
+
+    fn persisted_with_url(url: Option<&str>) -> SharedValkeyPersisted {
+        SharedValkeyPersisted::seal(1, DEFAULT_SHARED_VALKEY_TTL_SECONDS, url, &manager())
+            .expect("seal fixture")
+    }
+
+    #[test]
+    fn a_missing_or_blank_seed_never_seeds() {
+        assert_eq!(
+            decide_shared_valkey_seed(None, None).expect("no seed"),
+            SharedValkeySeedDecision::None
+        );
+        assert_eq!(
+            decide_shared_valkey_seed(None, Some("")).expect("blank seed"),
+            SharedValkeySeedDecision::None
+        );
+        assert_eq!(
+            decide_shared_valkey_seed(None, Some("   ")).expect("blank seed"),
+            SharedValkeySeedDecision::None
+        );
+    }
+
+    #[test]
+    fn a_valid_seed_is_trimmed_and_selected_when_no_row_exists() {
+        assert_eq!(
+            decide_shared_valkey_seed(None, Some("  redis://valkey:6379/0  ")).expect("valid seed"),
+            SharedValkeySeedDecision::Seed("redis://valkey:6379/0".to_string())
+        );
+    }
+
+    #[test]
+    fn an_invalid_seed_is_an_error_only_when_no_row_exists() {
+        assert!(decide_shared_valkey_seed(None, Some("http://valkey:6379")).is_err());
+        assert!(decide_shared_valkey_seed(None, Some("redis://val key")).is_err());
+    }
+
+    #[test]
+    fn an_existing_row_wins_over_valid_or_invalid_seeds() {
+        for url in [Some("redis://persisted:6379"), None] {
+            let persisted = persisted_with_url(url);
+            for seed in ["redis://seed:6379", "http://invalid"] {
+                assert_eq!(
+                    decide_shared_valkey_seed(Some(&persisted), Some(seed)).expect("row wins"),
+                    SharedValkeySeedDecision::Ignored,
+                    "row url {url:?} must ignore seed {seed:?}"
+                );
+            }
+            assert_eq!(
+                decide_shared_valkey_seed(Some(&persisted), Some("   ")).expect("blank seed"),
+                SharedValkeySeedDecision::None
+            );
+        }
     }
 }
