@@ -91,11 +91,12 @@ pub use settings::{
 };
 pub use shared_valkey::{
     DEFAULT_SHARED_VALKEY_TTL_SECONDS, MAX_SHARED_VALKEY_TTL_SECONDS,
-    MIN_SHARED_VALKEY_TTL_SECONDS, SECRET_MASK, SHARED_VALKEY_SETTINGS_KEY, SharedValkeyConfig,
-    SharedValkeyFailure, SharedValkeyPersisted, SharedValkeyWriteOutcome,
-    count_workers_requiring_restart, desired_shared_valkey_revision, get_shared_valkey_persisted,
-    load_shared_valkey_config, lock_shared_valkey_setting, mask_shared_valkey_url,
-    next_shared_valkey_revision, read_shared_valkey_revision, save_shared_valkey_settings,
+    MIN_SHARED_VALKEY_TTL_SECONDS, SECRET_MASK, SHARED_VALKEY_SEED_ENV, SHARED_VALKEY_SETTINGS_KEY,
+    SharedValkeyConfig, SharedValkeyFailure, SharedValkeyPersisted, SharedValkeySeedDecision,
+    SharedValkeyWriteOutcome, count_workers_requiring_restart, decide_shared_valkey_seed,
+    desired_shared_valkey_revision, get_shared_valkey_persisted, load_shared_valkey_config,
+    lock_shared_valkey_setting, mask_shared_valkey_url, next_shared_valkey_revision,
+    read_shared_valkey_revision, save_shared_valkey_settings, seed_shared_valkey_from_env,
     shared_valkey_failure, validate_shared_valkey_ttl, validate_shared_valkey_url,
 };
 pub use types::*;

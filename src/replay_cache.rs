@@ -78,6 +78,7 @@ struct LocalBackend {
     max_session_entries: usize,
     replay_snapshot_ttl: Duration,
     replay_snapshots: Mutex<HashMap<Uuid, LocalReplaySnapshotEntry>>,
+    replay_enabled: bool,
 }
 
 struct SqliteBackend {
@@ -105,7 +106,19 @@ impl LocalBackend {
             max_session_entries: max_session_entries.max(1),
             replay_snapshot_ttl: Duration::from_secs(replay_ttl_seconds.max(1)),
             replay_snapshots: Mutex::new(HashMap::new()),
+            replay_enabled: true,
         }
+    }
+
+    /// Bounded process-local sessions without replay snapshots.
+    fn sessions_only(session_ttl_seconds: u64, max_session_entries: usize) -> Self {
+        let mut backend = Self::new(
+            session_ttl_seconds,
+            crate::db::DEFAULT_SHARED_VALKEY_TTL_SECONDS,
+            max_session_entries,
+        );
+        backend.replay_enabled = false;
+        backend
     }
 }
 
@@ -147,15 +160,23 @@ impl Default for ReplayCache {
 }
 
 impl ReplayCache {
-    fn unavailable_sessions_only(config: &WorkerConfig, reason: &str) -> Self {
+    /// Process-local sessions for PostgreSQL when no shared Valkey is
+    /// configured. Replay snapshots stay unavailable so the degraded mode keeps
+    /// its existing replay behavior; only the admin session path changes.
+    fn local_sessions_only(config: &WorkerConfig, reason: &str) -> Self {
         warn!(
-            backend = "unavailable",
+            backend = "memory",
             reason,
+            scope = "single-process",
             capability = "session_persistence",
-            "session state is unavailable; process-local authentication fallback is disabled"
+            "no shared Valkey is configured; using bounded process-local sessions until the \
+             worker restarts; replay snapshots remain unavailable"
         );
         Self {
-            backend: ReplayCacheBackend::Disabled,
+            backend: ReplayCacheBackend::Local(Arc::new(LocalBackend::sessions_only(
+                config.session_ttl_seconds,
+                config.local_session_max_entries,
+            ))),
             response_affinity: ResponseAffinityStore::local_with_ttl_and_capacity(
                 Duration::from_secs(config.session_ttl_seconds.max(1)),
                 config.local_session_max_entries,
@@ -178,7 +199,7 @@ impl ReplayCache {
             if let Some(pool) = sqlite_pool {
                 return Ok(Self::sqlite(config, shared, pool, "valkey_not_configured"));
             }
-            return Ok(Self::unavailable_sessions_only(
+            return Ok(Self::local_sessions_only(
                 config,
                 "valkey_not_configured_without_durable_store",
             ));
@@ -268,7 +289,11 @@ impl ReplayCache {
     }
 
     pub(crate) fn replay_snapshots_available(&self) -> bool {
-        !matches!(self.backend, ReplayCacheBackend::Disabled)
+        match &self.backend {
+            ReplayCacheBackend::Disabled => false,
+            ReplayCacheBackend::Local(inner) => inner.replay_enabled,
+            ReplayCacheBackend::Redis(_) | ReplayCacheBackend::Sqlite(_) => true,
+        }
     }
 
     pub fn for_tests() -> Self {
@@ -297,6 +322,9 @@ impl ReplayCache {
         match &self.backend {
             ReplayCacheBackend::Disabled => Ok(None),
             ReplayCacheBackend::Local(inner) => {
+                if !inner.replay_enabled {
+                    return Ok(None);
+                }
                 let mut snapshots = inner.replay_snapshots.lock().await;
                 let now = Instant::now();
                 let expired = snapshots
@@ -340,6 +368,9 @@ impl ReplayCache {
         match &self.backend {
             ReplayCacheBackend::Disabled => Ok(false),
             ReplayCacheBackend::Local(inner) => {
+                if !inner.replay_enabled {
+                    return Ok(false);
+                }
                 let next = ReplaySnapshotValue {
                     conversation_id: update.conversation_id,
                     base_event_id: update.event_id,
@@ -813,7 +844,8 @@ mod tests {
             .await
             .expect("replay cache");
         assert!(!cache.enabled());
-        assert!(!cache.session_available());
+        assert!(cache.session_available());
+        assert!(!cache.replay_snapshots_available());
 
         let key = "local-response-affinity";
         let binding = crate::response_affinity::ResponseAffinityBinding {
@@ -829,6 +861,138 @@ mod tests {
                 .await
                 .unwrap(),
             binding
+        );
+    }
+
+    fn session_user(user_id: i64) -> SessionUser {
+        SessionUser {
+            user_id,
+            login_name: format!("user-{user_id}"),
+            display_name: format!("User {user_id}"),
+            is_admin: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn no_valkey_sessions_are_written_read_and_deleted_in_memory() {
+        let config = WorkerConfig {
+            session_ttl_seconds: 60,
+            local_session_max_entries: 10,
+            ..Default::default()
+        };
+        let cache = ReplayCache::from_config(&config, &SharedValkeyConfig::not_configured())
+            .await
+            .expect("replay cache");
+
+        cache
+            .write_session("session-a", &session_user(7))
+            .await
+            .expect("write session");
+        let restored = cache
+            .read_session_refresh("session-a")
+            .await
+            .expect("read session")
+            .expect("session exists");
+        assert_eq!(restored.user_id, 7);
+
+        cache
+            .delete_session("session-a")
+            .await
+            .expect("delete session");
+        assert!(
+            cache
+                .read_session_refresh("session-a")
+                .await
+                .expect("read deleted session")
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn no_valkey_sessions_evict_the_oldest_entry_at_capacity() {
+        let config = WorkerConfig {
+            session_ttl_seconds: 60,
+            local_session_max_entries: 2,
+            ..Default::default()
+        };
+        let cache = ReplayCache::from_config(&config, &SharedValkeyConfig::not_configured())
+            .await
+            .expect("replay cache");
+
+        cache
+            .write_session("oldest", &session_user(1))
+            .await
+            .expect("write oldest");
+        cache
+            .write_session("middle", &session_user(2))
+            .await
+            .expect("write middle");
+        assert!(
+            cache
+                .read_session_refresh("oldest")
+                .await
+                .expect("read oldest")
+                .is_some()
+        );
+        cache
+            .write_session("newest", &session_user(3))
+            .await
+            .expect("write newest");
+
+        assert!(
+            cache
+                .read_session_refresh("middle")
+                .await
+                .expect("read evicted")
+                .is_none()
+        );
+        assert!(
+            cache
+                .read_session_refresh("oldest")
+                .await
+                .expect("read refreshed")
+                .is_some()
+        );
+        assert!(
+            cache
+                .read_session_refresh("newest")
+                .await
+                .expect("read newest")
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn no_valkey_replay_snapshots_remain_unavailable() {
+        let config = WorkerConfig {
+            session_ttl_seconds: 60,
+            local_session_max_entries: 10,
+            ..Default::default()
+        };
+        let cache = ReplayCache::from_config(&config, &SharedValkeyConfig::not_configured())
+            .await
+            .expect("replay cache");
+
+        assert!(!cache.replay_snapshots_available());
+        let update = ReplaySnapshotUpdate {
+            event_id: 1,
+            created_at: Utc::now(),
+            conversation_id: Uuid::new_v4(),
+            conversation_seq: 1,
+            prompt_refs: Vec::new(),
+        };
+        assert!(
+            !cache
+                .write_snapshot_if_newer(&update)
+                .await
+                .expect("write snapshot")
+        );
+        assert!(
+            cache
+                .get_snapshot(update.conversation_id)
+                .await
+                .expect("read snapshot")
+                .is_none()
         );
     }
 }

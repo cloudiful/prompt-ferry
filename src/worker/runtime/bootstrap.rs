@@ -308,6 +308,13 @@ pub(super) async fn build_admin_state(
     // single-worker state; a decryption or parse failure aborts startup instead
     // of silently falling back to process-local coordination.
     let shared_valkey = if is_postgres {
+        // The environment seed is a first-start initializer, read after the
+        // repository `.env` has been loaded. The database row always wins, so
+        // this never overrides a configured or deliberately cleared setting.
+        let seed = std::env::var(db::SHARED_VALKEY_SEED_ENV).ok();
+        db::seed_shared_valkey_from_env(&pool, &relay_secret_manager, seed.as_deref())
+            .await
+            .context("failed to apply the shared Valkey environment seed")?;
         db::load_shared_valkey_config(&pool, &relay_secret_manager)
             .await
             .context("failed to resolve the shared Valkey configuration")?
