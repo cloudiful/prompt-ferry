@@ -45,12 +45,35 @@ pub async fn run_with_listeners(
     worker_listener: std::net::TcpListener,
     admin_listener: std::net::TcpListener,
 ) -> anyhow::Result<()> {
+    run_with_listeners_and_shutdown(
+        config,
+        public_listener,
+        worker_listener,
+        admin_listener,
+        None,
+    )
+    .await
+}
+
+/// Run the relay with an additional shutdown trigger.
+///
+/// The trigger is the internal shutdown signal of the process: a worker that
+/// stops for an internal reason asks the integrated relay to stop with it, so
+/// the relay never keeps serving without the worker that serves it.
+pub async fn run_with_listeners_and_shutdown(
+    config: RelayConfig,
+    public_listener: std::net::TcpListener,
+    worker_listener: std::net::TcpListener,
+    admin_listener: std::net::TcpListener,
+    external_shutdown: Option<watch::Receiver<bool>>,
+) -> anyhow::Result<()> {
     validate(&config)?;
     run_with_tokio_listeners(
         config,
         into_tokio_listener(public_listener, "relay public")?,
         into_tokio_listener(worker_listener, "relay worker bridge")?,
         into_tokio_listener(admin_listener, "relay management")?,
+        external_shutdown,
     )
     .await
 }
@@ -94,6 +117,7 @@ async fn run_with_tokio_listeners(
     public_listener: TcpListener,
     worker_listener: TcpListener,
     admin_listener: TcpListener,
+    external_shutdown: Option<watch::Receiver<bool>>,
 ) -> anyhow::Result<()> {
     let public_drain_budget = Duration::from_secs(config.shutdown_drain_seconds.max(1));
     let tls_mode = config.tls_mode;
@@ -109,7 +133,18 @@ async fn run_with_tokio_listeners(
     let worker_app = worker_router(relay_state);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     tokio::spawn(async move {
-        relay_shutdown_signal().await;
+        // The relay stops on an OS signal and on the internal shutdown signal
+        // of the process, so an integrated worker that stops takes the relay
+        // with it.
+        match external_shutdown {
+            Some(external) => {
+                tokio::select! {
+                    _ = relay_shutdown_signal() => {}
+                    _ = wait_for_shutdown_signal(external) => {}
+                }
+            }
+            None => relay_shutdown_signal().await,
+        }
         let _ = shutdown_tx.send(true);
     });
     let public_acceptor = if tls_mode.enabled() {

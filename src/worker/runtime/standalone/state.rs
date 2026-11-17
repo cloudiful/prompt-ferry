@@ -1,15 +1,11 @@
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, AtomicI64, Ordering},
+    atomic::{AtomicBool, Ordering},
 };
 
-use anyhow::Context;
-use tokio::sync::{Mutex, RwLock, mpsc};
-use uuid::Uuid;
+use tokio::sync::RwLock;
 
 use crate::{
-    bridge::protocol::BridgeMessage,
-    db::ManagedRelayRuntimeStatus,
     relay_secrets::RelaySecretManager,
     standalone_config::{StandaloneConfig, StandaloneConfigStore},
     worker_usage::{StandaloneUsageSummary, UsageLog},
@@ -22,11 +18,6 @@ pub(crate) struct StandaloneRuntimeState {
     pub(super) store: Arc<StandaloneConfigStore>,
     manager: RelaySecretManager,
     snapshot: Arc<RwLock<StandaloneConfig>>,
-    pub(super) relay_senders:
-        Arc<Mutex<std::collections::HashMap<String, mpsc::UnboundedSender<BridgeMessage>>>>,
-    pub(super) relay_statuses:
-        Arc<RwLock<std::collections::HashMap<Uuid, ManagedRelayRuntimeStatus>>>,
-    pub(super) snapshot_version: Arc<AtomicI64>,
     redaction_enabled: Arc<AtomicBool>,
     recent_usage: Arc<StandaloneUsageBuffer>,
     mcp_runtime: Option<crate::mcp::McpRuntimeState>,
@@ -39,27 +30,6 @@ pub(crate) struct ClientKeyIdentity {
 }
 
 impl StandaloneRuntimeState {
-    pub(crate) async fn reload_snapshot(&self) -> anyhow::Result<bool> {
-        let snapshot = self
-            .store
-            .load_snapshot(&self.manager)
-            .await
-            .context("failed to reload standalone configuration")?;
-        let changed = {
-            let mut current = self.snapshot.write().await;
-            if *current == snapshot {
-                false
-            } else {
-                *current = snapshot.clone();
-                true
-            }
-        };
-        if changed {
-            apply_redaction_settings(&snapshot, &self.redaction_enabled);
-        }
-        Ok(changed)
-    }
-
     pub(crate) fn with_mcp_runtime(mut self, mcp_runtime: crate::mcp::McpRuntimeState) -> Self {
         self.mcp_runtime = Some(mcp_runtime);
         self
@@ -80,9 +50,6 @@ impl StandaloneRuntimeState {
             store: store.clone(),
             manager,
             snapshot: Arc::new(RwLock::new(snapshot)),
-            relay_senders: Arc::new(Mutex::new(std::collections::HashMap::new())),
-            relay_statuses: Arc::new(RwLock::new(std::collections::HashMap::new())),
-            snapshot_version: Arc::new(AtomicI64::new(0)),
             redaction_enabled,
             recent_usage: Arc::new(StandaloneUsageBuffer::with_persistence(
                 DEFAULT_USAGE_CAPACITY,
@@ -143,40 +110,6 @@ impl StandaloneRuntimeState {
                 user_id: key.user_id,
                 label: key.label.clone(),
             })
-    }
-
-    pub(crate) async fn set_bridge_sender(
-        &self,
-        relay_key: &str,
-        sender: Option<mpsc::UnboundedSender<BridgeMessage>>,
-    ) {
-        let mut senders = self.relay_senders.lock().await;
-        match sender {
-            Some(sender) => {
-                senders.insert(relay_key.to_string(), sender);
-            }
-            None => {
-                senders.remove(relay_key);
-            }
-        }
-    }
-
-    pub(crate) async fn mark_connected(&self, relay_id: Uuid) {
-        let mut statuses = self.relay_statuses.write().await;
-        let status = statuses.entry(relay_id).or_default();
-        status.connected = true;
-        status.last_error = None;
-        status.last_connected_at = Some(chrono::Utc::now());
-    }
-
-    pub(crate) async fn mark_disconnected(&self, relay_id: Uuid, error: Option<String>) {
-        let mut statuses = self.relay_statuses.write().await;
-        let status = statuses.entry(relay_id).or_default();
-        status.connected = false;
-        status.last_disconnected_at = Some(chrono::Utc::now());
-        if let Some(error) = error {
-            status.last_error = Some(error);
-        }
     }
 }
 

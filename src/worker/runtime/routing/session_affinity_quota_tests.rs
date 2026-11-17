@@ -87,7 +87,6 @@ pub(super) fn request() -> BufferedBridgeRequest {
         path: "/v1/responses".to_string(),
         headers: Vec::new(),
         body: br#"{"model":"gpt-5.4","input":"ping"}"#.to_vec(),
-        request_deadline_unix_ms: 0,
         user_id: Some(1),
         client_key_hash: Some("key-a".to_string()),
         request_user_agent: Some("Codex Desktop".to_string()),

@@ -17,8 +17,6 @@ mod endpoints;
 mod mcp;
 #[path = "store_mcp_oauth.rs"]
 mod mcp_oauth;
-#[path = "store_relays.rs"]
-mod relays;
 #[path = "store_replay_snapshots.rs"]
 mod replay_snapshots;
 #[path = "store_routes.rs"]
@@ -30,7 +28,7 @@ mod snapshot;
 #[path = "store_usage_summaries.rs"]
 mod usage_summaries;
 
-const CURRENT_SCHEMA_VERSION: i64 = 39;
+const CURRENT_SCHEMA_VERSION: i64 = 40;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootstrapOutcome {

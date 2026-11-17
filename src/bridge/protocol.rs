@@ -8,7 +8,6 @@ pub enum BridgeMessage {
     RequestChunk(BridgeRequestChunk),
     RequestEnd(BridgeRequestEnd),
     RequestCancel(BridgeRequestCancel),
-    ApprovalPending(ApprovalPending),
     RealtimeSessionStart(RealtimeSessionStart),
     RealtimeClientEvent(RealtimeClientEventMessage),
     RealtimeServerEvent(RealtimeServerEventMessage),
@@ -115,11 +114,6 @@ pub struct BridgeRequestCancel {
     pub reason: String,
     #[serde(default)]
     pub response_started: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ApprovalPending {
-    pub request_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

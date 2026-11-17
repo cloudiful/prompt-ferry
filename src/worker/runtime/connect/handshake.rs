@@ -9,7 +9,7 @@ use crate::{
     protocol::BridgeMessage,
 };
 
-use super::RelayConnectionConfig;
+use super::config::RelayConnectionConfig;
 
 type RelaySocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 

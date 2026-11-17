@@ -7,7 +7,7 @@
 //! value is here" from "only a hash (or nothing) survived on the source".
 //!
 //! Runtime history is deliberately absent: request records, usage events,
-//! billing charges, approvals, sessions, and caches never appear here.
+//! billing charges, sessions, and caches never appear here.
 //!
 //! The record shapes live in [`domains`]; the manifest, its summary, and the
 //! sealed payload wrapper live in [`manifest`].
@@ -18,8 +18,7 @@ mod manifest;
 pub use domains::{
     ClientKeySnapshot, EndpointApiKeySnapshot, EndpointOAuthSnapshot, EndpointSnapshot,
     McpCredentialSnapshot, McpServerSnapshot, ModelRouteSnapshot, ModelRouteTargetSnapshot,
-    RelaySnapshot, SecretRecovery, SettingSnapshot, SnapshotDomains, UserRedactionConfigSnapshot,
-    UserSnapshot,
+    SecretRecovery, SettingSnapshot, SnapshotDomains, UserRedactionConfigSnapshot, UserSnapshot,
 };
 pub use manifest::{
     ConfigBackendKind, ConfigSnapshot, SNAPSHOT_FORMAT_VERSION, SnapshotDomainSummary,

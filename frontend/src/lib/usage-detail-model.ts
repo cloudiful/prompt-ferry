@@ -208,14 +208,11 @@ export function usageAbortFromStateKey(
   state: string | null | undefined,
 ):
   | 'requestStateReceived'
-  | 'requestStateAwaitingApproval'
   | 'requestStateUpstreamProcessing'
   | 'notAvailable' {
   switch (state) {
     case 'received':
       return 'requestStateReceived'
-    case 'awaiting_approval':
-      return 'requestStateAwaitingApproval'
     case 'upstream_processing':
       return 'requestStateUpstreamProcessing'
     default:

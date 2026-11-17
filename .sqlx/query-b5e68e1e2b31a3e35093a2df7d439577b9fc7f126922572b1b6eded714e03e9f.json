@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Serialize shared setting writes that must not interleave.\n--\n-- The lock is transaction scoped: it is released when the surrounding\n-- transaction commits or rolls back, so a crashed writer never leaves the\n-- setting locked.\nselect pg_advisory_xact_lock($1)\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pg_advisory_xact_lock",
+        "type_info": "Void",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b5e68e1e2b31a3e35093a2df7d439577b9fc7f126922572b1b6eded714e03e9f"
+}

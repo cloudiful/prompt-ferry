@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -44,6 +45,18 @@ pub const REQUEST_CONTENT_LOGGING_SETTINGS_KEY: &str = "request_content_logging"
 pub const USAGE_RETENTION_SETTINGS_KEY: &str = "usage_retention";
 pub const STREAM_DELTA_BATCHING_SETTINGS_KEY: &str = "stream_delta_batching";
 pub const RAW_OBJECT_STORE_SETTINGS_KEY: &str = "raw_object_store";
+/// Legacy location of the relay snapshot fence. The fence now comes from the
+/// `relay_snapshot_version_seq` sequence; the key stays excluded from the
+/// configuration archive so an older archive can never reset coordination
+/// state.
+pub const RELAY_SNAPSHOT_VERSION_SETTINGS_KEY: &str = "relay_snapshot_version";
+
+/// Settings rows that hold internal coordination state.
+///
+/// They belong to the running deployment and not to the archived
+/// configuration: a configuration export never contains them and a
+/// configuration import never resets them.
+pub const INTERNAL_COORDINATION_SETTING_KEYS: [&str; 1] = [RELAY_SNAPSHOT_VERSION_SETTINGS_KEY];
 const REQUEST_CONTENT_LOGGING_ENABLED_KEY: &str = "request_content_logging_enabled";
 const LEGACY_USAGE_CONTENT_LOGGING_SETTINGS_KEY: &str = "usage_content_logging";
 const LEGACY_USAGE_CONTENT_LOGGING_ENABLED_KEY: &str = "usage_content_logging_enabled";
@@ -409,6 +422,85 @@ fn normalize_stream_delta_batching(
     value
 }
 
+/// Advisory lock that serializes the relay snapshot publication.
+///
+/// The lock is held from before the fence token allocation and the snapshot
+/// content read until the snapshot is sent, so a version always labels content
+/// that is at least as fresh as the content of every earlier version.
+const RELAY_SNAPSHOT_PUBLICATION_LOCK: i64 = 8_675_309_004;
+
+/// Upper bound for the whole acquisition of the publication boundary.
+const RELAY_SNAPSHOT_PUBLICATION_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Backoff between two attempts to enter the publication boundary.
+const RELAY_SNAPSHOT_PUBLICATION_BACKOFF: Duration = Duration::from_millis(50);
+
+/// Longest backoff between two attempts to enter the publication boundary.
+const RELAY_SNAPSHOT_PUBLICATION_MAX_BACKOFF: Duration = Duration::from_millis(500);
+
+/// The backoff before the next attempt to enter the publication boundary.
+fn publication_retry_backoff(current: Duration) -> Duration {
+    current
+        .saturating_mul(2)
+        .min(RELAY_SNAPSHOT_PUBLICATION_MAX_BACKOFF)
+}
+
+/// Open the relay snapshot publication boundary.
+///
+/// The boundary is entered with a non-blocking lock: a caller that does not
+/// get it rolls its transaction back, releases the connection and retries
+/// after a bounded backoff. A waiting publisher therefore never holds a
+/// database connection, so the pool cannot be exhausted by concurrent
+/// publications.
+pub async fn begin_snapshot_publication(
+    pool: &PgPool,
+) -> Result<sqlx::Transaction<'_, sqlx::Postgres>> {
+    let deadline = tokio::time::Instant::now() + RELAY_SNAPSHOT_PUBLICATION_TIMEOUT;
+    let mut backoff = RELAY_SNAPSHOT_PUBLICATION_BACKOFF;
+    loop {
+        let mut transaction = pool.begin().await?;
+        let acquired: bool = sqlx::query_file_unchecked!(
+            "src/sql/settings/try_lock_relay_snapshot_publication.sql",
+            RELAY_SNAPSHOT_PUBLICATION_LOCK
+        )
+        .fetch_one(&mut *transaction)
+        .await?
+        .acquired
+        .unwrap_or(false);
+        if acquired {
+            return Ok(transaction);
+        }
+        // The boundary belongs to another publisher: the transaction and its
+        // connection are released before the next attempt.
+        transaction.rollback().await?;
+        if tokio::time::Instant::now() >= deadline {
+            return Err(anyhow::anyhow!(
+                "the relay snapshot publication boundary stayed busy"
+            ));
+        }
+        tokio::time::sleep(backoff).await;
+        backoff = publication_retry_backoff(backoff);
+    }
+}
+
+/// Allocate the next global relay snapshot fence.
+///
+/// The token comes from a PostgreSQL sequence on the SAME connection that
+/// holds the publication boundary. A sequence is non-transactional, so the
+/// token survives a rollback and is never reused, and a publisher whose
+/// boundary connection was lost cannot allocate a newer fence from a healthy
+/// pooled connection after it has already read older contents: the fence is
+/// fixed before any content read.
+pub async fn next_relay_snapshot_version(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<i64> {
+    let version: Option<i64> =
+        sqlx::query_file_scalar!("src/sql/settings/next_relay_snapshot_version.sql")
+            .fetch_one(&mut **transaction)
+            .await?;
+    version.ok_or_else(|| anyhow::anyhow!("the relay snapshot sequence returned no version"))
+}
+
 pub async fn get_raw_object_store_persisted(
     pool: &PgPool,
 ) -> Result<Option<RawObjectStorePersisted>> {
@@ -445,7 +537,32 @@ pub async fn set_raw_object_store_config(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_rfc3339_utc;
+    use super::{
+        RELAY_SNAPSHOT_PUBLICATION_BACKOFF, RELAY_SNAPSHOT_PUBLICATION_MAX_BACKOFF,
+        parse_rfc3339_utc, publication_retry_backoff,
+    };
+    use std::time::Duration;
+
+    #[test]
+    fn the_publication_backoff_grows_and_stays_bounded() {
+        let mut backoff = RELAY_SNAPSHOT_PUBLICATION_BACKOFF;
+        assert!(backoff < RELAY_SNAPSHOT_PUBLICATION_MAX_BACKOFF);
+        for _ in 0..16 {
+            let next = publication_retry_backoff(backoff);
+            assert!(next >= backoff, "the backoff never shrinks");
+            assert!(next <= RELAY_SNAPSHOT_PUBLICATION_MAX_BACKOFF);
+            backoff = next;
+        }
+        assert_eq!(backoff, RELAY_SNAPSHOT_PUBLICATION_MAX_BACKOFF);
+        assert_eq!(
+            publication_retry_backoff(RELAY_SNAPSHOT_PUBLICATION_MAX_BACKOFF),
+            RELAY_SNAPSHOT_PUBLICATION_MAX_BACKOFF
+        );
+        assert_eq!(
+            publication_retry_backoff(Duration::from_secs(30)),
+            RELAY_SNAPSHOT_PUBLICATION_MAX_BACKOFF
+        );
+    }
 
     #[test]
     fn parse_rfc3339_utc_handles_valid_blank_junk_and_missing() {

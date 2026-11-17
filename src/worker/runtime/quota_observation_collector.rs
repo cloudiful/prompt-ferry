@@ -26,14 +26,13 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::{
-    config::WorkerConfig,
     db::{quota_key_observations, quota_snapshots},
     worker_admin::token_plan_cache::TokenPlanQuotaCache,
 };
-use scheduler::{Job, Schedule, Task, TaskContext};
+use scheduler::{Job, Schedule, Task, TaskContext, ValkeyCoordinatedStateStore};
 
 use super::{
-    background_job::{connect_coordinated_store, coordinated_scheduler, run_coordinated_scheduler},
+    background_job::{coordinated_scheduler, run_coordinated_scheduler},
     lifecycle::RuntimeControl,
 };
 
@@ -45,19 +44,20 @@ const PRUNE_INTERVAL: ChronoDuration = ChronoDuration::hours(1);
 const MAX_CONCURRENT_REFRESHES: usize = 4;
 
 pub(super) fn spawn(
-    config: &WorkerConfig,
+    shared_valkey: &crate::db::SharedValkeyConfig,
     pool: PgPool,
     cache: TokenPlanQuotaCache,
     control: RuntimeControl,
+    coordinated_store: Option<ValkeyCoordinatedStateStore>,
 ) -> JoinHandle<()> {
-    let valkey_url = config.valkey_url.trim().to_string();
+    let valkey_url = shared_valkey.url_or_empty().trim().to_string();
     tokio::spawn(async move {
         if !periodic_coordination_configured(&valkey_url) {
             warn!(
                 capability = "quota_observation_collection",
                 "periodic quota observation collection disabled because Valkey coordination is not configured"
             );
-        } else if let Some(store) = connect_coordinated_store(&valkey_url).await {
+        } else if let Some(store) = coordinated_store {
             let scheduler = coordinated_scheduler(store);
             if let Err(error) = run_coordinated_scheduler(
                 scheduler,
@@ -72,10 +72,14 @@ pub(super) fn spawn(
                     capability = "quota_observation_collection",
                     "coordinated quota observation collector stopped"
                 );
-                control.wait_for_shutdown().await;
+                control.begin_fail_closed_shutdown();
             }
         } else {
-            control.wait_for_shutdown().await;
+            warn!(
+                capability = "quota_observation_collection",
+                "the coordinated quota observation store is unavailable; stopping the worker"
+            );
+            control.begin_fail_closed_shutdown();
         }
         if !control.is_shutting_down() {
             control.wait_for_shutdown().await;

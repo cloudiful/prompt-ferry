@@ -13,7 +13,7 @@ use crate::protocol::BridgeMessage;
 /// this value is unchanged. bincode 1.x serializes fields in declaration order
 /// and cannot default a missing trailing field, so a payload schema change is
 /// never mixed-version compatible and requires this bump.
-pub const BRIDGE_WIRE_VERSION: u8 = 5;
+pub const BRIDGE_WIRE_VERSION: u8 = 6;
 pub const PUBLIC_API_BODY_LIMIT_BYTES: usize = 256 * 1024 * 1024;
 pub const BRIDGE_WS_MAX_MESSAGE_BYTES: usize = PUBLIC_API_BODY_LIMIT_BYTES + 1024 * 1024;
 pub const BRIDGE_WS_MAX_FRAME_BYTES: usize = BRIDGE_WS_MAX_MESSAGE_BYTES;
@@ -163,8 +163,10 @@ mod tests {
 
     #[test]
     fn invalid_wire_version_fails() {
-        let err = decode_message(&[BRIDGE_WIRE_VERSION + 1, COMPRESSION_NONE]).unwrap_err();
-        assert!(err.to_string().contains("unsupported bridge wire version"));
+        for version in [BRIDGE_WIRE_VERSION - 1, BRIDGE_WIRE_VERSION + 1] {
+            let err = decode_message(&[version, COMPRESSION_NONE]).unwrap_err();
+            assert!(err.to_string().contains("unsupported bridge wire version"));
+        }
     }
 
     #[test]

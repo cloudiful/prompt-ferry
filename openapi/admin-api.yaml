@@ -8,96 +8,6 @@ info:
     identifier: Apache-2.0
   version: 0.1.0
 paths:
-  /api/v1/admin/approvals:
-    get:
-      tags:
-      - approvals
-      operationId: list_approvals
-      parameters:
-      - name: status
-        in: query
-        required: false
-        schema:
-          $ref: '#/components/schemas/ApprovalStatusFilter'
-      - name: first
-        in: query
-        required: false
-        schema:
-          type: integer
-          format: int64
-      - name: rows
-        in: query
-        required: false
-        schema:
-          type: integer
-          format: int64
-      responses:
-        '200':
-          description: Approval page
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApprovalPageResponse'
-  /api/v1/admin/approvals/{approval_id}:
-    get:
-      tags:
-      - approvals
-      operationId: get_approval
-      parameters:
-      - name: approval_id
-        in: path
-        description: Approval ID
-        required: true
-        schema:
-          type: string
-          format: uuid
-      responses:
-        '200':
-          description: Approval detail
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApprovalRequest'
-  /api/v1/admin/approvals/{approval_id}/approve:
-    post:
-      tags:
-      - approvals
-      operationId: approve_approval
-      parameters:
-      - name: approval_id
-        in: path
-        description: Approval ID
-        required: true
-        schema:
-          type: string
-          format: uuid
-      responses:
-        '200':
-          description: Approved request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApprovalRequest'
-  /api/v1/admin/approvals/{approval_id}/reject:
-    post:
-      tags:
-      - approvals
-      operationId: reject_approval
-      parameters:
-      - name: approval_id
-        in: path
-        description: Approval ID
-        required: true
-        schema:
-          type: string
-          format: uuid
-      responses:
-        '200':
-          description: Rejected request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApprovalRequest'
   /api/v1/admin/billing/charges:
     get:
       tags:
@@ -1640,164 +1550,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelEndpointRule'
-  /api/v1/admin/relays:
-    get:
-      tags:
-      - relays
-      operationId: list_relays
-      parameters:
-      - name: first
-        in: query
-        required: false
-        schema:
-          type: integer
-          format: int64
-      - name: rows
-        in: query
-        required: false
-        schema:
-          type: integer
-          format: int64
-      responses:
-        '200':
-          description: Managed relay list
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ManagedRelayListResponse'
-    post:
-      tags:
-      - relays
-      operationId: create_relay
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ManagedRelayRequest'
-        required: true
-      responses:
-        '200':
-          description: Created relay
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ManagedRelay'
-        '400':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-  /api/v1/admin/relays/{relay_id}:
-    get:
-      tags:
-      - relays
-      operationId: get_relay
-      parameters:
-      - name: relay_id
-        in: path
-        description: Relay ID
-        required: true
-        schema:
-          type: string
-          format: uuid
-      responses:
-        '200':
-          description: Managed relay detail
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ManagedRelay'
-        '404':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-    delete:
-      tags:
-      - relays
-      operationId: delete_relay
-      parameters:
-      - name: relay_id
-        in: path
-        description: Relay ID
-        required: true
-        schema:
-          type: string
-          format: uuid
-      responses:
-        '204':
-          description: Deleted relay
-        '404':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-    patch:
-      tags:
-      - relays
-      operationId: update_relay
-      parameters:
-      - name: relay_id
-        in: path
-        description: Relay ID
-        required: true
-        schema:
-          type: string
-          format: uuid
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ManagedRelayPatchRequest'
-        required: true
-      responses:
-        '200':
-          description: Updated relay
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ManagedRelay'
-        '404':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-  /api/v1/admin/relays/{relay_id}/reconnect:
-    post:
-      tags:
-      - relays
-      operationId: reconnect_relay
-      parameters:
-      - name: relay_id
-        in: path
-        description: Relay ID
-        required: true
-        schema:
-          type: string
-          format: uuid
-      responses:
-        '200':
-          description: Reconnect requested
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ManagedRelay'
-        '400':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '404':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/admin/request-records:
     get:
       tags:
@@ -2595,6 +2347,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/admin/workers:
+    get:
+      tags:
+      - workers
+      operationId: list_workers
+      parameters:
+      - name: first
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: rows
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: Workers registered against this database
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerListResponse'
+        '401':
+          description: Not authenticated
+        '403':
+          description: Administrator access required
   /api/v1/auth/login:
     post:
       tags:
@@ -3034,35 +2815,6 @@ paths:
       responses:
         '204':
           description: Endpoint preference updated
-  /api/v1/settings/llm-review:
-    get:
-      tags:
-      - settings
-      operationId: get_llm_review_setting
-      responses:
-        '200':
-          description: LLM review settings
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/LlmReviewSettings'
-    patch:
-      tags:
-      - settings
-      operationId: set_llm_review_setting
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/LlmReviewSettings'
-        required: true
-      responses:
-        '200':
-          description: Updated LLM review settings
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/LlmReviewSettings'
   /api/v1/settings/model-route-whitelist:
     get:
       tags:
@@ -3300,6 +3052,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RequestContentLoggingResponse'
+  /api/v1/settings/shared-valkey:
+    get:
+      tags:
+      - settings
+      operationId: get_shared_valkey
+      responses:
+        '200':
+          description: Shared Valkey settings; the URL is masked and the desired/applied revisions expose restart status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedValkeySettingsResponse'
+    patch:
+      tags:
+      - settings
+      operationId: set_shared_valkey
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SharedValkeySettingsRequest'
+        required: true
+      responses:
+        '200':
+          description: Persisted shared Valkey settings; every running worker stays on its applied revision until it restarts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedValkeySettingsResponse'
   /api/v1/settings/stream-delta-batching:
     get:
       tags:
@@ -3402,133 +3183,6 @@ components:
           type: string
         strategy:
           type: string
-    ApprovalPageResponse:
-      type: object
-      required:
-      - total
-      - approvals
-      - first
-      - rows
-      properties:
-        approvals:
-          type: array
-          items:
-            $ref: '#/components/schemas/ApprovalRequest'
-        first:
-          type: integer
-          format: int64
-        rows:
-          type: integer
-          format: int64
-        total:
-          type: integer
-          format: int64
-    ApprovalRequest:
-      type: object
-      required:
-      - approval_id
-      - request_id
-      - path
-      - review_decision
-      - approval_status
-      - review_reason
-      - review_categories
-      - request_preview
-      - request_deadline_unix_ms
-      - wait_deadline_unix_ms
-      - created_at
-      - updated_at
-      properties:
-        approval_id:
-          type: string
-          format: uuid
-        approval_status:
-          type: string
-        client_key_label:
-          type:
-          - string
-          - 'null'
-        created_at:
-          type: string
-          format: date-time
-        decided_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        decided_by_login_name:
-          type:
-          - string
-          - 'null'
-        decided_by_user_id:
-          type:
-          - integer
-          - 'null'
-          format: int64
-        model:
-          type:
-          - string
-          - 'null'
-        path:
-          type: string
-        request_deadline_unix_ms:
-          type: integer
-          format: int64
-        request_id:
-          type: string
-          format: uuid
-        request_payload_json: {}
-        request_preview:
-          type: string
-        review_categories:
-          type: array
-          items:
-            type: string
-        review_decision:
-          type: string
-        review_reason:
-          type: string
-        updated_at:
-          type: string
-          format: date-time
-        user_id:
-          type:
-          - integer
-          - 'null'
-          format: int64
-        user_login_name:
-          type:
-          - string
-          - 'null'
-        wait_deadline_unix_ms:
-          type: integer
-          format: int64
-    ApprovalRequestPage:
-      type: object
-      required:
-      - total
-      - approvals
-      - first
-      - rows
-      properties:
-        approvals:
-          type: array
-          items:
-            $ref: '#/components/schemas/ApprovalRequest'
-        first:
-          type: integer
-          format: int64
-        rows:
-          type: integer
-          format: int64
-        total:
-          type: integer
-          format: int64
-    ApprovalStatusFilter:
-      type: string
-      enum:
-      - pending
-      - resolved
     AvailableModel:
       type: object
       required:
@@ -3897,11 +3551,6 @@ components:
         unpriced_count:
           type: integer
           format: int64
-    BridgeEncryptionMode:
-      type: string
-      enum:
-      - off
-      - required
     BridgeStatus:
       type: object
       required:
@@ -5277,59 +4926,6 @@ components:
         usable_blocks:
           type: integer
           minimum: 0
-    LlmReviewSettings:
-      type: object
-      required:
-      - enabled
-      - review_base_url
-      - review_api_key
-      - review_model
-      - review_timeout_ms
-      - failure_policy
-      - pending_ttl_seconds
-      - custom_policy_text
-      properties:
-        custom_policy_text:
-          type: string
-        enabled:
-          type: boolean
-        failure_policy:
-          $ref: '#/components/schemas/ReviewFailurePolicy'
-        pending_ttl_seconds:
-          type: integer
-          format: int64
-          minimum: 0
-        review_api_key:
-          type: string
-        review_base_url:
-          type: string
-        review_model:
-          type: string
-        review_timeout_ms:
-          type: integer
-          format: int64
-          minimum: 0
-        webhook:
-          $ref: '#/components/schemas/LlmReviewWebhookSettings'
-    LlmReviewWebhookSettings:
-      type: object
-      required:
-      - enabled
-      - url
-      - bearer_token
-      properties:
-        bearer_token:
-          type: string
-        enabled:
-          type: boolean
-        extra_headers:
-          type: object
-          additionalProperties:
-            type: string
-          propertyNames:
-            type: string
-        url:
-          type: string
     LoginRequest:
       type: object
       required:
@@ -5339,240 +4935,6 @@ components:
         login_name:
           type: string
         password:
-          type: string
-    ManagedRelay:
-      type: object
-      required:
-      - relay_id
-      - name
-      - relay_url
-      - enabled
-      - tls_mode
-      - bridge_encryption_mode
-      - has_relay_ca
-      - has_client_cert
-      - has_client_key
-      - has_bridge_key
-      - connected
-      - created_at
-      - updated_at
-      properties:
-        bridge_encryption_mode:
-          $ref: '#/components/schemas/BridgeEncryptionMode'
-        connected:
-          type: boolean
-        created_at:
-          type: string
-          format: date-time
-        enabled:
-          type: boolean
-        has_bridge_key:
-          type: boolean
-        has_client_cert:
-          type: boolean
-        has_client_key:
-          type: boolean
-        has_relay_ca:
-          type: boolean
-        last_connected_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        last_disconnected_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        last_error:
-          type:
-          - string
-          - 'null'
-        last_snapshot_version:
-          type:
-          - integer
-          - 'null'
-          format: int64
-        name:
-          type: string
-        relay_id:
-          type: string
-          format: uuid
-        relay_url:
-          type: string
-        tls_mode:
-          $ref: '#/components/schemas/TlsMode'
-        updated_at:
-          type: string
-          format: date-time
-    ManagedRelayListResponse:
-      type: object
-      required:
-      - relays
-      - total
-      - first
-      - rows
-      - connected_count
-      - enabled_count
-      properties:
-        connected_count:
-          type: integer
-          format: int64
-        enabled_count:
-          type: integer
-          format: int64
-        first:
-          type: integer
-          format: int64
-        relays:
-          type: array
-          items:
-            $ref: '#/components/schemas/ManagedRelay'
-        rows:
-          type: integer
-          format: int64
-        total:
-          type: integer
-          format: int64
-    ManagedRelayPatchRequest:
-      type: object
-      properties:
-        bridge_encryption_key:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/ManagedRelaySecretPatch'
-        bridge_encryption_mode:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/BridgeEncryptionMode'
-        client_cert_pem:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/ManagedRelaySecretPatch'
-        client_key_pem:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/ManagedRelaySecretPatch'
-        enabled:
-          type:
-          - boolean
-          - 'null'
-        name:
-          type:
-          - string
-          - 'null'
-        relay_ca_pem:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/ManagedRelaySecretPatch'
-        relay_url:
-          type:
-          - string
-          - 'null'
-        tls_mode:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/TlsMode'
-    ManagedRelayRequest:
-      type: object
-      required:
-      - name
-      - relay_url
-      - tls_mode
-      - bridge_encryption_mode
-      properties:
-        bridge_encryption_key:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/ManagedRelaySecretPatch'
-        bridge_encryption_mode:
-          $ref: '#/components/schemas/BridgeEncryptionMode'
-        client_cert_pem:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/ManagedRelaySecretPatch'
-        client_key_pem:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/ManagedRelaySecretPatch'
-        enabled:
-          type:
-          - boolean
-          - 'null'
-        name:
-          type: string
-        relay_ca_pem:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/ManagedRelaySecretPatch'
-        relay_url:
-          type: string
-        tls_mode:
-          $ref: '#/components/schemas/TlsMode'
-    ManagedRelaySecretPatch:
-      oneOf:
-      - type: object
-        required:
-        - mode
-        properties:
-          mode:
-            type: string
-            enum:
-            - keep
-      - type: object
-        required:
-        - mode
-        properties:
-          mode:
-            type: string
-            enum:
-            - clear
-      - type: object
-        required:
-        - value
-        - mode
-        properties:
-          mode:
-            type: string
-            enum:
-            - replace
-          value:
-            type: string
-    ManagedRelayStatus:
-      type: object
-      required:
-      - relay_id
-      - relay_url
-      - enabled
-      - connected
-      properties:
-        connected:
-          type: boolean
-        enabled:
-          type: boolean
-        last_connected_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        last_disconnected_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        last_error:
-          type:
-          - string
-          - 'null'
-        last_snapshot_version:
-          type:
-          - integer
-          - 'null'
-          format: int64
-        relay_id:
-          type: string
-          format: uuid
-        relay_url:
           type: string
     McpBearerToken:
       type: object
@@ -7399,27 +6761,10 @@ components:
       type: object
       required:
       - relay_url
-      - enabled
       - connected
       properties:
         connected:
           type: boolean
-        enabled:
-          type: boolean
-        last_error:
-          type:
-          - string
-          - 'null'
-        last_snapshot_version:
-          type:
-          - integer
-          - 'null'
-          format: int64
-        relay_id:
-          type:
-          - string
-          - 'null'
-          format: uuid
         relay_url:
           type: string
     RelayConfigView:
@@ -8795,7 +8140,6 @@ components:
       type: string
       enum:
       - received
-      - awaiting_approval
       - upstream_processing
       - completed
       - failed
@@ -8950,11 +8294,6 @@ components:
       properties:
         password:
           type: string
-    ReviewFailurePolicy:
-      type: string
-      enum:
-      - fail_open
-      - fail_closed
     RouteSelectionReason:
       type: string
       enum:
@@ -9090,6 +8429,83 @@ components:
           type:
           - string
           - 'null'
+    SharedValkeySecretPatch:
+      oneOf:
+      - type: object
+        required:
+        - mode
+        properties:
+          mode:
+            type: string
+            enum:
+            - keep
+      - type: object
+        required:
+        - mode
+        properties:
+          mode:
+            type: string
+            enum:
+            - clear
+      - type: object
+        required:
+        - value
+        - mode
+        properties:
+          mode:
+            type: string
+            enum:
+            - replace
+          value:
+            type: string
+      description: Write-only patch for the encrypted shared Valkey URL.
+    SharedValkeySettingsRequest:
+      type: object
+      properties:
+        ttl_seconds:
+          type: integer
+          format: int64
+          minimum: 0
+        url:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/SharedValkeySecretPatch'
+    SharedValkeySettingsResponse:
+      type: object
+      description: |-
+        Read response: the URL is masked and the revisions expose whether this
+        worker (and how many live workers) still run an older shared revision.
+      required:
+      - configured
+      - ttl_seconds
+      - restart_required
+      - workers_restart_required
+      properties:
+        applied_revision:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        configured:
+          type: boolean
+        desired_revision:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        restart_required:
+          type: boolean
+        ttl_seconds:
+          type: integer
+          format: int64
+          minimum: 0
+        url_masked:
+          type:
+          - string
+          - 'null'
+        workers_restart_required:
+          type: integer
+          format: int64
     StreamDeltaBatchingSettings:
       type: object
       required:
@@ -9205,12 +8621,6 @@ components:
           description: |-
             Reported window length in seconds. `None` when the upstream omitted or
             reported a non-positive duration.
-    TlsMode:
-      type: string
-      enum:
-      - off
-      - server
-      - mtls
     TokenPlanKeyUsage:
       type: object
       required:
@@ -9484,10 +8894,6 @@ components:
     UsageRetentionSettings:
       type: object
       properties:
-        approval_retention_days:
-          type: integer
-          format: int32
-          default: 90
         content_retention_days:
           type: integer
           format: int32
@@ -9579,6 +8985,60 @@ components:
           type:
           - boolean
           - 'null'
+    WorkerCoordinationState:
+      type: object
+      required:
+      - mode
+      - shared_valkey_configured
+      - degraded
+      - live_worker_count
+      properties:
+        degraded:
+          type: boolean
+          description: Whether the deployment runs in the degraded single-worker mode.
+        degraded_reason:
+          type:
+          - string
+          - 'null'
+          description: Why the deployment is degraded, when it is.
+        live_worker_count:
+          type: integer
+          format: int64
+          description: The number of live workers in the registry.
+        mode:
+          type: string
+          description: The coordinator the workers use to share state across processes.
+        shared_valkey_configured:
+          type: boolean
+          description: Whether the shared Valkey coordination is configured.
+    WorkerListResponse:
+      type: object
+      required:
+      - workers
+      - total
+      - first
+      - rows
+      - online_count
+      - coordination
+      properties:
+        coordination:
+          $ref: '#/components/schemas/WorkerCoordinationState'
+        first:
+          type: integer
+          format: int64
+        online_count:
+          type: integer
+          format: int64
+        rows:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+        workers:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkerSummary'
     WorkerStatusResponse:
       type: object
       description: |-
@@ -9601,6 +9061,47 @@ components:
         connected_workers:
           type: integer
           minimum: 0
+    WorkerSummary:
+      type: object
+      required:
+      - worker_id
+      - role
+      - version
+      - incarnation
+      - started_at
+      - last_heartbeat_at
+      - status
+      - config_restart_required
+      properties:
+        config_applied_revision:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        config_restart_required:
+          type: boolean
+        incarnation:
+          type: string
+          format: uuid
+        last_heartbeat_at:
+          type: string
+          format: date-time
+        role:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+        stopped_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        version:
+          type: string
+        worker_id:
+          type: string
 tags:
 - name: auth
   description: Authentication and session
@@ -9614,14 +9115,12 @@ tags:
   description: Model route rules
 - name: mcp
   description: MCP server management
-- name: relays
-  description: Managed relay topology
+- name: workers
+  description: Worker discovery
 - name: request-records
   description: Request record reporting
 - name: settings
   description: Worker and admin settings
-- name: approvals
-  description: Manual approval workflow
 - name: bridge
   description: Bridge runtime status
 - name: config

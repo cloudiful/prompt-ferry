@@ -20,7 +20,15 @@ use crate::{db, worker_admin::AdminState};
 pub(super) struct RuntimeControl {
     worker_instance_id: Uuid,
     shutting_down: Arc<AtomicBool>,
+    fail_closed: Arc<AtomicBool>,
     shutdown_notify: Arc<Notify>,
+    /// Signals the escalation to a fail closed shutdown.
+    fail_closed_notify: Arc<Notify>,
+    /// The single internal shutdown signal of the process. Every service that
+    /// has to stop — the admin listener, the relay bridge, the schedulers —
+    /// observes it, so an OS signal and an internal failure take the same
+    /// path.
+    shutdown_broadcast: Arc<Mutex<Option<super::WorkerShutdown>>>,
     admission_lock: Arc<Mutex<()>>,
     session_stopped: Arc<AtomicBool>,
     session_stop_notify: Arc<Notify>,
@@ -33,7 +41,10 @@ impl RuntimeControl {
         Self {
             worker_instance_id: Uuid::new_v4(),
             shutting_down: Arc::new(AtomicBool::new(false)),
+            fail_closed: Arc::new(AtomicBool::new(false)),
             shutdown_notify: Arc::new(Notify::new()),
+            fail_closed_notify: Arc::new(Notify::new()),
+            shutdown_broadcast: Arc::new(Mutex::new(None)),
             admission_lock: Arc::new(Mutex::new(())),
             session_stopped: Arc::new(AtomicBool::new(false)),
             session_stop_notify: Arc::new(Notify::new()),
@@ -50,6 +61,28 @@ impl RuntimeControl {
         self.shutting_down.load(Ordering::SeqCst)
     }
 
+    /// Whether the worker is shutting down because it can no longer prove it
+    /// owns its identity.
+    ///
+    /// A lost fencing or an expiring registry lease must not drain accepted
+    /// work: the work is cancelled instead, because another process may
+    /// already serve the same identity.
+    pub(super) fn is_fail_closed(&self) -> bool {
+        self.fail_closed.load(Ordering::SeqCst)
+    }
+
+    /// Attach the internal shutdown signal of the process.
+    ///
+    /// The signal is triggered by [`Self::begin_shutdown`], so an OS signal
+    /// and an internal failure stop exactly the same services.
+    pub(super) fn attach_shutdown_broadcast(&self, shutdown: super::WorkerShutdown) {
+        let mut broadcast = self
+            .shutdown_broadcast
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *broadcast = Some(shutdown);
+    }
+
     pub(super) fn begin_shutdown(&self) {
         let _admission = self
             .admission_lock
@@ -58,7 +91,52 @@ impl RuntimeControl {
         if !self.shutting_down.swap(true, Ordering::SeqCst) {
             self.shutdown_notify.notify_waiters();
             self.active_notify.notify_waiters();
+            let broadcast = self
+                .shutdown_broadcast
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(shutdown) = broadcast.as_ref() {
+                shutdown.trigger();
+            }
         }
+    }
+
+    /// Stop the worker because it can no longer prove that it owns its
+    /// registry row.
+    ///
+    /// The shutdown is fail closed: accepted work is cancelled instead of
+    /// drained, because another incarnation may already own the identity.
+    pub(super) fn begin_fail_closed_shutdown(&self) {
+        self.fail_closed.store(true, Ordering::SeqCst);
+        self.fail_closed_notify.notify_waiters();
+        self.begin_shutdown();
+    }
+
+    /// Resolve when the worker escalates to a fail closed shutdown.
+    ///
+    /// A graceful drain observes this signal: a lost fencing, an expiring
+    /// registry lease or a failed coordinator interrupts the drain instead of
+    /// letting accepted work run past the lease.
+    pub(super) async fn wait_for_fail_closed(&self) {
+        let notified = self.fail_closed_notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if self.is_fail_closed() {
+            return;
+        }
+        notified.await;
+    }
+
+    /// The drain budget of a shutdown.
+    ///
+    /// A fail closed shutdown has no budget at all: the accepted work is
+    /// cancelled instead of drained, because the identity of the worker can
+    /// no longer be trusted.
+    pub(super) fn shutdown_drain_budget(fail_closed: bool, configured_seconds: u64) -> Duration {
+        if fail_closed {
+            return Duration::from_secs(0);
+        }
+        Duration::from_secs(configured_seconds.max(1))
     }
 
     pub(super) fn is_session_stopped(&self) -> bool {
@@ -138,6 +216,82 @@ impl RuntimeControl {
         if self.active_requests.fetch_sub(1, Ordering::SeqCst) == 1 {
             self.active_notify.notify_waiters();
         }
+    }
+}
+
+/// Join every owned task with one bounded allowance.
+///
+/// Each handle is removed from the queue before it is awaited, so a handle is
+/// never polled twice. The escalation and the deadline are observed inside
+/// this loop instead of cancelling the loop future: a fail-closed escalation
+/// aborts and joins the handle currently in progress and every remaining one,
+/// it never leaves a dropped `JoinHandle` that would detach its task. When
+/// the whole allowance is spent, the task is aborted and joined rather than
+/// left running after the worker released its registry row.
+pub(super) async fn join_owned_tasks(
+    tasks: &mut Vec<JoinHandle<()>>,
+    allowance: Duration,
+    control: &RuntimeControl,
+) {
+    let deadline = time::Instant::now() + allowance;
+    let mut abort_now = control.is_fail_closed();
+    while let Some(mut task) = tasks.pop() {
+        if abort_now {
+            task.abort();
+            let _ = task.await;
+            continue;
+        }
+        let remaining = deadline.saturating_duration_since(time::Instant::now());
+        tokio::select! {
+            result = &mut task => {
+                if let Err(err) = result {
+                    warn!(error = %err, "an owned task join failed during shutdown");
+                }
+            }
+            _ = control.wait_for_fail_closed() => {
+                abort_now = true;
+                task.abort();
+                let _ = task.await;
+            }
+            _ = time::sleep(remaining) => {
+                warn!(
+                    allowance_seconds = allowance.as_secs(),
+                    "an owned task did not stop within the teardown allowance; aborting it"
+                );
+                task.abort();
+                let _ = task.await;
+            }
+        }
+    }
+}
+
+/// Stop and join every accepted request task.
+///
+/// A request that was admitted just before the shutdown closes can still be
+/// registering its owning task when the first pass takes the owned set. The
+/// pass therefore repeats while a drain guard remains: every remaining guard
+/// belongs to a task that will register (or drop) without acquiring a new
+/// guard, because admission is closed. The registry row is never released
+/// while a guard remains. A fail-closed worker aborts the tasks at once; a
+/// drain timeout passes a zero allowance so the same forced stop happens
+/// before any bridge or admin teardown starts.
+pub(super) async fn stop_accepted_tasks(
+    runtime_state: &super::WorkerRuntimeState,
+    allowance: Duration,
+) {
+    let deadline = time::Instant::now() + allowance;
+    loop {
+        let mut tasks = runtime_state.take_accepted_tasks().await;
+        let remaining = deadline.saturating_duration_since(time::Instant::now());
+        join_owned_tasks(&mut tasks, remaining, &runtime_state.control).await;
+        if runtime_state.control.wait_for_drain(Duration::ZERO).await == 0
+            || time::Instant::now() >= deadline
+        {
+            break;
+        }
+        // Give a handler that was already admitted the chance to register its
+        // owned task before the next ownership pass.
+        time::sleep(Duration::from_millis(10)).await;
     }
 }
 
@@ -464,7 +618,53 @@ async fn abort_requests_missing_valkey_leases(
 mod tests {
     use std::time::Duration;
 
-    use super::RuntimeControl;
+    use super::{RuntimeControl, join_owned_tasks};
+
+    #[tokio::test]
+    async fn a_completed_handle_is_consumed_once_while_the_escalation_aborts_the_rest() {
+        let control = RuntimeControl::new();
+        let completed = tokio::spawn(async {});
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        assert!(completed.is_finished(), "the first handle is complete");
+        let stalled = tokio::spawn(async { std::future::pending::<()>().await });
+        let mut tasks = vec![completed, stalled];
+
+        let escalation = tokio::spawn({
+            let control = control.clone();
+            async move {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                control.begin_fail_closed_shutdown();
+            }
+        });
+
+        join_owned_tasks(&mut tasks, Duration::from_secs(5), &control).await;
+
+        escalation.await.expect("the escalation task ran");
+        assert!(tasks.is_empty(), "every owned handle was consumed");
+        assert!(control.is_fail_closed());
+    }
+
+    #[tokio::test]
+    async fn a_task_that_outlives_the_allowance_is_aborted_and_joined() {
+        let control = RuntimeControl::new();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let mut tasks = vec![tokio::spawn(async move {
+            let _ = started_tx.send(());
+            std::future::pending::<()>().await;
+        })];
+        started_rx.await.expect("the owned task started");
+
+        let started = std::time::Instant::now();
+        join_owned_tasks(&mut tasks, Duration::from_millis(20), &control).await;
+
+        assert!(tasks.is_empty(), "the timed-out handle was consumed");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "the allowance bounds the wait instead of leaving the task alive"
+        );
+    }
 
     #[tokio::test]
     async fn drain_returns_once_the_last_guard_drops() {
@@ -527,5 +727,75 @@ mod tests {
         control.begin_session_stop();
         waiting.await.expect("session stop wait ran");
         assert!(control.is_session_stopped());
+    }
+
+    #[test]
+    fn the_internal_shutdown_path_stops_the_subscribed_services() {
+        let control = RuntimeControl::new();
+        let shutdown = super::super::WorkerShutdown::new();
+        control.attach_shutdown_broadcast(shutdown.clone());
+        assert!(!shutdown.is_triggered());
+
+        control.begin_shutdown();
+
+        assert!(shutdown.is_triggered());
+        assert!(control.is_shutting_down());
+        assert!(!control.is_fail_closed());
+    }
+
+    #[tokio::test]
+    async fn a_fail_closed_escalation_wakes_a_running_drain() {
+        let control = RuntimeControl::new();
+        let waiting = tokio::spawn({
+            let control = control.clone();
+            async move { control.wait_for_fail_closed().await }
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert!(
+            !waiting.is_finished(),
+            "the escalation has not been signalled yet"
+        );
+
+        control.begin_fail_closed_shutdown();
+
+        waiting.await.expect("the fail closed wait ran");
+        assert!(control.is_fail_closed());
+    }
+
+    #[tokio::test]
+    async fn a_fail_closed_escalation_that_already_happened_is_observed_at_once() {
+        let control = RuntimeControl::new();
+        control.begin_fail_closed_shutdown();
+
+        control.wait_for_fail_closed().await;
+
+        assert!(control.is_fail_closed());
+    }
+
+    #[test]
+    fn a_fail_closed_shutdown_stops_the_services_and_cancels_the_work() {
+        let control = RuntimeControl::new();
+        let shutdown = super::super::WorkerShutdown::new();
+        control.attach_shutdown_broadcast(shutdown.clone());
+
+        control.begin_fail_closed_shutdown();
+
+        assert!(shutdown.is_triggered());
+        assert!(control.is_shutting_down());
+        assert!(control.is_fail_closed());
+        assert_eq!(
+            RuntimeControl::shutdown_drain_budget(true, 120),
+            Duration::from_secs(0),
+            "a fail closed shutdown never drains accepted work"
+        );
+        assert_eq!(
+            RuntimeControl::shutdown_drain_budget(false, 120),
+            Duration::from_secs(120)
+        );
+        assert_eq!(
+            RuntimeControl::shutdown_drain_budget(false, 0),
+            Duration::from_secs(1),
+            "a configured budget of zero still allows one second"
+        );
     }
 }

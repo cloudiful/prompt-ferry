@@ -81,17 +81,6 @@ fn domain_ids(domains: &SnapshotDomains, name: &str) -> (BTreeSet<String>, usize
                 ids.insert(credential.credential_id.to_string());
             }
         }
-        "relays" => {
-            for relay in &domains.relays {
-                ids.insert(relay.relay_id.to_string());
-                let missing_key = relay.tls_mode != "off" && relay.client_key_pem.is_none();
-                let missing_bridge = relay.bridge_encryption_mode == "required"
-                    && relay.bridge_encryption_key.is_none();
-                if missing_key || missing_bridge {
-                    unrecoverable += 1;
-                }
-            }
-        }
         "settings" => {
             for setting in &domains.settings {
                 ids.insert(setting.key.clone());

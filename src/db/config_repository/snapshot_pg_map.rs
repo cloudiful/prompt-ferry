@@ -5,15 +5,13 @@
 //! secret-shaped strings to `None` so a record never claims an empty secret.
 //! The reads that feed these functions live in [`super::snapshot_postgres`].
 
-use super::ManagedRelaySecrets;
 use super::snapshot::{
     ClientKeySnapshot, EndpointApiKeySnapshot, EndpointOAuthSnapshot, EndpointSnapshot,
     McpCredentialSnapshot, McpServerSnapshot, ModelRouteSnapshot, ModelRouteTargetSnapshot,
-    RelaySnapshot, SecretRecovery,
+    SecretRecovery,
 };
 use crate::db::{
-    ClientKey as PgClientKey, ManagedRelayRow, McpCredential, McpServer, ModelEndpointRule,
-    ProviderEndpoint,
+    ClientKey as PgClientKey, McpCredential, McpServer, ModelEndpointRule, ProviderEndpoint,
 };
 
 pub(super) fn convert_client_key(key: PgClientKey) -> ClientKeySnapshot {
@@ -167,40 +165,6 @@ pub(super) fn convert_mcp_credential(credential: McpCredential) -> McpCredential
         created_at: credential.created_at,
         updated_at: credential.updated_at,
     }
-}
-
-/// A managed relay row plus its sealed secrets, decrypted for the archive.
-pub(super) fn convert_relay(
-    row: ManagedRelayRow,
-    secrets: ManagedRelaySecrets,
-    manager: Option<&crate::relay_secrets::RelaySecretManager>,
-) -> anyhow::Result<RelaySnapshot> {
-    let decrypt = |envelope: Option<crate::relay_secrets::EncryptedSecretEnvelope>| match envelope {
-        Some(envelope) => match manager {
-            Some(manager) => Ok(Some(manager.decrypt(&envelope)?)),
-            None => anyhow::bail!(
-                "managed relay secrets are sealed but no worker configuration \
-                 encryption key is configured"
-            ),
-        },
-        None => Ok(None),
-    };
-    // Read the mode strings before the row is destructured, so the snapshot
-    // carries the stored values rather than a re-derived default.
-    let tls_mode = row.tls_mode().as_str().to_string();
-    let bridge_encryption_mode = row.bridge_encryption_mode().as_str().to_string();
-    Ok(RelaySnapshot {
-        relay_id: row.relay_id,
-        name: row.name,
-        relay_url: row.relay_url,
-        enabled: row.enabled,
-        tls_mode,
-        bridge_encryption_mode,
-        relay_ca_pem: decrypt(secrets.relay_ca)?,
-        client_cert_pem: decrypt(secrets.client_cert)?,
-        client_key_pem: decrypt(secrets.client_key)?,
-        bridge_encryption_key: decrypt(secrets.bridge_key)?,
-    })
 }
 
 pub(super) fn non_empty(value: Option<String>) -> Option<String> {

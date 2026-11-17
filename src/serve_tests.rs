@@ -119,3 +119,18 @@ fn the_relay_command_runs_the_relay_role() {
         "the command starts no local worker, so it bridges nothing in-process"
     );
 }
+
+#[test]
+fn a_failed_relay_half_stops_the_worker_fail_closed() {
+    // The relay is gone, so the accepted work cannot reach it any more: the
+    // worker cancels it instead of draining it against a dead bridge.
+    assert_eq!(
+        worker_stop_for_relay(true),
+        crate::worker::ExternalStop::FailClosed
+    );
+    // A relay that stopped cleanly leaves the worker its graceful drain.
+    assert_eq!(
+        worker_stop_for_relay(false),
+        crate::worker::ExternalStop::Graceful
+    );
+}

@@ -14,7 +14,7 @@ use crate::db::entities::postgres::model_route_targets;
 use crate::db::seaorm::PostgresNativeConnection;
 use crate::db::settings::RAW_OBJECT_STORE_SETTINGS_KEY;
 use crate::raw_payload_store::{RawObjectStoreConfig, RawObjectStorePersisted};
-use crate::relay_secrets::{EncryptedSecretEnvelope, RelaySecretManager};
+use crate::relay_secrets::RelaySecretManager;
 
 pub(super) async fn insert_route_targets(
     conn: &mut PgConnection,
@@ -166,75 +166,6 @@ pub(super) async fn insert_mcp_credentials(
     run(conn, query).await
 }
 
-fn envelope(
-    manager: &RelaySecretManager,
-    value: Option<&String>,
-) -> Result<Option<EncryptedSecretEnvelope>> {
-    match value
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-    {
-        Some(value) => Ok(Some(manager.encrypt(value)?)),
-        None => Ok(None),
-    }
-}
-
-pub(super) async fn insert_relays(
-    conn: &mut PgConnection,
-    manager: &RelaySecretManager,
-    domains: &SnapshotDomains,
-) -> Result<()> {
-    if domains.relays.is_empty() {
-        return Ok(());
-    }
-    // Relay secrets are re-encrypted with the destination key before insert.
-    let encrypted = domains
-        .relays
-        .iter()
-        .map(|relay| {
-            Ok((
-                relay,
-                envelope(manager, relay.relay_ca_pem.as_ref())?,
-                envelope(manager, relay.client_cert_pem.as_ref())?,
-                envelope(manager, relay.client_key_pem.as_ref())?,
-                envelope(manager, relay.bridge_encryption_key.as_ref())?,
-            ))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let mut query = QueryBuilder::new(
-        "INSERT INTO managed_relays (relay_id, name, relay_url, enabled, tls_mode, \
-         bridge_encryption_mode, relay_ca_ciphertext, relay_ca_nonce, relay_ca_key_version, \
-         client_cert_ciphertext, client_cert_nonce, client_cert_key_version, \
-         client_key_ciphertext, client_key_nonce, client_key_key_version, \
-         bridge_encryption_key_ciphertext, bridge_encryption_key_nonce, \
-         bridge_encryption_key_key_version, created_at, updated_at) ",
-    );
-    query.push_values(encrypted, |mut row, (relay, ca, cert, key, bridge)| {
-        let now = chrono::Utc::now();
-        row.push_bind(relay.relay_id)
-            .push_bind(relay.name.clone())
-            .push_bind(relay.relay_url.clone())
-            .push_bind(relay.enabled)
-            .push_bind(relay.tls_mode.clone())
-            .push_bind(relay.bridge_encryption_mode.clone())
-            .push_bind(ca.as_ref().map(|e| e.ciphertext.clone()))
-            .push_bind(ca.as_ref().map(|e| e.nonce.clone()))
-            .push_bind(ca.as_ref().map(|e| e.key_version))
-            .push_bind(cert.as_ref().map(|e| e.ciphertext.clone()))
-            .push_bind(cert.as_ref().map(|e| e.nonce.clone()))
-            .push_bind(cert.as_ref().map(|e| e.key_version))
-            .push_bind(key.as_ref().map(|e| e.ciphertext.clone()))
-            .push_bind(key.as_ref().map(|e| e.nonce.clone()))
-            .push_bind(key.as_ref().map(|e| e.key_version))
-            .push_bind(bridge.as_ref().map(|e| e.ciphertext.clone()))
-            .push_bind(bridge.as_ref().map(|e| e.nonce.clone()))
-            .push_bind(bridge.as_ref().map(|e| e.key_version))
-            .push_bind(now)
-            .push_bind(now);
-    });
-    run(conn, query).await
-}
-
 pub(super) async fn insert_settings(
     conn: &mut PgConnection,
     manager: &RelaySecretManager,
@@ -244,6 +175,13 @@ pub(super) async fn insert_settings(
         .settings
         .iter()
         .filter(|setting| setting.key != RAW_OBJECT_STORE_SETTINGS_KEY)
+        // The shared Valkey settings carry their own revision and are written
+        // with the concurrency protocol of the settings patch.
+        .filter(|setting| setting.key != crate::db::SHARED_VALKEY_SETTINGS_KEY)
+        // The internal coordination rows are never restored from an archive.
+        .filter(|setting| {
+            !crate::db::INTERNAL_COORDINATION_SETTING_KEYS.contains(&setting.key.as_str())
+        })
         .collect();
     if !settings.is_empty() {
         let mut query = QueryBuilder::new(
@@ -289,5 +227,48 @@ pub(super) async fn insert_user_redaction_configs(
             .push_bind(config.config.clone())
             .push_bind(chrono::Utc::now());
     });
+    run(conn, query).await
+}
+
+/// Restore the shared Valkey settings with a fresh revision.
+///
+/// The archived revision is never replayed: an archive that predates a
+/// running worker must not make an applied revision look current again. An
+/// archive without the shared Valkey settings disables the coordination with
+/// a new revision instead of erasing the lineage.
+pub(super) async fn insert_shared_valkey(
+    conn: &mut PgConnection,
+    domains: &SnapshotDomains,
+    current_revision: Option<i64>,
+) -> Result<()> {
+    let archived = domains
+        .settings
+        .iter()
+        .find(|setting| setting.key == crate::db::SHARED_VALKEY_SETTINGS_KEY);
+    let mut persisted = match archived {
+        Some(setting) => {
+            let archived: crate::db::SharedValkeyPersisted =
+                serde_json::from_value(setting.value.clone())
+                    .context("archived shared Valkey settings are unreadable")?;
+            archived
+        }
+        None => crate::db::SharedValkeyPersisted {
+            revision: 0,
+            ttl_seconds: crate::db::DEFAULT_SHARED_VALKEY_TTL_SECONDS,
+            url: None,
+        },
+    };
+    persisted.revision = crate::db::next_shared_valkey_revision(current_revision);
+    if crate::db::validate_shared_valkey_ttl(persisted.ttl_seconds).is_err() {
+        persisted.ttl_seconds = crate::db::DEFAULT_SHARED_VALKEY_TTL_SECONDS;
+    }
+    let mut query = QueryBuilder::new("INSERT INTO worker_settings (setting_key, setting_value) ");
+    query.push_values(
+        [(crate::db::SHARED_VALKEY_SETTINGS_KEY, persisted)],
+        |mut row, (key, value)| {
+            row.push_bind(key)
+                .push_bind(serde_json::to_value(value).unwrap_or_default());
+        },
+    );
     run(conn, query).await
 }

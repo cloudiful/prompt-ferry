@@ -1,5 +1,3 @@
-#[path = "types/approvals.rs"]
-mod approvals;
 #[path = "types/auth_users.rs"]
 mod auth_users;
 #[path = "types/billing.rs"]
@@ -22,16 +20,15 @@ mod model_routes;
 mod quota_key_observations;
 #[path = "types/quota_status.rs"]
 mod quota_status;
-#[path = "types/relays.rs"]
-mod relays;
 #[path = "types/settings.rs"]
 mod settings;
 #[path = "types/token_plan.rs"]
 mod token_plan;
 #[path = "types/usage.rs"]
 mod usage;
+#[path = "types/workers.rs"]
+mod workers;
 
-pub use approvals::*;
 pub use auth_users::*;
 pub use billing::*;
 pub use cache_alert::*;
@@ -45,10 +42,10 @@ pub use mcp_provider::*;
 pub use model_routes::*;
 pub use quota_key_observations::*;
 pub use quota_status::*;
-pub use relays::*;
 pub use settings::*;
 pub use token_plan::*;
 pub use usage::*;
+pub use workers::*;
 
 #[cfg(test)]
 mod tests {

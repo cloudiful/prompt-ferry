@@ -255,7 +255,6 @@ async fn resolve_realtime_route(
         path: request.path.clone(),
         headers: Vec::new(),
         body: serde_json::to_vec(&serde_json::json!({"model": request.model})).unwrap_or_default(),
-        request_deadline_unix_ms: 0,
         user_id: request.user_id,
         client_key_hash: request.client_key_hash.clone(),
         request_user_agent: request.request_user_agent.clone(),

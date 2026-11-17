@@ -65,7 +65,7 @@ pub struct RelayConfig {
     ///
     /// Empty means the relay generates one on first start and persists it in
     /// the host-local configuration; it is never written to the shared
-    /// configuration a managed relay list can carry between hosts.
+    /// PostgreSQL configuration that every worker reads.
     pub admin_token: String,
 }
 

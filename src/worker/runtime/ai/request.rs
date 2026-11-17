@@ -12,7 +12,6 @@ use super::{
     request_init::initialize_request,
     request_routes::{RouteResolution, resolve_route},
     request_support::mark_function_call_outputs_received,
-    review::handle_llm_review_gate,
 };
 use crate::{
     config::{NativeApi, WorkerConfig},
@@ -72,12 +71,6 @@ pub(in crate::worker::runtime) async fn process_request(
             request_headers: &request.headers,
         }))
         .await;
-    }
-
-    if services.admin_state().is_some()
-        && !Box::pin(handle_llm_review_gate(services, &request, &request_ctx)).await?
-    {
-        return Ok(());
     }
 
     let (mut route, quota_probe) =

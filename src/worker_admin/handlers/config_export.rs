@@ -4,7 +4,7 @@
 //! the restorable configuration domains; `POST .../config-export/metadata`
 //! returns the non-secret manifest summary an operator records in the audit
 //! trail. Both are admin-only (`ensure_admin`) and read-only: no configuration
-//! is written and no request/usage/billing/approval/session data is read.
+//! is written and no request/usage/billing/session data is read.
 //!
 //! The passphrase arrives in the request body, is never logged, never stored,
 //! and never appears in a URL, response header, filename, or error message.

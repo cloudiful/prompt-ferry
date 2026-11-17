@@ -37,11 +37,9 @@ impl StorageBackend {
                 client_keys: true,
                 endpoints: true,
                 routes: true,
-                relays: true,
                 settings: true,
                 request_usage: true,
                 raw_payload_retention: true,
-                approvals: true,
                 mcp: true,
                 billing: true,
                 durable_replay: true,
@@ -55,11 +53,9 @@ impl StorageBackend {
                 client_keys: true,
                 endpoints: true,
                 routes: true,
-                relays: true,
                 settings: true,
                 request_usage: false,
                 raw_payload_retention: false,
-                approvals: false,
                 mcp: true,
                 billing: false,
                 durable_replay: false,
@@ -98,6 +94,16 @@ impl CoordinatorBackend {
 
     pub const fn is_process_local(self) -> bool {
         matches!(self, Self::InMemory)
+    }
+
+    /// True when the deployment cannot coordinate several workers and
+    /// therefore runs in the degraded single-worker mode.
+    ///
+    /// Only PostgreSQL is in that state: it keeps its durable state in the
+    /// database but has no cross-process coordinator for the shared caches,
+    /// the request leases and the sessions.
+    pub const fn is_degraded_single_worker(self) -> bool {
+        matches!(self, Self::Postgres)
     }
 
     /// True when the coordinator backend survives process restart. Valkey,
@@ -148,11 +154,9 @@ pub struct StorageCapabilities {
     pub client_keys: bool,
     pub endpoints: bool,
     pub routes: bool,
-    pub relays: bool,
     pub settings: bool,
     pub request_usage: bool,
     pub raw_payload_retention: bool,
-    pub approvals: bool,
     pub mcp: bool,
     pub billing: bool,
     pub durable_replay: bool,
@@ -188,10 +192,17 @@ impl StorageContract {
             CoordinatorBackend::Postgres => StateBackend::Memory,
             CoordinatorBackend::InMemory => StateBackend::Memory,
         };
+        let mut capabilities = backend.capabilities();
+        // Shared workers need a coordinator that arbitrates between
+        // processes. Without a shared Valkey the PostgreSQL deployment runs
+        // in the degraded single-worker mode and must not advertise the
+        // shared-worker capability.
+        capabilities.shared_workers =
+            capabilities.shared_workers && !coordinator.is_degraded_single_worker();
         Self {
             backend,
             coordinator,
-            capabilities: backend.capabilities(),
+            capabilities,
             replay: match coordinator {
                 CoordinatorBackend::Postgres => StateBackend::Postgres,
                 _ => cache_backend,
@@ -296,12 +307,10 @@ mod tests {
         assert!(contract.capabilities.client_keys);
         assert!(contract.capabilities.endpoints);
         assert!(contract.capabilities.routes);
-        assert!(contract.capabilities.relays);
         assert!(contract.capabilities.settings);
         assert!(contract.capabilities.mcp);
         assert!(!contract.capabilities.request_usage);
         assert!(!contract.capabilities.raw_payload_retention);
-        assert!(!contract.capabilities.approvals);
         assert!(!contract.capabilities.billing);
         assert!(!contract.capabilities.durable_replay);
         assert!(
@@ -358,10 +367,13 @@ mod tests {
 
         assert!(contract.capabilities.request_usage);
         assert!(contract.capabilities.raw_payload_retention);
-        assert!(contract.capabilities.approvals);
         assert!(contract.capabilities.billing);
         assert!(contract.capabilities.durable_replay);
-        assert!(contract.capabilities.shared_workers);
+        // Without a shared coordinator the deployment runs in the degraded
+        // single-worker mode: only one live worker may serve, so the
+        // shared-worker capability must not be advertised.
+        assert!(!contract.capabilities.shared_workers);
+        assert!(contract.coordinator.is_degraded_single_worker());
 
         assert_contract_invariants(&contract);
     }
@@ -386,6 +398,9 @@ mod tests {
         assert!(contract.capabilities.shared_workers);
         assert!(contract.capabilities.billing);
         assert!(contract.capabilities.request_usage);
+
+        // A shared Valkey removes the degraded single-worker mode.
+        assert!(!contract.coordinator.is_degraded_single_worker());
 
         assert_contract_invariants(&contract);
     }

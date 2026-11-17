@@ -127,7 +127,6 @@ pub(crate) struct PendingRequest {
     pub(crate) worker: WorkerSender,
     pub(crate) queued_bytes: usize,
     pub(crate) response_started: bool,
-    pub(crate) awaiting_approval: bool,
 }
 
 pub(crate) struct PendingMcpRequest {

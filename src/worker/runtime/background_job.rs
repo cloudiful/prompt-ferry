@@ -23,37 +23,67 @@ const COORDINATED_LEASE_RENEW: Duration = Duration::from_secs(60);
 pub(super) type CoordinatedScheduler =
     Scheduler<InMemoryStateStore, NoopExecutionGuard, ValkeyCoordinatedStateStore>;
 
-/// Connect the shared Valkey coordination store, or `None` when it is
-/// unreachable inside the bounded probe so the caller can disable the job
-/// instead of running it uncoordinated.
+/// How often the coordinated store connection is attempted before the caller
+/// stops the worker.
+const COORDINATED_STORE_ATTEMPTS: usize = 3;
+
+/// Connect the shared Valkey coordination store.
+///
+/// A configured shared Valkey is authoritative: the store is required for the
+/// job, so a transient failure is retried inside a bounded window. The
+/// function returns `None` only when the store cannot be created inside that
+/// window; the caller must then stop the worker instead of running the job
+/// without coordination.
+///
+/// The failure is reported as a fixed category: a backend error can echo the
+/// connection string or a part of it.
 pub(super) async fn connect_coordinated_store(
     valkey_url: &str,
 ) -> Option<ValkeyCoordinatedStateStore> {
-    match timeout(
-        VALKEY_HEALTH_CHECK_TIMEOUT,
-        ValkeyCoordinatedStateStore::new(valkey_url),
-    )
-    .await
-    {
-        Ok(Ok(store)) => Some(store),
-        Ok(Err(error)) => {
-            tracing::warn!(
-                error = %error,
-                capability = "job_coordination",
-                "background job disabled because Valkey coordination is unavailable"
-            );
-            None
+    let mut backoff = VALKEY_HEALTH_RETRY_BACKOFF;
+    for attempt in 0..COORDINATED_STORE_ATTEMPTS {
+        match timeout(
+            VALKEY_HEALTH_CHECK_TIMEOUT,
+            ValkeyCoordinatedStateStore::new(valkey_url),
+        )
+        .await
+        {
+            Ok(Ok(store)) => return Some(store),
+            Ok(Err(_)) => {
+                tracing::warn!(
+                    category = "coordinated_store_client_open_failed",
+                    attempt,
+                    capability = "job_coordination",
+                    "the shared Valkey coordination store could not be opened; retrying"
+                );
+            }
+            Err(_) => {
+                tracing::warn!(
+                    category = "coordinated_store_timeout",
+                    attempt,
+                    capability = "job_coordination",
+                    "the shared Valkey coordination store did not answer in time; retrying"
+                );
+            }
         }
-        Err(_) => {
-            tracing::warn!(
-                capability = "job_coordination",
-                "background job disabled because Valkey coordination initialization timed out"
-            );
-            None
+        if attempt + 1 < COORDINATED_STORE_ATTEMPTS {
+            tokio::time::sleep(backoff).await;
+            backoff = backoff.saturating_mul(2);
         }
     }
+    tracing::warn!(
+        category = "coordinated_store_unavailable",
+        capability = "job_coordination",
+        "the shared Valkey coordination store stayed unavailable; the job cannot run coordinated"
+    );
+    None
 }
 
+/// Build the coordinated scheduler.
+///
+/// The store is built once during startup and handed to every required
+/// consumer, so the worker never serves with a coordinator it did not
+/// initialize itself.
 pub(super) fn coordinated_scheduler(store: ValkeyCoordinatedStateStore) -> CoordinatedScheduler {
     Scheduler::with_coordinated_state_store(
         SchedulerConfig::default(),
@@ -105,12 +135,14 @@ where
     tokio::pin!(health);
 
     tokio::select! {
-        result = &mut run => result.map(|_| ()).map_err(|error| error.to_string()),
+        result = &mut run => result.map(|_| ()).map_err(|_| "coordinated_scheduler_failed".to_string()),
         _ = control.wait_for_shutdown() => {
             handle.shutdown();
-            (&mut run).await.map(|_| ()).map_err(|error| error.to_string())
+            (&mut run).await.map(|_| ()).map_err(|_| "coordinated_scheduler_failed".to_string())
         }
         result = &mut health => {
+            // The health monitor only reports fixed categories, so a
+            // dependency message can never reach the logs.
             let error = match result {
                 Ok(()) => "Valkey health monitor stopped unexpectedly".to_string(),
                 Err(error) => error.to_string(),
@@ -123,13 +155,25 @@ where
 }
 
 async fn monitor_valkey_health(url: String) -> anyhow::Result<()> {
-    let client = redis::Client::open(url.as_str())?;
+    let client = redis::Client::open(url.as_str())
+        .map_err(|_| anyhow::anyhow!("scheduler health check client could not be opened"))?;
+    // The inner error of the timeout is a dependency error and can echo the
+    // connection string, so it is replaced by a fixed category. The outer
+    // timeout error is a fixed category as well.
     let mut manager: ConnectionManager =
-        timeout(VALKEY_HEALTH_CHECK_TIMEOUT, client.get_connection_manager())
-            .await
-            .map_err(|_| {
-                anyhow::anyhow!("timed out connecting to Valkey for scheduler health check")
-            })??;
+        match timeout(VALKEY_HEALTH_CHECK_TIMEOUT, client.get_connection_manager()).await {
+            Ok(Ok(manager)) => manager,
+            Ok(Err(_)) => {
+                return Err(anyhow::anyhow!(
+                    "could not connect to Valkey for scheduler health check"
+                ));
+            }
+            Err(_) => {
+                return Err(anyhow::anyhow!(
+                    "timed out connecting to Valkey for scheduler health check"
+                ));
+            }
+        };
 
     loop {
         tokio::time::sleep(VALKEY_HEALTH_CHECK_INTERVAL).await;
@@ -142,7 +186,7 @@ async fn monitor_valkey_health(url: String) -> anyhow::Result<()> {
                     healthy = true;
                     break;
                 }
-                Ok(Err(error)) => last_error = Some(error.to_string()),
+                Ok(Err(_)) => last_error = Some("ping_failed".to_string()),
                 Err(_) => {
                     last_error = Some("Valkey health check timed out".to_string());
                 }
@@ -156,7 +200,7 @@ async fn monitor_valkey_health(url: String) -> anyhow::Result<()> {
             return Err(anyhow::anyhow!(
                 "Valkey scheduler health check failed after {} attempts: {}",
                 VALKEY_HEALTH_FAILURE_LIMIT,
-                last_error.unwrap_or_else(|| "unknown error".to_string())
+                last_error.unwrap_or_else(|| "ping_failed".to_string())
             ));
         }
     }

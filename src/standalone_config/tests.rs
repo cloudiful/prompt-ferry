@@ -1,24 +1,12 @@
 use uuid::Uuid;
 
 use super::*;
-use crate::config::{BridgeEncryptionMode, NativeApi, NativeApiSource, TlsMode};
+use crate::config::{NativeApi, NativeApiSource};
 
 fn sample_config() -> StandaloneConfig {
     let endpoint_id = Uuid::new_v4();
     let key_id = Uuid::new_v4();
     StandaloneConfig {
-        relays: vec![ManagedRelayConfig {
-            relay_id: Uuid::new_v4(),
-            name: "local relay".to_string(),
-            relay_url: "ws://127.0.0.1:8788/ws/worker".to_string(),
-            enabled: true,
-            tls_mode: TlsMode::Off,
-            bridge_encryption_mode: BridgeEncryptionMode::Required,
-            relay_ca_pem: Some("CA PEM".to_string()),
-            client_cert_pem: Some("CERT PEM".to_string()),
-            client_key_pem: Some("CLIENT KEY".to_string()),
-            bridge_encryption_key: Some("BRIDGE KEY".to_string()),
-        }],
         endpoints: vec![ProviderEndpointConfig {
             endpoint_id,
             name: "upstream".to_string(),
@@ -123,34 +111,18 @@ fn public_debug_output_redacts_all_standalone_secrets() {
     ] {
         assert!(!output.contains(secret), "debug output leaked {secret:?}");
     }
-    assert!(output.contains("local relay"));
     assert!(output.contains("[REDACTED;"));
 
     let seed = BootstrapSeed {
-        relay_urls: vec!["ws://127.0.0.1:8788/ws/worker".to_string()],
-        tls_mode: TlsMode::Off,
-        relay_ca_pem: Some("seed CA".to_string()),
-        client_cert_pem: Some("seed cert".to_string()),
-        client_key_pem: Some("seed key".to_string()),
-        bridge_encryption_mode: BridgeEncryptionMode::Required,
-        bridge_encryption_key: Some("seed bridge".to_string()),
         upstream_base_url: "https://api.example.test".to_string(),
         upstream_api_key: "seed endpoint secret".to_string(),
         upstream_native_api: NativeApi::Responses,
     };
     let seed_output = format!("{seed:?}");
-    for secret in [
-        "seed CA",
-        "seed cert",
-        "seed key",
-        "seed bridge",
-        "seed endpoint secret",
-    ] {
-        assert!(
-            !seed_output.contains(secret),
-            "debug output leaked {secret:?}"
-        );
-    }
+    assert!(
+        !seed_output.contains("seed endpoint secret"),
+        "debug output leaked the bootstrap endpoint secret"
+    );
 }
 
 // ---- Phase 1A standalone usage ledger tests ----

@@ -14,7 +14,7 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::{
-    config::WorkerConfig, db, response_affinity::ResponseAffinityStore,
+    config::WorkerConfig, db, db::SharedValkeyConfig, response_affinity::ResponseAffinityStore,
     usage_prompt::PromptMessageRef, worker_admin_types::SessionUser,
 };
 
@@ -163,80 +163,68 @@ impl ReplayCache {
         }
     }
 
-    pub async fn from_config(config: &WorkerConfig) -> Self {
-        Self::from_config_with_sqlite(config, None).await
+    pub async fn from_config(config: &WorkerConfig, shared: &SharedValkeyConfig) -> Result<Self> {
+        Self::from_config_with_sqlite(config, shared, None).await
     }
 
     pub async fn from_config_with_sqlite(
         config: &WorkerConfig,
+        shared: &SharedValkeyConfig,
         sqlite_pool: Option<SqlitePool>,
-    ) -> Self {
-        let url = config.valkey_url.trim();
+    ) -> Result<Self> {
+        let url = shared.url_or_empty().trim();
+        let valkey_ttl_seconds = shared.ttl_seconds();
         if url.is_empty() {
             if let Some(pool) = sqlite_pool {
-                return Self::sqlite(config, pool, "valkey_not_configured");
+                return Ok(Self::sqlite(config, shared, pool, "valkey_not_configured"));
             }
-            return Self::unavailable_sessions_only(
+            return Ok(Self::unavailable_sessions_only(
                 config,
                 "valkey_not_configured_without_durable_store",
-            );
+            ));
         }
-        let client = match redis::Client::open(url) {
-            Ok(client) => client,
-            Err(err) => {
-                warn!(error = %err, "failed to open valkey client");
-                if let Some(pool) = sqlite_pool {
-                    return Self::sqlite(config, pool, "valkey_client_open_failed");
-                }
-                return Self::unavailable_sessions_only(
-                    config,
-                    "valkey_client_open_failed_without_durable_store",
-                );
-            }
-        };
+        let client = redis::Client::open(url)
+            .map_err(|_| db::shared_valkey_failure(db::SharedValkeyFailure::ClientOpen, url))?;
         let manager =
             match tokio::time::timeout(VALKEY_CONNECT_TIMEOUT, client.get_connection_manager())
                 .await
             {
                 Ok(Ok(manager)) => manager,
-                Ok(Err(err)) => {
-                    warn!(error = %err, "failed to connect valkey");
-                    if let Some(pool) = sqlite_pool {
-                        return Self::sqlite(config, pool, "valkey_connection_failed");
-                    }
-                    return Self::unavailable_sessions_only(
-                        config,
-                        "valkey_connection_failed_without_durable_store",
-                    );
+                Ok(Err(_)) => {
+                    // A configured shared Valkey is authoritative: the replay
+                    // and session state must not degrade to a process-local
+                    // store.
+                    return Err(db::shared_valkey_failure(
+                        db::SharedValkeyFailure::Connect,
+                        url,
+                    ));
                 }
                 Err(_) => {
-                    warn!(
-                        timeout_seconds = VALKEY_CONNECT_TIMEOUT.as_secs(),
-                        "timed out connecting to valkey for replay cache; falling back",
-                    );
-                    if let Some(pool) = sqlite_pool {
-                        return Self::sqlite(config, pool, "valkey_connection_timeout");
-                    }
-                    return Self::unavailable_sessions_only(
-                        config,
-                        "valkey_connection_timeout_without_durable_store",
-                    );
+                    return Err(db::shared_valkey_failure(
+                        db::SharedValkeyFailure::Timeout,
+                        url,
+                    ));
                 }
             };
-        Self {
+        Ok(Self {
             backend: ReplayCacheBackend::Redis(Arc::new(RedisBackend {
                 manager: manager.clone(),
-                replay_ttl_seconds: config.valkey_ttl_seconds.max(1),
+                replay_ttl_seconds: valkey_ttl_seconds.max(1),
                 session_ttl_seconds: config.session_ttl_seconds.max(1),
             })),
             response_affinity: ResponseAffinityStore::from_connection_manager(
                 manager,
                 config.session_ttl_seconds,
             ),
-        }
+        })
     }
 
-    fn sqlite(config: &WorkerConfig, pool: SqlitePool, reason: &str) -> Self {
+    fn sqlite(
+        config: &WorkerConfig,
+        shared: &SharedValkeyConfig,
+        pool: SqlitePool,
+        reason: &str,
+    ) -> Self {
         warn!(
             backend = "sqlite",
             reason,
@@ -248,7 +236,7 @@ impl ReplayCache {
         Self {
             backend: ReplayCacheBackend::Sqlite(Arc::new(SqliteBackend {
                 coordinator: coordinator.clone(),
-                replay_ttl_seconds: config.valkey_ttl_seconds.max(1),
+                replay_ttl_seconds: shared.ttl_seconds(),
                 session_ttl_seconds: config.session_ttl_seconds.max(1),
             })),
             response_affinity: ResponseAffinityStore::sqlite_with_ttl(
@@ -821,7 +809,9 @@ mod tests {
             ..Default::default()
         };
 
-        let cache = ReplayCache::from_config(&config).await;
+        let cache = ReplayCache::from_config(&config, &SharedValkeyConfig::not_configured())
+            .await
+            .expect("replay cache");
         assert!(!cache.enabled());
         assert!(!cache.session_available());
 

@@ -11,14 +11,12 @@ use anyhow::{Context, Result};
 use super::snapshot::{
     ClientKeySnapshot, EndpointApiKeySnapshot, EndpointOAuthSnapshot, EndpointSnapshot,
     McpCredentialSnapshot, McpServerSnapshot, ModelRouteSnapshot, ModelRouteTargetSnapshot,
-    RelaySnapshot, SecretRecovery, SettingSnapshot, SnapshotDomains, UserSnapshot,
+    SecretRecovery, SettingSnapshot, SnapshotDomains, UserSnapshot,
 };
 use crate::{
     config::NativeApi,
     db::config_repository::{ConfigRepository, SqliteConfigRepository},
-    standalone_config::{
-        ManagedRelayConfig, ModelRouteConfig, ProviderEndpointConfig, StandaloneConfig,
-    },
+    standalone_config::{ModelRouteConfig, ProviderEndpointConfig, StandaloneConfig},
 };
 
 pub(super) async fn read(
@@ -53,7 +51,6 @@ pub(super) async fn read(
         model_routes: snapshot.routes.iter().map(convert_route).collect(),
         mcp_servers: mcp_servers.into_iter().map(convert_mcp_server).collect(),
         mcp_credentials,
-        relays: snapshot.relays.iter().map(convert_relay).collect(),
         settings: snapshot.settings.iter().map(convert_setting).collect(),
         // Per-user redaction rules and the raw object store are
         // PostgreSQL-only configuration domains.
@@ -180,21 +177,6 @@ fn convert_route(route: &ModelRouteConfig) -> ModelRouteSnapshot {
                 prefer_new_sessions: target.prefer_new_sessions,
             })
             .collect(),
-    }
-}
-
-fn convert_relay(relay: &ManagedRelayConfig) -> RelaySnapshot {
-    RelaySnapshot {
-        relay_id: relay.relay_id,
-        name: relay.name.clone(),
-        relay_url: relay.relay_url.clone(),
-        enabled: relay.enabled,
-        tls_mode: relay.tls_mode.as_str().to_string(),
-        bridge_encryption_mode: relay.bridge_encryption_mode.as_str().to_string(),
-        relay_ca_pem: non_empty(relay.relay_ca_pem.clone()),
-        client_cert_pem: non_empty(relay.client_cert_pem.clone()),
-        client_key_pem: non_empty(relay.client_key_pem.clone()),
-        bridge_encryption_key: non_empty(relay.bridge_encryption_key.clone()),
     }
 }
 

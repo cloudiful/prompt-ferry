@@ -1,12 +1,12 @@
 use crate::{
     db::StreamDeltaBatchingSettings,
-    llm_review::LlmReviewSettings,
     protocol::RelayIpPolicy,
     worker_admin_types::{
         CacheAlertSettingsRequest, CacheAlertSettingsResponse, EndpointSettingRequest,
         ModelRouteWhitelistRequest, ModelRouteWhitelistResponse, RawObjectStoreSettingsRequest,
         RawObjectStoreSettingsResponse, RelayIpPolicyResponse, RequestContentLoggingRequest,
-        RequestContentLoggingResponse, UsageRetentionSettings,
+        RequestContentLoggingResponse, SharedValkeySettingsRequest, SharedValkeySettingsResponse,
+        UsageRetentionSettings,
     },
 };
 
@@ -194,23 +194,6 @@ pub(super) fn set_relay_ip_whitelist() {}
 
 #[utoipa::path(
     get,
-    path = "/api/v1/settings/llm-review",
-    responses((status = 200, body = LlmReviewSettings, description = "LLM review settings")),
-    tag = "settings"
-)]
-pub(super) fn get_llm_review_setting() {}
-
-#[utoipa::path(
-    patch,
-    path = "/api/v1/settings/llm-review",
-    request_body = LlmReviewSettings,
-    responses((status = 200, body = LlmReviewSettings, description = "Updated LLM review settings")),
-    tag = "settings"
-)]
-pub(super) fn set_llm_review_setting() {}
-
-#[utoipa::path(
-    get,
     path = "/api/v1/settings/raw-object-store",
     responses((status = 200, body = RawObjectStoreSettingsResponse, description = "Raw object store settings")),
     tag = "settings"
@@ -225,3 +208,20 @@ pub(super) fn get_raw_object_store() {}
     tag = "settings"
 )]
 pub(super) fn set_raw_object_store() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/shared-valkey",
+    responses((status = 200, body = SharedValkeySettingsResponse, description = "Shared Valkey settings; the URL is masked and the desired/applied revisions expose restart status")),
+    tag = "settings"
+)]
+pub(super) fn get_shared_valkey() {}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/settings/shared-valkey",
+    request_body = SharedValkeySettingsRequest,
+    responses((status = 200, body = SharedValkeySettingsResponse, description = "Persisted shared Valkey settings; every running worker stays on its applied revision until it restarts")),
+    tag = "settings"
+)]
+pub(super) fn set_shared_valkey() {}

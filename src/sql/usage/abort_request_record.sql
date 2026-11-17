@@ -3,7 +3,7 @@ WITH active AS (
     FROM request_records
     WHERE request_id = $1
       AND event_kind = 'request'
-      AND request_state IN ('received', 'awaiting_approval', 'upstream_processing')
+      AND request_state IN ('received', 'upstream_processing')
     FOR UPDATE
 ), cleaned AS (
     DELETE FROM request_record_leases lease

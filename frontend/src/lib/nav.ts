@@ -3,7 +3,6 @@ import {
   Blocks,
   Cable,
   ChartColumn,
-  ClipboardCheck,
   Database,
   KeyRound,
   Plug,
@@ -98,15 +97,15 @@ export const navSections: NavSection[] = [
     routes: [{ id: 'R-MCP', path: '/mcp', titleKey: 'mcp', adminOnly: false }],
   },
   {
-    id: 'relays',
-    labelKey: 'relays',
+    id: 'workers',
+    labelKey: 'workers',
     icon: Plug,
     adminOnly: true,
     routes: [
       {
-        id: 'R-RELAYS',
-        path: '/relays',
-        titleKey: 'relays',
+        id: 'R-WORKERS',
+        path: '/workers',
+        titleKey: 'workers',
         adminOnly: true,
       },
     ],
@@ -176,20 +175,6 @@ export const navSections: NavSection[] = [
     ],
   },
   {
-    id: 'approvals',
-    labelKey: 'approvals',
-    icon: ClipboardCheck,
-    adminOnly: true,
-    routes: [
-      {
-        id: 'R-APPROVALS',
-        path: '/approvals',
-        titleKey: 'approvals',
-        adminOnly: true,
-      },
-    ],
-  },
-  {
     id: 'settings',
     labelKey: 'settings',
     icon: Settings,
@@ -210,12 +195,6 @@ export const navSections: NavSection[] = [
         id: 'R-SETTINGS-NETWORK',
         path: '/settings/network',
         titleKey: 'settingsNetwork',
-        adminOnly: true,
-      },
-      {
-        id: 'R-SETTINGS-REVIEW',
-        path: '/settings/review',
-        titleKey: 'settingsReview',
         adminOnly: true,
       },
       {

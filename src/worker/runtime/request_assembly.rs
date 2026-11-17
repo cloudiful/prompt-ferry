@@ -63,7 +63,6 @@ pub(super) struct BufferedBridgeRequest {
     pub(super) path: String,
     pub(super) headers: Vec<(String, String)>,
     pub(super) body: Vec<u8>,
-    pub(super) request_deadline_unix_ms: i64,
     pub(super) user_id: Option<i64>,
     pub(super) client_key_hash: Option<String>,
     pub(super) request_user_agent: Option<String>,
@@ -102,7 +101,6 @@ impl BufferedBridgeRequest {
             path: start.path,
             headers: start.headers,
             body,
-            request_deadline_unix_ms: start.request_deadline_unix_ms,
             user_id: start.user_id,
             client_key_hash: start.client_key_hash,
             request_user_agent: start.request_user_agent,
@@ -192,17 +190,37 @@ pub(super) enum ChunkCollection {
     Complete(Vec<u8>),
     /// The assembled body exceeded `limit`; the caller should respond 413.
     TooLarge,
+    /// The request was cancelled while its body was collected; the caller
+    /// must not answer it.
+    Cancelled,
 }
 
+/// Collect the body of a bridged request.
+///
+/// The collection observes the cancellation of the request: a request that is
+/// cancelled while its body is still arriving stops waiting for the chunks
+/// instead of holding its active guard until the bridge closes.
 pub(super) async fn collect_request_chunks(
     pending: &Arc<Mutex<HashMap<String, PendingIncomingRequest>>>,
     request_id: &str,
     mut chunk_rx: mpsc::Receiver<Vec<u8>>,
     end_rx: oneshot::Receiver<RequestTransferStats>,
     limit: usize,
+    cancellation: &RequestCancellation,
 ) -> (ChunkCollection, RequestTransferStats) {
     let mut body = Vec::new();
-    while let Some(chunk) = chunk_rx.recv().await {
+    loop {
+        let chunk = tokio::select! {
+            chunk = chunk_rx.recv() => chunk,
+            _ = cancellation.cancelled() => {
+                pending.lock().await.remove(request_id);
+                let stats = end_rx.await.unwrap_or_default();
+                return (ChunkCollection::Cancelled, stats);
+            }
+        };
+        let Some(chunk) = chunk else {
+            break;
+        };
         if body.len().saturating_add(chunk.len()) > limit {
             pending.lock().await.remove(request_id);
             let stats = end_rx.await.unwrap_or_default();
@@ -212,6 +230,11 @@ pub(super) async fn collect_request_chunks(
     }
     pending.lock().await.remove(request_id);
     let stats = end_rx.await.unwrap_or_default();
+    if cancellation.is_cancelled() {
+        // The body ended because the request was cancelled: the collected
+        // bytes are incomplete and must not be answered.
+        return (ChunkCollection::Cancelled, stats);
+    }
     (ChunkCollection::Complete(body), stats)
 }
 
@@ -302,8 +325,17 @@ mod tests {
         );
 
         let pending_for_collector = pending.clone();
+        let cancellation = RequestCancellation::default();
         let collector = tokio::spawn(async move {
-            collect_request_chunks(&pending_for_collector, "req-1", chunk_rx, end_rx, 1024).await
+            collect_request_chunks(
+                &pending_for_collector,
+                "req-1",
+                chunk_rx,
+                end_rx,
+                1024,
+                &cancellation,
+            )
+            .await
         });
         forward_request_chunk(&pending, "req-1".to_string(), vec![b'a'; 600]).await;
         forward_request_chunk(&pending, "req-1".to_string(), vec![b'b'; 600]).await;
@@ -314,6 +346,47 @@ mod tests {
         assert!(
             pending.lock().await.get("req-1").is_none(),
             "pending entry must be removed when the limit is hit"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_request_stops_collecting_its_body() {
+        let pending: Arc<Mutex<HashMap<String, PendingIncomingRequest>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let (chunk_tx, chunk_rx) = mpsc::channel(4);
+        let (end_tx, end_rx) = oneshot::channel();
+        let cancellation = RequestCancellation::default();
+        pending.lock().await.insert(
+            "req-1".to_string(),
+            PendingIncomingRequest {
+                chunk_tx,
+                end_tx: Some(end_tx),
+                cancellation: cancellation.clone(),
+            },
+        );
+
+        let pending_for_collector = pending.clone();
+        let collector_cancellation = cancellation.clone();
+        let collector = tokio::spawn(async move {
+            collect_request_chunks(
+                &pending_for_collector,
+                "req-1",
+                chunk_rx,
+                end_rx,
+                1024,
+                &collector_cancellation,
+            )
+            .await
+        });
+        // The request is cancelled while its body is still arriving: the
+        // collector must not wait for the end of the bridge session.
+        cancellation.cancel();
+
+        let (collection, _stats) = collector.await.unwrap();
+        assert!(matches!(collection, ChunkCollection::Cancelled));
+        assert!(
+            pending.lock().await.get("req-1").is_none(),
+            "the pending entry of a cancelled request must be removed"
         );
     }
 }

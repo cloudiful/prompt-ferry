@@ -12,10 +12,10 @@ use tokio_tungstenite::{
 use tracing::{error, info, warn};
 
 use super::{
-    RelayConnectionConfig,
     backoff::{
         relay_reconnect_base_delay, relay_reconnect_delay_with_jitter, wait_for_relay_ready,
     },
+    config::RelayConnectionConfig,
     handshake::negotiate_bridge_encryption,
     is_expected_relay_disconnect,
     support::{format_error_chain, ws_connect_error_detail},
@@ -50,7 +50,10 @@ pub(super) async fn run_relay_loop(
     // exponential backoff to keep the worker in lock-step.
     wait_for_relay_ready(&relay.relay_url).await;
     loop {
-        if runtime_state.is_shutting_down() {
+        // The session stays open while the worker drains its accepted work:
+        // the bridges are closed explicitly after the drain, not when the
+        // shutdown starts.
+        if runtime_state.control.is_session_stopped() {
             break;
         }
         let reconnect_delay = match connect_once(
@@ -65,9 +68,6 @@ pub(super) async fn run_relay_loop(
         {
             Ok(()) => {
                 consecutive_failures = 0;
-                if let Some(state) = admin_state.as_ref() {
-                    mark_relay_disconnected(state, &relay, None).await;
-                }
                 warn!(
                     relay_url = %relay.relay_url,
                     delay_seconds = RELAY_RECONNECT_DELAY_SECONDS,
@@ -79,9 +79,6 @@ pub(super) async fn run_relay_loop(
                 consecutive_failures = consecutive_failures.saturating_add(1);
                 let reconnect_delay = relay_reconnect_delay_with_jitter(consecutive_failures);
                 let error_detail = format_error_chain(&err);
-                if let Some(state) = admin_state.as_ref() {
-                    mark_relay_disconnected(state, &relay, Some(error_detail.clone())).await;
-                }
                 if is_expected_relay_disconnect(&err) {
                     warn!(
                         relay_url = %relay.relay_url,
@@ -104,7 +101,7 @@ pub(super) async fn run_relay_loop(
         };
 
         tokio::select! {
-            _ = runtime_state.wait_for_shutdown() => break,
+            _ = runtime_state.control.wait_for_session_stop() => break,
             _ = tokio::time::sleep(reconnect_delay) => {}
         }
     }
@@ -180,17 +177,7 @@ pub(super) async fn connect_once(
     });
     if let Some(state) = admin_state.as_ref() {
         worker_admin::set_bridge_sender(state, &relay.relay_key, Some(admin_tx.clone())).await;
-        mark_relay_connected(state, relay).await;
         worker_admin::publish_snapshot(state).await?;
-    }
-    if let Some(state) = standalone_state.as_ref() {
-        state
-            .set_bridge_sender(&relay.relay_key, Some(admin_tx.clone()))
-            .await;
-        if let Some(relay_id) = relay.relay_id {
-            state.mark_connected(relay_id).await;
-        }
-        super::super::standalone::publish_snapshot(state).await?;
     }
 
     let mut write_task = Some(tokio::spawn(run_bridge_writer(
@@ -278,9 +265,6 @@ pub(super) async fn connect_once(
     if let Some(state) = admin_state.as_ref() {
         worker_admin::set_bridge_sender(state, &relay.relay_key, None).await;
     }
-    if let Some(state) = standalone_state.as_ref() {
-        state.set_bridge_sender(&relay.relay_key, None).await;
-    }
     if runtime_state.control.is_shutting_down() && !out_tx.flush(BRIDGE_FLUSH_ALLOWANCE).await {
         warn!(
             relay_url = %relay.relay_url,
@@ -290,13 +274,6 @@ pub(super) async fn connect_once(
     }
     drop(out_tx);
     reap_write_task(&mut write_task).await;
-    if let Some(state) = standalone_state.as_ref()
-        && let Some(relay_id) = relay.relay_id
-    {
-        state
-            .mark_disconnected(relay_id, session_error.as_ref().map(ToString::to_string))
-            .await;
-    }
     match session_error {
         Some(err) => Err(err),
         None => Ok(()),
@@ -392,32 +369,6 @@ where
         .await
         .map_err(anyhow::Error::new)
         .with_context(|| format!("failed to write bridge {kind} message"))
-}
-
-async fn mark_relay_connected(state: &worker_admin::AdminState, relay: &RelayConnectionConfig) {
-    if let Some(relay_id) = relay.relay_id {
-        let mut statuses = state.managed_relay_statuses.write().await;
-        let status = statuses.entry(relay_id).or_default();
-        status.connected = true;
-        status.last_error = None;
-        status.last_connected_at = Some(chrono::Utc::now());
-    }
-}
-
-async fn mark_relay_disconnected(
-    state: &worker_admin::AdminState,
-    relay: &RelayConnectionConfig,
-    error_message: Option<String>,
-) {
-    if let Some(relay_id) = relay.relay_id {
-        let mut statuses = state.managed_relay_statuses.write().await;
-        let status = statuses.entry(relay_id).or_default();
-        status.connected = false;
-        status.last_disconnected_at = Some(chrono::Utc::now());
-        if let Some(error_message) = error_message {
-            status.last_error = Some(error_message);
-        }
-    }
 }
 
 #[cfg(test)]

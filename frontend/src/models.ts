@@ -1,5 +1,4 @@
 import type {
-  ApprovalStatusFilter,
   ConversationEndpointOverride,
   EndpointPlan,
   NativeApi,
@@ -216,7 +215,6 @@ export type NavigationSection =
   | 'redaction'
   | 'request-records'
   | 'billing'
-  | 'approvals'
   | 'settings'
 
 export type RequestRecordFilterModel = {
@@ -230,8 +228,6 @@ export type RequestRecordFilterModel = {
   mcp_server_id?: { value: string | null; matchMode: string }
   mcp_bearer_token_slot?: { value: number | null; matchMode: string }
 }
-
-export type ApprovalFilter = ApprovalStatusFilter
 
 export type Option<T = string> = {
   label: string

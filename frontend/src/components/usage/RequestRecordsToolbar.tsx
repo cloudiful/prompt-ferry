@@ -105,7 +105,6 @@ export function RequestRecordsToolbar({
   const stateOptions = createUsageStateOptions(
     {
       aborted: t('requestStateAborted'),
-      awaiting_approval: t('requestStateAwaitingApproval'),
       completed: t('requestStateCompleted'),
       failed: t('requestStateFailed'),
       received: t('requestStateReceived'),

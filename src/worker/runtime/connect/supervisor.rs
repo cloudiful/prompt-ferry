@@ -1,93 +1,107 @@
-use anyhow::anyhow;
 use reqwest::Client;
-use std::collections::HashMap;
-use tokio::{
-    sync::mpsc,
-    task::{JoinHandle, JoinSet},
-};
-use uuid::Uuid;
+use tokio::task::JoinSet;
+use tracing::warn;
 
 use super::{
     WorkerConfig, WorkerRuntimeState,
-    config::{
-        RelayTargets, managed_relay_connection_config,
-        relay_fingerprint as managed_relay_fingerprint, relay_targets,
-    },
-    run_relay_loop,
+    config::RelayConnectionConfig,
+    session::run_relay_loop,
     support::{MissingRelayTarget, SESSION_TEARDOWN_ALLOWANCE},
 };
-use crate::worker::runtime::standalone::StandaloneRuntimeState;
-use crate::worker_admin;
 
-#[derive(Debug)]
-struct ManagedRelayTask {
-    fingerprint: String,
-    handle: JoinHandle<()>,
+/// Whether the end of a relay session is an unexpected termination.
+///
+/// A session that ends while the worker is still running lost its relay
+/// connection without being asked to, so the worker stops instead of
+/// serving without a bridge.
+pub(super) fn unexpected_relay_termination(session_ended: bool, shutting_down: bool) -> bool {
+    session_ended && !shutting_down
 }
 
-pub(super) async fn spawn_managed_relay_supervisor(
+/// Spawn one reconnecting bridge session per locally configured relay target.
+///
+/// Targets come only from `worker.relay_urls`; there is no database or admin
+/// surface that adds, removes or edits them while the process runs, so the set
+/// is resolved and validated before the worker starts serving and is passed in
+/// here. That keeps every fallible relay construction before the services
+/// start: this function cannot fail while the worker already owns registry
+/// tasks.
+///
+/// The supervisor waits for the runtime shutdown before it starts its bounded
+/// join: the teardown allowance bounds the end of the sessions, it never cuts
+/// a healthy session short. A session that ends while the worker still runs is
+/// an unexpected termination and stops the worker, because a relay connection
+/// that silently disappeared would leave the worker unable to serve.
+pub(super) fn spawn_relay_supervisor(
+    relays: Vec<RelayConnectionConfig>,
     config: WorkerConfig,
     client: Client,
-    admin_state: worker_admin::AdminState,
+    admin_state: Option<crate::worker_admin::AdminState>,
+    standalone_state: Option<crate::worker::runtime::standalone::StandaloneRuntimeState>,
     runtime_state: WorkerRuntimeState,
     relay_tasks: &mut JoinSet<()>,
-) -> anyhow::Result<()> {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    admin_state
-        .set_relay_supervisor(worker_admin::ManagedRelaySupervisorHandle::new(tx))
-        .await;
-    let state = admin_state.clone();
+) {
+    let mut missing = MissingRelayTarget::default();
+    missing.observe(!relays.is_empty(), "local relay targets");
     relay_tasks.spawn(async move {
-        let mut tasks: HashMap<Uuid, ManagedRelayTask> = HashMap::new();
-        let mut missing = MissingRelayTarget::default();
-        let _ =
-            reconcile_managed_relays(&config, &client, &state, &runtime_state, &mut tasks).await;
-        missing.observe(!tasks.is_empty(), "managed relay list");
+        let (ended_tx, mut ended_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let mut handles = Vec::new();
+        for relay in relays {
+            let ended_tx = ended_tx.clone();
+            let config = config.clone();
+            let client = client.clone();
+            let admin_state = admin_state.clone();
+            let standalone_state = standalone_state.clone();
+            let runtime_state = runtime_state.clone();
+            handles.push(tokio::spawn(async move {
+                run_relay_loop(
+                    relay,
+                    config,
+                    client,
+                    admin_state,
+                    standalone_state,
+                    runtime_state,
+                )
+                .await;
+                let _ = ended_tx.send(());
+            }));
+        }
+        drop(ended_tx);
+        // The supervisor waits for the explicit close-bridges signal, which
+        // the runtime sends after the accepted work drained. The teardown
+        // deadline starts here, never at the beginning of the shutdown: a
+        // healthy bridge must survive the drain of an accepted response.
+        //
+        // A session that ends while the worker still runs is an unexpected
+        // termination: it stops the worker, but it never cuts the bridges of
+        // the other sessions short. The runtime closes the bridges after the
+        // drain of the accepted work.
         loop {
             tokio::select! {
                 _ = runtime_state.control.wait_for_session_stop() => break,
-                maybe_command = rx.recv() => {
-                    let Some(command) = maybe_command else {
+                ended = ended_rx.recv() => {
+                    if ended.is_none() {
+                        // Every session ended.
                         break;
-                    };
-                    match command {
-                        worker_admin::RelaySupervisorCommand::Reconcile { response } => {
-                            let result = reconcile_managed_relays(
-                                &config,
-                                &client,
-                                &state,
-                                &runtime_state,
-                                &mut tasks,
-                            )
-                            .await;
-                            missing.observe(!tasks.is_empty(), "managed relay list");
-                            let _ = response.send(result);
-                        }
-                        worker_admin::RelaySupervisorCommand::Reconnect { relay_id, response } => {
-                            let result = reconnect_managed_relay(
-                                &config,
-                                &client,
-                                &state,
-                                &runtime_state,
-                                &mut tasks,
-                                relay_id,
-                            )
-                            .await;
-                            let _ = response.send(result);
-                        }
+                    }
+                    if unexpected_relay_termination(true, runtime_state.control.is_shutting_down()) {
+                        warn!(
+                            "a relay session ended while the worker was running; stopping the worker service"
+                        );
+                        runtime_state.control.begin_shutdown();
                     }
                 }
             }
         }
-        join_relay_handles(tasks.into_values().map(|task| task.handle)).await;
+        // The sessions get a bounded window to flush their own teardown.
+        join_relay_sessions(handles).await;
     });
-    Ok(())
 }
 
 /// Give each session supervisor bounded time to finish its own flush, then
 /// abort whatever is still running. The allowance is global, so N draining
 /// sessions never add up to an unbounded serial wait.
-async fn join_relay_handles(handles: impl IntoIterator<Item = JoinHandle<()>>) {
+async fn join_relay_sessions(handles: Vec<tokio::task::JoinHandle<()>>) {
     let deadline = tokio::time::sleep(SESSION_TEARDOWN_ALLOWANCE);
     tokio::pin!(deadline);
     for mut handle in handles {
@@ -101,309 +115,15 @@ async fn join_relay_handles(handles: impl IntoIterator<Item = JoinHandle<()>>) {
     }
 }
 
-async fn reconcile_managed_relays(
-    config: &WorkerConfig,
-    client: &Client,
-    admin_state: &worker_admin::AdminState,
-    runtime_state: &WorkerRuntimeState,
-    tasks: &mut HashMap<Uuid, ManagedRelayTask>,
-) -> anyhow::Result<()> {
-    if runtime_state.is_shutting_down() {
-        return Ok(());
+#[cfg(test)]
+mod tests {
+    use super::unexpected_relay_termination;
+
+    #[test]
+    fn a_session_that_ends_during_the_shutdown_is_not_an_unexpected_termination() {
+        assert!(unexpected_relay_termination(true, false));
+        assert!(!unexpected_relay_termination(true, true));
+        assert!(!unexpected_relay_termination(false, false));
+        assert!(!unexpected_relay_termination(false, true));
     }
-    let desired_relays = crate::db::list_enabled_managed_relays(&admin_state.pool).await?;
-    let desired_ids = desired_relays
-        .iter()
-        .map(|relay| relay.relay_id)
-        .collect::<Vec<_>>();
-
-    let removed_ids = tasks
-        .keys()
-        .filter(|relay_id| !desired_ids.contains(relay_id))
-        .copied()
-        .collect::<Vec<_>>();
-    for relay_id in removed_ids {
-        if let Some(task) = tasks.remove(&relay_id) {
-            task.handle.abort();
-        }
-        let mut statuses = admin_state.managed_relay_statuses.write().await;
-        if let Some(status) = statuses.get_mut(&relay_id) {
-            status.connected = false;
-            status.last_disconnected_at = Some(chrono::Utc::now());
-        }
-    }
-
-    for relay in desired_relays {
-        let fingerprint = managed_relay_fingerprint(&relay);
-        let needs_restart = match tasks.get(&relay.relay_id) {
-            Some(task) => task.fingerprint != fingerprint || task.handle.is_finished(),
-            None => true,
-        };
-        if !needs_restart {
-            continue;
-        }
-
-        if let Some(existing) = tasks.remove(&relay.relay_id) {
-            existing.handle.abort();
-        }
-
-        let relay_config = match managed_relay_connection_config(config, admin_state, &relay).await
-        {
-            Ok(relay_config) => relay_config,
-            Err(err) => {
-                admin_state
-                    .set_managed_relay_error(relay.relay_id, err.to_string())
-                    .await;
-                continue;
-            }
-        };
-
-        let task = tokio::spawn(run_relay_loop(
-            relay_config,
-            config.clone(),
-            client.clone(),
-            Some(admin_state.clone()),
-            None,
-            runtime_state.clone(),
-        ));
-        tasks.insert(
-            relay.relay_id,
-            ManagedRelayTask {
-                fingerprint,
-                handle: task,
-            },
-        );
-    }
-    Ok(())
-}
-
-async fn reconnect_managed_relay(
-    config: &WorkerConfig,
-    client: &Client,
-    admin_state: &worker_admin::AdminState,
-    runtime_state: &WorkerRuntimeState,
-    tasks: &mut HashMap<Uuid, ManagedRelayTask>,
-    relay_id: Uuid,
-) -> anyhow::Result<()> {
-    if runtime_state.is_shutting_down() {
-        return Ok(());
-    }
-    let relay = crate::db::get_managed_relay(&admin_state.pool, relay_id)
-        .await?
-        .ok_or_else(|| anyhow!("relay not found"))?;
-    if !relay.enabled {
-        return Err(anyhow!("relay is disabled"));
-    }
-
-    if let Some(existing) = tasks.remove(&relay_id) {
-        existing.handle.abort();
-    }
-    {
-        let mut statuses = admin_state.managed_relay_statuses.write().await;
-        if let Some(status) = statuses.get_mut(&relay_id) {
-            status.connected = false;
-            status.last_disconnected_at = Some(chrono::Utc::now());
-        }
-    }
-
-    let relay_config = managed_relay_connection_config(config, admin_state, &relay).await?;
-    let task = tokio::spawn(run_relay_loop(
-        relay_config,
-        config.clone(),
-        client.clone(),
-        Some(admin_state.clone()),
-        None,
-        runtime_state.clone(),
-    ));
-    tasks.insert(
-        relay.relay_id,
-        ManagedRelayTask {
-            fingerprint: managed_relay_fingerprint(&relay),
-            handle: task,
-        },
-    );
-    Ok(())
-}
-
-pub(super) async fn spawn_standalone_relay_supervisor(
-    config: WorkerConfig,
-    client: reqwest::Client,
-    standalone_state: StandaloneRuntimeState,
-    runtime_state: WorkerRuntimeState,
-    relay_tasks: &mut JoinSet<()>,
-) -> anyhow::Result<()> {
-    // Resolved once: the role of this process is fixed for its whole lifetime,
-    // and every reload reconciles against the same connection sources.
-    let targets = relay_targets();
-    relay_tasks.spawn(async move {
-        let mut tasks = HashMap::<String, StandaloneRelayTask>::new();
-        let mut missing = MissingRelayTarget::default();
-        if let Err(err) = reconcile_standalone_relays(
-            &config,
-            &client,
-            &standalone_state,
-            &runtime_state,
-            targets,
-            &mut tasks,
-        )
-        .await
-        {
-            tracing::warn!(error = %err, "initial SQLite relay reconcile failed");
-        }
-        missing.observe(!tasks.is_empty(), standalone_target_source(targets));
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            tokio::select! {
-                _ = runtime_state.control.wait_for_session_stop() => break,
-                _ = interval.tick() => {
-                    match standalone_state.reload_snapshot().await {
-                        Ok(true) => {
-                            if let Err(err) = reconcile_standalone_relays(
-                                &config,
-                                &client,
-                                &standalone_state,
-                                &runtime_state,
-                                targets,
-                                &mut tasks,
-                            ).await {
-                                 tracing::warn!(error = %err, "SQLite relay reconcile failed after configuration reload");
-                            }
-                            missing.observe(!tasks.is_empty(), standalone_target_source(targets));
-                            let _ = crate::worker::runtime::standalone::publish_snapshot(&standalone_state).await;
-                        }
-                        Ok(false) => {
-                            if let Err(err) = reconcile_standalone_relays(
-                                &config,
-                                &client,
-                                &standalone_state,
-                                &runtime_state,
-                                targets,
-                                &mut tasks,
-                            ).await {
-                                tracing::warn!(error = %err, "SQLite relay reconcile failed");
-                            }
-                            missing.observe(!tasks.is_empty(), standalone_target_source(targets));
-                        }
-                        Err(err) => tracing::warn!(error = %err, "SQLite configuration reload failed"),
-                    }
-                }
-            }
-        }
-        join_relay_handles(tasks.into_values().map(|task| task.handle)).await;
-    });
-    Ok(())
-}
-
-/// Name the connection sources this startup dials, for the missing-connection
-/// report.
-fn standalone_target_source(targets: RelayTargets) -> &'static str {
-    match targets {
-        RelayTargets::RemoteRelayList => "remote relay list",
-        RelayTargets::RemoteRelayListOrConfiguredFallback => "remote relay list and static URLs",
-    }
-}
-
-#[derive(Debug)]
-struct StandaloneRelayTask {
-    fingerprint: String,
-    handle: JoinHandle<()>,
-}
-
-async fn reconcile_standalone_relays(
-    config: &WorkerConfig,
-    client: &reqwest::Client,
-    standalone_state: &StandaloneRuntimeState,
-    runtime_state: &WorkerRuntimeState,
-    targets: RelayTargets,
-    tasks: &mut HashMap<String, StandaloneRelayTask>,
-) -> anyhow::Result<()> {
-    if runtime_state.is_shutting_down() {
-        return Ok(());
-    }
-    let relays =
-        super::config::standalone_relay_connection_configs(config, standalone_state, targets)
-            .await?;
-    let desired = relays
-        .iter()
-        .map(|relay| (relay.relay_key.clone(), relay_fingerprint(relay)))
-        .collect::<HashMap<_, _>>();
-    let removed = tasks
-        .keys()
-        .filter(|key| !desired.contains_key(*key))
-        .cloned()
-        .collect::<Vec<_>>();
-    for key in removed {
-        if let Some(task) = tasks.remove(&key) {
-            task.handle.abort();
-        }
-        if let Ok(relay_id) = key.parse::<Uuid>() {
-            standalone_state.mark_disconnected(relay_id, None).await;
-        }
-    }
-    for relay in relays {
-        let key = relay.relay_key.clone();
-        let fingerprint = desired.get(&key).cloned().unwrap_or_default();
-        let restart = tasks
-            .get(&key)
-            .is_none_or(|task| task.fingerprint != fingerprint || task.handle.is_finished());
-        if !restart {
-            continue;
-        }
-        if let Some(task) = tasks.remove(&key) {
-            task.handle.abort();
-        }
-        let handle = tokio::spawn(run_relay_loop(
-            relay,
-            config.clone(),
-            client.clone(),
-            None,
-            Some(standalone_state.clone()),
-            runtime_state.clone(),
-        ));
-        tasks.insert(
-            key,
-            StandaloneRelayTask {
-                fingerprint,
-                handle,
-            },
-        );
-    }
-    Ok(())
-}
-
-fn relay_fingerprint(relay: &super::config::RelayConnectionConfig) -> String {
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
-    use sha2::{Digest, Sha256};
-    let mut digest = Sha256::new();
-    digest.update(relay.relay_key.as_bytes());
-    digest.update(relay.relay_url.as_bytes());
-    digest.update(relay.worker_token.as_bytes());
-    digest.update(relay.tls_mode.as_str().as_bytes());
-    digest.update(relay.bridge_encryption_mode.as_str().as_bytes());
-    digest.update(relay.relay_ca_pem.as_deref().unwrap_or_default().as_bytes());
-    digest.update(
-        relay
-            .client_cert_pem
-            .as_deref()
-            .unwrap_or_default()
-            .as_bytes(),
-    );
-    digest.update(
-        relay
-            .client_key_pem
-            .as_deref()
-            .unwrap_or_default()
-            .as_bytes(),
-    );
-    digest.update(relay.bridge_encryption_key.as_bytes());
-    STANDARD.encode(digest.finalize())
-}
-
-pub(super) fn require_managed_admin_state(
-    admin_state: Option<&worker_admin::AdminState>,
-) -> anyhow::Result<worker_admin::AdminState> {
-    admin_state
-        .cloned()
-        .ok_or_else(|| anyhow!("PostgreSQL storage mode requires admin state"))
 }

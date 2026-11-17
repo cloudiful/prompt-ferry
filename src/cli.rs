@@ -90,6 +90,9 @@ pub struct RelayArgs {
 pub struct WorkerArgs {
     #[arg(long)]
     pub relay_url: Vec<String>,
+    /// Stable identity of this worker in the shared worker registry.
+    #[arg(long)]
+    pub worker_identity: Option<String>,
     #[arg(long)]
     pub worker_token: Option<String>,
     #[arg(long)]
@@ -122,10 +125,6 @@ pub struct WorkerArgs {
     pub bridge_encryption_mode: Option<BridgeEncryptionMode>,
     #[arg(long)]
     pub bridge_encryption_key: Option<String>,
-    #[arg(long)]
-    pub valkey_url: Option<String>,
-    #[arg(long)]
-    pub valkey_ttl_seconds: Option<u64>,
     #[arg(long)]
     pub session_ttl_seconds: Option<u64>,
     #[arg(long)]

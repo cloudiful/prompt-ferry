@@ -11,6 +11,10 @@ use super::{BridgeEncryptionMode, McpWarmupMode, NativeApi, WorkerTlsMode};
 #[serde(default)]
 pub struct WorkerConfig {
     pub relay_urls: Vec<String>,
+    /// Stable identity of this worker process inside one shared database.
+    /// Workers register under this name so the Workers view can tell two
+    /// processes apart; an empty value falls back to `<host>:<admin_bind>`.
+    pub worker_identity: String,
     pub worker_token: String,
     pub upstream_base_url: String,
     pub upstream_api_key: String,
@@ -39,8 +43,6 @@ pub struct WorkerConfig {
     /// (`RELAY_SECRET_MASTER_KEY`). Kept for compatibility; a non-empty
     /// current [`Self::worker_config_encryption_key`] always wins.
     pub relay_secret_master_key: String,
-    pub valkey_url: String,
-    pub valkey_ttl_seconds: u64,
     pub session_ttl_seconds: u64,
     pub local_session_max_entries: usize,
     /// Hard ceiling on the relay drain that runs on shutdown. The runtime
@@ -89,6 +91,7 @@ impl Default for WorkerConfig {
     fn default() -> Self {
         Self {
             relay_urls: vec!["ws://127.0.0.1:8788/ws/worker".to_string()],
+            worker_identity: String::new(),
             worker_token: "change-me-worker-token".to_string(),
             upstream_base_url: "https://api.openai.com".to_string(),
             upstream_api_key: String::new(),
@@ -107,8 +110,6 @@ impl Default for WorkerConfig {
             bridge_encryption_key: String::new(),
             worker_config_encryption_key: String::new(),
             relay_secret_master_key: String::new(),
-            valkey_url: String::new(),
-            valkey_ttl_seconds: 24 * 60 * 60,
             session_ttl_seconds: 7 * 24 * 60 * 60,
             local_session_max_entries: 10_000,
             shutdown_drain_seconds: 120,
@@ -145,6 +146,18 @@ impl WorkerConfig {
         }
     }
 
+    /// Stable worker identity shared through the worker registry. A configured
+    /// value wins; otherwise the host and admin bind keep two local processes
+    /// distinct without introducing a machine-specific setting.
+    pub fn resolved_worker_identity(&self) -> String {
+        let hostname = std::env::var("HOSTNAME")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "unknown-host".to_string());
+        resolve_worker_identity(&self.worker_identity, &hostname, &self.admin_bind)
+    }
+
     pub(crate) fn storage_backend(&self) -> StorageBackend {
         if self.database_url.trim().is_empty() {
             StorageBackend::Sqlite
@@ -160,13 +173,16 @@ impl WorkerConfig {
         self.storage_backend().is_postgres() && self.effective_encryption_key().trim().is_empty()
     }
 
-    pub(crate) fn storage_contract(&self) -> StorageContract {
-        StorageContract::for_backend(self.storage_backend(), &self.valkey_url)
+    pub(crate) fn storage_contract(&self, valkey_url: &str) -> StorageContract {
+        StorageContract::for_backend(self.storage_backend(), valkey_url)
     }
 
     pub fn merge_args(mut self, args: WorkerArgs) -> Self {
         if !args.relay_url.is_empty() {
             self.relay_urls = args.relay_url;
+        }
+        if let Some(identity) = args.worker_identity {
+            self.worker_identity = identity;
         }
         if let Some(token) = args.worker_token {
             self.worker_token = token;
@@ -216,12 +232,6 @@ impl WorkerConfig {
         if let Some(key) = args.bridge_encryption_key {
             self.bridge_encryption_key = key;
         }
-        if let Some(url) = args.valkey_url {
-            self.valkey_url = url;
-        }
-        if let Some(ttl) = args.valkey_ttl_seconds {
-            self.valkey_ttl_seconds = ttl;
-        }
         if let Some(ttl) = args.session_ttl_seconds {
             self.session_ttl_seconds = ttl;
         }
@@ -264,9 +274,25 @@ fn default_raw_object_store_path_style() -> bool {
     true
 }
 
+/// Resolve the registry identity from an explicit name or the host plus admin
+/// bind. The fallback keeps two local processes distinct without a new
+/// machine-specific setting; operators of several hosts behind one database
+/// should set an explicit `worker.worker_identity`.
+pub(crate) fn resolve_worker_identity(
+    configured: &str,
+    hostname: &str,
+    admin_bind: &str,
+) -> String {
+    let configured = configured.trim();
+    if !configured.is_empty() {
+        return configured.to_string();
+    }
+    format!("{hostname}:{}", admin_bind.trim())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::WorkerConfig;
+    use super::{WorkerConfig, resolve_worker_identity};
 
     const KEY_A: &str = "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=";
     const KEY_B: &str = "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=";
@@ -339,5 +365,24 @@ mod tests {
             ..WorkerConfig::default()
         };
         assert!(postgres_blank_current.mcp_oauth_shared_key_missing());
+    }
+    #[test]
+    fn worker_identity_prefers_the_configured_name() {
+        assert_eq!(
+            resolve_worker_identity("worker-a", "host-a", "127.0.0.1:8789"),
+            "worker-a"
+        );
+    }
+
+    #[test]
+    fn worker_identity_falls_back_to_host_and_admin_bind() {
+        assert_eq!(
+            resolve_worker_identity("   ", "host-a", "127.0.0.1:8789"),
+            "host-a:127.0.0.1:8789"
+        );
+        assert_ne!(
+            resolve_worker_identity("", "host-a", "127.0.0.1:8789"),
+            resolve_worker_identity("", "host-a", "127.0.0.1:8791")
+        );
     }
 }

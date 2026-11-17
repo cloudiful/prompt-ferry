@@ -13,9 +13,9 @@ pub enum HostRole {
     /// every installation that carries no role configuration.
     #[default]
     Integrated,
-    /// Worker only: no local relay, and the worker dials the enabled remote
-    /// relay list. An empty list is not an error — the worker stays up and
-    /// waits for a connection to appear.
+    /// Worker only: no local relay, and the worker dials the relay targets in
+    /// its own `worker.relay_urls`. An empty list is not an error — the worker
+    /// stays up and waits for a target to be configured.
     Worker,
     /// Relay only: no local worker. Remote workers connect to the relay's
     /// worker bind.

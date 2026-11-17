@@ -18,7 +18,6 @@ mod tests {
     use super::postgres::client_keys;
     use super::postgres::config_archive_audit;
     use super::postgres::endpoint_api_keys;
-    use super::postgres::managed_relays;
     use super::postgres::mcp_servers;
     use super::postgres::model_endpoint_rules;
     use super::postgres::model_route_targets;
@@ -274,26 +273,6 @@ mod tests {
         let index = indexes[0].to_string(PostgresQueryBuilder);
         assert!(index.contains("UNIQUE"));
         assert!(index.contains("(\"endpoint_id\", \"position\")"));
-    }
-
-    #[test]
-    fn postgres_relay_declaration_keeps_applied_checks_and_unique_index() {
-        let table = managed_relays::create_table_statement().to_owned();
-        let sql = table.to_string(PostgresQueryBuilder);
-        assert!(sql.contains("CHECK"), "relay checks missing: {sql}");
-        assert!(sql.contains("relay_url"), "relay_url missing: {sql}");
-
-        let indexes = managed_relays::create_index_statements();
-        let unique = indexes
-            .iter()
-            .map(|index| index.to_string(PostgresQueryBuilder))
-            .collect::<Vec<_>>();
-        assert!(
-            unique.iter().any(
-                |sql| sql.contains("managed_relays_relay_url_unique") && sql.contains("UNIQUE")
-            ),
-            "relay url unique index missing: {unique:?}"
-        );
     }
 
     #[test]

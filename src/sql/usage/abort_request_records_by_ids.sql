@@ -2,7 +2,7 @@ WITH target AS (
     SELECT event_id, request_id, request_state
     FROM request_records
     WHERE event_kind = 'request'
-      AND request_state IN ('received', 'awaiting_approval', 'upstream_processing')
+      AND request_state IN ('received', 'upstream_processing')
       AND request_id = ANY($1::UUID[])
 ), cleaned AS (
     DELETE FROM request_record_leases lease

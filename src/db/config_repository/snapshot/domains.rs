@@ -184,20 +184,6 @@ pub struct McpCredentialSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RelaySnapshot {
-    pub relay_id: Uuid,
-    pub name: String,
-    pub relay_url: String,
-    pub enabled: bool,
-    pub tls_mode: String,
-    pub bridge_encryption_mode: String,
-    pub relay_ca_pem: Option<String>,
-    pub client_cert_pem: Option<String>,
-    pub client_key_pem: Option<String>,
-    pub bridge_encryption_key: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettingSnapshot {
     pub key: String,
     pub version: i64,
@@ -221,7 +207,6 @@ pub struct SnapshotDomains {
     pub model_routes: Vec<ModelRouteSnapshot>,
     pub mcp_servers: Vec<McpServerSnapshot>,
     pub mcp_credentials: Vec<McpCredentialSnapshot>,
-    pub relays: Vec<RelaySnapshot>,
     pub settings: Vec<SettingSnapshot>,
     pub user_redaction_configs: Vec<UserRedactionConfigSnapshot>,
     /// Decrypted raw object-store configuration when the source backend could

@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT request_id\nFROM request_records\nWHERE event_kind = 'request'\n  AND request_state IN ('received', 'upstream_processing')\n  AND request_id IS NOT NULL\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "request_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "94a317bf122616b6c459bc0a7906c00eb942c068a0a4bdbb53e6e0f57663b963"
+}

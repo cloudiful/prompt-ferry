@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 import { LoginPage } from '@/pages/LoginPage'
 import { RelayHostPage } from '@/pages/RelayHostPage'
-import { RelaysPage } from '@/pages/RelaysPage'
+import { WorkersPage } from '@/pages/WorkersPage'
 import { AppShell } from '@/layouts/AppShell'
 import { ApiKeysPage } from '@/pages/ApiKeysPage'
 import { AvailableModelsPage } from '@/pages/AvailableModelsPage'
@@ -12,7 +12,6 @@ import { ModelRoutesPage } from '@/pages/ModelRoutesPage'
 import { McpPage } from '@/pages/McpPage'
 import { RedactionPage } from '@/pages/RedactionPage'
 import { BillingPage } from '@/pages/BillingPage'
-import { ApprovalsPage } from '@/pages/ApprovalsPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { UsagePage } from '@/pages/UsagePage'
 import { appRoutes, type AppRoute } from '@/lib/nav'
@@ -58,12 +57,6 @@ function AppRouteElement({ route }: { route: AppRoute }) {
       return <RedactionPage />
     case 'R-BILLING':
       return <BillingPage />
-    case 'R-APPROVALS':
-      return (
-        <AdminGuard>
-          <ApprovalsPage />
-        </AdminGuard>
-      )
     case 'R-USAGE-AI':
     case 'R-USAGE-MCP':
       return <UsagePage />
@@ -76,7 +69,6 @@ function AppRouteElement({ route }: { route: AppRoute }) {
         </AdminGuard>
       )
     case 'R-SETTINGS-NETWORK':
-    case 'R-SETTINGS-REVIEW':
     case 'R-SETTINGS-STORAGE':
     case 'R-SETTINGS-CACHE-ALERT':
     case 'R-SETTINGS-CONFIG-ARCHIVE':
@@ -85,10 +77,10 @@ function AppRouteElement({ route }: { route: AppRoute }) {
           <SettingsPage />
         </AdminGuard>
       )
-    case 'R-RELAYS':
+    case 'R-WORKERS':
       return (
         <AdminGuard>
-          <RelaysPage />
+          <WorkersPage />
         </AdminGuard>
       )
     default:

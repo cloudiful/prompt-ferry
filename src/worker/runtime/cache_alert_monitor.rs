@@ -10,12 +10,14 @@
 //! coordinated so only one worker evaluates each tick.
 
 use super::background_job::{
-    connect_coordinated_store, coordinated_scheduler, run_coordinated_scheduler, run_scheduler,
-    try_postgres_advisory_lease,
+    coordinated_scheduler, run_coordinated_scheduler, run_scheduler, try_postgres_advisory_lease,
 };
 use super::lifecycle::RuntimeControl;
-use crate::{config::WorkerConfig, db, notify, worker_admin_types::CacheAlertSettings};
-use scheduler::{InMemoryStateStore, Job, Schedule, Scheduler, SchedulerConfig, Task, TaskContext};
+use crate::{db, notify, worker_admin_types::CacheAlertSettings};
+use scheduler::{
+    InMemoryStateStore, Job, Schedule, Scheduler, SchedulerConfig, Task, TaskContext,
+    ValkeyCoordinatedStateStore,
+};
 use sqlx::PgPool;
 use std::{
     sync::Arc,
@@ -192,13 +194,14 @@ fn cooldown_active(
 }
 
 pub(super) fn spawn_cache_alert_monitor(
-    config: &WorkerConfig,
+    shared_valkey: &crate::db::SharedValkeyConfig,
     pool: PgPool,
     settings: Arc<RwLock<CacheAlertSettings>>,
     client: reqwest::Client,
     control: RuntimeControl,
+    coordinated_store: Option<ValkeyCoordinatedStateStore>,
 ) -> JoinHandle<()> {
-    let valkey_url = config.valkey_url.trim().to_string();
+    let valkey_url = shared_valkey.url_or_empty().trim().to_string();
     tokio::spawn(async move {
         let runtime = Arc::new(CacheAlertRuntime {
             deps: Arc::new(CacheAlertDependencies {
@@ -225,19 +228,32 @@ pub(super) fn spawn_cache_alert_monitor(
 
         // Coordinated mode: the first pass comes from the leased scheduler
         // tick so a multi-worker cluster never evaluates it uncoordinated.
-        let Some(store) = connect_coordinated_store(&valkey_url).await else {
+        // The store is the one the worker initialized before it started
+        // serving.
+        let Some(store) = coordinated_store else {
+            warn!(
+                category = "coordinated_store_unavailable",
+                capability = "alert_coordination",
+                "the coordinated cache alert store was not initialized; stopping the worker"
+            );
+            control.begin_fail_closed_shutdown();
             return;
         };
         let scheduler = coordinated_scheduler(store);
-        if let Err(error) =
-            run_coordinated_scheduler(scheduler, cache_alert_job(runtime), valkey_url, control)
-                .await
+        if let Err(error) = run_coordinated_scheduler(
+            scheduler,
+            cache_alert_job(runtime),
+            valkey_url,
+            control.clone(),
+        )
+        .await
         {
             warn!(
                 error = %error,
                 capability = "alert_coordination",
                 "coordinated cache alert scheduler stopped; local scheduling is not safe"
             );
+            control.begin_fail_closed_shutdown();
         }
     })
 }

@@ -1,9 +1,109 @@
 use super::*;
-use crate::db::config_repository::relays as relay_repo;
+use crate::db::config_repository::relay_snapshot as relay_repo;
 
+/// Build the configuration snapshot and publish it to every connected relay.
+///
+/// The publication boundary is acquired BEFORE the contents are read, so the
+/// version always labels content that is at least as fresh as the content of
+/// every earlier version. A prebuilt snapshot is never published: a caller
+/// cannot know whether the contents it read are still the newest ones.
 pub async fn publish_snapshot(state: &AdminState) -> anyhow::Result<i64> {
-    let snapshot = relay_repo::build_unified_snapshot(&state.config_repository, 0).await?;
-    let version = state.snapshot_version.fetch_add(1, Ordering::SeqCst) + 1;
+    publish_snapshot_locked(state, true)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("the forced snapshot publication did not produce a version"))
+}
+
+/// Publish the snapshot only when its content changed since the last
+/// successful publication.
+///
+/// The fingerprint is recorded only after a successful publication, so a
+/// failed publication is retried by the next refresh.
+pub async fn publish_snapshot_if_changed(state: &AdminState) -> anyhow::Result<Option<i64>> {
+    publish_snapshot_locked(state, false).await
+}
+
+/// Build and publish the snapshot inside the publication boundary.
+///
+/// The PostgreSQL deployment holds a database lock while the contents are
+/// read and the snapshot is sent, so two publishers cannot label different
+/// contents with crossing versions. The lock is entered without waiting and
+/// the local callers are serialized by a worker-local mutex, so a waiting
+/// publisher never holds a pool connection while it waits for another
+/// publication.
+///
+/// The fence token is allocated on the held boundary connection BEFORE any
+/// content is read. The token is non-reusable, so a publisher whose boundary
+/// connection was lost cannot read old contents and then mint a newer fence
+/// for them from a healthy pooled connection: its successor already holds the
+/// higher token. The publisher still holds more than one pooled connection
+/// while it works, because the snapshot content reads use their own
+/// connections; the boundary only serializes the publishers and owns the
+/// fence token, and it never claims to be the only connection the publication
+/// uses.
+async fn publish_snapshot_locked(state: &AdminState, force: bool) -> anyhow::Result<Option<i64>> {
+    let _publication = state.snapshot_publication_lock.lock().await;
+    match state.config_repository.as_postgres() {
+        Some(pool) => {
+            let mut transaction = crate::db::begin_snapshot_publication(pool).await?;
+            // Allocate the fence on the connection that holds the boundary,
+            // before the contents are read.
+            let version = crate::db::next_relay_snapshot_version(&mut transaction).await?;
+            let snapshot = relay_repo::build_unified_snapshot(&state.config_repository, 0).await?;
+            let fingerprint = relay_repo::snapshot_fingerprint(&snapshot)?;
+            if !force
+                && !relay_repo::should_publish(
+                    *state.published_snapshot_fingerprint.lock().await,
+                    fingerprint,
+                )
+            {
+                transaction.rollback().await?;
+                return Ok(None);
+            }
+            // The fence is already fixed, so no other publisher can read
+            // newer contents and label them with a lower version while this
+            // snapshot is on its way.
+            let published = send_snapshot(state, version, snapshot).await;
+            // The boundary is released only after the snapshot was sent.
+            transaction.commit().await?;
+            published?;
+            state
+                .published_snapshot_fingerprint
+                .lock()
+                .await
+                .replace(fingerprint);
+            Ok(Some(version))
+        }
+        None => {
+            let snapshot = relay_repo::build_unified_snapshot(&state.config_repository, 0).await?;
+            let fingerprint = relay_repo::snapshot_fingerprint(&snapshot)?;
+            if !force
+                && !relay_repo::should_publish(
+                    *state.published_snapshot_fingerprint.lock().await,
+                    fingerprint,
+                )
+            {
+                return Ok(None);
+            }
+            let version = state.snapshot_version.fetch_add(1, Ordering::SeqCst) + 1;
+            send_snapshot(state, version, snapshot).await?;
+            state
+                .published_snapshot_fingerprint
+                .lock()
+                .await
+                .replace(fingerprint);
+            Ok(Some(version))
+        }
+    }
+}
+
+/// Send a built snapshot to every connected relay.
+async fn send_snapshot(
+    state: &AdminState,
+    version: i64,
+    snapshot: relay_repo::UnifiedSnapshot,
+) -> anyhow::Result<()> {
+    // Keep the locally observed version at least as high as the published one.
+    state.snapshot_version.fetch_max(version, Ordering::SeqCst);
     let config_snapshot = ConfigSnapshot {
         version,
         keys: snapshot.keys.clone(),
@@ -21,30 +121,12 @@ pub async fn publish_snapshot(state: &AdminState) -> anyhow::Result<i64> {
             .is_err()
         {
             disconnected.push(relay_url);
-        } else if let Ok(relay_id) = relay_url.parse::<Uuid>()
-            && let Some(status) = state
-                .managed_relay_statuses
-                .write()
-                .await
-                .get_mut(&relay_id)
-        {
-            status.last_snapshot_version = Some(version);
         }
     }
     for relay_url in disconnected {
         relay_senders.remove(&relay_url);
-        if let Ok(relay_id) = relay_url.parse::<Uuid>()
-            && let Some(status) = state
-                .managed_relay_statuses
-                .write()
-                .await
-                .get_mut(&relay_id)
-        {
-            status.connected = false;
-            status.last_disconnected_at = Some(chrono::Utc::now());
-        }
     }
-    Ok(version)
+    Ok(())
 }
 
 pub async fn set_bridge_sender(

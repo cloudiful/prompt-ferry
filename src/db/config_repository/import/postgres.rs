@@ -5,10 +5,10 @@
 //! counts and the destination is a fixed, known table set; values are always
 //! bound, never interpolated. Deleting and re-inserting the archive's rows
 //! (with their original identifiers) makes the destination match the archive
-//! while leaving request/usage/billing/approval/session rows untouched.
+//! while leaving request/usage/billing/session rows untouched.
 //!
 //! The domain inserts that live outside this file (routes targets, MCP,
-//! relays, settings, redaction) share the same transaction through
+//! settings, redaction) share the same transaction through
 //! [`super::postgres_domains`].
 
 use anyhow::{Context, Result};
@@ -23,7 +23,7 @@ use crate::db::seaorm::PostgresNativeConnection;
 
 /// Child-before-parent order; deleting an MCP server or endpoint first keeps
 /// the cascade graph simple and never touches non-configuration tables.
-const DELETE_ORDER: [&str; 12] = [
+const DELETE_ORDER: [&str; 10] = [
     "mcp_credentials",
     "mcp_servers",
     "model_route_targets",
@@ -32,9 +32,7 @@ const DELETE_ORDER: [&str; 12] = [
     "endpoint_oauth_tokens",
     "provider_endpoints",
     "client_keys",
-    "managed_relays",
     "user_redaction_configs",
-    "worker_settings",
     "users",
 ];
 
@@ -48,6 +46,11 @@ pub(super) async fn apply(
         .await
         .context("begin configuration import transaction")?;
     let conn = &mut *tx;
+    // The shared Valkey lineage is coordination state: the lock is taken
+    // before the current revision is read, so an import cannot race a
+    // concurrent settings write and cannot replay an applied revision.
+    crate::db::lock_shared_valkey_setting(conn).await?;
+    let shared_valkey_revision = crate::db::read_shared_valkey_revision(conn).await?;
     delete_configuration(conn).await?;
     insert_users(conn, domains).await?;
     insert_client_keys(conn, domains).await?;
@@ -58,8 +61,8 @@ pub(super) async fn apply(
     postgres_domains::insert_route_targets(conn, domains).await?;
     postgres_domains::insert_mcp_servers(conn, domains).await?;
     postgres_domains::insert_mcp_credentials(conn, domains).await?;
-    postgres_domains::insert_relays(conn, manager, domains).await?;
     postgres_domains::insert_settings(conn, manager, domains).await?;
+    postgres_domains::insert_shared_valkey(conn, domains, shared_valkey_revision).await?;
     postgres_domains::insert_user_redaction_configs(conn, domains).await?;
     tx.commit()
         .await
@@ -80,6 +83,17 @@ async fn delete_configuration(conn: &mut PgConnection) -> Result<()> {
     for table in DELETE_ORDER {
         run(conn, QueryBuilder::new(format!("DELETE FROM {table}"))).await?;
     }
+    let excluded_keys: Vec<String> = crate::db::INTERNAL_COORDINATION_SETTING_KEYS
+        .iter()
+        .map(|key| key.to_string())
+        .collect();
+    sqlx::query_file!(
+        "src/sql/settings/delete_restorable_settings.sql",
+        &excluded_keys
+    )
+    .execute(&mut *conn)
+    .await
+    .context("failed to replace the restorable settings rows")?;
     Ok(())
 }
 
