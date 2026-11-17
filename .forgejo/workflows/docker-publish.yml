@@ -53,8 +53,8 @@ jobs:
       - name: Export OpenAPI
         run: ci-image-input/prompt-ferry openapi export
 
-      - name: Build and push Docker image
-        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-targets@v0.4.6
+      - name: Build and publish Docker image
+        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker@v0.5.0
         with:
           context: .
           dockerfile: ./forgejo.Dockerfile
@@ -64,16 +64,6 @@ jobs:
           builder_name_prefix: prompt-ferry
           inline_cache: "true"
           inline_cache_tag: latest-amd64
-          publish_latest: "false"
-          username: ${{ github.actor }}
-          password: ${{ secrets.REGISTRY_TOKEN }}
-
-      - name: Publish Docker manifest
-        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-manifests@v0.4.6
-        with:
-          architectures: amd64
-          targets: >-
-            [{"target":"runtime","image_suffix":""}]
           publish_latest: "false"
           username: ${{ github.actor }}
           password: ${{ secrets.REGISTRY_TOKEN }}
