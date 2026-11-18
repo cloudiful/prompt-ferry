@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build-and-publish:
-    uses: actions/workflows/.forgejo/workflows/docker-publish.yml@v0.6.1
+    uses: actions/workflows/.forgejo/workflows/docker-publish.yml@v0.6.2
     with:
       builds: >-
         [{"platform":"linux/amd64","runner":"aio"}]
@@ -39,15 +39,10 @@ jobs:
         sccache --show-stats
         "$RUST_OUTPUT_DIRECTORY/prompt-ferry" openapi export
         git diff --exit-code -- openapi/admin-api.yaml
-      context: .
       dockerfile: ./forgejo.Dockerfile
       targets: >-
-        [{"target":"runtime","image_suffix":""}]
+        [{"target":"runtime"}]
       builder_name_prefix: prompt-ferry
-      inline_cache: "true"
       inline_cache_tag: latest-amd64
       publish_latest: "false"
       push: true
-      username: ${{ github.actor }}
-    secrets:
-      registry_token: ${{ secrets.REGISTRY_TOKEN }}
