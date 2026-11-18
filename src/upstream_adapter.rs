@@ -246,10 +246,9 @@ fn apply_thinking_effort_override_for_path(
 /// Issue #1032: validate an OpenAI-compatible embeddings request body before
 /// it reaches the upstream.
 ///
-/// The standard shape is enforced: a required non-empty `model` string, a
-/// required `input` that is a non-empty text string, a homogeneous batch of
-/// non-empty text strings, a batch of nonnegative token ids, or a batch of
-/// token-id arrays; an optional `dimensions` that must be a positive i32 (no
+/// The request envelope requires a non-empty `model` string and an `input`
+/// field whose contents are passed through for upstream validation;
+/// an optional `dimensions` must be a positive i32 (no
 /// string/boolean/fraction/zero/negative/overflow, never clamped); an
 /// optional `encoding_format` of `float` or `base64`. `stream: true` is
 /// rejected because embeddings have no streaming variant. Unknown
@@ -283,16 +282,8 @@ pub fn validate_embeddings_request_body(request_body: &[u8]) -> Result<(), Compa
             ));
         }
     }
-    match object.get("input") {
-        Some(serde_json::Value::String(text)) if !text.is_empty() => {}
-        Some(serde_json::Value::Array(items)) if !items.is_empty() => {
-            validate_embeddings_input_batch(items).map_err(invalid)?;
-        }
-        _ => {
-            return Err(invalid(
-                "`input` is required and must be non-empty text or a non-empty text/token batch",
-            ));
-        }
+    if !object.contains_key("input") {
+        return Err(invalid("`input` is required"));
     }
     if let Some(dimensions) = object.get("dimensions")
         && !dimensions.is_null()
@@ -321,33 +312,6 @@ pub fn validate_embeddings_request_body(request_body: &[u8]) -> Result<(), Compa
         }
     }
     Ok(())
-}
-
-fn validate_embeddings_input_batch(items: &[serde_json::Value]) -> Result<(), &'static str> {
-    let all_text = items
-        .iter()
-        .all(|item| item.as_str().is_some_and(|text| !text.is_empty()));
-    if all_text {
-        return Ok(());
-    }
-    let all_tokens = items
-        .iter()
-        .all(|item| item.as_i64().is_some_and(|token| token >= 0));
-    if all_tokens {
-        return Ok(());
-    }
-    let all_token_batches = items.iter().all(|item| {
-        item.as_array().is_some_and(|batch| {
-            !batch.is_empty()
-                && batch
-                    .iter()
-                    .all(|token| token.as_i64().is_some_and(|token| token >= 0))
-        })
-    });
-    if all_token_batches {
-        return Ok(());
-    }
-    Err("`input` batches must be homogeneous non-empty strings or nonnegative token ids")
 }
 
 fn prepare_upstream_request_inner(
@@ -1133,9 +1097,10 @@ mod tests {
     fn embeddings_requests_are_validated_and_forwarded_untranslated() {
         // Issue #1032: the embeddings arm buffers the body unchanged and never
         // applies a chat translation.
+        let request_body = br#"{"model":"m","input":["a",{"bytes":"aW1hZ2U="}],"dimensions":7,"unknown_field":true}"#;
         let prepared = super::prepare_upstream_request(
             "/v1/embeddings",
-            br#"{"model":"qwen/qwen3-embedding-8b","input":["a","b"],"dimensions":7,"unknown_field":true}"#,
+            request_body,
             NativeApi::Embeddings,
             false,
             None,
@@ -1149,9 +1114,7 @@ mod tests {
         let PreparedRequestBody::BufferedBytes(body) = prepared.body else {
             panic!("embeddings must be buffered");
         };
-        let body: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(body["dimensions"], 7);
-        assert_eq!(body["unknown_field"], true);
+        assert_eq!(body, request_body);
     }
 
     #[test]
@@ -1176,10 +1139,6 @@ mod tests {
             r#"{"input":"hello"}"#,
             r#"{"model":"","input":"hello"}"#,
             r#"{"model":"m"}"#,
-            r#"{"model":"m","input":""}"#,
-            r#"{"model":"m","input":[]}"#,
-            r#"{"model":"m","input":["a",1]}"#,
-            r#"{"model":"m","input":[-1]}"#,
             r#"{"model":"m","input":"x","dimensions":0}"#,
             r#"{"model":"m","input":"x","dimensions":-1}"#,
             r#"{"model":"m","input":"x","dimensions":1.5}"#,
