@@ -63,7 +63,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -97,7 +97,6 @@ jobs:
         env:
           RUSTC_WRAPPER: sccache
           SCCACHE_GHA_ENABLED: "true"
-          SCCACHE_BASEDIRS: ${{ github.workspace }}
         run: cargo build --release --bin prompt-ferry --target "${{ matrix.target }}"
 
       - name: Show sccache stats
@@ -105,7 +104,6 @@ jobs:
         env:
           RUSTC_WRAPPER: sccache
           SCCACHE_GHA_ENABLED: "true"
-          SCCACHE_BASEDIRS: ${{ github.workspace }}
         run: sccache --show-stats
 
       - name: Prepare binary
