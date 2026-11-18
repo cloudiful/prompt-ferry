@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router'
-import { LogOut, Menu, Server, X } from 'lucide-react'
+import { LogOut, Menu, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -23,9 +23,7 @@ import { useAsyncAction } from '@/lib/use-async-action'
 import { useLocale } from '@/lib/i18n'
 import { usePageTitle } from '@/lib/router'
 import {
-  RELAY_SESSION_AUTH_KEY,
   SESSION_AUTH_KEY,
-  useRelaySessionStore,
   useSessionStore,
 } from '@/lib/session'
 import { useNotifier } from '@/lib/notifier'
@@ -155,17 +153,12 @@ export function AppShell() {
   const { notifyApiError } = useNotifier()
   const me = useSessionStore((state) => state.me)
   const logout = useSessionStore((state) => state.logout)
-  const relayAuthenticated = useRelaySessionStore(
-    (state) => state.authenticated,
-  )
-  const relayLogout = useRelaySessionStore((state) => state.logout)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [headerActions, setHeaderActions] = useState<HTMLDivElement | null>(null)
   const isAdmin = me?.is_admin ?? false
   const currentRoute = routeForPath(location.pathname)
   const titleKey = currentRoute?.titleKey ?? 'workspaceTitle'
   const workerBusy = isPending(SESSION_AUTH_KEY)
-  const relayBusy = isPending(RELAY_SESSION_AUTH_KEY)
 
   usePageTitle(titleKey)
 
@@ -173,14 +166,6 @@ export function AppShell() {
     try {
       const outcome = await logout()
       if (outcome.executed) navigate('/login', { replace: true })
-    } catch (cause) {
-      notifyApiError(cause)
-    }
-  }
-
-  async function handleRelayLogout(): Promise<void> {
-    try {
-      await relayLogout()
     } catch (cause) {
       notifyApiError(cause)
     }
@@ -211,21 +196,6 @@ export function AppShell() {
               onLogout={() => void handleWorkerLogout()}
               pending={pendingOrigin(SESSION_AUTH_KEY) === 'logout'}
             />
-          )}
-          {relayAuthenticated && (
-            <Button
-              className="w-full justify-start"
-              disabled={relayBusy}
-              onClick={() => void handleRelayLogout()}
-              type="button"
-              variant="ghost"
-            >
-              <Server aria-hidden="true" />
-              <span>{t('relayHost')}</span>
-              {pendingOrigin(RELAY_SESSION_AUTH_KEY) === 'logout' && (
-                <span className="ml-auto size-3 animate-spin rounded-full border-2 border-current border-r-transparent" />
-              )}
-            </Button>
           )}
         </div>
       </aside>

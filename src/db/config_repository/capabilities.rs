@@ -53,7 +53,7 @@ impl Capability {
             Self::ConfigExport => "sqlite_config_export_unavailable",
             Self::ConfigImport => "sqlite_config_import_unavailable",
             Self::ConfigAudit => "sqlite_config_audit_unavailable",
-            Self::Workers => "sqlite_workers_unavailable",
+            Self::Workers => "sqlite_nodes_unavailable",
         }
     }
 
@@ -82,7 +82,7 @@ impl Capability {
             Self::ConfigExport => "encrypted configuration export is available on SQLite",
             Self::ConfigImport => "encrypted configuration import is available on SQLite",
             Self::ConfigAudit => "the configuration archive audit trail is available on SQLite",
-            Self::Workers => "worker discovery is not available on SQLite",
+            Self::Workers => "node discovery is not available on SQLite",
         }
     }
 
@@ -135,7 +135,7 @@ impl Capability {
         if path.starts_with("/admin/model-routes/") {
             return Some(Self::ModelRoutes);
         }
-        if path == "/admin/workers" {
+        if path == "/admin/nodes" {
             return Some(Self::Workers);
         }
         if path == "/me/client-keys" || path.starts_with("/me/client-keys/") {
@@ -214,7 +214,7 @@ mod tests {
             Some(Capability::ModelRouteTest)
         );
         assert_eq!(
-            Capability::for_path("/admin/workers"),
+            Capability::for_path("/admin/nodes"),
             Some(Capability::Workers)
         );
         assert_eq!(

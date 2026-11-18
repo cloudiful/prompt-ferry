@@ -1,4 +1,4 @@
-use crate::config::{RelayConfig, TlsMode, WorkerConfig};
+use crate::config::{NodeConfig, NodeTlsMode, RelayConfig, TlsMode, WorkerConfig};
 use anyhow::{Context, anyhow};
 use rustls::{
     ClientConfig, RootCertStore, ServerConfig,
@@ -114,6 +114,72 @@ pub fn server_config(config: &RelayConfig) -> anyhow::Result<Arc<ServerConfig>> 
             .with_single_cert(certs, key)
             .context("failed to build relay TLS server config")?,
     ))
+}
+
+/// The TLS server configuration of the single node listener.
+///
+/// The node serves every surface on one listener, so the TLS mode of the
+/// node applies to all of them. In mutual TLS mode the client certificate
+/// is verified strictly: a client without a trusted certificate cannot
+/// connect at all.
+pub fn node_server_config(config: &NodeConfig) -> anyhow::Result<Arc<ServerConfig>> {
+    let certs = load_certs(&config.tls_cert)?;
+    let key = load_key(&config.tls_key)?;
+    let builder = ServerConfig::builder();
+    let builder = match config.tls_mode {
+        NodeTlsMode::Off => {
+            return Err(anyhow!(
+                "tls server config requested when the node tls mode is off"
+            ));
+        }
+        NodeTlsMode::Server => builder.with_no_client_auth(),
+        NodeTlsMode::Mtls => {
+            let roots = load_root_store(&config.tls_client_ca)?;
+            let verifier = WebPkiClientVerifier::builder(roots.into())
+                .build()
+                .context("failed to build the node client certificate verifier")?;
+            builder.with_client_cert_verifier(verifier)
+        }
+    };
+    Ok(Arc::new(
+        builder
+            .with_single_cert(certs, key)
+            .context("failed to build the node TLS server config")?,
+    ))
+}
+
+/// The TLS client configuration of an outbound node peer link.
+///
+/// The trust anchor of the outbound link is the configured client CA when
+/// there is one, and the native root store otherwise. The certificate and
+/// key are the optional client identity of this node: they are used only if
+/// both are configured, because a certificate without its key cannot
+/// authenticate anything and a key without its certificate is useless.
+///
+/// The configuration of the local listener is independent of this one: a
+/// node can serve plain HTTP and still reach a peer over TLS.
+pub fn node_client_config(config: &NodeConfig) -> anyhow::Result<Arc<ClientConfig>> {
+    let roots = if config.tls_client_ca.trim().is_empty() {
+        load_native_root_store()?
+    } else {
+        load_root_store(&config.tls_client_ca)?
+    };
+    let builder = ClientConfig::builder().with_root_certificates(roots);
+    let has_cert = !config.tls_cert.trim().is_empty();
+    let has_key = !config.tls_key.trim().is_empty();
+    if has_cert != has_key {
+        return Err(anyhow!(
+            "the node client certificate and key must be configured together"
+        ));
+    }
+    let client = if has_cert {
+        builder
+            .with_client_auth_cert(load_certs(&config.tls_cert)?, load_key(&config.tls_key)?)
+            .context("failed to build the node client identity")?
+    } else {
+        builder.with_no_client_auth()
+    };
+    Ok(Arc::new(client))
 }
 
 pub fn worker_server_config(config: &RelayConfig) -> anyhow::Result<Arc<ServerConfig>> {

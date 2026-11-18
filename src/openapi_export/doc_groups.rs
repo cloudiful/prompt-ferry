@@ -15,6 +15,7 @@ use super::{
         __path_quota_key_observation_trend, __path_test_endpoint, __path_token_plan_usage,
         __path_update_endpoint,
     },
+    init::{__path_setup_initialize, __path_setup_status},
     mcp::{
         __path_create_mcp_server, __path_delete_mcp_server, __path_disconnect_mcp_oauth,
         __path_get_mcp_catalog, __path_get_mcp_oauth_status, __path_list_mcp_providers,
@@ -29,6 +30,8 @@ use super::{
         __path_create_model_route, __path_delete_model_route, __path_list_model_routes,
         __path_test_model_route, __path_update_model_route,
     },
+    node::__path_node_status,
+    nodes::__path_list_nodes,
     schemas::*,
     settings::{
         __path_get_cache_alert_setting, __path_get_endpoint_setting,
@@ -57,7 +60,6 @@ use super::{
         __path_list_client_keys, __path_list_user_options, __path_list_users,
         __path_reset_password, __path_update_client_key, __path_update_user,
     },
-    workers::__path_list_workers,
 };
 use crate::db::config_repository::{
     ConfigAuditAction, ConfigAuditDomainCount, ConfigAuditEntry, ConfigAuditPage,
@@ -81,23 +83,23 @@ use crate::{
         McpProviderDescriptor, McpServer, McpServerPageResponse, McpServerRequest, McpTestResponse,
         MeResponse, ModelRoutePageResponse, ModelRouteRequest, ModelRouteTargetRequest,
         ModelRouteTestRequest, ModelRouteTestResponse, ModelRouteTestTargetResult,
-        ModelRouteWhitelistRequest, ModelRouteWhitelistResponse, OAuthBrowserCompleteRequest,
-        OAuthBrowserStartResponse, OAuthDeviceStartResponse, OAuthFlowRequest, OAuthLoginResponse,
-        OAuthLoginStatus, OpenRouterBalance, OpenRouterSpend, OpencodeGoWindowUsage,
-        QuotaKeyObservationHistoryItem, QuotaKeyObservationHistoryResponse,
-        QuotaKeyObservationTrendMetric, QuotaKeyObservationTrendPoint,
-        QuotaKeyObservationTrendResponse, QuotaKeyObservationTrendSeries, RawObjectStoreBackend,
-        RawObjectStoreSecretPatch, RawObjectStoreSettingsRequest, RawObjectStoreSettingsResponse,
-        RelayIpPolicyResponse, RequestContentLoggingRequest, RequestContentLoggingResponse,
-        RequestRecordFullMessage, RequestRecordFullResponse, RequestRecordOverviewRange,
-        RequestRecordPruneResponse, RequestRecordsClearRequest, RequestRecordsClearResponse,
-        ResetPasswordRequest, SessionAffinityResetResponse, SessionAffinityState,
-        SessionAffinityStatus, SessionRouteOptionsResponse, SharedValkeySecretPatch,
+        ModelRouteWhitelistRequest, ModelRouteWhitelistResponse, NodeListResponse, NodePeerSummary,
+        NodeStatusResponse, NodeSummary, OAuthBrowserCompleteRequest, OAuthBrowserStartResponse,
+        OAuthDeviceStartResponse, OAuthFlowRequest, OAuthLoginResponse, OAuthLoginStatus,
+        OpenRouterBalance, OpenRouterSpend, OpencodeGoWindowUsage, QuotaKeyObservationHistoryItem,
+        QuotaKeyObservationHistoryResponse, QuotaKeyObservationTrendMetric,
+        QuotaKeyObservationTrendPoint, QuotaKeyObservationTrendResponse,
+        QuotaKeyObservationTrendSeries, RawObjectStoreBackend, RawObjectStoreSecretPatch,
+        RawObjectStoreSettingsRequest, RawObjectStoreSettingsResponse, RelayIpPolicyResponse,
+        RequestContentLoggingRequest, RequestContentLoggingResponse, RequestRecordFullMessage,
+        RequestRecordFullResponse, RequestRecordOverviewRange, RequestRecordPruneResponse,
+        RequestRecordsClearRequest, RequestRecordsClearResponse, ResetPasswordRequest,
+        SessionAffinityResetResponse, SessionAffinityState, SessionAffinityStatus,
+        SessionRouteOptionsResponse, SetupRequest, SetupStatus, SharedValkeySecretPatch,
         SharedValkeySettingsRequest, SharedValkeySettingsResponse, SubscriptionQuotaObservation,
         SubscriptionWindowAvailability, SubscriptionWindowUsage, TokenPlanKeyUsage,
         TokenPlanModelUsage, TokenPlanQuotaState, TokenPlanQuotaStatus, TokenPlanUsageResponse,
         TokenPlanWindowUsage, UpdateClientKeyRequest, UserOptionsResponse, UserPageResponse,
-        WorkerListResponse, WorkerSummary,
     },
 };
 
@@ -107,6 +109,8 @@ use crate::{
         auth_login,
         auth_logout,
         auth_me,
+        setup_status,
+        setup_initialize,
         me_list_client_keys,
         me_create_client_key,
         me_update_client_key,
@@ -125,6 +129,8 @@ use crate::{
     ),
     components(
         schemas(
+            SetupStatus,
+            SetupRequest,
             CreateClientKeyRequest,
             CreateClientKeyResponse,
             CreateUserRequest,
@@ -186,7 +192,7 @@ pub(super) struct IdentityApiDoc;
         mcp_oauth_callback,
         refresh_mcp_oauth,
         disconnect_mcp_oauth,
-        list_workers,
+        list_nodes,
         get_endpoint_setting,
         set_endpoint_setting,
         get_model_route_whitelist,
@@ -241,8 +247,8 @@ pub(super) struct IdentityApiDoc;
             McpServerPageResponse,
             McpServerRequest,
             McpTestResponse,
-            WorkerListResponse,
-            WorkerSummary,
+            NodeListResponse,
+            NodeSummary,
             ModelRoutePageResponse,
             ModelRouteRequest,
             ModelRouteTargetRequest,
@@ -264,7 +270,7 @@ pub(super) struct IdentityApiDoc;
         (name = "endpoints", description = "Provider endpoints"),
         (name = "model-routes", description = "Model route rules"),
         (name = "mcp", description = "MCP server management"),
-        (name = "workers", description = "Worker discovery")
+        (name = "nodes", description = "Node group discovery")
     )
 )]
 pub(super) struct RoutingApiDoc;
@@ -303,6 +309,7 @@ pub(super) struct RoutingApiDoc;
             get_shared_valkey,
             set_shared_valkey,
         bridge_status,
+        node_status,
         get_cache_alert_setting,
         set_cache_alert_setting,
         export_config,
@@ -315,6 +322,8 @@ pub(super) struct RoutingApiDoc;
         schemas(
             AppliedReplacementSchema,
             BridgeStatus,
+            NodeStatusResponse,
+            NodePeerSummary,
             CacheAlertSettings,
             CacheAlertSettingsResponse,
             CustomStringMatchSchema,

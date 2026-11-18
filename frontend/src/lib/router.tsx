@@ -9,7 +9,7 @@ import { WorkerQueryProvider } from './query'
 import { Skeleton } from '@/components/ui/skeleton'
 import { FoundationPlaceholder } from '@/pages/FoundationPlaceholder'
 
-export function WorkerAuthGate() {
+export function SessionAuthGate() {
   const bootstrapped = useSessionStore((state) => state.bootstrapped)
   const bootstrapping = useSessionStore((state) => state.bootstrapping)
   const me = useSessionStore((state) => state.me)

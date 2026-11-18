@@ -1,6 +1,9 @@
 use super::*;
+use crate::db::seaorm::PostgresNativeConnection;
 use crate::raw_payload_store::{RawPayloadEnvelope, RawPayloadStore};
 use chrono::Duration as ChronoDuration;
+use sea_orm::ConnectionTrait;
+use sea_orm::sea_query::{Alias, Expr, Query};
 use tracing::warn;
 
 pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) -> Result<i64> {
@@ -17,6 +20,7 @@ async fn record_request_record_with_created_at(
 ) -> Result<(i64, DateTime<Utc>)> {
     let ref_full = input.request_full_json.clone();
     let ref_delta = input.request_delta_json.clone();
+    let node_attribution = input.node_attribution;
     let mut tx = pool.begin().await?;
     let record = sqlx::query_file!(
         "src/sql/usage/upsert_request_record.sql",
@@ -114,6 +118,27 @@ async fn record_request_record_with_created_at(
     )
     .execute(&mut *tx)
     .await?;
+
+    // The node ownership of the record is written in the same transaction as
+    // the row itself: a failed attribution write rolls the record back. The
+    // update is null-only, so the lifecycle upserts of the same request never
+    // overwrite the ownership captured by the first write, and its `created_at`
+    // predicate prunes the statement to the row's daily partition.
+    if let Some(node_attribution) = node_attribution {
+        use sea_orm::sea_query::ExprTrait;
+        let document = serde_json::to_value(node_attribution)?;
+        let statement = Query::update()
+            .table(Alias::new("request_records"))
+            .value(Alias::new("node_attribution"), Expr::value(document))
+            .and_where(Expr::col(Alias::new("event_id")).eq(event_id))
+            .and_where(Expr::col(Alias::new("created_at")).eq(created_at))
+            .and_where(Expr::col(Alias::new("node_attribution")).is_null())
+            .to_owned();
+        PostgresNativeConnection::new(&mut tx)
+            .execute(&statement)
+            .await
+            .map_err(crate::db::seaorm::native_error)?;
+    }
 
     tx.commit().await?;
 

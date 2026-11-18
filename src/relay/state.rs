@@ -21,6 +21,18 @@ use tokio::{
 pub(crate) type WorkerSender = mpsc::Sender<BridgeMessage>;
 pub(crate) const MAX_WORKER_CONNECTIONS: usize = 4;
 
+/// How many edge nodes one database node serves.
+pub(crate) const MAX_NODE_PEERS: usize = 256;
+
+/// Whether the node already serves the maximum number of peers.
+///
+/// The cap belongs to the node, not to the relay: a database node serves a
+/// bounded number of edge nodes, and the edge nodes of one database node
+/// share that budget.
+pub(crate) fn node_peer_cap_reached(peers: usize) -> bool {
+    peers >= MAX_NODE_PEERS
+}
+
 #[derive(Clone)]
 pub(crate) struct WorkerSelection {
     pub(crate) worker_id: usize,
@@ -74,6 +86,25 @@ impl axum::extract::connect_info::Connected<SocketAddr> for RemoteAddr {
 pub(crate) struct AppState {
     pub(crate) config: RelayConfig,
     pub(crate) inner: Arc<RelayState>,
+    /// Managed client keys are the only accepted AI credential.
+    ///
+    /// The node runtime has no static client token: a managed `pfy_` key is
+    /// the only way to authenticate, and the flag keeps the legacy static
+    /// token path closed for it without changing the legacy relay.
+    pub(crate) managed_only_auth: bool,
+}
+
+impl AppState {
+    /// Allocate the next local worker id of this relay state.
+    ///
+    /// The in-memory node worker uses the same counter as the socket worker
+    /// path, so the pending-request bookkeeping of both transports agrees on
+    /// which worker owns a request.
+    pub(crate) fn allocate_worker_id(&self) -> usize {
+        self.inner
+            .next_worker_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 #[derive(Clone)]
@@ -163,5 +194,6 @@ pub(crate) fn test_state() -> AppState {
             config_version: Mutex::new(None),
             next_worker_id: AtomicUsize::new(1),
         }),
+        managed_only_auth: false,
     }
 }

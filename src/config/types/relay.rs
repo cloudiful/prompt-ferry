@@ -1,31 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{RelayArgs, ServeArgs};
-
 use super::{BridgeEncryptionMode, TlsMode};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ServeConfig {
-    pub internal_worker_bind: String,
-}
-
-impl Default for ServeConfig {
-    fn default() -> Self {
-        Self {
-            internal_worker_bind: "127.0.0.1:8788".to_string(),
-        }
-    }
-}
-
-impl ServeConfig {
-    pub fn merge_args(mut self, args: ServeArgs) -> Self {
-        if let Some(bind) = args.internal_worker_bind {
-            self.internal_worker_bind = bind;
-        }
-        self
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -55,18 +30,6 @@ pub struct RelayConfig {
     pub worker_tls_client_ca: String,
     pub bridge_encryption_mode: BridgeEncryptionMode,
     pub bridge_encryption_key: String,
-    /// Loopback address of the relay's own management listener.
-    ///
-    /// The relay serves the management UI and its own control API here, and
-    /// proxies the worker's business API over the bridge. It is host-local and
-    /// must stay on loopback, exactly like the worker's admin listener.
-    pub admin_bind: String,
-    /// Host-local token guarding the relay management API.
-    ///
-    /// Empty means the relay generates one on first start and persists it in
-    /// the host-local configuration; it is never written to the shared
-    /// PostgreSQL configuration that every worker reads.
-    pub admin_token: String,
 }
 
 impl Default for RelayConfig {
@@ -92,79 +55,13 @@ impl Default for RelayConfig {
             worker_tls_client_ca: String::new(),
             bridge_encryption_mode: BridgeEncryptionMode::Off,
             bridge_encryption_key: String::new(),
-            admin_bind: "127.0.0.1:8790".to_string(),
-            admin_token: String::new(),
         }
-    }
-}
-
-impl RelayConfig {
-    pub fn merge_args(mut self, args: RelayArgs) -> Self {
-        if let Some(bind) = args.bind {
-            self.bind = bind;
-        }
-        if let Some(bind) = args.worker_bind {
-            self.worker_bind = bind;
-        }
-        if let Some(token) = args.client_token {
-            self.client_token = token;
-        }
-        if let Some(token) = args.worker_token {
-            self.worker_token = token;
-        }
-        if let Some(timeout) = args.request_timeout_seconds {
-            self.request_timeout_seconds = timeout;
-        }
-        if let Some(timeout) = args.worker_heartbeat_timeout_seconds {
-            self.worker_heartbeat_timeout_seconds = timeout;
-        }
-        if let Some(buffer) = args.response_stream_buffer {
-            self.response_stream_buffer = buffer;
-        }
-        if let Some(max_bytes) = args.response_stream_max_bytes {
-            self.response_stream_max_bytes = max_bytes;
-        }
-        if let Some(timeout_ms) = args.response_stream_backpressure_timeout_ms {
-            self.response_stream_backpressure_timeout_ms = timeout_ms;
-        }
-        if let Some(mode) = args.tls_mode {
-            self.tls_mode = mode;
-        }
-        if let Some(path) = args.tls_cert {
-            self.tls_cert = path;
-        }
-        if let Some(path) = args.tls_key {
-            self.tls_key = path;
-        }
-        if let Some(path) = args.tls_client_ca {
-            self.tls_client_ca = path;
-        }
-        if let Some(mode) = args.worker_tls_mode {
-            self.worker_tls_mode = mode;
-        }
-        if let Some(path) = args.worker_tls_cert {
-            self.worker_tls_cert = path;
-        }
-        if let Some(path) = args.worker_tls_key {
-            self.worker_tls_key = path;
-        }
-        if let Some(path) = args.worker_tls_client_ca {
-            self.worker_tls_client_ca = path;
-        }
-        if let Some(mode) = args.bridge_encryption_mode {
-            self.bridge_encryption_mode = mode;
-        }
-        if let Some(key) = args.bridge_encryption_key {
-            self.bridge_encryption_key = key;
-        }
-        self
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::RelayConfig;
-    use crate::cli::RelayArgs;
 
     #[test]
     fn defaults_keep_response_buffer_bounded() {
@@ -178,19 +75,5 @@ mod tests {
     #[test]
     fn shutdown_drain_default_outlives_the_worker_drain() {
         assert_eq!(RelayConfig::default().shutdown_drain_seconds, 130);
-    }
-
-    #[test]
-    fn relay_args_override_response_buffer_settings() {
-        let config = RelayConfig::default().merge_args(RelayArgs {
-            response_stream_buffer: Some(8),
-            response_stream_max_bytes: Some(4096),
-            response_stream_backpressure_timeout_ms: Some(250),
-            ..RelayArgs::default()
-        });
-
-        assert_eq!(config.response_stream_buffer, 8);
-        assert_eq!(config.response_stream_max_bytes, 4096);
-        assert_eq!(config.response_stream_backpressure_timeout_ms, 250);
     }
 }

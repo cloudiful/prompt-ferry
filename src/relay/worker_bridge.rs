@@ -1,10 +1,8 @@
 use crate::{
-    auth::check_bearer,
-    bridge_wire, ip_acl,
+    bridge::link::{LinkEvent, LinkReceiver},
+    ip_acl,
     protocol::{BridgeMessage, ConfigSnapshot, ResponseError},
 };
-
-mod connection;
 
 use super::{
     response_forward::{
@@ -15,128 +13,110 @@ use super::{
     },
     state::{AppState, MAX_WORKER_CONNECTIONS, WorkerSender},
 };
-use axum::{
-    Router,
-    extract::{
-        State,
-        ws::{Message, WebSocket, WebSocketUpgrade},
-    },
-    http::{HeaderMap, StatusCode},
-    response::Response,
-    routing::get,
-};
-use futures::{SinkExt, StreamExt};
-use std::{collections::HashMap, sync::atomic::Ordering, time::Duration};
+use axum::http::StatusCode;
+use std::collections::HashMap;
+#[cfg(test)]
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
-const BRIDGE_SEND_BUFFER: usize = 64;
-
-pub(super) fn worker_router(state: AppState) -> Router {
-    if state.config.worker_token.is_empty() {
-        warn!(
-            "worker authentication is DISABLED: WORKER_TOKEN is empty so any client that can \
-             reach the relay /ws/worker bind can connect as a worker; use TLS and network \
-             isolation to protect this endpoint"
-        );
+/// Attach a local in-memory executor as a worker of this relay state.
+///
+/// The relay keeps the same sender registration, dispatch and disconnect
+/// cleanup as the websocket path; only the transport differs. The returned
+/// task drains the executor responses until the executor drops its outbound
+/// half, then performs the ordinary worker cleanup.
+#[allow(dead_code)] // Integration entrypoint for the P3b node; exercised by link tests now.
+pub(crate) async fn attach_in_memory_worker(
+    state: AppState,
+    worker_id: usize,
+    request_tx: WorkerSender,
+    mut response_rx: LinkReceiver,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if !register_worker(&state, worker_id, request_tx).await {
+        return None;
     }
-    Router::new()
-        .route("/healthz", get(worker_healthz))
-        .route("/ws/worker", get(worker_ws))
-        .with_state(state)
-}
-
-async fn worker_healthz() -> &'static str {
-    "ok"
-}
-
-async fn worker_ws(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    ws: WebSocketUpgrade,
-) -> Response {
-    if let Err(response) = check_bearer(&headers, &state.config.worker_token) {
-        return *response;
-    }
-    ws.max_message_size(bridge_wire::BRIDGE_WS_MAX_MESSAGE_BYTES)
-        .max_frame_size(bridge_wire::BRIDGE_WS_MAX_FRAME_BYTES)
-        .on_upgrade(move |socket| handle_worker_socket(state, socket))
-}
-
-async fn handle_worker_socket(state: AppState, socket: WebSocket) {
-    let worker_id = state.inner.next_worker_id.fetch_add(1, Ordering::Relaxed);
-    let heartbeat_timeout = Duration::from_secs(state.config.worker_heartbeat_timeout_seconds);
-    let (mut ws_tx, mut ws_rx) = socket.split();
-    let (mut write_cipher, mut read_cipher) =
-        match connection::perform_worker_handshake(&state, worker_id, &mut ws_tx, &mut ws_rx).await
-        {
-            Some(ciphers) => ciphers,
-            None => return,
-        };
-    let (tx, mut rx) = mpsc::channel::<BridgeMessage>(BRIDGE_SEND_BUFFER);
-
-    if !register_worker(&state, worker_id, tx).await {
-        let _ = ws_tx.send(Message::Close(None)).await;
-        return;
-    }
-    info!(worker_id, "worker connected");
-
-    let write_task = tokio::spawn(async move {
-        while let Some(message) = rx.recv().await {
-            let payload = if let Some(cipher) = write_cipher.as_mut() {
-                cipher.encrypt_message(&message)
-            } else {
-                bridge_wire::encode_message(&message)
-            };
-            match payload {
-                Ok(payload) => {
-                    if ws_tx.send(Message::Binary(payload.into())).await.is_err() {
-                        break;
-                    }
+    info!(worker_id, "worker connected over an in-memory link");
+    Some(tokio::spawn(async move {
+        while let Some(event) = response_rx.next().await {
+            match event {
+                LinkEvent::Data(item) => {
+                    let (message, permit) = item.into_parts();
+                    dispatch_worker_bridge_message(&state, message).await;
+                    // Keep the outbound byte permit until the relay handled
+                    // the item, matching the socket write lifetime.
+                    drop(permit);
                 }
-                Err(err) => {
-                    error!(worker_id, error = %err, "failed to encode bridge message");
-                    break;
+                LinkEvent::Control(message) => {
+                    dispatch_worker_bridge_message(&state, message).await
+                }
+                LinkEvent::Flush(ack) => {
+                    let mut acknowledgements = vec![ack];
+                    while let Some(event) = response_rx.try_next() {
+                        match event {
+                            LinkEvent::Data(item) => {
+                                let (message, permit) = item.into_parts();
+                                dispatch_worker_bridge_message(&state, message).await;
+                                drop(permit);
+                            }
+                            LinkEvent::Control(message) => {
+                                dispatch_worker_bridge_message(&state, message).await
+                            }
+                            LinkEvent::Flush(ack) => acknowledgements.push(ack),
+                        }
+                    }
+                    for ack in acknowledgements {
+                        let _ = ack.send(());
+                    }
                 }
             }
         }
-    });
+        cleanup_worker(&state, worker_id).await;
+    }))
+}
 
-    while let Some(message) = connection::recv_worker_message(
-        worker_id,
-        heartbeat_timeout,
-        &mut ws_rx,
-        read_cipher.as_mut(),
-    )
-    .await
-    {
-        handle_worker_bridge_message(&state, message).await;
-    }
-
-    write_task.abort();
+/// Remove a worker and fail everything it still owned.
+///
+/// This is shared by the socket adapter and the local in-memory link so a
+/// disconnect has exactly the same route reset and pending failure behaviour.
+pub(crate) async fn cleanup_worker(state: &AppState, worker_id: usize) {
+    // The observation of the last worker and the reset of the snapshot stay
+    // in one critical section of the worker registration: a new worker that
+    // registers between the observation and the reset would publish its own
+    // snapshot, and the reset of the older cleanup would erase it.
+    //
+    // The lock order is workers, then the configuration version, then the
+    // routes. A snapshot is applied under the configuration version alone, so
+    // this order cannot deadlock.
     let last_worker_gone = {
         let mut workers = state.inner.workers.lock().await;
         workers.remove(&worker_id);
-        workers.is_empty()
+        let last_worker_gone = workers.is_empty();
+        if last_worker_gone {
+            // The relay is no longer serviceable. Drop the stale snapshot so
+            // `/ready` flips red immediately and a managed key is never
+            // matched against routes from a worker that is gone. The version
+            // lock is held across the reset, so the reset cannot interleave
+            // with a snapshot that is applied at the same time.
+            let mut applied_version = state.inner.config_version.lock().await;
+            state.inner.routes.lock().await.clear();
+            *state.inner.relay_ip_policy.lock().await = ip_acl::CompiledRelayIpPolicy::default();
+            *applied_version = None;
+        }
+        last_worker_gone
     };
     state.inner.worker_loads.lock().await.remove(&worker_id);
     if last_worker_gone {
-        // The relay is no longer serviceable. Drop the stale snapshot so
-        // `/ready` flips red immediately and a managed key is never matched
-        // against routes from a worker that is gone. The version lock is held
-        // across the reset, so the reset cannot interleave with a snapshot
-        // that is applied at the same time.
-        let mut applied_version = state.inner.config_version.lock().await;
-        state.inner.routes.lock().await.clear();
-        *state.inner.relay_ip_policy.lock().await = ip_acl::CompiledRelayIpPolicy::default();
-        *applied_version = None;
+        debug!(
+            worker_id,
+            "the last worker left; the relay configuration snapshot was reset"
+        );
     }
     warn!(
         category = "mcp_bridge_diag",
         worker_id, "worker bridge connection ended; pending requests will be failed"
     );
     fail_pending_for_worker(
-        &state,
+        state,
         worker_id,
         ResponseError {
             request_id: String::new(),
@@ -185,7 +165,7 @@ pub(super) async fn handle_config_snapshot(state: &AppState, snapshot: ConfigSna
     info!(version, route_count, "relay config snapshot applied");
 }
 
-async fn register_worker(state: &AppState, worker_id: usize, tx: WorkerSender) -> bool {
+pub(crate) async fn register_worker(state: &AppState, worker_id: usize, tx: WorkerSender) -> bool {
     let mut workers = state.inner.workers.lock().await;
     if workers.len() >= MAX_WORKER_CONNECTIONS {
         warn!(
@@ -200,7 +180,7 @@ async fn register_worker(state: &AppState, worker_id: usize, tx: WorkerSender) -
     true
 }
 
-async fn handle_worker_bridge_message(state: &AppState, message: BridgeMessage) {
+pub(crate) async fn dispatch_worker_bridge_message(state: &AppState, message: BridgeMessage) {
     match message {
         BridgeMessage::ResponseStart(start) => handle_response_start(state, start).await,
         BridgeMessage::ResponseChunk(chunk) => handle_response_chunk(state, chunk).await,
@@ -239,6 +219,7 @@ async fn handle_worker_bridge_message(state: &AppState, message: BridgeMessage) 
 mod tests {
     use super::super::{response_forward::fail_pending_for_worker, state::test_state};
     use super::*;
+    use crate::bridge::link::{InMemoryLink, in_memory_link};
     use tokio::sync::oneshot;
 
     #[tokio::test]
@@ -315,6 +296,108 @@ mod tests {
         assert_eq!(err.status, StatusCode::BAD_GATEWAY.as_u16());
         assert_eq!(err.code, "worker_disconnected");
         assert_eq!(err.request_id, "mcp-req-1");
+    }
+
+    #[tokio::test]
+    async fn in_memory_worker_link_registers_dispatches_and_cleans_up() {
+        use std::time::Duration;
+
+        let state = test_state();
+        let InMemoryLink {
+            relay_request_tx,
+            mut executor_request_rx,
+            executor_response_tx,
+            relay_response_rx,
+        } = in_memory_link();
+        let relay_tx = relay_request_tx.clone();
+        let task = attach_in_memory_worker(state.clone(), 7, relay_request_tx, relay_response_rx)
+            .await
+            .expect("the in-memory worker is registered");
+        assert!(state.inner.workers.lock().await.contains_key(&7));
+        assert_eq!(state.inner.worker_loads.lock().await.get(&7), Some(&0));
+
+        let cancel = BridgeMessage::RequestCancel(crate::protocol::BridgeRequestCancel {
+            request_id: "request-1".to_string(),
+            reason: "client_cancel".to_string(),
+            response_started: false,
+        });
+        relay_tx
+            .send(cancel.clone())
+            .await
+            .expect("requests reach the executor half");
+        assert_eq!(executor_request_rx.recv().await, Some(cancel));
+
+        executor_response_tx
+            .send(BridgeMessage::Pong)
+            .await
+            .expect("responses reach the relay half");
+        assert!(
+            executor_response_tx.flush(Duration::from_secs(1)).await,
+            "the relay acknowledges a flush only after dispatching the preceding response"
+        );
+
+        drop(executor_response_tx);
+        task.await
+            .expect("the relay link task ends with the executor half");
+        assert!(!state.inner.workers.lock().await.contains_key(&7));
+        assert!(!state.inner.worker_loads.lock().await.contains_key(&7));
+    }
+
+    #[tokio::test]
+    async fn the_last_worker_cleanup_keeps_the_registration_and_the_reset_together() {
+        use crate::protocol::{ClientRoute, ConfigSnapshot};
+
+        fn snapshot(version: i64, key_hash: &str) -> ConfigSnapshot {
+            ConfigSnapshot {
+                version,
+                keys: vec![ClientRoute {
+                    key_hash: key_hash.to_string(),
+                    key_prefix: "pfy_".to_string(),
+                    user_id: 1,
+                    route_id: "route".to_string(),
+                }],
+                relay_ip_policy: Default::default(),
+            }
+        }
+
+        let state = test_state();
+        let (tx, _rx) = mpsc::channel(1);
+        assert!(register_worker(&state, 1, tx).await);
+        handle_config_snapshot(&state, snapshot(7, "hash-7")).await;
+        assert_eq!(*state.inner.config_version.lock().await, Some(7));
+
+        // The reset of the snapshot is blocked on the routes, so the cleanup
+        // stops between the observation of the last worker and the reset.
+        let routes = state.inner.routes.lock().await;
+        let cleanup = tokio::spawn({
+            let state = state.clone();
+            async move { cleanup_worker(&state, 1).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // A new worker must not register while the cleanup of the old one is
+        // still resetting the snapshot: the new registration and its snapshot
+        // would be erased by the older cleanup.
+        let (new_tx, _new_rx) = mpsc::channel(1);
+        let register = tokio::spawn({
+            let state = state.clone();
+            async move { register_worker(&state, 2, new_tx).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            !register.is_finished(),
+            "a new worker registered while the last worker cleanup was still resetting the snapshot"
+        );
+
+        drop(routes);
+        cleanup.await.expect("cleanup joins");
+        assert!(register.await.expect("registration joins"));
+        assert_eq!(state.inner.workers.lock().await.len(), 1);
+
+        // The snapshot of the new worker survives the cleanup of the old one.
+        handle_config_snapshot(&state, snapshot(8, "hash-8")).await;
+        assert_eq!(*state.inner.config_version.lock().await, Some(8));
+        assert_eq!(state.inner.routes.lock().await.len(), 1);
     }
 
     #[tokio::test]

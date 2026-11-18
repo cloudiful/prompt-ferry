@@ -41,36 +41,6 @@ prefix_output() {
   done
 }
 
-service_env=(
-  "PROMPT_FERRY_LOGGING__LEVEL=${PROMPT_FERRY_LOGGING__LEVEL:-info}"
-  "DATABASE_URL=${DATABASE_URL:-}"
-  "PROMPT_FERRY_RELAY__BIND=${PROMPT_FERRY_RELAY__BIND:-127.0.0.1:8787}"
-  "PROMPT_FERRY_RELAY__WORKER_BIND=${PROMPT_FERRY_RELAY__WORKER_BIND:-127.0.0.1:8788}"
-  "PROMPT_FERRY_RELAY__CLIENT_TOKEN=${PROMPT_FERRY_RELAY__CLIENT_TOKEN:-dev-client-token}"
-  "PROMPT_FERRY_RELAY__WORKER_TOKEN=${PROMPT_FERRY_RELAY__WORKER_TOKEN:-dev-worker-token}"
-  "PROMPT_FERRY_RELAY__REQUEST_TIMEOUT_SECONDS=${PROMPT_FERRY_RELAY__REQUEST_TIMEOUT_SECONDS:-300}"
-  "PROMPT_FERRY_WORKER__RELAY_URLS=${PROMPT_FERRY_WORKER__RELAY_URLS:-[\"ws://127.0.0.1:8788/ws/worker\"]}"
-  "PROMPT_FERRY_WORKER__WORKER_TOKEN=${PROMPT_FERRY_WORKER__WORKER_TOKEN:-dev-worker-token}"
-  "PROMPT_FERRY_WORKER__ADMIN_BIND=${PROMPT_FERRY_WORKER__ADMIN_BIND:-127.0.0.1:8789}"
-  "PROMPT_FERRY_WORKER__MCP_WARMUP=${PROMPT_FERRY_WORKER__MCP_WARMUP:-all}"
-  "PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_LOGIN=${PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_LOGIN:-admin}"
-  "PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD=${PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD:-change-me-now}"
-)
-
-worker_relay_urls="${PROMPT_FERRY_WORKER__RELAY_URLS:-[\"ws://127.0.0.1:8788/ws/worker\"]}"
-worker_relay_url="${worker_relay_urls#\[\"}"
-worker_relay_url="${worker_relay_url%%\"*}"
-
-relay_is_local() {
-  case "$worker_relay_url" in
-    ws://127.0.0.1:*|wss://127.0.0.1:*|ws://localhost:*|wss://localhost:*)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
 
 start_service() {
   local service="$1"
@@ -88,7 +58,7 @@ start_service() {
 
   (
     cd "$dir" || exit 1
-    exec env "${service_env[@]}" "$@"
+    exec "$@"
   ) > "$fifo" 2>&1 &
   local pid=$!
 
@@ -116,7 +86,7 @@ any_running() {
 
 all_core_stopped() {
   local i
-  for i in 0 1; do
+  for i in 0; do
     if [ "${pids[$i]+set}" = "set" ] && is_running "${pids[$i]}"; then
       return 1
     fi
@@ -171,33 +141,15 @@ endpoint_ready() {
   curl -sS --max-time 0.5 -o /dev/null "$1" 2>/dev/null
 }
 
-http_stack_ready() {
-  if relay_is_local; then
-    endpoint_ready "http://127.0.0.1:8787/healthz" &&
-      endpoint_ready "http://127.0.0.1:8788/healthz" &&
-      endpoint_ready "http://127.0.0.1:8789/api/v1/auth/login"
-  else
-    endpoint_ready "http://127.0.0.1:8789/api/v1/auth/login"
-  fi
-}
-
 wait_for_http_stack() {
-  if relay_is_local; then
-    printf 'Waiting for relay and worker admin to become reachable...\n'
-  else
-    printf 'Waiting for worker admin to become reachable...\n'
-  fi
+  printf 'Waiting for node to become reachable...\n'
   local i
   for i in $(seq 1 120); do
     if all_core_stopped; then
-      if relay_is_local; then
-        printf 'Warning: relay or worker stopped before stack became healthy\n'
-      else
-        printf 'Warning: worker stopped before stack became healthy\n'
-      fi
+      printf 'Warning: node stopped before becoming healthy\n'
       return 1
     fi
-    if http_stack_ready; then
+    if endpoint_ready "http://127.0.0.1:8787/healthz"; then
       return 0
     fi
     sleep 0.25
@@ -212,10 +164,7 @@ wait_until_stopped() {
   done
 }
 
-if relay_is_local; then
-  start_service "relay" "$cyan" "." "target/debug/prompt-ferry" "relay"
-fi
-start_service "worker" "$green" "." "target/debug/prompt-ferry" "worker"
+start_service "node" "$green" "." "target/debug/prompt-ferry"
 
 case "$mode" in
   full)

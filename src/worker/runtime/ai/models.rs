@@ -30,6 +30,9 @@ pub(super) struct ModelsRequestContext<'a> {
     pub(super) owner_worker_id: uuid::Uuid,
     pub(super) anthropic: bool,
     pub(super) request_headers: &'a [(String, String)],
+    /// The `/v1/models` path logs outside the runtime funnel, so it carries the
+    /// link's node ownership explicitly.
+    pub(super) node_attribution: Option<db::NodeAttribution>,
 }
 
 pub(super) async fn process_models_request(
@@ -47,6 +50,7 @@ pub(super) async fn process_models_request(
         anthropic,
         request_headers,
         created_at,
+        node_attribution,
     } = context;
     let routes = db::list_visible_endpoints(&state.pool, user_id)
         .await?
@@ -204,7 +208,8 @@ pub(super) async fn process_models_request(
                     Some(&body),
                 )),
                 Some(truncate_chars(&body, 512)),
-            ),
+            )
+            .with_node_attribution(node_attribution),
         )
         .await;
         return Ok(());
@@ -282,7 +287,8 @@ pub(super) async fn process_models_request(
             Some(true),
             Some(elapsed_ms(started)),
             None,
-        ),
+        )
+        .with_node_attribution(node_attribution),
     )
     .await;
     Ok(())

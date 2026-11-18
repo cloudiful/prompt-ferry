@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useForm } from '@tanstack/react-form'
-import { useLocation, useNavigate } from 'react-router'
+import { useQuery } from '@tanstack/react-query'
+import { Navigate, useLocation, useNavigate } from 'react-router'
 import { Eye, EyeOff, LogIn } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -13,7 +14,10 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Skeleton } from '@/components/ui/skeleton'
 import { LocaleToggle, ThemeToggle } from '@/components/auth/DisplayControls'
+import { setupStatusOptions } from '@/generated/admin-api/@tanstack/react-query.gen'
+import { formatApiError } from '@/api'
 import { LOGIN_NAME_STORAGE_KEY, readStorage, writeStorage } from '@/storage'
 import { defaultNavPath } from '@/lib/nav'
 import { useAsyncAction } from '@/lib/use-async-action'
@@ -45,6 +49,10 @@ export function LoginPage() {
   const busy = bootstrapping || isPending(SESSION_AUTH_KEY)
   const params = new URLSearchParams(location.search)
   const redirect = safeRedirectTarget(params.get('redirect'))
+  const setupQuery = useQuery({
+    ...setupStatusOptions(),
+    enabled: me === null,
+  })
 
   usePageTitle('login')
 
@@ -79,6 +87,46 @@ export function LoginPage() {
   useEffect(() => {
     if (me) navigate(redirect ?? defaultNavPath(me.is_admin), { replace: true })
   }, [me, navigate, redirect])
+
+  if (me) return null
+
+  if (!bootstrapped || bootstrapping || setupQuery.isPending) {
+    return (
+      <main
+        aria-label={t('loading')}
+        className="grid min-h-screen place-items-center p-4"
+        data-foundation-route-id="R-LOGIN"
+        role="status"
+      >
+        <Skeleton className="h-8 w-40" />
+      </main>
+    )
+  }
+
+  if (setupQuery.isError) {
+    return (
+      <StatusCard
+        description={t('setupStatusFailedDesc')}
+        detail={formatApiError(setupQuery.error)}
+        onRetry={() => void setupQuery.refetch()}
+        title={t('setupStatusFailed')}
+      />
+    )
+  }
+
+  const setup = setupQuery.data
+  if (setup && !setup.initialized) {
+    if (setup.setup_available) {
+      return <Navigate replace to={`/setup${location.search}`} />
+    }
+    return (
+      <StatusCard
+        description={t('setupUnavailableDesc')}
+        onRetry={() => void setupQuery.refetch()}
+        title={t('setupUnavailable')}
+      />
+    )
+  }
 
   return (
     <main
@@ -201,6 +249,44 @@ export function LoginPage() {
               <span>{t('login')}</span>
             </Button>
           </form>
+        </CardContent>
+        <CardFooter className="justify-center gap-2">
+          <LocaleToggle />
+          <ThemeToggle />
+        </CardFooter>
+      </Card>
+    </main>
+  )
+}
+
+type StatusCardProps = {
+  title: string
+  description: string
+  detail?: string
+  onRetry: () => void
+}
+
+function StatusCard({ title, description, detail, onRetry }: StatusCardProps) {
+  const { t } = useLocale()
+  return (
+    <main
+      className="grid min-h-screen place-items-center p-4 sm:p-8"
+      data-foundation-route-id="R-LOGIN"
+    >
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>{title}</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          <p className="text-sm text-muted-foreground">{description}</p>
+          {detail && (
+            <Alert variant="destructive">
+              <AlertDescription>{detail}</AlertDescription>
+            </Alert>
+          )}
+          <Button onClick={onRetry} type="button" variant="outline">
+            {t('retry')}
+          </Button>
         </CardContent>
         <CardFooter className="justify-center gap-2">
           <LocaleToggle />

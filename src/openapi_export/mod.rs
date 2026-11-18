@@ -13,14 +13,15 @@ mod config_import;
 mod doc;
 mod doc_groups;
 mod endpoints;
+mod init;
 mod mcp;
 mod me;
 mod model_routes;
-mod relay_management;
+mod node;
+mod nodes;
 mod schemas;
 mod settings;
 mod usage;
 mod users;
-mod workers;
 
 pub use doc::export_admin_api;

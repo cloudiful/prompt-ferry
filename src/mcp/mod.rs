@@ -1,5 +1,3 @@
-use anyhow::Result;
-
 mod aggregate;
 mod builtin;
 mod cache;
@@ -170,31 +168,6 @@ impl McpRuntimeState {
             allowed_origins: state.mcp_allowed_origins.clone(),
             request_content_logging: state.request_content_logging.clone(),
         }
-    }
-
-    pub(crate) async fn sqlite(
-        config: &crate::config::WorkerConfig,
-        storage: McpRuntimeStorage,
-        sqlite_pool: sqlx::SqlitePool,
-        catalog_cache: McpCatalogCache,
-    ) -> Result<Self> {
-        Ok(Self {
-            storage,
-            catalog_cache,
-            session_store: McpSessionStore::from_config_with_sqlite(
-                config,
-                &crate::db::SharedValkeyConfig::not_configured(),
-                Some(sqlite_pool),
-            )
-            .await?,
-            allowed_origins: config.mcp_allowed_origins.clone(),
-            request_content_logging: std::sync::Arc::new(tokio::sync::RwLock::new(
-                crate::worker_admin_types::RequestContentLoggingResponse {
-                    mode: crate::worker_admin_types::RequestContentLoggingMode::Off,
-                    raw_retention_days: 3,
-                },
-            )),
-        })
     }
 }
 

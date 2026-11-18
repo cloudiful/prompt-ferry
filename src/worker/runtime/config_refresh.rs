@@ -8,10 +8,11 @@
 //! The refresh never reconstructs the worker from scratch: it only replaces
 //! the settings that the database owns.
 
+use rand::RngExt;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
-use tokio::time::MissedTickBehavior;
+use tokio::time::{Instant, MissedTickBehavior};
 use tracing::{info, warn};
 
 use super::lifecycle::RuntimeControl;
@@ -24,39 +25,237 @@ use crate::worker_admin::AdminState;
 /// How often the worker re-reads the database-backed configuration.
 pub const CONFIG_REFRESH_INTERVAL_SECONDS: u64 = 30;
 
-/// Refresh the state-held configuration and the relay snapshot.
-pub(super) fn spawn_config_refresh(
+/// How many passes one notification-driven refresh may take before it yields.
+const NODE_CONFIG_REFRESH_ATTEMPTS: usize = 3;
+
+/// Initial delay before the node retries its revision listener.
+const NODE_CONFIG_RECONNECT_BASE: Duration = Duration::from_millis(500);
+
+/// Upper bound of the revision listener reconnect delay.
+const NODE_CONFIG_RECONNECT_MAX: Duration = Duration::from_secs(10);
+
+/// Refresh the node configuration when the database revision changes.
+///
+/// The task owns one dedicated listener connection and refreshes serially: a
+/// notification is only a hint, the authoritative revision is read from the
+/// gated application pool, and the 30 s poll stays as the repair path for a
+/// missed notification. The listener is a control connection and never a
+/// session of the gated pool.
+pub(super) fn spawn_node_config_refresh(
     state: AdminState,
     config: WorkerConfig,
     control: RuntimeControl,
+    database_url: String,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval =
-            tokio::time::interval(Duration::from_secs(CONFIG_REFRESH_INTERVAL_SECONDS));
-        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        interval.tick().await;
-        let mut last_redaction_fingerprint: Option<u64> = None;
-        let mut last_raw_store_fingerprint: Option<u64> = None;
-        loop {
-            tokio::select! {
-                _ = control.wait_for_shutdown() => break,
-                _ = interval.tick() => {
-                    if let Err(err) = refresh_once(
-                        &state,
-                        &config,
-                        &mut last_redaction_fingerprint,
-                        &mut last_raw_store_fingerprint,
-                    ).await {
-                        warn!(error = %err, "failed to refresh the database-backed configuration");
-                    }
-                }
-            }
-        }
+        run_node_config_refresh(state, config, control, database_url).await;
     })
 }
 
-/// One refresh pass over the database-backed settings.
-async fn refresh_once(
+async fn run_node_config_refresh(
+    state: AdminState,
+    config: WorkerConfig,
+    control: RuntimeControl,
+    database_url: String,
+) {
+    let mut listener: Option<db::config_revision::ConfigRevisionListener> = None;
+    let mut applied = db::config_revision::AppliedRevision::default();
+    let mut fingerprints = RefreshFingerprints::default();
+    let mut reconnect_attempt: u32 = 0;
+    let mut next_connect = Instant::now();
+    let mut refresh_now = true;
+    let mut force_refresh = true;
+    let mut interval = tokio::time::interval(Duration::from_secs(CONFIG_REFRESH_INTERVAL_SECONDS));
+    interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    interval.tick().await;
+
+    loop {
+        if listener.is_none() && Instant::now() >= next_connect {
+            match db::config_revision::ConfigRevisionListener::connect(&database_url).await {
+                Ok(connected) => {
+                    info!("subscribed to the configuration revision channel");
+                    listener = Some(connected);
+                    reconnect_attempt = 0;
+                    // A reconnect forces an authoritative read and refresh, so
+                    // a notification lost while the listener was away heals.
+                    refresh_now = true;
+                    force_refresh = true;
+                }
+                Err(err) => {
+                    reconnect_attempt = reconnect_attempt.saturating_add(1);
+                    let delay = node_reconnect_delay(reconnect_attempt);
+                    next_connect = Instant::now() + delay;
+                    warn!(
+                        error = %err,
+                        retry_millis = delay.as_millis(),
+                        "failed to subscribe to the configuration revision channel; \
+                         keeping the authoritative poll"
+                    );
+                }
+            }
+        }
+
+        if refresh_now {
+            refresh_now = false;
+            let force = force_refresh;
+            force_refresh = false;
+            if let Err(err) =
+                reconcile_node_config(&state, &config, &mut applied, &mut fingerprints, force).await
+            {
+                // The revision was not applied. The failure is remembered, so
+                // the next poll retries the same revision instead of waiting
+                // for a newer one.
+                applied.mark_failed();
+                warn!(
+                    error = %err,
+                    applied_revision = applied.get(),
+                    "failed to apply the database configuration revision"
+                );
+                force_refresh = force;
+            }
+        }
+
+        let mut listener_failed = false;
+        match listener.as_mut() {
+            Some(connected) => {
+                tokio::select! {
+                    _ = control.wait_for_shutdown() => break,
+                    _ = interval.tick() => {
+                        refresh_now = true;
+                    }
+                    result = connected.recv() => {
+                        match result {
+                            Ok(Some(hint)) if !applied.needs_refresh(hint) => {}
+                            Ok(_) => {
+                                refresh_now = true;
+                            }
+                            Err(err) => {
+                                warn!(
+                                    error = %err,
+                                    "the configuration revision listener failed; reconnecting"
+                                );
+                                listener_failed = true;
+                            }
+                        }
+                    }
+                }
+            }
+            None => {
+                tokio::select! {
+                    _ = control.wait_for_shutdown() => break,
+                    _ = interval.tick() => {
+                        refresh_now = true;
+                    }
+                    _ = tokio::time::sleep_until(next_connect) => {}
+                }
+            }
+        }
+        if listener_failed {
+            listener = None;
+            reconnect_attempt = 0;
+            next_connect = Instant::now();
+            refresh_now = true;
+            force_refresh = true;
+        }
+    }
+}
+
+/// Read the authoritative revision and refresh when it is newer.
+///
+/// A pass is retried while the revision changes, so a knowingly torn pass is
+/// never marked applied. A failed pass keeps the previous applied revision and
+/// the next notification or poll retries it.
+async fn reconcile_node_config(
+    state: &AdminState,
+    config: &WorkerConfig,
+    applied: &mut db::config_revision::AppliedRevision,
+    fingerprints: &mut RefreshFingerprints,
+    force: bool,
+) -> anyhow::Result<()> {
+    let mut revision = db::config_revision::read_revision(&state.pool).await?;
+    if !force && !applied.needs_refresh(revision) {
+        return Ok(());
+    }
+    for _ in 0..NODE_CONFIG_REFRESH_ATTEMPTS {
+        refresh_configuration(
+            state,
+            config,
+            &mut fingerprints.redaction,
+            &mut fingerprints.raw_store,
+        )
+        .await?;
+        // Do not publish a pass whose gather raced a newer revision.
+        let after_gather = db::config_revision::read_revision(&state.pool).await?;
+        if after_gather != revision {
+            revision = after_gather;
+            continue;
+        }
+        if let Some(version) = crate::worker_admin::publish_snapshot_if_changed(state).await? {
+            info!(version, "republished the relay configuration snapshot");
+        }
+        let after_publish = db::config_revision::read_revision(&state.pool).await?;
+        if after_publish != after_gather {
+            revision = after_publish;
+            continue;
+        }
+        invalidate_configuration_caches(state).await?;
+        warn_shared_valkey_restart(state).await?;
+        applied.commit(after_publish);
+        info!(
+            revision = after_publish,
+            "applied the database configuration revision"
+        );
+        return Ok(());
+    }
+    anyhow::bail!("the configuration revision changed while refreshing; retrying on the next wake")
+}
+
+/// Drop the caches whose identity is not part of their cache key.
+///
+/// The endpoint/model catalog is keyed by the configured endpoint identity, so
+/// a configuration change already selects a different entry. The MCP catalog
+/// is keyed by the server id alone and must be invalidated when configuration
+/// changes on another node.
+async fn invalidate_configuration_caches(state: &AdminState) -> anyhow::Result<()> {
+    for server in db::list_mcp_servers(&state.pool).await? {
+        state.mcp_catalog_service.invalidate(server.server_id).await;
+    }
+    Ok(())
+}
+
+/// Report a shared Valkey change without switching the active configuration.
+async fn warn_shared_valkey_restart(state: &AdminState) -> anyhow::Result<()> {
+    let desired = db::desired_shared_valkey_revision(&state.pool).await?;
+    let applied = state.shared_valkey.revision();
+    if crate::db::config_revision::shared_valkey_restart_required(desired, applied) {
+        warn!(
+            applied_revision = ?applied,
+            desired_revision = ?desired,
+            "the shared Valkey configuration changed; a coordinated restart is required \
+             and the active configuration is unchanged"
+        );
+    }
+    Ok(())
+}
+
+/// The bounded, jittered delay before the next listener connection attempt.
+fn node_reconnect_delay(attempt: u32) -> Duration {
+    let exponent = attempt.min(5);
+    let base = NODE_CONFIG_RECONNECT_BASE.saturating_mul(1_u32 << exponent);
+    let capped = base.min(NODE_CONFIG_RECONNECT_MAX);
+    let jitter = rand::rng().random_range(0..500_u64);
+    capped.saturating_add(Duration::from_millis(jitter))
+}
+
+/// Fingerprints of the process-wide configuration applied by earlier passes.
+#[derive(Default)]
+struct RefreshFingerprints {
+    redaction: Option<u64>,
+    raw_store: Option<u64>,
+}
+
+/// Gather and apply the database-backed configuration without publishing.
+async fn refresh_configuration(
     state: &AdminState,
     config: &WorkerConfig,
     last_redaction_fingerprint: &mut Option<u64>,
@@ -149,18 +348,16 @@ async fn refresh_once(
     }
 
     refresh_raw_payload_store(state, config, last_raw_store_fingerprint).await?;
-
-    // The relay snapshot is republished when its content changed. The
-    // publication reads the contents and assigns the version inside the
-    // publication boundary, so the version always labels the content it
-    // published.
-    if let Some(version) = crate::worker_admin::publish_snapshot_if_changed(state).await? {
-        info!(version, "republished the relay configuration snapshot");
-    }
     Ok(())
 }
 
 /// Rebuild the raw payload store when the persisted setting changed.
+///
+/// A failure is propagated to the caller: the store that is in use stays
+/// untouched, and the fingerprint of the persisted setting is not advanced, so
+/// the next pass of the same revision tries again. A refresh that swallows the
+/// failure would mark the revision as applied and keep the stale storage
+/// configuration until another revision arrives.
 async fn refresh_raw_payload_store(
     state: &AdminState,
     config: &WorkerConfig,
@@ -175,30 +372,27 @@ async fn refresh_raw_payload_store(
         return Ok(());
     }
     let raw_config = match persisted {
-        Some(persisted) => match persisted.into_config(manager) {
-            Ok(config) => config,
-            Err(err) => {
-                warn!(error = %err, "failed to decrypt the persisted raw object store config");
-                return Ok(());
-            }
-        },
+        Some(persisted) => persisted.into_config(manager).map_err(|err| {
+            anyhow::anyhow!("failed to decrypt the persisted raw object store config: {err}")
+        })?,
         None => crate::raw_payload_store::RawObjectStoreConfig::from_worker_config(config),
     };
-    match raw_config.build_store() {
-        Ok(store) => {
-            *state.raw_payload_store.write().await = store.map(Arc::new);
-            *last_raw_store_fingerprint = Some(fingerprint);
-            info!("refreshed the raw payload store setting");
-        }
-        Err(err) => {
-            warn!(error = %err, "failed to build the raw payload store");
-        }
-    }
+    let store = raw_config
+        .build_store()
+        .map_err(|err| anyhow::anyhow!("failed to build the raw payload store: {err}"))?;
+    // The store is replaced only when the new configuration is usable, so a
+    // failing build never drops a store that still works.
+    *state.raw_payload_store.write().await = store.map(Arc::new);
+    *last_raw_store_fingerprint = Some(fingerprint);
+    info!("refreshed the raw payload store setting");
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use super::{NODE_CONFIG_RECONNECT_BASE, NODE_CONFIG_RECONNECT_MAX, node_reconnect_delay};
     use crate::db::config_repository::relay_snapshot::UnifiedSnapshot;
     use crate::db::config_repository::relay_snapshot::snapshot_fingerprint;
 
@@ -217,5 +411,21 @@ mod tests {
         })
         .expect("fingerprint");
         assert_eq!(first, same);
+    }
+
+    #[test]
+    fn listener_reconnect_delays_stay_bounded() {
+        let jitter = Duration::from_millis(500);
+        for attempt in [0, 1, 2, 5, 9, 100] {
+            let delay = node_reconnect_delay(attempt);
+            assert!(
+                delay >= NODE_CONFIG_RECONNECT_BASE,
+                "attempt {attempt} would spin without a delay"
+            );
+            assert!(
+                delay <= NODE_CONFIG_RECONNECT_MAX + jitter,
+                "attempt {attempt} exceeded the reconnect bound"
+            );
+        }
     }
 }

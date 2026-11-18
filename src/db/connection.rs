@@ -52,6 +52,17 @@ pub async fn connect_with_max_connections(
     }
 }
 
+pub(super) fn node_pool_options(max_connections: u32) -> PgPoolOptions {
+    PgPoolOptions::new()
+        .max_connections(max_connections)
+        .min_connections(postgres_min_connections(max_connections))
+        .acquire_timeout(postgres_acquire_timeout())
+}
+
+pub(super) fn node_migrator() -> &'static Migrator {
+    &MIGRATOR
+}
+
 /// Pool acquire bound, overridable with
 /// `PROMPT_FERRY_DB_POOL_ACQUIRE_TIMEOUT_SECONDS`; malformed or zero values
 /// keep the default so a typo cannot remove the bound.

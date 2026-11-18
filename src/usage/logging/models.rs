@@ -218,6 +218,10 @@ pub struct UsageLog {
     pub owner_worker_id: Option<uuid::Uuid>,
     pub lease_expires_at: Option<DateTime<Utc>>,
     pub last_heartbeat_at: Option<DateTime<Utc>>,
+    /// The group, ingress and processor of the persisted request record. The
+    /// runtime funnel stamps the attribution bound to its link; the legacy
+    /// relay and the standalone path leave it absent.
+    pub node_attribution: Option<db::NodeAttribution>,
 }
 
 impl UsageLog {
@@ -453,6 +457,7 @@ impl UsageLog {
             owner_worker_id: metadata.owner_worker_id,
             lease_expires_at: metadata.lease_expires_at,
             last_heartbeat_at: metadata.last_heartbeat_at,
+            node_attribution: None,
         }
     }
 
@@ -623,6 +628,11 @@ impl UsageLog {
         self.owner_worker_id = owner_worker_id;
         self.lease_expires_at = lease_expires_at;
         self.last_heartbeat_at = last_heartbeat_at;
+        self
+    }
+
+    pub fn with_node_attribution(mut self, node_attribution: Option<db::NodeAttribution>) -> Self {
+        self.node_attribution = node_attribution;
         self
     }
 }

@@ -711,15 +711,6 @@ export type GlmWindowUsage = {
     remaining: number;
 };
 
-/**
- * Which services this host runs when prompt-ferry starts without a subcommand.
- *
- * The role is host-local: it picks the listeners and the running components of
- * this machine, never which remote relays a worker may dial. A subcommand
- * names its own component (`relay`, `worker`, `serve`) and does not read it.
- */
-export type HostRole = 'integrated' | 'worker' | 'relay';
-
 export type InferenceResponse = {
     account: Estimate;
     account_history_assumed_stable: boolean;
@@ -1208,6 +1199,52 @@ export type ModelRow = {
 
 export type NativeApi = 'auto' | 'anthropic_messages' | 'chat' | 'embeddings' | 'responses' | 'realtime';
 
+export type NodeCoordinationState = {
+    degraded: boolean;
+    degraded_reason?: string | null;
+    live_node_count: number;
+    mode: string;
+    shared_valkey_configured: boolean;
+};
+
+export type NodeListResponse = {
+    coordination: NodeCoordinationState;
+    first: number;
+    nodes: Array<NodeSummary>;
+    online_count: number;
+    rows: number;
+    total: number;
+};
+
+export type NodePeerSummary = {
+    connected_at?: string | null;
+    has_database: boolean;
+    node_id: string;
+    protocol_version: string;
+    runtime_version: string;
+};
+
+export type NodeStatusResponse = {
+    group_id: string;
+    has_database: boolean;
+    node_id: string;
+    peers: Array<NodePeerSummary>;
+    protocol_version: string;
+    runtime_version: string;
+};
+
+export type NodeSummary = {
+    config_applied_revision?: number | null;
+    config_restart_required: boolean;
+    incarnation: string;
+    last_heartbeat_at: string;
+    node_id: string;
+    started_at: string;
+    status: string;
+    stopped_at?: string | null;
+    version: string;
+};
+
 /**
  * Issue #599 R2b: browser login completion. `redirect_url` is the full URL
  * (or bare query string) the browser landed on after ChatGPT redirected to
@@ -1562,54 +1599,9 @@ export type RedactionStatsSchema = {
     total_findings: number;
 };
 
-/**
- * Whether the caller currently holds a management session.
- */
-export type RelayAuthResponse = {
-    authenticated: boolean;
-};
-
 export type RelayBridgeStatus = {
     connected: boolean;
     relay_url: string;
-};
-
-/**
- * This host's relay listeners and bridge security.
- */
-export type RelayConfigView = {
-    admin_bind: string;
-    bind: string;
-    bridge_encryption_required: boolean;
-    /**
-     * Whether a client token is configured; the token itself is never returned.
-     */
-    client_token_configured: boolean;
-    request_timeout_seconds: number;
-    tls_enabled: boolean;
-    worker_bind: string;
-    worker_heartbeat_timeout_seconds: number;
-    worker_tls_enabled: boolean;
-    worker_token_configured: boolean;
-};
-
-/**
- * Which services this host runs, and whether it must restart to change them.
- */
-export type RelayHostResponse = {
-    pending_role?: null | HostRole;
-    /**
-     * A saved change only takes effect on the next start.
-     */
-    restart_required: boolean;
-    /**
-     * The role this process started as.
-     */
-    role: HostRole;
-};
-
-export type RelayHostRoleRequest = {
-    role: HostRole;
 };
 
 export type RelayIpPolicy = {
@@ -1620,46 +1612,6 @@ export type RelayIpPolicy = {
 export type RelayIpPolicyResponse = {
     allowed_cidrs: Array<string>;
     trusted_proxy_cidrs: Array<string>;
-};
-
-export type RelayLoginRequest = {
-    admin_token: string;
-};
-
-export type RelaySettingsResponse = {
-    relay: RelayConfigView;
-    restart_required: boolean;
-};
-
-/**
- * The relay settings the management page may change.
- *
- * Everything here is relay-local: it names this machine's own management
- * listener and never which remote relays a worker may dial. Each field needs a
- * restart to take effect, because the listener it names is already bound.
- */
-export type RelaySettingsUpdate = {
-    /**
-     * The loopback bind of the relay's management listener.
-     */
-    admin_bind?: string | null;
-};
-
-/**
- * The relay's own state, without touching a worker.
- */
-export type RelayStatusResponse = {
-    relay: RelayConfigView;
-    /**
-     * Whether the relay can already route public business traffic.
-     */
-    relay_ready: boolean;
-    /**
-     * A saved role change is waiting for a restart.
-     */
-    restart_required: boolean;
-    role: HostRole;
-    worker: WorkerStatusResponse;
 };
 
 export type RequestAbortReason = 'downstream_closed' | 'bridge_backpressure_full' | 'bridge_backpressure_bytes_limit' | 'worker_lease_expired' | 'valkey_lease_missing' | 'relay_unknown';
@@ -2186,6 +2138,16 @@ export type SessionRouteOptionsResponse = {
     override_endpoint_key_label?: string | null;
 };
 
+export type SetupRequest = {
+    display_name?: string | null;
+    login_name: string;
+};
+
+export type SetupStatus = {
+    initialized: boolean;
+    setup_available: boolean;
+};
+
 /**
  * Write-only patch for the encrypted shared Valkey URL.
  */
@@ -2401,62 +2363,11 @@ export type UserUpdate = {
     is_admin?: boolean | null;
 };
 
-export type WorkerCoordinationState = {
-    /**
-     * Whether the deployment runs in the degraded single-worker mode.
-     */
-    degraded: boolean;
-    /**
-     * Why the deployment is degraded, when it is.
-     */
-    degraded_reason?: string | null;
-    /**
-     * The number of live workers in the registry.
-     */
-    live_worker_count: number;
-    /**
-     * The coordinator the workers use to share state across processes.
-     */
-    mode: string;
-    /**
-     * Whether the shared Valkey coordination is configured.
-     */
-    shared_valkey_configured: boolean;
-};
-
-export type WorkerListResponse = {
-    coordination: WorkerCoordinationState;
-    first: number;
-    online_count: number;
-    rows: number;
-    total: number;
-    workers: Array<WorkerSummary>;
-};
-
-/**
- * What the relay knows about the worker attached to it.
- *
- * A relay-only host reports `connected: false` here rather than failing: the
- * management page stays usable and only the worker-owned views report that
- * there is nothing behind them.
- */
-export type WorkerStatusResponse = {
-    config_version?: number | null;
-    connected: boolean;
-    connected_workers: number;
-};
-
-export type WorkerSummary = {
-    config_applied_revision?: number | null;
-    config_restart_required: boolean;
-    incarnation: string;
-    last_heartbeat_at: string;
-    role: string;
-    started_at: string;
-    status: string;
-    stopped_at?: string | null;
-    version: string;
-    worker_id: string;
+export type SetupRequestWritable = {
+    display_name?: string | null;
+    login_name: string;
+    master_secret: string;
+    password: string;
 };
 
 export type ListBillingChargesData = {
@@ -3771,6 +3682,36 @@ export type UpdateModelRouteResponses = {
 
 export type UpdateModelRouteResponse = UpdateModelRouteResponses[keyof UpdateModelRouteResponses];
 
+export type ListNodesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        first?: number;
+        rows?: number;
+    };
+    url: '/api/v1/admin/nodes';
+};
+
+export type ListNodesErrors = {
+    /**
+     * Not authenticated
+     */
+    401: unknown;
+    /**
+     * Administrator access required
+     */
+    403: unknown;
+};
+
+export type ListNodesResponses = {
+    /**
+     * Database processor node groups
+     */
+    200: NodeListResponse;
+};
+
+export type ListNodesResponse = ListNodesResponses[keyof ListNodesResponses];
+
 export type ListRequestRecordsData = {
     body?: never;
     path?: never;
@@ -4347,36 +4288,6 @@ export type ResetPasswordResponses = {
 
 export type ResetPasswordResponse = ResetPasswordResponses[keyof ResetPasswordResponses];
 
-export type ListWorkersData = {
-    body?: never;
-    path?: never;
-    query?: {
-        first?: number;
-        rows?: number;
-    };
-    url: '/api/v1/admin/workers';
-};
-
-export type ListWorkersErrors = {
-    /**
-     * Not authenticated
-     */
-    401: unknown;
-    /**
-     * Administrator access required
-     */
-    403: unknown;
-};
-
-export type ListWorkersResponses = {
-    /**
-     * Workers registered against this database
-     */
-    200: WorkerListResponse;
-};
-
-export type ListWorkersResponse = ListWorkersResponses[keyof ListWorkersResponses];
-
 export type AuthLoginData = {
     body: LoginRequest;
     path?: never;
@@ -4442,6 +4353,68 @@ export type AuthMeResponses = {
 };
 
 export type AuthMeResponse = AuthMeResponses[keyof AuthMeResponses];
+
+export type SetupStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/setup';
+};
+
+export type SetupStatusErrors = {
+    /**
+     * Setup unavailable
+     */
+    503: ErrorEnvelope;
+};
+
+export type SetupStatusError = SetupStatusErrors[keyof SetupStatusErrors];
+
+export type SetupStatusResponses = {
+    /**
+     * Setup status
+     */
+    200: SetupStatus;
+};
+
+export type SetupStatusResponse = SetupStatusResponses[keyof SetupStatusResponses];
+
+export type SetupInitializeData = {
+    body: SetupRequestWritable;
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/setup';
+};
+
+export type SetupInitializeErrors = {
+    /**
+     * Invalid request
+     */
+    400: ErrorEnvelope;
+    /**
+     * Invalid proof
+     */
+    401: ErrorEnvelope;
+    /**
+     * Already initialized
+     */
+    409: ErrorEnvelope;
+    /**
+     * Setup unavailable
+     */
+    503: ErrorEnvelope;
+};
+
+export type SetupInitializeError = SetupInitializeErrors[keyof SetupInitializeErrors];
+
+export type SetupInitializeResponses = {
+    /**
+     * Administrator initialized
+     */
+    201: SetupStatus;
+};
+
+export type SetupInitializeResponse = SetupInitializeResponses[keyof SetupInitializeResponses];
 
 export type BridgeStatusData = {
     body?: never;
@@ -4612,222 +4585,38 @@ export type MeListModelsResponses = {
 
 export type MeListModelsResponse = MeListModelsResponses[keyof MeListModelsResponses];
 
-export type RelayAuthLoginData = {
-    body: RelayLoginRequest;
-    path?: never;
-    query?: never;
-    url: '/api/v1/relay/auth/login';
-};
-
-export type RelayAuthLoginErrors = {
-    /**
-     * Invalid management token
-     */
-    401: ErrorEnvelope;
-};
-
-export type RelayAuthLoginError = RelayAuthLoginErrors[keyof RelayAuthLoginErrors];
-
-export type RelayAuthLoginResponses = {
-    /**
-     * Management session started
-     */
-    204: void;
-};
-
-export type RelayAuthLoginResponse = RelayAuthLoginResponses[keyof RelayAuthLoginResponses];
-
-export type RelayAuthLogoutData = {
+export type NodeStatusData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/api/v1/relay/auth/logout';
+    url: '/api/v1/node';
 };
 
-export type RelayAuthLogoutResponses = {
-    /**
-     * Management session ended
-     */
-    204: void;
-};
-
-export type RelayAuthLogoutResponse = RelayAuthLogoutResponses[keyof RelayAuthLogoutResponses];
-
-export type RelayAuthMeData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/relay/auth/me';
-};
-
-export type RelayAuthMeResponses = {
-    /**
-     * Management session state
-     */
-    200: RelayAuthResponse;
-};
-
-export type RelayAuthMeResponse = RelayAuthMeResponses[keyof RelayAuthMeResponses];
-
-export type RelayHostData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/relay/host';
-};
-
-export type RelayHostErrors = {
-    /**
-     * Unauthorized
-     */
-    401: ErrorEnvelope;
-};
-
-export type RelayHostError = RelayHostErrors[keyof RelayHostErrors];
-
-export type RelayHostResponses = {
-    /**
-     * Host role and restart state
-     */
-    200: RelayHostResponse;
-};
-
-export type RelayHostResponse2 = RelayHostResponses[keyof RelayHostResponses];
-
-export type RelayRequestRestartData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/relay/host/restart';
-};
-
-export type RelayRequestRestartErrors = {
-    /**
-     * Unauthorized
-     */
-    401: ErrorEnvelope;
-};
-
-export type RelayRequestRestartError = RelayRequestRestartErrors[keyof RelayRequestRestartErrors];
-
-export type RelayRequestRestartResponses = {
-    /**
-     * Restart requested
-     */
-    202: unknown;
-};
-
-export type RelaySetHostRoleData = {
-    body: RelayHostRoleRequest;
-    path?: never;
-    query?: never;
-    url: '/api/v1/relay/host/role';
-};
-
-export type RelaySetHostRoleErrors = {
-    /**
-     * Unknown role
-     */
-    400: ErrorEnvelope;
+export type NodeStatusErrors = {
     /**
      * Unauthorized
      */
     401: ErrorEnvelope;
     /**
-     * The role could not be saved
+     * Administrator required
+     */
+    403: ErrorEnvelope;
+    /**
+     * Node status unavailable
      */
     503: ErrorEnvelope;
 };
 
-export type RelaySetHostRoleError = RelaySetHostRoleErrors[keyof RelaySetHostRoleErrors];
+export type NodeStatusError = NodeStatusErrors[keyof NodeStatusErrors];
 
-export type RelaySetHostRoleResponses = {
+export type NodeStatusResponses = {
     /**
-     * Host role recorded
+     * Processing node and authenticated peers
      */
-    200: RelayHostResponse;
+    200: NodeStatusResponse;
 };
 
-export type RelaySetHostRoleResponse = RelaySetHostRoleResponses[keyof RelaySetHostRoleResponses];
-
-export type RelayGetSettingsData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/relay/settings';
-};
-
-export type RelayGetSettingsErrors = {
-    /**
-     * Unauthorized
-     */
-    401: ErrorEnvelope;
-};
-
-export type RelayGetSettingsError = RelayGetSettingsErrors[keyof RelayGetSettingsErrors];
-
-export type RelayGetSettingsResponses = {
-    /**
-     * Relay management settings
-     */
-    200: RelaySettingsResponse;
-};
-
-export type RelayGetSettingsResponse = RelayGetSettingsResponses[keyof RelayGetSettingsResponses];
-
-export type RelaySetSettingsData = {
-    body: RelaySettingsUpdate;
-    path?: never;
-    query?: never;
-    url: '/api/v1/relay/settings';
-};
-
-export type RelaySetSettingsErrors = {
-    /**
-     * Invalid setting
-     */
-    400: ErrorEnvelope;
-    /**
-     * Unauthorized
-     */
-    401: ErrorEnvelope;
-};
-
-export type RelaySetSettingsError = RelaySetSettingsErrors[keyof RelaySetSettingsErrors];
-
-export type RelaySetSettingsResponses = {
-    /**
-     * Updated relay management settings
-     */
-    200: RelaySettingsResponse;
-};
-
-export type RelaySetSettingsResponse = RelaySetSettingsResponses[keyof RelaySetSettingsResponses];
-
-export type RelayStatusData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/relay/status';
-};
-
-export type RelayStatusErrors = {
-    /**
-     * Unauthorized
-     */
-    401: ErrorEnvelope;
-};
-
-export type RelayStatusError = RelayStatusErrors[keyof RelayStatusErrors];
-
-export type RelayStatusResponses = {
-    /**
-     * Relay status
-     */
-    200: RelayStatusResponse;
-};
-
-export type RelayStatusResponse2 = RelayStatusResponses[keyof RelayStatusResponses];
+export type NodeStatusResponse2 = NodeStatusResponses[keyof NodeStatusResponses];
 
 export type GetCacheAlertSettingData = {
     body?: never;
@@ -5069,7 +4858,7 @@ export type GetRelayIpWhitelistData = {
 
 export type GetRelayIpWhitelistResponses = {
     /**
-     * Relay IP whitelist
+     * Ingress IP whitelist
      */
     200: RelayIpPolicyResponse;
 };
@@ -5085,7 +4874,7 @@ export type SetRelayIpWhitelistData = {
 
 export type SetRelayIpWhitelistResponses = {
     /**
-     * Updated relay IP whitelist
+     * Updated ingress IP whitelist
      */
     200: RelayIpPolicyResponse;
 };

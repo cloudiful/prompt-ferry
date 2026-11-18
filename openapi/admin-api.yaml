@@ -1550,6 +1550,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelEndpointRule'
+  /api/v1/admin/nodes:
+    get:
+      tags:
+      - nodes
+      operationId: list_nodes
+      parameters:
+      - name: first
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: rows
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: Database processor node groups
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeListResponse'
+        '401':
+          description: Not authenticated
+        '403':
+          description: Administrator access required
   /api/v1/admin/request-records:
     get:
       tags:
@@ -2347,35 +2376,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
-  /api/v1/admin/workers:
-    get:
-      tags:
-      - workers
-      operationId: list_workers
-      parameters:
-      - name: first
-        in: query
-        required: false
-        schema:
-          type: integer
-          format: int64
-      - name: rows
-        in: query
-        required: false
-        schema:
-          type: integer
-          format: int64
-      responses:
-        '200':
-          description: Workers registered against this database
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkerListResponse'
-        '401':
-          description: Not authenticated
-        '403':
-          description: Administrator access required
   /api/v1/auth/login:
     post:
       tags:
@@ -2418,6 +2418,65 @@ paths:
                 $ref: '#/components/schemas/MeResponse'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/auth/setup:
+    get:
+      tags:
+      - auth
+      operationId: setup_status
+      responses:
+        '200':
+          description: Setup status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupStatus'
+        '503':
+          description: Setup unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+    post:
+      tags:
+      - auth
+      operationId: setup_initialize
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetupRequest'
+        required: true
+      responses:
+        '201':
+          description: Administrator initialized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupStatus'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Invalid proof
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Already initialized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Setup unavailable
           content:
             application/json:
               schema:
@@ -2588,175 +2647,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
-  /api/v1/relay/auth/login:
-    post:
-      tags:
-      - relay
-      operationId: relay_auth_login
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RelayLoginRequest'
-        required: true
-      responses:
-        '204':
-          description: Management session started
-        '401':
-          description: Invalid management token
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-  /api/v1/relay/auth/logout:
-    post:
-      tags:
-      - relay
-      operationId: relay_auth_logout
-      responses:
-        '204':
-          description: Management session ended
-  /api/v1/relay/auth/me:
+  /api/v1/node:
     get:
       tags:
-      - relay
-      operationId: relay_auth_me
+      - node
+      operationId: node_status
       responses:
         '200':
-          description: Management session state
+          description: Processing node and authenticated peers
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RelayAuthResponse'
-  /api/v1/relay/host:
-    get:
-      tags:
-      - relay
-      operationId: relay_host
-      responses:
-        '200':
-          description: Host role and restart state
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RelayHostResponse'
+                $ref: '#/components/schemas/NodeStatusResponse'
         '401':
           description: Unauthorized
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
-  /api/v1/relay/host/restart:
-    post:
-      tags:
-      - relay
-      operationId: relay_request_restart
-      responses:
-        '202':
-          description: Restart requested
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-  /api/v1/relay/host/role:
-    put:
-      tags:
-      - relay
-      operationId: relay_set_host_role
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RelayHostRoleRequest'
-        required: true
-      responses:
-        '200':
-          description: Host role recorded
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RelayHostResponse'
-        '400':
-          description: Unknown role
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '401':
-          description: Unauthorized
+        '403':
+          description: Administrator required
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '503':
-          description: The role could not be saved
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-  /api/v1/relay/settings:
-    get:
-      tags:
-      - relay
-      operationId: relay_get_settings
-      responses:
-        '200':
-          description: Relay management settings
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RelaySettingsResponse'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-    patch:
-      tags:
-      - relay
-      operationId: relay_set_settings
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RelaySettingsUpdate'
-        required: true
-      responses:
-        '200':
-          description: Updated relay management settings
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RelaySettingsResponse'
-        '400':
-          description: Invalid setting
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-  /api/v1/relay/status:
-    get:
-      tags:
-      - relay
-      operationId: relay_status
-      responses:
-        '200':
-          description: Relay status
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RelayStatusResponse'
-        '401':
-          description: Unauthorized
+          description: Node status unavailable
           content:
             application/json:
               schema:
@@ -3001,7 +2917,7 @@ paths:
       operationId: get_relay_ip_whitelist
       responses:
         '200':
-          description: Relay IP whitelist
+          description: Ingress IP whitelist
           content:
             application/json:
               schema:
@@ -3018,7 +2934,7 @@ paths:
         required: true
       responses:
         '200':
-          description: Updated relay IP whitelist
+          description: Updated ingress IP whitelist
           content:
             application/json:
               schema:
@@ -4839,18 +4755,6 @@ components:
         remaining:
           type: number
           format: double
-    HostRole:
-      type: string
-      description: |-
-        Which services this host runs when prompt-ferry starts without a subcommand.
-
-        The role is host-local: it picks the listeners and the running components of
-        this machine, never which remote relays a worker may dial. A subcommand
-        names its own component (`relay`, `worker`, `serve`) and does not read it.
-      enum:
-      - integrated
-      - worker
-      - relay
     InferenceResponse:
       type: object
       required:
@@ -5927,6 +5831,141 @@ components:
       - embeddings
       - responses
       - realtime
+    NodeCoordinationState:
+      type: object
+      required:
+      - mode
+      - shared_valkey_configured
+      - degraded
+      - live_node_count
+      properties:
+        degraded:
+          type: boolean
+        degraded_reason:
+          type:
+          - string
+          - 'null'
+        live_node_count:
+          type: integer
+          format: int64
+        mode:
+          type: string
+        shared_valkey_configured:
+          type: boolean
+    NodeListResponse:
+      type: object
+      required:
+      - nodes
+      - total
+      - first
+      - rows
+      - online_count
+      - coordination
+      properties:
+        coordination:
+          $ref: '#/components/schemas/NodeCoordinationState'
+        first:
+          type: integer
+          format: int64
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeSummary'
+        online_count:
+          type: integer
+          format: int64
+        rows:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    NodePeerSummary:
+      type: object
+      required:
+      - node_id
+      - has_database
+      - runtime_version
+      - protocol_version
+      properties:
+        connected_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        has_database:
+          type: boolean
+        node_id:
+          type: string
+          format: uuid
+        protocol_version:
+          type: string
+        runtime_version:
+          type: string
+    NodeStatusResponse:
+      type: object
+      required:
+      - node_id
+      - group_id
+      - has_database
+      - runtime_version
+      - protocol_version
+      - peers
+      properties:
+        group_id:
+          type: string
+          format: uuid
+        has_database:
+          type: boolean
+        node_id:
+          type: string
+          format: uuid
+        peers:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodePeerSummary'
+        protocol_version:
+          type: string
+        runtime_version:
+          type: string
+    NodeSummary:
+      type: object
+      required:
+      - node_id
+      - version
+      - incarnation
+      - started_at
+      - last_heartbeat_at
+      - status
+      - config_restart_required
+      properties:
+        config_applied_revision:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        config_restart_required:
+          type: boolean
+        incarnation:
+          type: string
+          format: uuid
+        last_heartbeat_at:
+          type: string
+          format: date-time
+        node_id:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+        stopped_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        version:
+          type: string
     OAuthBrowserCompleteRequest:
       type: object
       description: |-
@@ -6749,14 +6788,6 @@ components:
         total_findings:
           type: integer
           minimum: 0
-    RelayAuthResponse:
-      type: object
-      description: Whether the caller currently holds a management session.
-      required:
-      - authenticated
-      properties:
-        authenticated:
-          type: boolean
     RelayBridgeStatus:
       type: object
       required:
@@ -6767,72 +6798,6 @@ components:
           type: boolean
         relay_url:
           type: string
-    RelayConfigView:
-      type: object
-      description: This host's relay listeners and bridge security.
-      required:
-      - bind
-      - worker_bind
-      - admin_bind
-      - client_token_configured
-      - worker_token_configured
-      - tls_enabled
-      - worker_tls_enabled
-      - bridge_encryption_required
-      - request_timeout_seconds
-      - worker_heartbeat_timeout_seconds
-      properties:
-        admin_bind:
-          type: string
-        bind:
-          type: string
-        bridge_encryption_required:
-          type: boolean
-        client_token_configured:
-          type: boolean
-          description: Whether a client token is configured; the token itself is never returned.
-        request_timeout_seconds:
-          type: integer
-          format: int64
-          minimum: 0
-        tls_enabled:
-          type: boolean
-        worker_bind:
-          type: string
-        worker_heartbeat_timeout_seconds:
-          type: integer
-          format: int64
-          minimum: 0
-        worker_tls_enabled:
-          type: boolean
-        worker_token_configured:
-          type: boolean
-    RelayHostResponse:
-      type: object
-      description: Which services this host runs, and whether it must restart to change them.
-      required:
-      - role
-      - restart_required
-      properties:
-        pending_role:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/HostRole'
-            description: The role recorded for the next start, when one differs.
-        restart_required:
-          type: boolean
-          description: A saved change only takes effect on the next start.
-        role:
-          $ref: '#/components/schemas/HostRole'
-          description: The role this process started as.
-    RelayHostRoleRequest:
-      type: object
-      required:
-      - role
-      properties:
-        role:
-          $ref: '#/components/schemas/HostRole'
-      additionalProperties: false
     RelayIpPolicy:
       type: object
       properties:
@@ -6858,61 +6823,6 @@ components:
           type: array
           items:
             type: string
-    RelayLoginRequest:
-      type: object
-      required:
-      - admin_token
-      properties:
-        admin_token:
-          type: string
-      additionalProperties: false
-    RelaySettingsResponse:
-      type: object
-      required:
-      - restart_required
-      - relay
-      properties:
-        relay:
-          $ref: '#/components/schemas/RelayConfigView'
-        restart_required:
-          type: boolean
-    RelaySettingsUpdate:
-      type: object
-      description: |-
-        The relay settings the management page may change.
-
-        Everything here is relay-local: it names this machine's own management
-        listener and never which remote relays a worker may dial. Each field needs a
-        restart to take effect, because the listener it names is already bound.
-      properties:
-        admin_bind:
-          type:
-          - string
-          - 'null'
-          description: The loopback bind of the relay's management listener.
-      additionalProperties: false
-    RelayStatusResponse:
-      type: object
-      description: The relay's own state, without touching a worker.
-      required:
-      - role
-      - restart_required
-      - relay
-      - worker
-      - relay_ready
-      properties:
-        relay:
-          $ref: '#/components/schemas/RelayConfigView'
-        relay_ready:
-          type: boolean
-          description: Whether the relay can already route public business traffic.
-        restart_required:
-          type: boolean
-          description: A saved role change is waiting for a restart.
-        role:
-          $ref: '#/components/schemas/HostRole'
-        worker:
-          $ref: '#/components/schemas/WorkerStatusResponse'
     RequestAbortReason:
       type: string
       enum:
@@ -8429,6 +8339,35 @@ components:
           type:
           - string
           - 'null'
+    SetupRequest:
+      type: object
+      required:
+      - master_secret
+      - login_name
+      - password
+      properties:
+        display_name:
+          type:
+          - string
+          - 'null'
+        login_name:
+          type: string
+        master_secret:
+          type: string
+          writeOnly: true
+        password:
+          type: string
+          writeOnly: true
+    SetupStatus:
+      type: object
+      required:
+      - initialized
+      - setup_available
+      properties:
+        initialized:
+          type: boolean
+        setup_available:
+          type: boolean
     SharedValkeySecretPatch:
       oneOf:
       - type: object
@@ -8985,123 +8924,6 @@ components:
           type:
           - boolean
           - 'null'
-    WorkerCoordinationState:
-      type: object
-      required:
-      - mode
-      - shared_valkey_configured
-      - degraded
-      - live_worker_count
-      properties:
-        degraded:
-          type: boolean
-          description: Whether the deployment runs in the degraded single-worker mode.
-        degraded_reason:
-          type:
-          - string
-          - 'null'
-          description: Why the deployment is degraded, when it is.
-        live_worker_count:
-          type: integer
-          format: int64
-          description: The number of live workers in the registry.
-        mode:
-          type: string
-          description: The coordinator the workers use to share state across processes.
-        shared_valkey_configured:
-          type: boolean
-          description: Whether the shared Valkey coordination is configured.
-    WorkerListResponse:
-      type: object
-      required:
-      - workers
-      - total
-      - first
-      - rows
-      - online_count
-      - coordination
-      properties:
-        coordination:
-          $ref: '#/components/schemas/WorkerCoordinationState'
-        first:
-          type: integer
-          format: int64
-        online_count:
-          type: integer
-          format: int64
-        rows:
-          type: integer
-          format: int64
-        total:
-          type: integer
-          format: int64
-        workers:
-          type: array
-          items:
-            $ref: '#/components/schemas/WorkerSummary'
-    WorkerStatusResponse:
-      type: object
-      description: |-
-        What the relay knows about the worker attached to it.
-
-        A relay-only host reports `connected: false` here rather than failing: the
-        management page stays usable and only the worker-owned views report that
-        there is nothing behind them.
-      required:
-      - connected
-      - connected_workers
-      properties:
-        config_version:
-          type:
-          - integer
-          - 'null'
-          format: int64
-        connected:
-          type: boolean
-        connected_workers:
-          type: integer
-          minimum: 0
-    WorkerSummary:
-      type: object
-      required:
-      - worker_id
-      - role
-      - version
-      - incarnation
-      - started_at
-      - last_heartbeat_at
-      - status
-      - config_restart_required
-      properties:
-        config_applied_revision:
-          type:
-          - integer
-          - 'null'
-          format: int64
-        config_restart_required:
-          type: boolean
-        incarnation:
-          type: string
-          format: uuid
-        last_heartbeat_at:
-          type: string
-          format: date-time
-        role:
-          type: string
-        started_at:
-          type: string
-          format: date-time
-        status:
-          type: string
-        stopped_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
-        version:
-          type: string
-        worker_id:
-          type: string
 tags:
 - name: auth
   description: Authentication and session
@@ -9115,8 +8937,8 @@ tags:
   description: Model route rules
 - name: mcp
   description: MCP server management
-- name: workers
-  description: Worker discovery
+- name: nodes
+  description: Node group discovery
 - name: request-records
   description: Request record reporting
 - name: settings
@@ -9127,5 +8949,3 @@ tags:
   description: Encrypted configuration migration
 - name: billing
   description: Usage billing and pricing
-- name: relay
-  description: Relay management served by the relay's own management listener

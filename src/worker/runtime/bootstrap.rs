@@ -1,197 +1,13 @@
 use crate::{
-    bridge_crypto::{self},
-    config::{WorkerConfig, normalize_relay_url},
+    config::WorkerConfig,
     db, redact,
-    relay_secrets::{self, BOOTSTRAP_ADMIN_PASSWORD_FILE, RelaySecretManager},
+    relay_secrets::RelaySecretManager,
     replay_cache::ReplayCache,
-    runtime_env,
-    standalone_config::{BootstrapSeed, StandaloneConfigStore},
-    tls,
-    worker::runtime::WorkerShutdown,
     worker_admin::{self, AdminState},
 };
-use anyhow::{Context, anyhow};
-use sqlx::postgres::PgPoolOptions;
-use std::{path::Path, sync::Arc, time::Duration};
-use tracing::{error, info, warn};
-
-/// Atomically publish a generated bootstrap admin password and return the
-/// effective one to store in the database.
-///
-/// The protected file is created only if absent. If another starter already
-/// created it (supported multi-process PostgreSQL startup), that process's
-/// password is read back and reused so every racing process inserts the same
-/// password and the file always matches the database. A short bounded retry
-/// covers reading a file another process has just created but not yet
-/// written; any other failure propagates so no user row is committed.
-fn publish_bootstrap_password(
-    candidate: &str,
-    secrets_dir: Option<&Path>,
-) -> anyhow::Result<String> {
-    use anyhow::Context;
-    let password_path =
-        relay_secrets::resolve_data_file(BOOTSTRAP_ADMIN_PASSWORD_FILE, secrets_dir)?;
-    let won_creation =
-        runtime_env::create_private_file_exclusive(&password_path, &format!("{candidate}\n"))?;
-    if won_creation {
-        return Ok(candidate.to_string());
-    }
-    // Another starter won the race: reuse its published password verbatim
-    // instead of overwriting it.
-    const READ_ATTEMPTS: usize = 50;
-    let mut last_error = None;
-    for _ in 0..READ_ATTEMPTS {
-        match std::fs::read_to_string(&password_path) {
-            Ok(content) => {
-                let existing = content.trim();
-                if !existing.is_empty() {
-                    return Ok(existing.to_string());
-                }
-            }
-            Err(error) => last_error = Some(error),
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    Err(last_error.unwrap_or_else(|| std::io::Error::other("file is empty or unreadable")))
-        .with_context(|| {
-            format!(
-                "bootstrap admin password file {} already exists but could not be read after \
-             retries; remove the file or restore its contents",
-                password_path.display()
-            )
-        })
-}
-
-pub(super) fn validate_config(config: &WorkerConfig) -> anyhow::Result<()> {
-    // An empty worker token intentionally disables relay worker authentication;
-    // the relay logs a warning when this mode is active.
-    if config.storage_backend().is_sqlite() {
-        runtime_env::resolve_standalone_database_path(&config.standalone_database_path)?;
-        let relay_urls = config
-            .relay_urls
-            .iter()
-            .map(|relay_url| normalize_relay_url(relay_url))
-            .filter(|relay_url| !relay_url.is_empty())
-            .collect::<Vec<_>>();
-        if !relay_urls.is_empty() {
-            let unique_relay_urls = relay_urls
-                .iter()
-                .cloned()
-                .collect::<std::collections::BTreeSet<_>>();
-            if unique_relay_urls.len() != relay_urls.len() {
-                return Err(anyhow!(
-                    "worker relay URLs must be unique after normalization"
-                ));
-            }
-        }
-        if !relay_urls.is_empty() {
-            tls::validate_worker_config(config)?;
-            bridge_crypto::validate_settings(
-                "worker",
-                config.bridge_encryption_mode,
-                &config.bridge_encryption_key,
-            )?;
-        }
-    }
-    // An explicitly configured encryption key must already be valid; when none
-    // is configured one is generated later during state construction.
-    let configured_key = config.effective_encryption_key().trim();
-    if !configured_key.is_empty() {
-        RelaySecretManager::from_base64(configured_key)?;
-    }
-    if config
-        .upstream_base_url
-        .trim()
-        .trim_end_matches('/')
-        .ends_with("/v1")
-    {
-        return Err(anyhow!(
-            "upstream_base_url must be the provider base URL without /v1"
-        ));
-    }
-    Ok(())
-}
-
-pub(super) async fn build_standalone_state(
-    config: &WorkerConfig,
-    secrets_dir: Option<&Path>,
-    catalog_cache: Option<crate::mcp::McpCatalogCache>,
-) -> anyhow::Result<crate::worker::runtime::standalone::StandaloneRuntimeState> {
-    if !config.storage_backend().is_sqlite() {
-        return Err(anyhow!(
-            "standalone runtime state requires the SQLite storage backend"
-        ));
-    }
-    let manager = relay_secrets::load_or_create_worker_config_key_for(
-        config.effective_encryption_key(),
-        secrets_dir,
-    )?;
-    let path = runtime_env::resolve_standalone_database_path(&config.standalone_database_path)?;
-    if let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        std::fs::create_dir_all(parent).map_err(|error| {
-            anyhow!(error).context("failed to create standalone SQLite parent directory")
-        })?;
-    }
-    let store = Arc::new(StandaloneConfigStore::open(&path).await?);
-    if !config.upstream_api_key.is_empty() {
-        let seed = BootstrapSeed {
-            upstream_base_url: config.upstream_base_url.clone(),
-            upstream_api_key: config.upstream_api_key.clone(),
-            upstream_native_api: config.upstream_native_api,
-        };
-        store.bootstrap_if_empty(&manager, seed).await?;
-    }
-    let snapshot = store.load_snapshot(&manager).await?;
-    // First startup may have no endpoint yet: the worker stays up and the
-    // Admin setup flow creates the first endpoint. Upstream requests are not
-    // possible until an enabled endpoint exists.
-    if snapshot.endpoints.iter().all(|endpoint| !endpoint.enabled) {
-        warn!(
-            "standalone configuration has no enabled endpoints and no static upstream API key; \
-             configure an upstream endpoint through the Admin console before sending requests"
-        );
-    }
-    let mcp_repository = db::ConfigRepository::sqlite(store.clone(), manager.clone());
-    // The request path must share the catalog cache (and therefore its refresh
-    // coordinator) with the admin state and the managed refresh task; only a
-    // caller without one builds it here.
-    let catalog_cache = match catalog_cache {
-        Some(cache) => cache,
-        None => {
-            crate::mcp::McpCatalogCache::from_config_with_sqlite(
-                config,
-                &crate::db::SharedValkeyConfig::not_configured(),
-                Some(store.pool().clone()),
-            )
-            .await?
-        }
-    };
-    let mcp_runtime = crate::mcp::McpRuntimeState::sqlite(
-        config,
-        {
-            let storage = crate::mcp::McpRuntimeStorage::from_repository(mcp_repository);
-            storage.with_oauth_service(std::sync::Arc::new(
-                crate::mcp::oauth::McpOAuthService::new(
-                    storage.repository().clone(),
-                    Some(manager.clone()),
-                    Some(config.mcp_oauth_redirect_base.clone()),
-                    crate::db::UserStore::sqlite(store.pool().clone()),
-                ),
-            ))
-        },
-        store.pool().clone(),
-        catalog_cache,
-    )
-    .await;
-    let state =
-        crate::worker::runtime::standalone::StandaloneRuntimeState::new(store, manager, snapshot)
-            .with_mcp_runtime(mcp_runtime?);
-    state.hydrate_usage().await;
-    Ok(state)
-}
+use anyhow::Context;
+use std::{sync::Arc, time::Duration};
+use tracing::warn;
 
 /// Attach the personal MCP OAuth backend to a freshly built admin state.
 ///
@@ -225,192 +41,42 @@ fn attach_mcp_oauth(state: AdminState, config: &crate::config::WorkerConfig) -> 
         .with_mcp_oauth_service(service)
 }
 
-/// Start the admin HTTP server on a socket the caller already bound.
+/// Resolve the shared Valkey configuration from the database.
 ///
-/// The integrated entrypoint binds and reserves the admin socket before the
-/// worker begins its slow bootstrap and passes the result in, so a bind
-/// failure has already been reported by the time this runs. The standalone
-/// worker passes `None` and the server binds `admin_bind` itself, keeping its
-/// existing behaviour of staying up and logging a failure.
-///
-/// The task handle is returned so the caller can await the graceful
-/// completion of the server, or abort and join it, before the worker
-/// releases its registry row.
-pub(super) fn start_admin_server(
-    state: AdminState,
-    config: &WorkerConfig,
-    admin_listener: Option<tokio::net::TcpListener>,
-    worker_shutdown: Option<&WorkerShutdown>,
-) -> tokio::task::JoinHandle<()> {
-    let admin_config = config.clone();
-    let shutdown_rx = worker_shutdown.map(WorkerShutdown::subscribe);
-    tokio::spawn(async move {
-        let served = worker_admin::run_admin_server(
-            state,
-            &admin_config.admin_bind,
-            admin_listener,
-            shutdown_rx,
-        )
-        .await;
-        if let Err(err) = served {
-            error!(error = %err, "worker admin server stopped");
-        }
-    })
+/// Shared Valkey ownership is database-only. A missing row is the degraded
+/// single-worker state; a decryption or parse failure aborts startup instead
+/// of silently falling back to process-local coordination.
+async fn resolve_shared_valkey(
+    pool: &sqlx::PgPool,
+    relay_secret_manager: &RelaySecretManager,
+    seed: Option<&str>,
+) -> anyhow::Result<db::SharedValkeyConfig> {
+    // The candidate is a first-start initializer provided by the caller. The
+    // database row always wins, so this never overrides a configured or
+    // deliberately cleared setting.
+    db::seed_shared_valkey_from_env(pool, relay_secret_manager, seed)
+        .await
+        .context("failed to apply the shared Valkey seed")?;
+    db::load_shared_valkey_config(pool, relay_secret_manager)
+        .await
+        .context("failed to resolve the shared Valkey configuration")
 }
 
-/// Build the admin state without starting any service.
+/// Build the admin state from already connected PostgreSQL pools.
 ///
-/// The admin HTTP server is started by the caller, after the worker was
-/// admitted to the registry: a worker that may not serve must not expose an
-/// admin listener either.
-pub(super) async fn build_admin_state(
+/// The caller owns the pools and the secret manager, so no key is generated
+/// and no migration is run here: the node runtime connects its gated pools
+/// itself and lets the node gate own the schema.
+///
+/// The shared settings, caches and the personal MCP OAuth backend are built
+/// using the database as the authoritative configuration source.
+async fn build_postgres_admin_state(
     config: &WorkerConfig,
-    secrets_dir: Option<&Path>,
-) -> anyhow::Result<Option<AdminState>> {
-    let relay_secret_manager = relay_secrets::load_or_create_worker_config_key_for(
-        config.effective_encryption_key(),
-        secrets_dir,
-    )?;
-    let is_postgres = config.storage_backend().is_postgres();
-    let (pool, lease_pool, user_store, config_repository, sqlite_pool) = if is_postgres {
-        let pool = db::connect(&config.database_url).await?;
-        // The lease pool serves request admission, heartbeat, cancel and
-        // delete; a 2-connection cap queued them behind each other.
-        let lease_pool = db::connect_with_max_connections(&config.database_url, 8).await?;
-        db::migrate(&pool).await?;
-        let user_store = db::UserStore::postgres(&pool);
-        let config_repository = db::ConfigRepository::postgres(&pool);
-        (pool, lease_pool, user_store, config_repository, None)
-    } else {
-        let path = runtime_env::resolve_standalone_database_path(&config.standalone_database_path)?;
-        if let Some(parent) = path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-        {
-            std::fs::create_dir_all(parent).map_err(|error| {
-                anyhow!(error).context("failed to create standalone SQLite parent directory")
-            })?;
-        }
-        let store = Arc::new(StandaloneConfigStore::open(&path).await?);
-        let sqlite_pool = store.pool().clone();
-        let pool =
-            PgPoolOptions::new().connect_lazy("postgres://postgres@localhost/prompt_ferry")?;
-        let config_repository = db::ConfigRepository::sqlite(store, relay_secret_manager.clone());
-        (
-            pool.clone(),
-            pool,
-            db::UserStore::sqlite(sqlite_pool.clone()),
-            config_repository,
-            Some(sqlite_pool),
-        )
-    };
-    // Shared Valkey ownership is database-only. A missing row is the degraded
-    // single-worker state; a decryption or parse failure aborts startup instead
-    // of silently falling back to process-local coordination.
-    let shared_valkey = if is_postgres {
-        // The environment seed is a first-start initializer, read after the
-        // repository `.env` has been loaded. The database row always wins, so
-        // this never overrides a configured or deliberately cleared setting.
-        let seed = std::env::var(db::SHARED_VALKEY_SEED_ENV).ok();
-        db::seed_shared_valkey_from_env(&pool, &relay_secret_manager, seed.as_deref())
-            .await
-            .context("failed to apply the shared Valkey environment seed")?;
-        db::load_shared_valkey_config(&pool, &relay_secret_manager)
-            .await
-            .context("failed to resolve the shared Valkey configuration")?
-    } else {
-        db::SharedValkeyConfig::not_configured()
-    };
-    // When no active user exists and no password is configured, a strong
-    // random candidate password is atomically published to the protected file
-    // (create-if-absent) BEFORE the admin user is committed; if another
-    // starter won the publication race, its existing password is reused so
-    // the file and the database always agree. A failing publication aborts
-    // startup without leaving an account whose password cannot be retrieved.
-    // Only the path and login are logged, never the password itself.
-    user_store
-        .ensure_bootstrap_admin(
-            &config.bootstrap_admin_login,
-            (!config.bootstrap_admin_password.trim().is_empty())
-                .then_some(config.bootstrap_admin_password.as_str()),
-            |candidate| {
-                let effective = publish_bootstrap_password(candidate, secrets_dir)?;
-                let password_path =
-                    relay_secrets::resolve_data_file(BOOTSTRAP_ADMIN_PASSWORD_FILE, secrets_dir)?;
-                info!(
-                    login = %config.bootstrap_admin_login,
-                    password_file = %password_path.display(),
-                    "no active admin existed and no bootstrap password was configured; an \
-                     initial admin password is available in the logged file"
-                );
-                Ok(effective)
-            },
-        )
-        .await?;
-
-    if !is_postgres {
-        // The SQLite path has no Valkey backend; each `from_config_with_sqlite`
-        // call only touches the embedded store so they can run together
-        // without changing semantics.
-        let (mcp_catalog_cache, replay_cache, mcp_session_store) = tokio::try_join!(
-            crate::mcp::McpCatalogCache::from_config_with_sqlite(
-                config,
-                &shared_valkey,
-                sqlite_pool.clone()
-            ),
-            ReplayCache::from_config_with_sqlite(config, &shared_valkey, sqlite_pool.clone()),
-            crate::mcp::McpSessionStore::from_config_with_sqlite(
-                config,
-                &shared_valkey,
-                sqlite_pool
-            ),
-        )?;
-        let stream_delta_batching: db::StreamDeltaBatchingSettings = config_repository
-            .get_json_setting::<db::StreamDeltaBatchingSettings>("stream_delta_batching")
-            .await?
-            .map(|v| db::StreamDeltaBatchingSettings {
-                enabled: v.enabled,
-                flush_window_ms: v.flush_window_ms.clamp(1, 1_000),
-                max_buffer_chars: v.max_buffer_chars.clamp(1, 8_192),
-                max_buffer_bytes: v.max_buffer_bytes.clamp(1, 65_536),
-                flush_on_line_break: v.flush_on_line_break,
-                flush_on_sentence_end: v.flush_on_sentence_end,
-            })
-            .unwrap_or_default();
-        let state = AdminState::new(crate::worker_admin_state::AdminStateInit {
-            pool: pool.clone(),
-            lease_pool,
-            replay_cache,
-            configured_relays: config.relay_urls.clone(),
-            managed_mode: false,
-            relay_secret_manager: Some(relay_secret_manager),
-            redaction_enabled: false,
-            model_route_whitelist_enabled: true,
-            request_content_logging: crate::worker_admin_types::RequestContentLoggingResponse {
-                mode: crate::worker_admin_types::RequestContentLoggingMode::Off,
-                raw_retention_days: 3,
-            },
-            usage_retention: crate::worker_admin_types::UsageRetentionSettings::default(),
-            raw_payload_store: None,
-            stream_delta_batching,
-            mcp_catalog_cache: mcp_catalog_cache.clone(),
-            mcp_catalog_service: crate::mcp::McpCatalogService::new_with_repository(
-                config_repository.clone(),
-                mcp_catalog_cache,
-            ),
-            mcp_session_store,
-            mcp_allowed_origins: config.mcp_allowed_origins.clone(),
-            endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(
-                Duration::from_secs(config.endpoint_model_cache_ttl_seconds.max(1)),
-            ),
-            shared_valkey,
-        })
-        .with_user_store(user_store)
-        .with_config_repository(config_repository);
-        let state = attach_mcp_oauth(state, config);
-        return Ok(Some(state));
-    }
-
+    pool: sqlx::PgPool,
+    lease_pool: sqlx::PgPool,
+    relay_secret_manager: RelaySecretManager,
+    shared_valkey: db::SharedValkeyConfig,
+) -> anyhow::Result<AdminState> {
     let usage_retention = db::get_usage_retention(&pool).await?;
     let cache_alert = db::get_cache_alert_settings(&pool).await?;
     // Raw payloads always go to the managed store (bucket or local fallback);
@@ -471,6 +137,7 @@ pub(super) async fn build_admin_state(
     let mcp_session_store = mcp_session_store;
     let mcp_catalog_service =
         crate::mcp::McpCatalogService::new(pool.clone(), mcp_catalog_cache.clone());
+    let user_store = db::UserStore::postgres(&pool);
     let state = AdminState::new(crate::worker_admin_state::AdminStateInit {
         pool,
         lease_pool,
@@ -504,85 +171,30 @@ pub(super) async fn build_admin_state(
         ),
     );
     let state = state.with_chatgpt_quota_service(quota_service);
-    Ok(Some(state))
+    Ok(state)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::validate_config;
-    use crate::config::WorkerConfig;
-    use base64::Engine as _;
-
-    fn test_key() -> String {
-        base64::engine::general_purpose::STANDARD.encode([7_u8; 32])
-    }
-
-    #[test]
-    fn empty_database_url_selects_named_standalone_mode() {
-        let config = WorkerConfig {
-            upstream_api_key: "bootstrap-key".to_string(),
-            worker_token: "token".to_string(),
-            relay_secret_master_key: test_key(),
-            ..WorkerConfig::default()
-        };
-
-        assert_eq!(config.storage_backend().as_str(), "sqlite");
-        assert!(validate_config(&config).is_ok());
-    }
-
-    #[test]
-    fn first_startup_validates_without_token_upstream_key_or_encryption_key() {
-        let config = WorkerConfig {
-            worker_token: String::new(),
-            ..WorkerConfig::default()
-        };
-
-        assert!(config.worker_token.is_empty());
-        assert!(config.upstream_api_key.is_empty());
-        assert_eq!(config.storage_backend().as_str(), "sqlite");
-        assert!(validate_config(&config).is_ok());
-    }
-
-    #[test]
-    fn invalid_configured_encryption_key_fails_validation() {
-        let config = WorkerConfig {
-            relay_secret_master_key: "not-base64!!".to_string(),
-            ..WorkerConfig::default()
-        };
-        let error = validate_config(&config).unwrap_err();
-        assert!(error.to_string().contains("valid base64"));
-    }
-
-    #[test]
-    fn current_encryption_key_takes_precedence_over_legacy() {
-        // A valid current key wins even when the legacy key is invalid.
-        let config = WorkerConfig {
-            worker_config_encryption_key: test_key(),
-            relay_secret_master_key: "not-base64!!".to_string(),
-            ..WorkerConfig::default()
-        };
-        assert!(validate_config(&config).is_ok());
-
-        // An invalid current key is not silently replaced by the legacy one.
-        let config = WorkerConfig {
-            worker_config_encryption_key: "not-base64!!".to_string(),
-            relay_secret_master_key: test_key(),
-            ..WorkerConfig::default()
-        };
-        assert!(validate_config(&config).is_err());
-    }
-
-    #[test]
-    fn configured_database_url_keeps_shared_managed_mode() {
-        let config = WorkerConfig {
-            database_url: "  postgres://postgres@localhost/prompt_ferry  ".to_string(),
-            relay_urls: Vec::new(),
-            relay_secret_master_key: test_key(),
-            worker_token: "token".to_string(),
-            ..WorkerConfig::default()
-        };
-
-        assert_eq!(config.storage_backend().as_str(), "postgres");
-        assert!(validate_config(&config).is_ok());
-    }
+/// Build the admin state of the node runtime from its gated pools.
+///
+/// The node runtime owns the pools: the node gate prepared the schema and
+/// the gated pool connections already hold the shared barrier. No migration
+/// runs, no key is generated and no bootstrap admin is created here; the
+/// master secret of the node is the only key material.
+pub(super) async fn build_admin_state_from_pools(
+    config: &WorkerConfig,
+    pool: sqlx::PgPool,
+    lease_pool: sqlx::PgPool,
+    relay_secret_manager: RelaySecretManager,
+    valkey_seed: Option<&str>,
+) -> anyhow::Result<AdminState> {
+    db::initial_admin::close_for_existing_users(&pool).await?;
+    let shared_valkey = resolve_shared_valkey(&pool, &relay_secret_manager, valkey_seed).await?;
+    build_postgres_admin_state(
+        config,
+        pool,
+        lease_pool,
+        relay_secret_manager,
+        shared_valkey,
+    )
+    .await
 }

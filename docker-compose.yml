@@ -1,23 +1,12 @@
-# Fresh-stack example: PostgreSQL 18, Valkey, RustFS (S3) and one integrated
-# prompt-ferry that serves the relay and the worker from a single process.
-# Copy .env.example to .env, replace the secret placeholders, then follow the
-# README quickstart.
-#
-# This example creates a NEW postgres18-data volume. It is not an upgrade path:
-# a PostgreSQL 17 cluster reaches 18 only through pg_dump/pg_restore or
-# pg_upgrade, never by moving the data directory.
-
+# Fresh stack only. Existing installations must follow MIGRATING.md first.
 services:
   postgres:
     image: postgres:18-bookworm
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
-      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-    # PostgreSQL 18 keeps its cluster under /var/lib/postgresql/<major>/docker,
-    # so the named volume mounts the version parent and survives container
-    # rebuilds.
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
     volumes:
       - postgres18-data:/var/lib/postgresql
     healthcheck:
@@ -26,13 +15,11 @@ services:
       timeout: 3s
       retries: 20
     ports:
-      # Loopback only: the database is never published on a routable address.
       - "127.0.0.1:${PROMPT_FERRY_POSTGRES_PORT:-5432}:5432"
 
   valkey:
     image: valkey/valkey:8-alpine
     restart: unless-stopped
-    # appendonly keeps the coordination and response-affinity keys across restarts.
     command: ["valkey-server", "--appendonly", "yes", "--dir", "/data"]
     volumes:
       - valkey-data:/data
@@ -48,10 +35,8 @@ services:
     image: rustfs/rustfs:1.0.1
     restart: unless-stopped
     environment:
-      # Reuses the application credentials, so there is exactly one S3 account
-      # to configure and no default rustfsadmin login to forget to change.
-      RUSTFS_ACCESS_KEY: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ACCESS_KEY:?set PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ACCESS_KEY in .env}
-      RUSTFS_SECRET_KEY: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_SECRET_KEY:?set PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_SECRET_KEY in .env}
+      RUSTFS_ACCESS_KEY: ${PROMPT_FERRY__RAW_OBJECT_STORE_ACCESS_KEY:?set object store access key}
+      RUSTFS_SECRET_KEY: ${PROMPT_FERRY__RAW_OBJECT_STORE_SECRET_KEY:?set object store secret key}
       RUSTFS_CONSOLE_ENABLE: "true"
     volumes:
       - rustfs-data:/data
@@ -61,19 +46,14 @@ services:
       timeout: 3s
       retries: 20
     ports:
-      # S3 API and web console, loopback only; the console creates the bucket.
       - "127.0.0.1:${PROMPT_FERRY_RUSTFS_PORT:-9000}:9000"
       - "127.0.0.1:${PROMPT_FERRY_RUSTFS_CONSOLE_PORT:-9001}:9001"
 
   prompt-ferry:
-    image: ${PROMPT_FERRY_IMAGE:?set PROMPT_FERRY_IMAGE in .env}
+    image: ${PROMPT_FERRY_IMAGE:?set PROMPT_FERRY_IMAGE}
     restart: unless-stopped
     stop_signal: SIGTERM
-    # Must stay above the relay drain below (130s default) so an already
-    # accepted response can finish before Docker sends SIGKILL.
-    stop_grace_period: 150s
-    # The image ships `relay` as its default command; an empty command starts
-    # the integrated relay + worker default of the binary.
+    stop_grace_period: 180s
     command: []
     depends_on:
       postgres:
@@ -83,66 +63,34 @@ services:
       rustfs:
         condition: service_healthy
     environment:
-      PROMPT_FERRY_LOGGING__LEVEL: ${PROMPT_FERRY_LOGGING__LEVEL:-info}
-      PROMPT_FERRY_RELAY__BIND: 0.0.0.0:8787
-      PROMPT_FERRY_RELAY__CLIENT_TOKEN: ${PROMPT_FERRY_RELAY__CLIENT_TOKEN:?set PROMPT_FERRY_RELAY__CLIENT_TOKEN in .env}
-      # The relay must outlive the worker drain so a response can still cross
-      # the bridge, and this must fit inside stop_grace_period above.
-      PROMPT_FERRY_RELAY__SHUTDOWN_DRAIN_SECONDS: ${PROMPT_FERRY_RELAY__SHUTDOWN_DRAIN_SECONDS:-130}
-      # Optional: empty keeps the worker bridge unauthenticated, which is only
-      # safe because the bridge stays on an internal loopback bind. The worker
-      # token is authoritative for both halves in integrated mode.
-      PROMPT_FERRY_WORKER__WORKER_TOKEN: ${PROMPT_FERRY_WORKER__WORKER_TOKEN:-}
-      PROMPT_FERRY_WORKER__ADMIN_BIND: 0.0.0.0:80
-      PROMPT_FERRY_WORKER__SHUTDOWN_DRAIN_SECONDS: ${PROMPT_FERRY_WORKER__SHUTDOWN_DRAIN_SECONDS:-120}
-      PROMPT_FERRY_WORKER__MCP_WARMUP: ${PROMPT_FERRY_WORKER__MCP_WARMUP:-all}
-      PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_LOGIN: ${PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_LOGIN:-admin}
-      # Optional: empty generates a strong password once and writes it to
-      # <data-root>/prompt-ferry/bootstrap-admin.txt, which the data volume keeps.
-      PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD: ${PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD:-}
-      # Optional: empty generates a key once and persists it to
-      # <data-root>/prompt-ferry/worker-config.key; back it up or stored secrets
-      # become unreadable.
-      PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY: ${PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY:-}
-      PROMPT_FERRY_WORKER__MCP_OAUTH_REDIRECT_BASE: ${PROMPT_FERRY_WORKER__MCP_OAUTH_REDIRECT_BASE:-}
-      PROMPT_FERRY_WORKER__UPSTREAM_API_KEY: ${PROMPT_FERRY_WORKER__UPSTREAM_API_KEY:-}
-      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
-      # Storage endpoints are service names on the Compose network. The
-      # host-loopback URLs in .env apply to a host-run binary, not here.
-      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
-      # First-start seed for the shared Valkey URL. Compose defaults to the
-      # service address; the database setting wins once one exists (including a
-      # cleared one), so this never overrides an Admin → Settings → Storage
-      # value. A saved but unreachable URL fails startup rather than reseeding.
-      PROMPT_FERRY_WORKER__VALKEY_URL: ${PROMPT_FERRY_WORKER__VALKEY_URL:-redis://valkey:6379}
-      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ENDPOINT: "http://rustfs:9000"
-      # Credentials and bucket come from .env so the host and container setups
-      # store payloads in the same place.
-      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_BUCKET: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_BUCKET:-prompt-ferry-raw}
-      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_REGION: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_REGION:-auto}
-      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ACCESS_KEY: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ACCESS_KEY:?set PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ACCESS_KEY in .env}
-      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_SECRET_KEY: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_SECRET_KEY:?set PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_SECRET_KEY in .env}
-      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_PREFIX: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_PREFIX:-prompt-ferry/raw}
-      # allow_http is required for a plain-HTTP local endpoint.
-      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ALLOW_HTTP: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ALLOW_HTTP:-true}
-      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_PATH_STYLE: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_PATH_STYLE:-true}
-      # The bootstrap password and encryption key are generated under the data
-      # root, so both roots must be persistent volumes.
+      PROMPT_FERRY__BIND: 0.0.0.0:8787
+      PROMPT_FERRY__MASTER_SECRET: ${PROMPT_FERRY__MASTER_SECRET:?set a stable master secret}
+      PROMPT_FERRY__DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      PROMPT_FERRY__PEER_URLS: ${PROMPT_FERRY__PEER_URLS:-[]}
+      PROMPT_FERRY__VALKEY_URL: ${PROMPT_FERRY__VALKEY_URL:-redis://valkey:6379}
+      PROMPT_FERRY__LOG_LEVEL: ${PROMPT_FERRY__LOG_LEVEL:-info}
+      PROMPT_FERRY__SHUTDOWN_DRAIN_SECONDS: ${PROMPT_FERRY__SHUTDOWN_DRAIN_SECONDS:-120}
+      PROMPT_FERRY__MCP_WARMUP: ${PROMPT_FERRY__MCP_WARMUP:-all}
+      PROMPT_FERRY__MCP_OAUTH_REDIRECT_BASE: ${PROMPT_FERRY__MCP_OAUTH_REDIRECT_BASE:-}
+      PROMPT_FERRY__UPSTREAM_API_KEY: ${PROMPT_FERRY__UPSTREAM_API_KEY:-}
+      PROMPT_FERRY__RAW_OBJECT_STORE_ENDPOINT: http://rustfs:9000
+      PROMPT_FERRY__RAW_OBJECT_STORE_BUCKET: ${PROMPT_FERRY__RAW_OBJECT_STORE_BUCKET:-prompt-ferry-raw}
+      PROMPT_FERRY__RAW_OBJECT_STORE_REGION: ${PROMPT_FERRY__RAW_OBJECT_STORE_REGION:-auto}
+      PROMPT_FERRY__RAW_OBJECT_STORE_ACCESS_KEY: ${PROMPT_FERRY__RAW_OBJECT_STORE_ACCESS_KEY:?set object store access key}
+      PROMPT_FERRY__RAW_OBJECT_STORE_SECRET_KEY: ${PROMPT_FERRY__RAW_OBJECT_STORE_SECRET_KEY:?set object store secret key}
+      PROMPT_FERRY__RAW_OBJECT_STORE_PREFIX: ${PROMPT_FERRY__RAW_OBJECT_STORE_PREFIX:-prompt-ferry/raw}
+      PROMPT_FERRY__RAW_OBJECT_STORE_ALLOW_HTTP: ${PROMPT_FERRY__RAW_OBJECT_STORE_ALLOW_HTTP:-true}
+      PROMPT_FERRY__RAW_OBJECT_STORE_PATH_STYLE: ${PROMPT_FERRY__RAW_OBJECT_STORE_PATH_STYLE:-true}
       XDG_DATA_HOME: /var/lib/prompt-ferry
       XDG_CONFIG_HOME: /etc/prompt-ferry
     volumes:
       - prompt-ferry-data:/var/lib/prompt-ferry
       - prompt-ferry-config:/etc/prompt-ferry
-      # uv caches for the uvx-based stdio MCP servers; a recreate without them
-      # re-downloads the Python runtime and its dependencies.
       - prompt-ferry-uv-cache:/root/.cache/uv
       - prompt-ferry-uv-data:/root/.local/share/uv
+    # This example uses plaintext only on a trusted local network. For native
+    # TLS/mTLS replace this probe with one that validates TLS and client auth.
     healthcheck:
-      # /healthz is relay liveness; /api/v1/ready additionally proves the
-      # worker reached the database. Both must hold for traffic to flow.
-      # Runtime image ships bash but no wget/curl, so probe via bash
-      # /dev/tcp and require exact HTTP/1.0-or-1.1 200 status field;
-      # reason/body digits never determine health.
       test:
         - CMD
         - bash
@@ -150,22 +98,14 @@ services:
         - >-
           exec 3<>/dev/tcp/127.0.0.1/8787 || exit 1;
           printf 'GET /healthz HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n' >&3;
-          IFS= read -r -t 2 line <&3 || { exec 3<&-; exec 3>&-; exit 1; };
-          exec 3<&-; exec 3>&-;
-          line=$${line%$$'\r'}; case "$$line" in "HTTP/1.0 200"|"HTTP/1.0 200 "*|"HTTP/1.1 200"|"HTTP/1.1 200 "*) ;; *) exit 1;; esac;
-          exec 3<>/dev/tcp/127.0.0.1/80 || exit 1;
-          printf 'GET /api/v1/ready HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n' >&3;
-          IFS= read -r -t 2 line <&3 || { exec 3<&-; exec 3>&-; exit 1; };
-          exec 3<&-; exec 3>&-;
+          IFS= read -r -t 2 line <&3 || exit 1;
           line=$${line%$$'\r'}; case "$$line" in "HTTP/1.0 200"|"HTTP/1.0 200 "*|"HTTP/1.1 200"|"HTTP/1.1 200 "*) ;; *) exit 1;; esac
       interval: 5s
       timeout: 3s
       retries: 20
       start_period: 15s
     ports:
-      # Client traffic and the admin console, loopback only.
-      - "127.0.0.1:${PROMPT_FERRY_RELAY_PORT:-8787}:8787"
-      - "127.0.0.1:${PROMPT_FERRY_WORKER_ADMIN_PORT:-8789}:80"
+      - "127.0.0.1:${PROMPT_FERRY_PORT:-8787}:8787"
 
 volumes:
   postgres18-data:

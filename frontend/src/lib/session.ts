@@ -4,18 +4,19 @@ import {
   authLogout,
   authMe,
   bridgeStatus,
-  relayAuthLogin,
-  relayAuthLogout,
-  relayAuthMe,
+  setupInitialize,
 } from '@/generated/admin-api'
-import type { BridgeStatus, MeResponse } from '@/generated/admin-api'
+import type {
+  BridgeStatus,
+  MeResponse,
+  SetupStatus,
+} from '@/generated/admin-api'
 import { expectData, formatApiError, withData } from '@/api'
 import { runAsyncAction, type AsyncActionOutcome } from './async-action'
 import { messages, normalizeLocale, type MessageKey } from '@/i18n'
 import { LOCALE_STORAGE_KEY, readStorage } from '@/storage'
 
 export const SESSION_AUTH_KEY = 'session:authentication'
-export const RELAY_SESSION_AUTH_KEY = 'relay-session:authentication'
 
 function localizedMessage(key: MessageKey): string {
   const locale = normalizeLocale(readStorage(LOCALE_STORAGE_KEY))
@@ -33,9 +34,27 @@ function isUnauthorized(cause: unknown): boolean {
   )
 }
 
+function isConflict(cause: unknown): boolean {
+  if (!cause || typeof cause !== 'object' || !('error' in cause)) return false
+  const error = (cause as { error?: unknown }).error
+  return Boolean(
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'conflict',
+  )
+}
+
 export type LoginPayload = {
   login_name: string
   password: string
+}
+
+export type SetupPayload = {
+  master_secret: string
+  login_name: string
+  password: string
+  display_name: string | null
 }
 
 type SessionState = {
@@ -44,6 +63,7 @@ type SessionState = {
   bootstrapped: boolean
   bootstrapping: boolean
   error: string
+  setupError: string
   bridgeStatusError: string
   /**
    * The authenticated session epoch.
@@ -56,6 +76,10 @@ type SessionState = {
   epoch: number
   bootstrapAuth: (force?: boolean) => Promise<boolean>
   refreshBridgeStatus: () => Promise<void>
+  setup: (
+    payload: SetupPayload,
+    refreshStatus: (status?: SetupStatus) => Promise<void>,
+  ) => Promise<AsyncActionOutcome<SetupStatus>>
   login: (payload: LoginPayload) => Promise<AsyncActionOutcome<void>>
   logout: () => Promise<AsyncActionOutcome<void>>
 }
@@ -88,6 +112,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   bootstrapped: false,
   bootstrapping: false,
   error: '',
+  setupError: '',
   bridgeStatusError: '',
   epoch: 0,
 
@@ -135,6 +160,35 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             : 'Failed to load bridge status',
       })
     }
+  },
+
+  setup(payload, refreshStatus) {
+    const captured: SetupPayload = {
+      master_secret: payload.master_secret,
+      login_name: payload.login_name,
+      password: payload.password,
+      display_name: payload.display_name,
+    }
+    return runAsyncAction(
+      SESSION_AUTH_KEY,
+      async () => {
+        set({ setupError: '' })
+        try {
+          const status = expectData(
+            await setupInitialize<true>(withData({ body: captured })),
+          )
+          await refreshStatus(status)
+          return status
+        } catch (cause) {
+          if (isConflict(cause)) {
+            await refreshStatus().catch(() => undefined)
+          }
+          set({ setupError: formatApiError(cause) })
+          throw cause
+        }
+      },
+      'setup',
+    )
   },
 
   login(payload) {
@@ -186,96 +240,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             bootstrapping: false,
             bridgeStatusError: '',
             epoch: get().epoch + 1,
-          })
-        }
-      },
-      'logout',
-    )
-  },
-}))
-
-type RelaySessionState = {
-  authenticated: boolean
-  bootstrapped: boolean
-  bootstrapping: boolean
-  error: string
-  bootstrap: (force?: boolean) => Promise<boolean>
-  login: (
-    adminToken: string,
-    afterLogin?: () => Promise<void>,
-  ) => Promise<AsyncActionOutcome<void>>
-  logout: () => Promise<AsyncActionOutcome<void>>
-}
-
-let relaySessionGeneration = 0
-
-export const useRelaySessionStore = create<RelaySessionState>((set, get) => ({
-  authenticated: false,
-  bootstrapped: false,
-  bootstrapping: false,
-  error: '',
-
-  async bootstrap(force = false) {
-    if (get().bootstrapped && !force) return get().authenticated
-    const generation = ++relaySessionGeneration
-    set({ bootstrapping: true, error: '' })
-    try {
-      const auth = expectData(await relayAuthMe<true>(withData()))
-      if (generation !== relaySessionGeneration) return false
-      set({ authenticated: auth.authenticated === true, bootstrapped: true })
-      return auth.authenticated === true
-    } catch (cause) {
-      if (generation !== relaySessionGeneration) return false
-      set({
-        authenticated: false,
-        error: isUnauthorized(cause) ? '' : formatApiError(cause),
-        bootstrapped: true,
-      })
-      return false
-    } finally {
-      if (generation === relaySessionGeneration) set({ bootstrapping: false })
-    }
-  },
-
-  login(adminToken, afterLogin) {
-    const capturedToken = adminToken
-    return runAsyncAction(
-      RELAY_SESSION_AUTH_KEY,
-      async () => {
-        set({ error: '' })
-        try {
-          await relayAuthLogin<true>(
-            withData({ body: { admin_token: capturedToken } }),
-          )
-          const loaded = await get().bootstrap(true)
-          if (!loaded)
-            throw new Error(get().error || 'Failed to load relay session')
-          await afterLogin?.()
-        } catch (cause) {
-          set({
-            authenticated: false,
-            error: formatApiError(cause),
-          })
-          throw cause
-        }
-      },
-      'login',
-    )
-  },
-
-  logout() {
-    return runAsyncAction(
-      RELAY_SESSION_AUTH_KEY,
-      async () => {
-        set({ error: '' })
-        try {
-          await relayAuthLogout<true>(withData())
-        } finally {
-          relaySessionGeneration += 1
-          set({
-            authenticated: false,
-            bootstrapped: false,
-            bootstrapping: false,
           })
         }
       },

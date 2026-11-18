@@ -1,0 +1,27 @@
+drop trigger if exists trg_cfg_rev_users_write on public.users;
+drop trigger if exists trg_cfg_rev_users_update on public.users;
+drop trigger if exists trg_cfg_rev_client_keys_write on public.client_keys;
+drop trigger if exists trg_cfg_rev_client_keys_update on public.client_keys;
+drop trigger if exists trg_cfg_rev_provider_endpoints_write on public.provider_endpoints;
+drop trigger if exists trg_cfg_rev_provider_endpoints_update on public.provider_endpoints;
+drop trigger if exists trg_cfg_rev_endpoint_api_keys_write on public.endpoint_api_keys;
+drop trigger if exists trg_cfg_rev_endpoint_api_keys_update on public.endpoint_api_keys;
+drop trigger if exists trg_cfg_rev_endpoint_oauth_tokens_write on public.endpoint_oauth_tokens;
+drop trigger if exists trg_cfg_rev_endpoint_oauth_tokens_update on public.endpoint_oauth_tokens;
+drop trigger if exists trg_cfg_rev_model_endpoint_rules_write on public.model_endpoint_rules;
+drop trigger if exists trg_cfg_rev_model_endpoint_rules_update on public.model_endpoint_rules;
+drop trigger if exists trg_cfg_rev_model_route_targets_write on public.model_route_targets;
+drop trigger if exists trg_cfg_rev_model_route_targets_update on public.model_route_targets;
+drop trigger if exists trg_cfg_rev_mcp_servers_write on public.mcp_servers;
+drop trigger if exists trg_cfg_rev_mcp_servers_update on public.mcp_servers;
+drop trigger if exists trg_cfg_rev_mcp_credentials_write on public.mcp_credentials;
+drop trigger if exists trg_cfg_rev_mcp_credentials_update on public.mcp_credentials;
+drop trigger if exists trg_cfg_rev_user_redaction_configs_write on public.user_redaction_configs;
+drop trigger if exists trg_cfg_rev_user_redaction_configs_update on public.user_redaction_configs;
+drop trigger if exists trg_cfg_rev_user_endpoint_settings_write on public.user_endpoint_settings;
+drop trigger if exists trg_cfg_rev_user_endpoint_settings_update on public.user_endpoint_settings;
+drop trigger if exists trg_cfg_rev_worker_settings_write on public.worker_settings;
+drop trigger if exists trg_cfg_rev_worker_settings_update on public.worker_settings;
+
+drop function if exists public.prompt_ferry_bump_config_revision();
+drop table if exists public.prompt_ferry_config_revision;

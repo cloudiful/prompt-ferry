@@ -909,8 +909,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 [[package]]
 name = "cloudiful-config"
 version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdd97023d2d81fd1f8129a72c76ffb5d6ec5fbb60d86f990db7cdb94b63a69be"
+source = "git+https://github.com/cloudiful/config.git?tag=v0.6.3#6d68ecc0e8a9886bb627a5f475e27f3bd66ab148"
 dependencies = [
  "dotenvy",
  "postgres",
@@ -922,8 +921,7 @@ dependencies = [
 [[package]]
 name = "cloudiful-db-init"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6677bc8a035f430195d94ca6f86572c960bd4a3196f3f936850e7dc18414921"
+source = "git+https://github.com/cloudiful/db-init.git?rev=a3612a2ae92343540077bd625aa7c228de75f254#a3612a2ae92343540077bd625aa7c228de75f254"
 dependencies = [
  "anyhow",
  "dotenvy",
@@ -933,8 +931,7 @@ dependencies = [
 [[package]]
 name = "cloudiful-notifier"
 version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f95995fc075572ce05a20eedbbc928f6facfde648648c42e2edd846004accb6a"
+source = "git+https://github.com/cloudiful/notifier.git?tag=v0.3.2#d357d779d674205e658ac0132de74d7a6d51a92f"
 dependencies = [
  "base64 0.23.1",
  "hmac",
@@ -949,8 +946,7 @@ dependencies = [
 [[package]]
 name = "cloudiful-redactor"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82345bad7232691775c8e7c2ed045aa344c346a0385a0b31d2b19814eff7a171"
+source = "git+https://github.com/cloudiful/redactor.git?tag=v0.5.1#9e2e725e7c6b1240f004ca21a488f17aabfb059e"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -972,8 +968,7 @@ dependencies = [
 [[package]]
 name = "cloudiful-scheduler"
 version = "0.4.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a92f8dc860774e50bbdbe92780d130f129f5562ebb231a514ba6718e430d15f"
+source = "git+https://github.com/cloudiful/scheduler.git?tag=v0.4.12#bb0db0a782819fbcfe2753849c67266a077422be"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -3033,7 +3028,7 @@ dependencies = [
 
 [[package]]
 name = "prompt-ferry"
-version = "1.42.32"
+version = "1.42.35"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3100,11 +3095,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "cloudiful-config",
- "cloudiful-db-init",
- "serde_json",
- "sqlx",
+ "prompt-ferry",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

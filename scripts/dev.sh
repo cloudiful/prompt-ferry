@@ -3,7 +3,7 @@
 # Usage: bash scripts/dev.sh <help|backend|full>
 #
 # Loads the root .env as data via scripts/dev-env.sh, applies development
-# defaults, and delegates the relay/worker/frontend process lifecycle to
+# defaults, and delegates the node/frontend process lifecycle to
 # scripts/dev-supervisor.sh.
 
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -35,7 +35,7 @@ ENV_HELPER="$SCRIPT_DIR/dev-env.sh"
 [ -f "$ENV_HELPER" ] || die "missing $ENV_HELPER" "Run from a complete checkout of the repository."
 source "$ENV_HELPER"
 
-DOTENV_FILE="$ROOT/.env"
+DOTENV_FILE="${PROMPT_FERRY_DOTENV:-$ROOT/.env}"
 SUPERVISOR="$ROOT/scripts/dev-supervisor.sh"
 
 usage() {
@@ -43,15 +43,13 @@ usage() {
 Usage: bash scripts/dev.sh <help|backend|full>
 
 Commands:
-  backend   Start relay and worker
-  full      Start relay, worker, and frontend Vite dev server
+  backend   Start the node
+  full      Start the node and frontend Vite dev server
 
 Config:
-  Reads root .env automatically and treats it as the source of truth
-  DATABASE_URL is required
-  Switch local/remote settings by editing or commenting values in .env
-  PROMPT_FERRY_LOGGING__LEVEL defaults to info
-  managed dev defaults include a local relay secret master key if unset
+  Reads PROMPT_FERRY_DOTENV or root .env as data
+  PROMPT_FERRY__MASTER_SECRET is required and must remain stable
+  Vite proxies /api/ to 127.0.0.1:8787; use the default bind for full mode
   frontend deps auto-install once with bun if frontend/node_modules is missing
 
 Requirements:
@@ -60,48 +58,9 @@ Requirements:
 EOF
 }
 
-# First entry of a JSON array value, or the value itself when it is a bare URL.
-first_relay_url() {
-  local value="$1" first
-  value="${value#"${value%%[![:space:]]*}"}"
-  value="${value%"${value##*[![:space:]]}"}"
-  case "$value" in
-    \[*)
-      first="${value#\[}"
-      first="${first%%,*}"
-      first="${first%]}"
-      first="${first#\"}"
-      first="${first%\"}"
-      first="${first#\'}"
-      first="${first%\'}"
-      printf '%s' "$first"
-      ;;
-    *)
-      printf '%s' "$value"
-      ;;
-  esac
-}
-
-relay_is_local() {
-  case "$1" in
-    ws://127.0.0.1:* | wss://127.0.0.1:* | ws://localhost:* | wss://localhost:*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 print_startup_summary() {
-  local mode="$1" relay_url="$2"
-  printf 'Starting local dev stack (%s)\n' "$mode"
-  if relay_is_local "$relay_url"; then
-    printf '  relay               http://127.0.0.1:8787\n'
-    printf '  worker listener     http://127.0.0.1:8788\n'
-  else
-    printf '  relay               external %s\n' "$relay_url"
-  fi
-  printf '  worker admin api    http://127.0.0.1:8789/api/v1\n'
-  if [ "$mode" = "full" ]; then
-    printf '  frontend            http://127.0.0.1:5171\n'
-  fi
+  printf 'Starting node on %s (%s)\n' "$PROMPT_FERRY__BIND" "$1"
+  [ "$1" != full ] || printf '  frontend http://127.0.0.1:5171\n'
   printf 'Stop with Ctrl+C\n'
 }
 
@@ -146,8 +105,15 @@ run_stack() {
   export_dotenv
   export_dev_env
 
-  if is_blank "${DATABASE_URL:-}"; then
-    die "DATABASE_URL is not set" "Set DATABASE_URL in .env, then re-run: bash scripts/dev.sh $mode"
+  local key
+  for key in ${!PROMPT_FERRY_RELAY__@} ${!PROMPT_FERRY_WORKER__@}; do
+    die "legacy environment namespace detected: $key" "Use a separate node environment; see MIGRATING.md."
+  done
+  if is_blank "${PROMPT_FERRY__MASTER_SECRET:-}"; then
+    die "PROMPT_FERRY__MASTER_SECRET is required" "Configure a stable secret; see README.md."
+  fi
+  if [ "$mode" = full ] && { [ "$PROMPT_FERRY__BIND" != 127.0.0.1:8787 ] || [ "${PROMPT_FERRY__TLS_MODE:-off}" != off ]; }; then
+    die "full mode requires plaintext on 127.0.0.1:8787" "Vite proxies to that local address; use a trusted development environment."
   fi
 
   ensure_backend_binary
@@ -155,7 +121,7 @@ run_stack() {
     ensure_frontend_deps
   fi
 
-  print_startup_summary "$mode" "$(first_relay_url "${PROMPT_FERRY_WORKER__RELAY_URLS}")"
+  print_startup_summary "$mode"
 
   exec bash "$SUPERVISOR" "$mode"
 }

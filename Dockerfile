@@ -14,6 +14,5 @@ WORKDIR /app
 COPY --chmod=755 ci-image-input/prompt-ferry /usr/local/bin/prompt-ferry
 COPY --chmod=755 docker/start-prompt-ferry.sh /usr/local/bin/start-prompt-ferry.sh
 
-EXPOSE 8787 80
+EXPOSE 8787
 ENTRYPOINT ["tini", "--", "/usr/local/bin/start-prompt-ferry.sh"]
-CMD ["relay"]

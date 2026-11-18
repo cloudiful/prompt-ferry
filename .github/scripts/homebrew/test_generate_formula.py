@@ -425,7 +425,7 @@ class TapWriteTest(unittest.TestCase):
     def test_rejects_same_version_with_different_content(self):
         existing = self.write_existing(
             self.render_for("v1.42.30").replace(
-                "OpenAI-compatible relay and worker for upstream ferrying",
+                "OpenAI-compatible AI gateway with peer-connected nodes",
                 "Different description",
             )
         )

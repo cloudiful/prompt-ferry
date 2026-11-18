@@ -7,7 +7,6 @@ use crate::{
     worker_admin_types::{RequestContentLoggingMode, RequestContentLoggingResponse},
 };
 use anyhow::anyhow;
-use base64::Engine as _;
 use chrono::Utc;
 
 use super::ai::upstream::upstream_url_for_route;
@@ -23,56 +22,6 @@ fn builds_upstream_url_without_double_slash() {
         upstream_url("https://api.example.com/", "/v1/models"),
         "https://api.example.com/v1/models"
     );
-}
-
-#[test]
-fn first_startup_validation_allows_missing_upstream_key() {
-    let config = WorkerConfig {
-        upstream_api_key: String::new(),
-        worker_token: String::new(),
-        ..WorkerConfig::default()
-    };
-    // Fresh startup may have no upstream API key, no worker token, and no
-    // manually configured encryption key; the Admin setup flow completes
-    // configuration later.
-    assert!(validate_config(&config).is_ok());
-}
-
-#[test]
-fn rejects_upstream_base_url_with_v1_path() {
-    let config = WorkerConfig {
-        upstream_base_url: "https://api.example.com/v1/".to_string(),
-        upstream_api_key: "key".to_string(),
-        worker_token: "token".to_string(),
-        ..WorkerConfig::default()
-    };
-    assert!(validate_config(&config).is_err());
-}
-
-#[test]
-fn managed_mode_rejects_invalid_encryption_key() {
-    let config = WorkerConfig {
-        database_url: crate::test_support::fixture_database_url(),
-        upstream_api_key: String::new(),
-        relay_urls: Vec::new(),
-        worker_token: "token".to_string(),
-        relay_secret_master_key: "definitely-not-base64!!".to_string(),
-        ..WorkerConfig::default()
-    };
-    assert!(validate_config(&config).is_err());
-}
-
-#[test]
-fn managed_mode_allows_zero_relays_with_master_key() {
-    let config = WorkerConfig {
-        database_url: crate::test_support::fixture_database_url(),
-        upstream_api_key: String::new(),
-        relay_urls: Vec::new(),
-        worker_token: "token".to_string(),
-        relay_secret_master_key: base64::engine::general_purpose::STANDARD.encode([5_u8; 32]),
-        ..WorkerConfig::default()
-    };
-    assert!(validate_config(&config).is_ok());
 }
 
 #[test]

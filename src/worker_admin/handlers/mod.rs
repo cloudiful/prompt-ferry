@@ -1,5 +1,7 @@
 mod auth;
 mod billing;
+mod init;
+mod node;
 // Issue #599 R2c: the ChatGPT (Codex) private-interface mapping layer is
 // public so the runtime request path can reach the same helpers the admin
 // handlers use (the pattern already used by `pub mod oauth`).
@@ -21,6 +23,7 @@ mod mcp;
 mod mcp_oauth;
 mod me;
 mod model_routes;
+mod nodes;
 pub mod oauth;
 mod oauth_client;
 mod oauth_session;
@@ -34,9 +37,6 @@ mod support;
 mod usage;
 mod usage_support;
 mod users;
-mod workers;
-
-use std::net::SocketAddr;
 
 use axum::routing::{get, patch, post};
 pub(super) use axum::{
@@ -76,14 +76,14 @@ use tower_http::cors::CorsLayer;
 
 use self::{
     auth::*, billing::*, config_audit::*, config_export::*, config_import::*, endpoint_usage::*,
-    endpoints::*, mcp::*, mcp_oauth::*, model_routes::*, quota_inference::*,
-    quota_key_observations::*, session_routing::*, settings::*, settings_cache_alert::*, usage::*,
-    users::*, workers::*,
+    endpoints::*, init::*, mcp::*, mcp_oauth::*, model_routes::*, node::*, nodes::*,
+    quota_inference::*, quota_key_observations::*, session_routing::*, settings::*,
+    settings_cache_alert::*, usage::*, users::*,
 };
 
 pub(super) use self::support::*;
 pub use self::{
-    server::{router, run_admin_server},
+    server::router,
     support::{publish_snapshot, publish_snapshot_if_changed, set_bridge_sender},
 };
 pub use crate::worker_admin_state::AdminState;

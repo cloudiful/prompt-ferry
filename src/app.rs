@@ -1,7 +1,7 @@
 use crate::{
     certs,
     cli::{Cli, Command, OpenapiCommand},
-    config, openapi_export, serve, worker,
+    config, openapi_export, worker,
 };
 use anyhow::Context;
 use clap::Parser;
@@ -58,22 +58,17 @@ pub async fn run_cli() -> anyhow::Result<()> {
     // CLI arguments still win over both.
     let dotenv_path = config::load_repository_env().context("failed to load the .env file")?;
 
-    let (integrated, entrypoint) = match cli.command {
-        None => (
-            Some(cli.integrated.clone()),
-            serve::Entrypoint::NoSubcommand,
-        ),
-        Some(Command::Serve(args)) => (Some(args), serve::Entrypoint::ServeAlias),
+    let node_args = match cli.command {
+        None => cli.node,
         Some(command) => {
             run_component(command).await?;
             return Ok(());
         }
     };
-    let args = integrated.expect("the integrated path is selected above");
-    let app_config = config::read_app_config().context("failed to read config")?;
-    init_logging(&app_config.logging.level);
+    let node_config = config::read_node_config().context("failed to read node config")?;
+    init_logging(&node_config.log_level);
     log_dotenv(dotenv_path.as_deref());
-    serve::run(app_config, args, entrypoint).await
+    Box::pin(worker::run_node(node_config, node_args.ack_stop_old_nodes)).await
 }
 
 async fn run_component(command: Command) -> anyhow::Result<()> {
@@ -84,18 +79,11 @@ async fn run_component(command: Command) -> anyhow::Result<()> {
         Command::Cert(command) => match command {
             crate::cli::CertCommand::Init(args) => certs::init(args),
         },
-        Command::Relay(args) => {
-            let app_config = config::read_app_config().context("failed to read config")?;
-            init_logging(&app_config.logging.level);
-            serve::run_relay_command(app_config, args).await
-        }
-        Command::Worker(args) => {
-            let app_config = config::read_app_config().context("failed to read config")?;
-            init_logging(&app_config.logging.level);
-            worker::run(app_config.worker.merge_args(args)).await
-        }
-        // Both integrated spellings are handled by the caller.
-        Command::Serve(_) => Ok(()),
+        Command::Maintenance(command) => match command {
+            crate::cli::MaintenanceCommand::Rekey(args) => {
+                crate::maintenance::rekey::run_rekey(args).await
+            }
+        },
     }
 }
 

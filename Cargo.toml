@@ -34,9 +34,9 @@ bytes = "1.12.1"
 chacha20poly1305 = "0.11.0"
 chrono = { version = "0.4.45", features = ["serde"] }
 clap = { version = "4.6.6", features = [ "derive", "env" ] }
-cloudiful-notifier = { version = "0.3", default-features = false, features = ["dingtalk", "email"] }
-config = { package = "cloudiful-config", version = "0.6.3" }
-db-init = { package = "cloudiful-db-init", version = "0.1.0" }
+cloudiful-notifier = { version = "0.3", git = "https://github.com/cloudiful/notifier.git", tag = "v0.3.2", default-features = false, features = ["dingtalk", "email"] }
+config = { package = "cloudiful-config", version = "0.6.3", git = "https://github.com/cloudiful/config.git", tag = "v0.6.3" }
+db-init = { package = "cloudiful-db-init", version = "0.1.0", git = "https://github.com/cloudiful/db-init.git", rev = "a3612a2ae92343540077bd625aa7c228de75f254" }
 futures = "0.3.34"
 h2 = "0.4.19"
 hkdf = "0.13.0"
@@ -45,7 +45,7 @@ hyper = { version = "1.11.1", features = ["http1", "client"] }
 ipnet = "2.12.2"
 rand = "0.10.2"
 rcgen = "0.14.10"
-redactor = { package = "cloudiful-redactor", version = "0.5.1" }
+redactor = { package = "cloudiful-redactor", version = "0.5.1", git = "https://github.com/cloudiful/redactor.git", tag = "v0.5.1" }
 redis = { version = "1.7.0", features = ["tokio-comp", "connection-manager"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["charset", "gzip", "http2", "json", "rustls", "socks", "stream", "system-proxy"] }
 object_store = { version = "0.14.1", default-features = false, features = ["aws", "fs"] }
@@ -55,7 +55,7 @@ prompt-ferry-runtime-env = { version = "0.1.0", path = "crates/prompt-ferry-runt
 prompt-ferry-upstream-presets = { version = "0.1.0", path = "crates/prompt-ferry-upstream-presets" }
 sse-stream = "0.2"
 rmcp = { version = "3.8.0", features = ["auth", "client", "transport-streamable-http-client-reqwest", "transport-child-process", "transport-streamable-http-server"] }
-scheduler = { package = "cloudiful-scheduler", version = "0.4.12", features = ["valkey-store"] }
+scheduler = { package = "cloudiful-scheduler", version = "0.4.12", git = "https://github.com/cloudiful/scheduler.git", tag = "v0.4.12", features = ["valkey-store"] }
 rustls = { version = "0.23.44", features = ["aws-lc-rs"] }
 rustls-native-certs = "0.8.4"
 rustls-pki-types = "1.15.1"
