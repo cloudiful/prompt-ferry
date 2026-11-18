@@ -69,6 +69,7 @@ pub(in crate::worker::runtime) async fn process_request(
             owner_worker_id: services.runtime_state.worker_instance_id(),
             anthropic,
             request_headers: &request.headers,
+            node_attribution: services.node_attribution(),
         }))
         .await;
     }

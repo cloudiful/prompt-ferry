@@ -1,341 +1,64 @@
-use crate::{
-    bridge_crypto, config::RelayConfig, ip_acl::CompiledRelayIpPolicy, relay_tls::TlsListener, tls,
-};
+use crate::{config::RelayConfig, ip_acl::CompiledRelayIpPolicy};
 
 use super::{
-    admin::state::RelayAdminState,
-    public_proxy::public_router,
-    state::{AppState, RelayHandle, RelayState},
-    worker_bridge::worker_router,
+    public_proxy::{public_api_router, public_router},
+    state::{AppState, RelayState},
 };
-use anyhow::Context;
 use axum::{Router, body::Body, response::Response};
 use futures::StreamExt;
 use std::{
     collections::HashMap,
-    future::Future,
     sync::{Arc, atomic::AtomicUsize},
-    time::Duration,
 };
-use tokio::{
-    net::TcpListener,
-    sync::{Mutex, watch},
-};
-use tokio_rustls::TlsAcceptor;
-use tracing::{info, warn};
+use tokio::sync::Mutex;
 
-/// Extra headroom on top of the public budget for the worker bridge, so pending
-/// relay -> worker reply frames get a chance to flush after the public side has
-/// stopped accepting new client traffic.
-const RELAY_WORKER_BRIDGE_EXTRA_DRAIN: Duration = Duration::from_secs(4);
-/// Drain granted to the management listener once the host is stopping. It is the
-/// shortest of the three: the management listener holds no business stream, and
-/// a role change should not wait on a page that is already closing.
-const RELAY_ADMIN_DRAIN_BUDGET: Duration = Duration::from_secs(5);
-
-/// Serve on listeners the caller already reserved.
+/// The node router and the relay state it serves.
 ///
-/// The integrated entrypoint reserves every address before anything starts, so
-/// a port collision is reported before the worker connects, the derived worker
-/// relay URL names the socket that will really accept the connection, and the
-/// management listener keeps the address the startup resolved.
-pub async fn run_with_listeners(
-    config: RelayConfig,
-    public_listener: std::net::TcpListener,
-    worker_listener: std::net::TcpListener,
-    admin_listener: std::net::TcpListener,
-) -> anyhow::Result<()> {
-    run_with_listeners_and_shutdown(
-        config,
-        public_listener,
-        worker_listener,
-        admin_listener,
-        None,
-    )
-    .await
-}
-
-/// Run the relay with an additional shutdown trigger.
+/// The node runtime owns one listener that serves the public AI surface and
+/// the worker admin API at the same time. The admin router owns the single
+/// SPA fallback of that listener; the public routes are merged into it and
+/// carry no fallback of their own.
 ///
-/// The trigger is the internal shutdown signal of the process: a worker that
-/// stops for an internal reason asks the integrated relay to stop with it, so
-/// the relay never keeps serving without the worker that serves it.
-pub async fn run_with_listeners_and_shutdown(
-    config: RelayConfig,
-    public_listener: std::net::TcpListener,
-    worker_listener: std::net::TcpListener,
-    admin_listener: std::net::TcpListener,
-    external_shutdown: Option<watch::Receiver<bool>>,
-) -> anyhow::Result<()> {
-    validate(&config)?;
-    run_with_tokio_listeners(
-        config,
-        into_tokio_listener(public_listener, "relay public")?,
-        into_tokio_listener(worker_listener, "relay worker bridge")?,
-        into_tokio_listener(admin_listener, "relay management")?,
-        external_shutdown,
-    )
-    .await
-}
-
-/// Reject an unusable configuration before any socket is taken.
-fn validate(config: &RelayConfig) -> anyhow::Result<()> {
-    if config.worker_heartbeat_timeout_seconds == 0 {
-        anyhow::bail!("worker_heartbeat_timeout_seconds must be greater than 0");
-    }
-    if config.response_stream_buffer == 0 {
-        anyhow::bail!("response_stream_buffer must be greater than 0");
-    }
-    if config.response_stream_max_bytes == 0 {
-        anyhow::bail!("response_stream_max_bytes must be greater than 0");
-    }
-    if config.response_stream_backpressure_timeout_ms == 0 {
-        anyhow::bail!("response_stream_backpressure_timeout_ms must be greater than 0");
-    }
-    tls::validate_relay_config(config)?;
-    tls::validate_relay_worker_config(config)?;
-    bridge_crypto::validate_settings(
-        "relay",
-        config.bridge_encryption_mode,
-        &config.bridge_encryption_key,
-    )
-}
-
-fn into_tokio_listener(
-    listener: std::net::TcpListener,
-    name: &'static str,
-) -> anyhow::Result<TcpListener> {
-    listener.set_nonblocking(true).with_context(|| {
-        format!("failed to switch the reserved {name} listener to non-blocking mode")
-    })?;
-    TcpListener::from_std(listener)
-        .with_context(|| format!("failed to adopt the reserved {name} listener"))
-}
-
-async fn run_with_tokio_listeners(
-    config: RelayConfig,
-    public_listener: TcpListener,
-    worker_listener: TcpListener,
-    admin_listener: TcpListener,
-    external_shutdown: Option<watch::Receiver<bool>>,
-) -> anyhow::Result<()> {
-    let public_drain_budget = Duration::from_secs(config.shutdown_drain_seconds.max(1));
-    let tls_mode = config.tls_mode;
-    let worker_tls_mode = config.worker_tls_mode;
-    let public_config = config.clone();
-    let worker_config = config.clone();
-    let relay_state = AppState {
-        config: config.clone(),
-        inner: relay_state(),
-    };
-    let (admin_state, _) = management_state(config, relay_state.clone());
-    let app = public_router(relay_state.clone());
-    let worker_app = worker_router(relay_state);
-    let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    tokio::spawn(async move {
-        // The relay stops on an OS signal and on the internal shutdown signal
-        // of the process, so an integrated worker that stops takes the relay
-        // with it.
-        match external_shutdown {
-            Some(external) => {
-                tokio::select! {
-                    _ = relay_shutdown_signal() => {}
-                    _ = wait_for_shutdown_signal(external) => {}
-                }
-            }
-            None => relay_shutdown_signal().await,
-        }
-        let _ = shutdown_tx.send(true);
-    });
-    let public_acceptor = if tls_mode.enabled() {
-        Some(TlsAcceptor::from(tls::server_config(&public_config)?))
-    } else {
-        None
-    };
-    let worker_acceptor = if worker_tls_mode.enabled() {
-        Some(TlsAcceptor::from(tls::worker_server_config(
-            &worker_config,
-        )?))
-    } else {
-        None
-    };
-
-    // The listeners are already bound here, so this reports the address that
-    // is really serving rather than the configured one.
-    let public_addr = public_listener.local_addr()?;
-    let worker_addr = worker_listener.local_addr()?;
-    info!(%public_addr, ?tls_mode, "relay public listening");
-    info!(%worker_addr, ?worker_tls_mode, "relay worker listening");
-    let public_shutdown_rx = shutdown_rx.clone();
-    let worker_shutdown_rx = shutdown_rx.clone();
-    // The public side aborts first so new client traffic stops getting
-    // accepted; the worker bridge gets a brief extra budget to flush any
-    // pending relay -> worker reply frames before it is also forced.
-    let public_server = async move {
-        let shutdown = wait_for_shutdown_signal(public_shutdown_rx);
-        if let Some(acceptor) = public_acceptor {
-            axum::serve(
-                TlsListener::new(public_listener, acceptor),
-                app.into_make_service_with_connect_info::<super::state::RemoteAddr>(),
-            )
-            .with_graceful_shutdown(shutdown)
-            .await
-            .map_err(anyhow::Error::from)
-        } else {
-            axum::serve(
-                public_listener,
-                app.into_make_service_with_connect_info::<super::state::RemoteAddr>(),
-            )
-            .with_graceful_shutdown(shutdown)
-            .await
-            .map_err(anyhow::Error::from)
-        }
-    };
-    let worker_server = async move {
-        let shutdown = wait_for_shutdown_signal(worker_shutdown_rx);
-        if let Some(acceptor) = worker_acceptor {
-            axum::serve(
-                TlsListener::new(worker_listener, acceptor),
-                worker_app.into_make_service_with_connect_info::<super::state::RemoteAddr>(),
-            )
-            .with_graceful_shutdown(shutdown)
-            .await
-            .map_err(anyhow::Error::from)
-        } else {
-            axum::serve(
-                worker_listener,
-                worker_app.into_make_service_with_connect_info::<super::state::RemoteAddr>(),
-            )
-            .with_graceful_shutdown(shutdown)
-            .await
-            .map_err(anyhow::Error::from)
-        }
-    };
-    // Every listener runs concurrently for the whole life of the process. The
-    // budgets below do not start counting until shutdown has been signalled,
-    // so a healthy relay is never interrupted by them. The management listener
-    // stops on a restart request as well, because that request is what brings
-    // this process back with the settings that were just saved.
-    tokio::try_join!(
-        drain_within(
-            "public",
-            public_server,
-            shutdown_rx.clone(),
-            public_drain_budget,
-        ),
-        drain_within(
-            "worker-bridge",
-            worker_server,
-            shutdown_rx.clone(),
-            public_drain_budget + RELAY_WORKER_BRIDGE_EXTRA_DRAIN,
-        ),
-        drain_within(
-            "management",
-            super::admin::serve(admin_state, admin_listener),
-            shutdown_rx.clone(),
-            RELAY_ADMIN_DRAIN_BUDGET,
-        ),
-    )?;
-    Ok(())
-}
-
-/// Drive one listener for the lifetime of the process, capping only the
-/// post-shutdown drain. `grace` starts when the shutdown signal fires; dropping
-/// the listener future on expiry aborts whatever is still in flight.
-async fn drain_within<F>(
-    listener: &'static str,
-    serve: F,
-    shutdown_rx: watch::Receiver<bool>,
-    grace: Duration,
-) -> anyhow::Result<()>
-where
-    F: Future<Output = anyhow::Result<()>>,
-{
-    tokio::select! {
-        result = serve => result,
-        _ = drain_deadline(shutdown_rx, grace) => {
-            warn!(
-                listener,
-                grace_seconds = grace.as_secs(),
-                "relay listener did not drain within grace; forcing abort"
-            );
-            Ok(())
-        }
-    }
-}
-
-/// Resolves `grace` after shutdown is signalled, and never before — while the
-/// relay serves normally this stays parked on the watch channel.
-async fn drain_deadline(shutdown_rx: watch::Receiver<bool>, grace: Duration) {
-    wait_for_shutdown_signal(shutdown_rx).await;
-    tokio::time::sleep(grace).await;
-}
-
-async fn wait_for_shutdown_signal(mut shutdown_rx: watch::Receiver<bool>) {
-    if *shutdown_rx.borrow() {
-        return;
-    }
-    let _ = shutdown_rx.changed().await;
-}
-
-async fn relay_shutdown_signal() {
-    #[cfg(unix)]
-    {
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .expect("failed to install SIGTERM handler");
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = terminate.recv() => {}
-        }
-    }
-
-    #[cfg(not(unix))]
-    {
-        let _ = tokio::signal::ctrl_c().await;
-    }
-}
-
-/// The two relay-facing routers and the handle their shared state is reached
-/// through.
-///
-/// The management router is deliberately not part of this tuple: it owns the
-/// relay's host configuration rather than relay traffic, and the startup builds
-/// it through [`management_state`] on the same relay state.
-pub fn apps(config: RelayConfig) -> (Router, Router, RelayHandle) {
+/// The static client token is disabled for the node: the public AI surface
+/// authenticates managed client keys only, and the master secret never
+/// authenticates an AI request.
+pub(crate) fn node_apps(config: RelayConfig, admin_router: Router) -> (Router, AppState) {
     let inner = relay_state();
     let state = AppState {
         config,
-        inner: inner.clone(),
+        inner,
+        managed_only_auth: true,
     };
-    let public_app = public_router(state.clone());
-    let worker_app = worker_router(state);
-    (public_app, worker_app, RelayHandle { inner })
+    let public_app = public_api_router(state.clone());
+    let app = merge_node_router(admin_router, public_app);
+    (app, state)
 }
 
-/// The management state and its router, built from the same relay state the
-/// public listener serves so the two cannot describe different relays.
-pub(crate) fn management_state(config: RelayConfig, state: AppState) -> (RelayAdminState, Router) {
-    let role = active_role();
-    let handle = RelayHandle {
-        inner: state.inner.clone(),
-    };
-    let admin_state = RelayAdminState::new(&config, role, state, handle);
-    (admin_state.clone(), super::admin::router(admin_state))
-}
-
-/// The role this relay process is running as.
+/// The router of a database-less edge node.
 ///
-/// The role-driven startups record it before anything binds, so the management
-/// page reports the role that was actually started. A standalone `relay`
-/// command records none, and it is running a relay and nothing else.
-fn active_role() -> crate::config::HostRole {
-    crate::config::host_startup::active().unwrap_or(crate::config::HostRole::Relay)
+/// The edge serves the public API itself and forwards everything else — the
+/// administration pages, the API and the assets — to its database node. It
+/// has no local administration listener and no static client token: the
+/// managed keys of the database node are the only credential.
+pub(crate) fn node_edge_apps(config: RelayConfig) -> (Router, AppState) {
+    let inner = relay_state();
+    let state = AppState {
+        config,
+        inner,
+        managed_only_auth: true,
+    };
+    (public_router(state.clone()), state)
 }
 
-#[cfg(test)]
-pub(crate) fn test_relay_state() -> Arc<RelayState> {
-    relay_state()
+/// Merge the admin router with the public API routes.
+///
+/// The admin router carries the custom SPA fallback and the public router
+/// only the default one, so the merge keeps the admin fallback and the
+/// public routes win over it. Merging two routers that both carry a custom
+/// fallback would panic, which is why the public routes are extracted
+/// without one.
+pub(crate) fn merge_node_router(admin_router: Router, public_router: Router) -> Router {
+    admin_router.merge(public_router)
 }
 
 fn relay_state() -> Arc<RelayState> {
@@ -360,4 +83,153 @@ pub(crate) async fn drain_body_then(body: Body, response: Response) -> Response 
         }
     }
     response
+}
+
+#[cfg(test)]
+mod node_router_tests {
+    use super::{merge_node_router, public_api_router};
+    use crate::relay::state::{RemoteAddr, test_state};
+    use axum::{
+        Router,
+        body::Body,
+        extract::connect_info::ConnectInfo,
+        http::{Request, StatusCode},
+        routing::get,
+    };
+    use tower::ServiceExt;
+
+    /// A stand-in for the worker admin router: it owns the SPA fallback of
+    /// the node listener.
+    fn admin_router() -> Router {
+        Router::new()
+            .route("/api/v1/healthz", get(|| async { "admin" }))
+            .fallback(get(|| async { "spa" }))
+    }
+
+    fn request(uri: &str) -> Request<Body> {
+        Request::builder()
+            .uri(uri)
+            .body(Body::empty())
+            .expect("request builds")
+    }
+
+    #[tokio::test]
+    async fn the_node_router_merges_the_public_routes_with_the_admin_fallback() {
+        let public = public_api_router(test_state());
+        let app = merge_node_router(admin_router(), public);
+
+        // The public route is served by the public handler.
+        let mut healthz = request("/healthz");
+        healthz.extensions_mut().insert(ConnectInfo(RemoteAddr(
+            "127.0.0.1:1234".parse().expect("address parses"),
+        )));
+        let response = app
+            .clone()
+            .oneshot(healthz)
+            .await
+            .expect("the merged router answers");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // An unknown path still reaches the single SPA fallback of the
+        // admin router.
+        let response = app
+            .oneshot(request("/some/spa/path"))
+            .await
+            .expect("the merged router answers");
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn edge_fallback_uses_connected_bridge_without_a_peer_origin() {
+        use crate::protocol::{BridgeMessage, ResponseChunk, ResponseEnd, ResponseStart};
+        use crate::relay::worker_bridge::{dispatch_worker_bridge_message, register_worker};
+        use axum::body::to_bytes;
+        use tokio::sync::mpsc;
+
+        let (app, state) = super::node_edge_apps(crate::config::RelayConfig::default());
+        let (tx, mut rx) = mpsc::channel(16);
+        assert!(register_worker(&state, 1, tx).await);
+        let executor_state = state.clone();
+        let executor = tokio::spawn(async move {
+            for expected in ["/index.html", "/api/v1/auth/setup?x=1"] {
+                let start = loop {
+                    if let Some(BridgeMessage::RequestStart(start)) = rx.recv().await {
+                        break start;
+                    }
+                };
+                assert_eq!(start.path, expected);
+                if expected.starts_with("/api/") {
+                    assert!(
+                        start
+                            .headers
+                            .iter()
+                            .any(|(name, value)| name == "host" && value == "edge.example")
+                    );
+                }
+                loop {
+                    if let Some(BridgeMessage::RequestEnd(_)) = rx.recv().await {
+                        break;
+                    }
+                }
+                let request_id = start.request_id;
+                dispatch_worker_bridge_message(
+                    &executor_state,
+                    BridgeMessage::ResponseStart(ResponseStart {
+                        request_id: request_id.clone(),
+                        status: 201,
+                        content_type: Some("text/plain".into()),
+                        headers: vec![("set-cookie".into(), "session=ok; HttpOnly".into())],
+                    }),
+                )
+                .await;
+                dispatch_worker_bridge_message(
+                    &executor_state,
+                    BridgeMessage::ResponseChunk(ResponseChunk {
+                        request_id: request_id.clone(),
+                        data: b"bridge response".to_vec(),
+                    }),
+                )
+                .await;
+                dispatch_worker_bridge_message(
+                    &executor_state,
+                    BridgeMessage::ResponseEnd(ResponseEnd { request_id }),
+                )
+                .await;
+            }
+        });
+        for uri in ["/index.html", "/api/v1/auth/setup?x=1"] {
+            let mut req = Request::builder()
+                .uri(uri)
+                .header("host", "edge.example")
+                .body(Body::empty())
+                .unwrap();
+            req.extensions_mut()
+                .insert(ConnectInfo(RemoteAddr("127.0.0.1:1234".parse().unwrap())));
+            let response = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED);
+            assert_eq!(
+                response.headers().get("set-cookie").unwrap(),
+                "session=ok; HttpOnly"
+            );
+            assert_eq!(
+                to_bytes(response.into_body(), usize::MAX).await.unwrap(),
+                "bridge response"
+            );
+        }
+        executor.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_public_routes_of_a_node_have_no_fallback_of_their_own() {
+        let app = public_api_router(test_state());
+        let response = app
+            .oneshot(request("/some/spa/path"))
+            .await
+            .expect("the public router answers");
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "the node has exactly one fallback, and it belongs to the admin router"
+        );
+    }
 }

@@ -289,7 +289,7 @@ export const endpointMessages = {
     scheduleSettings: '排期设置',
     scheduleWindows: '生效时间段',
     scheduleWindowsHint:
-      '按 Worker 本机时间判断是否生效；开始与结束都留空表示所选星期全天生效；删除全部时间段表示不设排期（目标继承端点排期）；结束早于开始视为跨天（如 22:00–06:00，按起始日判定星期）；命中任一段即生效。',
+      '按 节点本机时间判断是否生效；开始与结束都留空表示所选星期全天生效；删除全部时间段表示不设排期（目标继承端点排期）；结束早于开始视为跨天（如 22:00–06:00，按起始日判定星期）；命中任一段即生效。',
     scheduleEmptyHint: '未设置时间段时端点始终生效，目标继承端点排期',
     scheduleAddWindow: '新增时间段',
     weekdays: '工作日',
@@ -646,7 +646,7 @@ export const endpointMessages = {
     scheduleSettings: 'Schedule settings',
     scheduleWindows: 'Active windows',
     scheduleWindowsHint:
-      'Evaluated in worker-local time; leave both times empty for all day on the selected weekdays; removing every window means no schedule of its own (a target inherits the endpoint schedule); end before start wraps overnight (e.g. 22:00–06:00, weekday decided by start day); any matching window activates the target.',
+      'Evaluated in node-local time; leave both times empty for all day on the selected weekdays; removing every window means no schedule of its own (a target inherits the endpoint schedule); end before start wraps overnight (e.g. 22:00–06:00, weekday decided by start day); any matching window activates the target.',
     scheduleEmptyHint:
       'With no windows an endpoint is always active; a target inherits the endpoint schedule',
     scheduleAddWindow: 'Add window',

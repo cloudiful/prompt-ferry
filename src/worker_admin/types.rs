@@ -9,6 +9,7 @@ mod config_export;
 mod config_import;
 #[path = "types/endpoints.rs"]
 mod endpoints;
+mod init;
 #[path = "types/mcp.rs"]
 mod mcp;
 #[path = "types/mcp_oauth.rs"]
@@ -16,6 +17,8 @@ mod mcp_oauth;
 mod mcp_provider;
 #[path = "types/model_routes.rs"]
 mod model_routes;
+mod node;
+mod nodes;
 #[path = "types/quota_key_observations.rs"]
 mod quota_key_observations;
 #[path = "types/quota_status.rs"]
@@ -26,8 +29,6 @@ mod settings;
 mod token_plan;
 #[path = "types/usage.rs"]
 mod usage;
-#[path = "types/workers.rs"]
-mod workers;
 
 pub use auth_users::*;
 pub use billing::*;
@@ -36,16 +37,18 @@ pub use config_audit::*;
 pub use config_export::*;
 pub use config_import::*;
 pub use endpoints::*;
+pub use init::*;
 pub use mcp::*;
 pub use mcp_oauth::*;
 pub use mcp_provider::*;
 pub use model_routes::*;
+pub use node::*;
+pub use nodes::*;
 pub use quota_key_observations::*;
 pub use quota_status::*;
 pub use settings::*;
 pub use token_plan::*;
 pub use usage::*;
-pub use workers::*;
 
 #[cfg(test)]
 mod tests {

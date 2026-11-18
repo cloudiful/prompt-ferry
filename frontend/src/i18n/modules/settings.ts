@@ -125,7 +125,7 @@ export const settingsMessages = {
     publicScope: '公共',
     privateScope: '私有',
     rawRetentionDays: '原始 JSON 保留天数',
-    relayIpWhitelist: '中继 IP 白名单',
+    relayIpWhitelist: '入口 IP 白名单',
     settingsGeneral: '常规',
     settingsUsage: '请求与路由',
     settingsNetwork: '网络访问',
@@ -163,7 +163,7 @@ export const settingsMessages = {
     storageSaved: '对象存储配置已保存',
     sharedValkeyTitle: '共享 Valkey',
     sharedValkeyHint:
-      '共享 Valkey 只由数据库配置；修改后需要协调重启所有 worker，不会在线热替换。',
+      '共享 Valkey 只由数据库配置；修改后需要协调重启所有 node，不会在线热替换。',
     sharedValkeyUrl: 'Valkey URL',
     sharedValkeyUrlHelp:
       '留空保持不变。URL 在数据库中以加密形式保存，读取时只回显脱敏地址。',
@@ -172,13 +172,13 @@ export const settingsMessages = {
     sharedValkeyTtlHelp:
       '重放快照、会话、MCP 缓存与请求租约的共享有效期，60 到 2592000 秒。',
     sharedValkeyConfigured: '已配置',
-    sharedValkeyNotConfigured: '未配置（单 worker 降级模式）',
+    sharedValkeyNotConfigured: '未配置（单 node 降级模式）',
     sharedValkeyClear: '清除已保存的 URL',
-    sharedValkeyClearHelp: '保存后所有 worker 重启前仍使用旧的已生效配置。',
-    sharedValkeySaved: '共享 Valkey 配置已保存，worker 需要重启后生效',
+    sharedValkeyClearHelp: '保存后所有 node 重启前仍使用旧的已生效配置。',
+    sharedValkeySaved: '共享 Valkey 配置已保存，node 需要重启后生效',
     sharedValkeySaveFailed: '保存共享 Valkey 配置失败',
-    sharedValkeyRestartRequired: '当前 worker 仍在旧配置上运行，需要重启。',
-    sharedValkeyWorkersRestart: '需要重启的在线 worker：{count}',
+    sharedValkeyRestartRequired: '当前 node 仍在旧配置上运行，需要重启。',
+    sharedValkeyWorkersRestart: '需要重启的在线 node：{count}',
     sharedValkeyRevision: '已生效版本 {applied} / 期望版本 {desired}',
     sharedValkeyUnavailable: '当前环境不支持共享 Valkey 配置。',
     sharedValkeySavedUrl: '已保存地址',
@@ -335,7 +335,7 @@ export const settingsMessages = {
     publicScope: 'Public',
     privateScope: 'Private',
     rawRetentionDays: 'Raw JSON retention days',
-    relayIpWhitelist: 'Relay IP whitelist',
+    relayIpWhitelist: 'Ingress IP whitelist',
     settingsGeneral: 'General',
     settingsUsage: 'Requests & routing',
     settingsNetwork: 'Network',
@@ -374,7 +374,7 @@ export const settingsMessages = {
     storageSaved: 'Object store settings saved',
     sharedValkeyTitle: 'Shared Valkey',
     sharedValkeyHint:
-      'Shared Valkey is configured only in the database; editing it requires a coordinated worker restart, never a hot swap.',
+      'Shared Valkey is configured only in the database; editing it requires a coordinated node restart, never a hot swap.',
     sharedValkeyUrl: 'Valkey URL',
     sharedValkeyUrlHelp:
       'Leave blank to keep the stored URL. The URL is encrypted in the database and only a masked address is returned.',
@@ -383,15 +383,15 @@ export const settingsMessages = {
     sharedValkeyTtlHelp:
       'Shared lifetime of replay snapshots, sessions, MCP caches and request leases, 60 to 2592000 seconds.',
     sharedValkeyConfigured: 'Configured',
-    sharedValkeyNotConfigured: 'Not configured (single-worker degraded mode)',
+    sharedValkeyNotConfigured: 'Not configured (single-node degraded mode)',
     sharedValkeyClear: 'Clear the stored URL',
     sharedValkeyClearHelp:
-      'After saving, every worker keeps its applied configuration until it restarts.',
-    sharedValkeySaved: 'Shared Valkey settings saved; workers must restart',
+      'After saving, every node keeps its applied configuration until it restarts.',
+    sharedValkeySaved: 'Shared Valkey settings saved; nodes must restart',
     sharedValkeySaveFailed: 'Failed to save shared Valkey settings',
     sharedValkeyRestartRequired:
-      'This worker still runs the previous configuration and must restart.',
-    sharedValkeyWorkersRestart: 'Online workers requiring a restart: {count}',
+      'This node still runs the previous configuration and must restart.',
+    sharedValkeyWorkersRestart: 'Online nodes requiring a restart: {count}',
     sharedValkeyRevision: 'Applied revision {applied} / desired {desired}',
     sharedValkeyUnavailable:
       'Shared Valkey settings are not available in this environment.',
@@ -406,7 +406,7 @@ export const settingsMessages = {
     settings: 'Settings',
     trustedProxyCidrs: 'Trusted proxy CIDRs',
     trustedProxyCidrsHelp:
-      'Relay reads X-Forwarded-For / X-Real-IP only when the request peer matches these proxy CIDRs.',
+      'Node reads X-Forwarded-For / X-Real-IP only when the request peer matches these proxy CIDRs.',
     trustedProxyCidrsPlaceholder: '172.16.0.0/12\n127.0.0.1/32',
   },
 } as const

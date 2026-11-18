@@ -178,7 +178,7 @@ pub(super) fn set_model_route_whitelist() {}
 #[utoipa::path(
     get,
     path = "/api/v1/settings/relay-ip-whitelist",
-    responses((status = 200, body = RelayIpPolicyResponse, description = "Relay IP whitelist")),
+    responses((status = 200, body = RelayIpPolicyResponse, description = "Ingress IP whitelist")),
     tag = "settings"
 )]
 pub(super) fn get_relay_ip_whitelist() {}
@@ -187,7 +187,7 @@ pub(super) fn get_relay_ip_whitelist() {}
     patch,
     path = "/api/v1/settings/relay-ip-whitelist",
     request_body = RelayIpPolicy,
-    responses((status = 200, body = RelayIpPolicyResponse, description = "Updated relay IP whitelist")),
+    responses((status = 200, body = RelayIpPolicyResponse, description = "Updated ingress IP whitelist")),
     tag = "settings"
 )]
 pub(super) fn set_relay_ip_whitelist() {}

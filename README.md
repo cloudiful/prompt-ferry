@@ -1,157 +1,19 @@
 # prompt-ferry
 
-[![Release](https://github.com/cloudiful/prompt-ferry/actions/workflows/release.yml/badge.svg)](https://github.com/cloudiful/prompt-ferry/actions/workflows/release.yml)
-[![Latest Release](https://img.shields.io/github/v/release/cloudiful/prompt-ferry?display_name=tag)](https://github.com/cloudiful/prompt-ferry/releases)
-[![License](https://img.shields.io/github/license/cloudiful/prompt-ferry)](LICENSE)
-[![GHCR](https://img.shields.io/badge/container-GHCR-2496ED?logo=docker&logoColor=white)](https://github.com/cloudiful/prompt-ferry/pkgs/container/prompt-ferry)
+An OpenAI-compatible AI gateway with peer-connected nodes. One node serves the browser, admin API, AI API and peer endpoint on one listener (default `:8787`). A node with PostgreSQL executes requests; a database-less edge forwards browser and AI traffic over its authenticated peer connection, without connecting to PostgreSQL or Valkey. Either side can list the other in `PROMPT_FERRY__PEER_URLS`; there is no multi-hop routing.
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+## Quick start
 
-`prompt-ferry` is an OpenAI-compatible AI API relay for Codex and other clients.
-It forwards requests to OpenAI-compatible or Anthropic-compatible upstreams over
-a relay-worker bridge, redacting sensitive content on the way. A single binary
-runs the relay and the worker together by default.
+For an existing installation, **follow [MIGRATING.md](MIGRATING.md)** first. For a new Compose stack:
 
-```text
-Client -> relay /v1/* <-> worker WebSocket -> upstream API
-```
+1. Copy `.env.example` to `.env`. Generate `PROMPT_FERRY__MASTER_SECRET` once with `openssl rand -base64 32`, keep it private and back it up. Fill the database and object-store credentials. The host database URL and `POSTGRES_PASSWORD` contain separate copies of the password; change both together.
+2. Run `docker compose up -d`. Create the raw payload bucket in the RustFS console if raw storage is needed. The Compose example binds the node and service ports to loopback and keeps both data and config volumes. Do not discard them: the data root contains the persistent node identity and old config volumes may contain backups.
+3. Visit `http://127.0.0.1:8787`. Complete first setup using the master secret over a trusted local connection or HTTPS, then log in normally. Create a managed AI client key in the UI and use that as the API bearer; the master secret is **not** an AI bearer token.
 
-## Capabilities
+Set `PROMPT_FERRY__DATABASE_URL` to a PostgreSQL URL for a database node or leave it empty for an edge. Set peers as a JSON array, for example `["wss://node.example:8787"]`, or `[]`. All peers must run the same compiled version and protocol and share the same master secret. Nodes using the same database share state; multiple database nodes in a group require shared Valkey. A single database node without Valkey uses local sessions, which log out on restart; a configured but unavailable Valkey does not fall back. No cross-group in-memory takeover or transparent retry is promised once generation starts.
 
-- OpenAI Chat Completions, Responses and Embeddings, plus native Anthropic Messages and Models.
-- Upstream presets for MiniMax, CommandCode, OpencodeGo, OpenRouter, GLM, DeepSeek and OpenAI Platform; other OpenAI-compatible hosts use the Generic provider with an explicit base URL.
-- Per-request reasoning controls, including Chat `reasoning_effort`, Responses `reasoning.effort`, and Anthropic `output_config.effort`.
-- First-class Embeddings forwarding with per-target dimension overrides, fail-closed redaction and input-only metering.
-- Users, client API keys, upstream endpoints, model routes, key balancing, and locally configured relay targets.
-- A read-only Workers view of every process registered against the same PostgreSQL database.
-- Configurable redaction for forwarded content, logs and usage details.
-- Admin console with effective default-text quota summaries, per-key detail, and 30-day OpenAI subscription history on PostgreSQL.
-- MCP aggregation for HTTP and stdio servers, with per-credential and shared quota budgets.
-- TLS, mutual TLS and application-layer encryption for relay-worker traffic.
+Use a canonical public HTTPS origin for MCP OAuth callbacks (`PROMPT_FERRY__MCP_OAUTH_REDIRECT_BASE`). Browser login is shared on the same origin; different domains require separate logins. Reverse proxies must preserve the original Host for setup Origin checks. See [SECURITY.md](SECURITY.md) for trust, TLS and proxy requirements.
 
-Dependencies: PostgreSQL for business data, and optionally Valkey for
-coordination and response affinity. The shared Valkey URL is stored encrypted
-in the database, and the database row is always authoritative. A new deployment
-can initialize that row once from `PROMPT_FERRY_WORKER__VALKEY_URL`: it is read
-only during PostgreSQL bootstrap after the `.env` file is loaded, only when no
-`shared_valkey` row exists, and it never overrides a saved or deliberately
-cleared setting. A blank value means no seed; an invalid value with no row fails
-startup. The seed is written with the same worker-config key as other stored
-secrets, so every worker sharing the database must use the same explicit
-`PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY`. A saved URL is probed
-before use: an unreachable configured Valkey fails startup instead of silently
-falling back or reseeding, so repair connectivity or the Admin → Settings →
-Storage value. After the first start, edit the setting in Admin → Settings →
-Storage; a change is a coordinated restart: while one existing worker still
-serves the admin console, apply the edit there; then stop every old worker; then
-start all workers so each resolves and applies the new desired revision. Do not
-stop every worker before the edit, because the admin editor is served by a
-worker. Admission rejects a worker whose coordination mode or applied revision
-differs from the live registry, so a bootstrap-mode process and a coordinated
-process never run side by side. Raw request and response payloads are written to
-an S3-compatible bucket when one is configured.
+## Development
 
-Without a shared Valkey, PostgreSQL runs the documented single-worker degraded
-mode. Its bounded admin sessions live in process memory (session TTL and entry
-limits apply), so a restart logs administrators out, and replay snapshots remain
-unavailable. The database configuration persists across restart, but the local
-sessions do not.
-
-## Quick start with Docker Compose (recommended)
-
-```bash
-cp .env.example .env
-```
-
-In `.env`, replace every `REPLACE...` placeholder: the database password (in
-both `POSTGRES_PASSWORD` and `DATABASE_URL`), `PROMPT_FERRY_RELAY__CLIENT_TOKEN`,
-and the two S3 credentials. The file is read as data and never expanded, so the
-two database password entries have to be edited together.
-
-Start the dependencies first, because the S3 bucket has to exist before the
-application starts:
-
-```bash
-docker compose up -d postgres valkey rustfs
-```
-
-Open the RustFS console at <http://127.0.0.1:9001>, sign in with the S3 access
-key and secret key from `.env`, and create a bucket named exactly as
-`PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_BUCKET` (`prompt-ferry-raw` by default).
-RustFS serves S3 and does not create buckets for you. Then start the
-application:
-
-```bash
-docker compose up -d prompt-ferry
-```
-
-Then open Admin → Settings → Storage in the running worker, optionally change
-the shared Valkey URL, and restart the worker so the new revision is applied.
-Compose seeds `redis://valkey:6379` on the first start when
-`PROMPT_FERRY_WORKER__VALKEY_URL` is unset or empty, so no manual SQL or console
-edit is required for a fresh stack. Once a row exists — including a cleared one
-— the environment seed is ignored and the database value wins. With several
-workers, stop all of them after an edit and then start all of them on the new
-revision. When no URL is configured, or the URL was deliberately cleared, the
-worker runs in the documented single-worker degraded mode with process-local
-admin sessions. A configured but unreachable URL is different: startup fails
-instead of entering that degraded mode, so repair connectivity or the stored
-value.
-
-- Admin console: <http://127.0.0.1:8789> — log in as `admin`.
-- OpenAI-compatible base URL: `http://127.0.0.1:8787/v1`.
-- Shutdown: SIGTERM stops new requests and lets accepted inference rounds finish
-  for up to `PROMPT_FERRY_WORKER__SHUTDOWN_DRAIN_SECONDS` (120 s). The relay
-  waits `PROMPT_FERRY_RELAY__SHUTDOWN_DRAIN_SECONDS` (130 s) and Compose allows
-  150 s before SIGKILL. Keep worker < relay < `stop_grace_period` if you change
-  them. Integrated mode waits for both drains; a worker-only process relies on
-  its remote relay's budget, and a stop-grace expiry or SIGKILL is not graceful.
-
-If you left `PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD` empty and no admin
-exists yet, a strong password was generated once and written to the data volume:
-
-```bash
-docker compose exec prompt-ferry cat /var/lib/prompt-ferry/prompt-ferry/bootstrap-admin.txt
-```
-
-## Running the binary directly
-
-Download a release binary from [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases).
-It needs the same PostgreSQL, Valkey and bucket, and it reads the same `.env`.
-For the first start, set `PROMPT_FERRY_WORKER__VALKEY_URL=redis://127.0.0.1:6379`
-there; leave it blank when using Compose, which defaults to its service address.
-
-```bash
-PROMPT_FERRY_DOTENV=.env prompt-ferry
-```
-
-With no subcommand the binary starts the integrated relay and worker. It keeps
-its own state under `$XDG_DATA_HOME/prompt-ferry` and configuration under
-`$XDG_CONFIG_HOME/prompt-ferry`. Stop the Compose application first, or the two
-will fight over the published ports.
-
-Fresh install and existing database differ. A fresh start with an empty
-`PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY` generates a key once under
-`<data-root>/prompt-ferry/worker-config.key`. To reuse a populated Compose
-database, copy `/var/lib/prompt-ferry/prompt-ferry/worker-config.key` from the
-Compose volume to the host `<data-root>/prompt-ferry/worker-config.key`
-(default `~/.local/share/prompt-ferry/worker-config.key`) with owner-only
-(`0600`) permissions before starting, and never replace/rotate it afterwards; or
-set the same explicit base64 32-byte key in both environments before first
-bootstrap. The existing database keeps its existing admin account — the
-bootstrap password file is written only on initial creation when no admin exists.
-
-## Personal MCP OAuth
-
-Personal HTTP MCP servers (for example `https://huggingface.co/mcp?login`) can use OAuth in the admin console instead of a static bearer token. Set `PROMPT_FERRY_WORKER__MCP_OAUTH_REDIRECT_BASE` to a public HTTPS base URL (callback suffix `/api/v1/admin/mcp-servers/{server_id}/oauth/callback`); on PostgreSQL also set an explicit shared `PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY` so every worker can decrypt the same grant. Personal OAuth requests only the read-only `read-mcp` scope. A per-server proxy, plain HTTP server URL, stdio or built-in transport, admin scope, or missing configuration disables OAuth for that server with an actionable error; other auth modes keep working. Runtime tokens are never exported or shown in the UI, and disconnecting locally requires reconnecting.
-
-## Before you expose it
-
-- Back up PostgreSQL and `<data-root>/prompt-ferry/worker-config.key`; without that key, stored secrets cannot be decrypted.
-- PostgreSQL 17 reaches 18 only through `pg_dump`/`pg_restore` or `pg_upgrade`. The example creates a fresh PostgreSQL 18 volume and migrates nothing.
-- Everything publishes on loopback. Reaching it from another machine means a deliberate port binding, TLS and a reverse proxy.
-- A session affinity payload records the selected upstream model. Upgrade every relay worker together: an old worker ignores that model and may serve the session from another model of the same endpoint.
-
-## Documentation
-
-[Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE)
+Configure a stable master in the environment or a separate dotenv selected by `PROMPT_FERRY_DOTENV`, then run `bash scripts/dev.sh backend` or `bash scripts/dev.sh full`. Full mode uses plaintext on the default `127.0.0.1:8787` node bind and Vite's API proxy; use it only on a trusted development host. The scripts do not generate a master. Run backend unit checks with `bash scripts/ci/run-tests.sh`; see [CONTRIBUTING.md](CONTRIBUTING.md).

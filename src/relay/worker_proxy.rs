@@ -1,12 +1,5 @@
-//! Forwarding one HTTP request to a connected worker over the relay/worker
-//! bridge.
-//!
-//! Both management entry points need this: the relay's public fallback, which
-//! keeps the existing authenticated Worker-admin proxy contract, and the relay's
-//! own management listener, which proxies the worker's business API while
-//! serving its own control plane locally. Sharing the bridge request lifecycle
-//! here keeps both on one implementation of streaming, back-pressure, cleanup,
-//! and the timeout behaviour.
+//! Forward an edge node's browser and admin requests over its authenticated
+//! bridge while preserving streaming, backpressure, cleanup and deadlines.
 
 use crate::protocol::BridgeRequestStart;
 
@@ -29,14 +22,14 @@ use axum::{
 use bytes::Bytes;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
+#[cfg(test)]
 use tracing::debug;
 use uuid::Uuid;
 
 /// One request to hand to a worker.
 ///
-/// Both management entry points authenticate their caller before reaching this,
-/// and the public one additionally applies the relay's client IP policy, so the
-/// forwarding core has no access-control decision left to make.
+/// The edge enforces its IP policy; the processing node authenticates the
+/// forwarded request through its normal administration router.
 pub(crate) struct WorkerRequest<'a> {
     pub(crate) method: &'a Method,
     pub(crate) path: &'a str,
@@ -92,7 +85,7 @@ pub(crate) async fn forward_to_worker(
         request_id: request_id.clone(),
         method: request.method.to_string(),
         path: request.path.to_string(),
-        headers: forwarded_request_headers(request.headers),
+        headers: forwarded_admin_request_headers(request.path, request.headers),
         request_deadline_unix_ms: request_deadline_unix_ms(&state.config),
         user_id: None,
         route_id: None,
@@ -186,6 +179,18 @@ pub(crate) async fn forward_to_worker(
     response
 }
 
+fn forwarded_admin_request_headers(path: &str, headers: &HeaderMap) -> Vec<(String, String)> {
+    let mut forwarded = forwarded_request_headers(headers);
+    if path.split('?').next() == Some("/api/v1/auth/setup") {
+        for value in headers.get_all(header::HOST) {
+            if let Ok(value) = value.to_str() {
+                forwarded.push((header::HOST.as_str().to_owned(), value.to_owned()));
+            }
+        }
+    }
+    forwarded
+}
+
 pub(crate) fn forwarded_request_headers(headers: &HeaderMap) -> Vec<(String, String)> {
     headers
         .iter()
@@ -233,9 +238,10 @@ pub(super) fn is_hop_by_hop_request_header(name: &header::HeaderName) -> bool {
 /// The management listener answers with this when no worker has registered on
 /// the bridge, which is the normal state of a relay-only host, so it is logged
 /// at a level that does not drown the log: the caller learns the real state from
-/// `GET /api/v1/relay/status`, which reports the same thing without a request
+/// The live node status reports connected peers without a request
 /// against it. The public fallback keeps its own wording so an existing client
 /// contract is unchanged.
+#[cfg(test)]
 pub(crate) fn no_worker_connected() -> Response {
     debug!("relay management request needs a worker, but none is connected");
     crate::auth::error_response(
@@ -282,6 +288,31 @@ mod tests {
             .expect("read the body");
         let body = std::str::from_utf8(&body).expect("JSON body");
         assert!(body.contains("worker_not_connected"), "got: {body}");
+    }
+
+    #[test]
+    fn setup_alone_preserves_actual_host() {
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "public.example".parse().unwrap());
+        headers.insert("origin", "https://public.example".parse().unwrap());
+        headers.insert("x-forwarded-host", "attacker.example".parse().unwrap());
+        let setup = super::forwarded_admin_request_headers("/api/v1/auth/setup?x=1", &headers);
+        assert!(
+            setup
+                .iter()
+                .any(|(name, value)| name == "host" && value == "public.example")
+        );
+        for path in [
+            "/api/v1/admin/endpoints",
+            "/v1/chat/completions",
+            "/api/v1/auth/setup/extra",
+        ] {
+            assert!(
+                !super::forwarded_admin_request_headers(path, &headers)
+                    .iter()
+                    .any(|(name, _)| name == "host")
+            );
+        }
     }
 
     #[tokio::test]

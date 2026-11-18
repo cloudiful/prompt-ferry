@@ -190,7 +190,8 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
         log.owner_worker_id,
         log.lease_expires_at,
         log.last_heartbeat_at,
-    );
+    )
+    .with_node_attribution(log.node_attribution);
     let retention = state.usage_retention.read().await.clone().normalized();
     let raw_store = state.raw_payload_store.read().await.clone();
     match db::record_request_record_with_raw_store(

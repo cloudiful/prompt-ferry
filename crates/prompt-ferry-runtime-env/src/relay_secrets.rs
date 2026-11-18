@@ -103,12 +103,26 @@ mod base64_bytes {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RelaySecretManager {
     key: [u8; KEY_BYTES],
 }
 
+impl std::fmt::Debug for RelaySecretManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RelaySecretManager([REDACTED])")
+    }
+}
+
 impl RelaySecretManager {
+    pub fn from_key_bytes(key: [u8; KEY_BYTES]) -> Self {
+        Self { key }
+    }
+
+    pub fn same_key(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+
     pub fn from_base64(value: &str) -> anyhow::Result<Self> {
         let value = value.trim();
         if value.is_empty() {
@@ -199,6 +213,13 @@ pub fn load_or_create_worker_config_key_at(
     }
 }
 
+pub fn read_worker_config_key_file(path: &Path) -> anyhow::Result<RelaySecretManager> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|_| anyhow!("failed to read legacy worker configuration key file"))?;
+    RelaySecretManager::from_base64(&content)
+        .map_err(|_| anyhow!("invalid legacy worker configuration key file"))
+}
+
 fn read_key_file(path: &Path) -> anyhow::Result<Option<RelaySecretManager>> {
     let content = match std::fs::read_to_string(path) {
         Ok(content) => content,
@@ -237,6 +258,14 @@ mod tests {
 
     fn test_key() -> String {
         STANDARD.encode([7_u8; KEY_BYTES])
+    }
+
+    #[test]
+    fn key_comparison_and_debug_are_safe() {
+        let manager = RelaySecretManager::from_key_bytes([7; KEY_BYTES]);
+        assert!(manager.same_key(&RelaySecretManager::from_key_bytes([7; KEY_BYTES])));
+        assert!(!manager.same_key(&RelaySecretManager::from_key_bytes([9; KEY_BYTES])));
+        assert_eq!(format!("{manager:?}"), "RelaySecretManager([REDACTED])");
     }
 
     #[test]

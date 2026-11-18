@@ -97,29 +97,30 @@ export const navSections: NavSection[] = [
     routes: [{ id: 'R-MCP', path: '/mcp', titleKey: 'mcp', adminOnly: false }],
   },
   {
-    id: 'workers',
-    labelKey: 'workers',
+    id: 'nodes',
+    labelKey: 'nodeGroups',
     icon: Plug,
     adminOnly: true,
     routes: [
       {
-        id: 'R-WORKERS',
-        path: '/workers',
-        titleKey: 'workers',
+        id: 'R-NODES',
+        path: '/nodes',
+        titleKey: 'nodeGroups',
         adminOnly: true,
       },
     ],
   },
   {
-    id: 'relay-host',
-    labelKey: 'relayHost',
+    id: 'node',
+    labelKey: 'nodeInfo',
     icon: Server,
+    adminOnly: true,
     routes: [
       {
-        id: 'R-RELAY-HOST',
-        path: '/relay-host',
-        titleKey: 'relayHost',
-        adminOnly: false,
+        id: 'R-NODE',
+        path: '/node',
+        titleKey: 'nodeInfo',
+        adminOnly: true,
       },
     ],
   },
@@ -235,8 +236,4 @@ export function routeForPath(path: string): AppRoute | undefined {
 
 export function defaultNavPath(isAdmin: boolean): string {
   return visibleNavSections(isAdmin)[0]?.routes[0]?.path ?? '/settings/general'
-}
-
-export function isRelayHostPath(path: string): boolean {
-  return path === '/relay-host' || path.startsWith('/relay-host/')
 }

@@ -1,3 +1,4 @@
+mod attribution;
 mod create;
 mod enums;
 mod overview;
@@ -6,6 +7,7 @@ mod records;
 mod replay;
 mod routing;
 
+pub use attribution::*;
 pub use create::*;
 pub use enums::*;
 pub use overview::*;

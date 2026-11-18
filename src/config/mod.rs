@@ -1,54 +1,119 @@
-pub mod binds;
 mod dotenv;
-pub(crate) mod host_startup;
-pub mod host_store;
-pub mod integrated_bridge;
-pub(crate) mod integrated_startup;
-pub mod management_token;
 mod types;
 
-pub use config::{ReadOptions, read, save};
+use config::{ReadOptions, read};
 pub use dotenv::{DOTENV_PATH_ENV, load_repository_env};
-pub use integrated_startup::IntegratedStartup;
 pub use types::*;
 
-use crate::{naming::CONFIG_ENV_PREFIX, runtime_env};
+use crate::{naming::NODE_CONFIG_ENV_PREFIX, runtime_env};
 
-/// Canonical PostgreSQL URL environment variable. An explicit `--database-url`
-/// argument still wins over it via `merge_args`, and the config file field
-/// `worker.database_url` remains the fallback when the variable is unset.
-const DATABASE_URL_ENV: &str = "DATABASE_URL";
+/// Nested environment prefixes of the removed role-scoped configuration.
+const REMOVED_NESTED_ENV_PREFIXES: &[&str] = &["PROMPT_FERRY_RELAY__", "PROMPT_FERRY_WORKER__"];
 
-pub fn read_app_config() -> Result<AppConfig, std::io::Error> {
+/// The maintenance rekey still reads its legacy key from this explicit
+/// variable, so the node startup classifier must not hide it.
+const MAINTENANCE_LEGACY_KEY_ENV: &str = "PROMPT_FERRY_LEGACY_WORKER_CONFIG_ENCRYPTION_KEY";
+
+/// Return the removed role-scoped environment key names present in `keys`.
+///
+/// Only names are classified: values are never read, returned or logged. The
+/// maintenance legacy key is explicitly excluded because the rekey utility
+/// still consumes it.
+pub fn classify_removed_environment_keys<I>(keys: I) -> Vec<String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut removed: Vec<String> = keys
+        .into_iter()
+        .filter(|key| key != MAINTENANCE_LEGACY_KEY_ENV)
+        .filter(|key| {
+            REMOVED_NESTED_ENV_PREFIXES
+                .iter()
+                .any(|prefix| key.starts_with(prefix))
+        })
+        .collect();
+    removed.sort();
+    removed.dedup();
+    removed
+}
+
+fn removed_environment_keys() -> Vec<String> {
+    classify_removed_environment_keys(
+        std::env::vars_os().filter_map(|(key, _value)| key.into_string().ok()),
+    )
+}
+
+fn reject_removed_environment_keys() -> Result<(), std::io::Error> {
+    let removed = removed_environment_keys();
+    if removed.is_empty() {
+        return Ok(());
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!(
+            "obsolete role-scoped environment keys are set: {}. The node reads only the flat \
+             PROMPT_FERRY__* namespace; remove these names before starting",
+            removed.join(", ")
+        ),
+    ))
+}
+
+/// Read the node configuration from `PROMPT_FERRY__*`.
+///
+/// This is the startup configuration: it applies no host-local overlay, reads
+/// no legacy `DATABASE_URL` alias, rejects the removed role-scoped environment
+/// names, and validates the result.
+pub fn read_node_config() -> Result<NodeConfig, std::io::Error> {
+    reject_removed_environment_keys()?;
     let app_name = runtime_env::select_config_app_name().map_err(|err| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             format!("failed to resolve config app name: {err}"),
         )
     })?;
-    let mut app_config: AppConfig = read(
+    let node_config: NodeConfig = read(
         app_name,
-        Some(ReadOptions::with_env_prefix(CONFIG_ENV_PREFIX)),
+        Some(ReadOptions::with_env_prefix(NODE_CONFIG_ENV_PREFIX)),
     )?;
-    if let Some(database_url) = database_url_from_env() {
-        app_config.worker.database_url = database_url;
-    }
-    // The registry identity is resolved from the configured bind before any
-    // listener reservation replaces it with an ephemeral address, so a
-    // restart keeps the same Workers row.
-    if app_config.worker.worker_identity.trim().is_empty() {
-        app_config.worker.worker_identity = app_config.worker.resolved_worker_identity();
-    }
-    // The host-local overlay is applied last: it is the writable surface the
-    // relay control plane owns, so it decides the keys it defines and leaves
-    // everything else to the main configuration above.
-    host_store::apply(&mut app_config);
-    Ok(app_config)
+    node_config
+        .validate()
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err.to_string()))?;
+    Ok(node_config)
 }
 
-fn database_url_from_env() -> Option<String> {
-    std::env::var(DATABASE_URL_ENV)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+#[cfg(test)]
+mod tests {
+    use super::classify_removed_environment_keys;
+
+    #[test]
+    fn removed_role_environment_names_are_classified_by_name_only() {
+        let removed = classify_removed_environment_keys([
+            "PROMPT_FERRY_RELAY__CLIENT_TOKEN".to_string(),
+            "PROMPT_FERRY_WORKER__VALKEY_URL".to_string(),
+            "PROMPT_FERRY__DATABASE_URL".to_string(),
+            "PROMPT_FERRY__VALKEY_URL".to_string(),
+            "PROMPT_FERRY_WORKER_ADMIN_PORT".to_string(),
+            "DATABASE_URL".to_string(),
+            "PROMPT_FERRY_LEGACY_WORKER_CONFIG_ENCRYPTION_KEY".to_string(),
+        ]);
+        assert_eq!(
+            removed,
+            vec![
+                "PROMPT_FERRY_RELAY__CLIENT_TOKEN".to_string(),
+                "PROMPT_FERRY_WORKER__VALKEY_URL".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_flat_namespace_is_never_reported_as_removed() {
+        assert!(
+            classify_removed_environment_keys([
+                "PROMPT_FERRY__BIND".to_string(),
+                "PROMPT_FERRY__MASTER_SECRET".to_string(),
+                "PROMPT_FERRY__VALKEY_URL".to_string(),
+            ])
+            .is_empty()
+        );
+    }
 }

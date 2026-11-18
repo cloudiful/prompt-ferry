@@ -1,4 +1,4 @@
-use super::{RequestRecordCategory, RequestRecordState, UsageEventKind};
+use super::{NodeAttribution, RequestRecordCategory, RequestRecordState, UsageEventKind};
 use crate::db::{RequestFailureFamily, RouteSelectionReason};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -102,6 +102,10 @@ pub struct RequestRecordCreate {
     pub client_key_id: Option<i64>,
     pub requested_model: Option<String>,
     pub upstream_model: Option<String>,
+    /// The group, ingress and processor of the persisted request record. Only
+    /// an authenticated node identity fills it; old rows and the legacy
+    /// relay path keep `NULL`.
+    pub node_attribution: Option<NodeAttribution>,
 }
 
 #[derive(Debug, Clone)]
@@ -259,6 +263,7 @@ impl RequestRecordCreate {
             client_key_id: None,
             requested_model: None,
             upstream_model: None,
+            node_attribution: None,
         }
     }
 
@@ -489,5 +494,33 @@ impl RequestRecordCreate {
         self.lease_expires_at = lease_expires_at;
         self.last_heartbeat_at = last_heartbeat_at;
         self
+    }
+
+    pub fn with_node_attribution(mut self, node_attribution: Option<NodeAttribution>) -> Self {
+        self.node_attribution = node_attribution;
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RequestRecordCreate;
+    use crate::db::NodeAttribution;
+    use uuid::Uuid;
+
+    #[test]
+    fn the_builder_keeps_the_node_attribution() {
+        let attribution = NodeAttribution::peer_link(Uuid::from_u128(7), Uuid::from_u128(11));
+        let create = RequestRecordCreate::ai_request(Uuid::from_u128(1), "/v1/chat/completions")
+            .with_node_attribution(Some(attribution));
+
+        assert_eq!(create.node_attribution, Some(attribution));
+    }
+
+    #[test]
+    fn a_record_without_a_node_identity_stays_unattributed() {
+        let create = RequestRecordCreate::ai_request(Uuid::from_u128(1), "/v1/chat/completions");
+
+        assert_eq!(create.node_attribution, None);
     }
 }

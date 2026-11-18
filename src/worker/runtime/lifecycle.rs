@@ -295,6 +295,25 @@ pub(super) async fn stop_accepted_tasks(
     }
 }
 
+/// Cancel every still-registered request through the same `RequestCancellation`
+/// the bridge cancel path uses.
+///
+/// At the point this runs, no new request can be admitted, so the remaining
+/// set only shrinks.
+pub(super) async fn cancel_in_flight_requests(runtime_state: &super::WorkerRuntimeState) {
+    let requests = {
+        let cancellations = runtime_state.request_cancellations.lock().await;
+        cancellations.values().cloned().collect::<Vec<_>>()
+    };
+    let mcp_requests = {
+        let cancellations = runtime_state.mcp_request_cancellations.lock().await;
+        cancellations.values().cloned().collect::<Vec<_>>()
+    };
+    for cancellation in requests.into_iter().chain(mcp_requests) {
+        cancellation.cancel();
+    }
+}
+
 pub(super) struct ActiveRequestGuard {
     control: RuntimeControl,
 }

@@ -35,6 +35,7 @@ jobs:
         run: |
           bun install --no-save --minimum-release-age 604800
           bun run openapi-ts
+          git diff --exit-code -- src/generated/admin-api
           bun run build
           test -f dist/index.html
 
@@ -51,7 +52,9 @@ jobs:
         run: mkdir -p ci-image-input
 
       - name: Export OpenAPI
-        run: ci-image-input/prompt-ferry openapi export
+        run: |
+          ci-image-input/prompt-ferry openapi export
+          git diff --exit-code -- openapi/admin-api.yaml
 
       - name: Build and publish Docker image
         uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker@v0.5.0

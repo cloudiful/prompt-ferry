@@ -86,10 +86,8 @@ runs code generation with Node. The application typecheck remains on TypeScript
 
 Commit generated changes to `openapi/admin-api.yaml` and
 `frontend/src/generated/admin-api/**` together with the source change. Do not
-hand-edit generated files or add handwritten admin API DTOs. The document covers
-the worker admin API and the relay management API; the relay routes are served
-by the relay's own loopback management listener but share the one `/api/v1`
-contract, so adding a route means adding its `utoipa` stub in the same change.
+hand-edit generated files or add handwritten admin API DTOs. The node serves the
+admin API on its single listener; add a `utoipa` stub with any route change.
 
 SQLx query metadata is generated after database or SQL changes:
 

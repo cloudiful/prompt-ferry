@@ -1,5 +1,4 @@
 use super::*;
-use anyhow::Context;
 use axum::extract::DefaultBodyLimit;
 use axum::http::{Extensions, Version};
 use axum::{
@@ -7,140 +6,15 @@ use axum::{
     middleware::{self, Next},
 };
 use std::path::PathBuf;
+#[cfg(test)]
 use std::time::Duration;
-use tokio::sync::watch;
 use tower_http::compression::{
     CompressionLayer,
     predicate::{DefaultPredicate, NotForContentType, Predicate},
 };
 use tower_http::services::{ServeDir, ServeFile};
 
-use crate::config;
 use crate::worker_admin::state::AdminExecutionTracker;
-
-/// Hard ceiling on how long the admin HTTP server waits for in-flight
-/// requests to drain before forcing shutdown. Sized to fit inside the
-/// worker container's `stop_grace_period` (30s) alongside the rest of
-/// the worker shutdown bookkeeping.
-pub const ADMIN_SHUTDOWN_BUDGET: Duration = Duration::from_secs(10);
-
-/// Run the admin HTTP server for the full lifetime of the worker process.
-/// The `ADMIN_SHUTDOWN_BUDGET` only caps the drain phase *after* shutdown
-/// has been signalled — a healthy worker is never cut off by the timeout.
-/// When `shutdown_rx` is `None` the server falls back to listening for OS
-/// signals directly (handy for `cargo run`).
-///
-/// `listener` is the socket to serve on. The integrated entrypoint passes one
-/// it already reserved, so a fixed admin port cannot be claimed by another
-/// process while the worker is still running database migrations; the
-/// standalone worker passes `None` and binds `bind_address` here.
-///
-/// The address reported after binding is the one really served: a configured
-/// port of `0` resolves here, so the startup path learns the address to open
-/// instead of echoing back what it intended to bind.
-pub async fn run_admin_server(
-    state: AdminState,
-    bind_address: &str,
-    listener: Option<tokio::net::TcpListener>,
-    shutdown_rx: Option<watch::Receiver<bool>>,
-) -> anyhow::Result<()> {
-    let listener = match listener {
-        Some(listener) => listener,
-        None => bind_admin_listener(bind_address).await?,
-    };
-    let bound_addr = listener.local_addr()?;
-    config::integrated_startup::publish_bound(bound_addr);
-    tracing::info!(%bound_addr, configured_bind = %bind_address, "worker admin listening");
-    let executions = state.admin_executions.clone();
-    let app = router(state);
-    // Both the graceful-shutdown future and the drain budget need to watch
-    // the same fired signal. A single watch channel keeps them in sync.
-    let (fired_tx, fired_rx) = watch::channel(false);
-    let mut shutdown_watcher = shutdown_rx;
-    tokio::spawn(async move {
-        match shutdown_watcher.as_mut() {
-            Some(rx) => {
-                if !*rx.borrow() {
-                    let _ = rx.changed().await;
-                }
-            }
-            None => admin_shutdown_signal().await,
-        }
-        let _ = fired_tx.send(true);
-    });
-    let serve_shutdown = fired_rx.clone();
-    let serve = axum::serve(listener, app).with_graceful_shutdown(async move {
-        wait_for_fired(serve_shutdown).await;
-    });
-    let drain_rx = fired_rx.clone();
-    tokio::select! {
-        result = serve => result.map_err(anyhow::Error::from),
-        _ = drain_deadline(drain_rx, ADMIN_SHUTDOWN_BUDGET) => {
-            // Axum spawns the connection tasks separately from this serve
-            // future. Cancelling the tracked handlers is what actually stops
-            // an in-progress admin mutation; dropping the serve future alone
-            // would leave it running.
-            executions.cancel();
-            let remaining = executions
-                .wait_for_idle(Duration::from_secs(1))
-                .await;
-            tracing::warn!(
-                budget_seconds = ADMIN_SHUTDOWN_BUDGET.as_secs(),
-                remaining,
-                "admin server exceeded graceful shutdown budget; forcing exit"
-            );
-            Ok(())
-        }
-    }
-}
-
-async fn wait_for_fired(mut rx: watch::Receiver<bool>) {
-    if *rx.borrow() {
-        return;
-    }
-    let _ = rx.changed().await;
-}
-
-/// Bind the admin socket from a configured address.
-///
-/// Kept separate from the serve path so a caller that must treat a bind
-/// failure as a startup failure can do so before spawning the server.
-async fn bind_admin_listener(bind_address: &str) -> anyhow::Result<tokio::net::TcpListener> {
-    let bind_addr: SocketAddr = bind_address
-        .parse()
-        .with_context(|| format!("invalid worker admin bind address `{bind_address}`"))?;
-    tokio::net::TcpListener::bind(bind_addr)
-        .await
-        .with_context(|| {
-            format!(
-                "failed to bind the worker admin listener to `{bind_address}`; set port 0 to let \
-                 prompt-ferry pick a free port"
-            )
-        })
-}
-
-/// Resolves `budget` after shutdown is signalled, and never before.
-async fn drain_deadline(rx: watch::Receiver<bool>, budget: Duration) {
-    wait_for_fired(rx).await;
-    tokio::time::sleep(budget).await;
-}
-
-async fn admin_shutdown_signal() {
-    #[cfg(unix)]
-    {
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .expect("failed to install SIGTERM handler");
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = terminate.recv() => {}
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = tokio::signal::ctrl_c().await;
-    }
-}
 
 /// The admin router as production serves it: API first, then the frontend.
 ///
@@ -219,6 +93,13 @@ fn api_router(state: AdminState) -> Router<AdminState> {
     Router::new()
         .route("/healthz", get(admin_healthz))
         .route("/ready", get(admin_ready))
+        .route(
+            "/auth/setup",
+            get(setup_status)
+                .post(setup_initialize)
+                .layer(DefaultBodyLimit::max(8192)),
+        )
+        .route("/node", get(node_status))
         .route("/auth/login", post(login))
         .route("/auth/logout", post(logout))
         .route("/auth/me", get(me))
@@ -296,7 +177,7 @@ fn api_router(state: AdminState) -> Router<AdminState> {
             get(list_mcp_servers).post(create_mcp_server),
         )
         .route("/admin/mcp-providers", get(list_mcp_providers))
-        .route("/admin/workers", get(list_workers))
+        .route("/admin/nodes", get(list_nodes))
         .route(
             "/admin/mcp-servers/{server_id}",
             patch(update_mcp_server).delete(delete_mcp_server),
@@ -522,7 +403,7 @@ fn admin_shutting_down_response() -> Response {
     error(
         StatusCode::SERVICE_UNAVAILABLE,
         "worker_shutting_down",
-        "the worker is shutting down",
+        "the node is shutting down",
     )
 }
 
@@ -586,7 +467,7 @@ mod admin_routing_tests {
                 Some(Capability::Endpoints),
             ),
             ("/admin/model-routes", Some(Capability::ModelRoutes)),
-            ("/admin/workers", Some(Capability::Workers)),
+            ("/admin/nodes", Some(Capability::Workers)),
             ("/me/client-keys", Some(Capability::ClientKeys)),
             ("/admin/users/7/client-keys", Some(Capability::ClientKeys)),
             ("/settings/endpoint", Some(Capability::EndpointSetting)),

@@ -83,6 +83,7 @@ jobs:
         run: |
           bun install --no-save
           bun run openapi-ts
+          git diff --exit-code -- src/generated/admin-api
           bun run build
           test -f dist/index.html
 
@@ -157,7 +158,9 @@ jobs:
           install -Dm755 "binary-artifact/${BINARY_NAME}" ci-image-input/prompt-ferry
 
       - name: Export OpenAPI
-        run: ci-image-input/prompt-ferry openapi export
+        run: |
+          ci-image-input/prompt-ferry openapi export
+          git diff --exit-code -- openapi/admin-api.yaml
 
       - name: Upload Docker input
         uses: actions/upload-artifact@v7

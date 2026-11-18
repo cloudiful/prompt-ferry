@@ -22,7 +22,7 @@ pub const SHARED_VALKEY_SETTINGS_KEY: &str = "shared_valkey";
 ///
 /// It is not a runtime override: the database row stays authoritative and the
 /// seed is read only when that row is absent.
-pub const SHARED_VALKEY_SEED_ENV: &str = "PROMPT_FERRY_WORKER__VALKEY_URL";
+pub const SHARED_VALKEY_SEED_ENV: &str = "PROMPT_FERRY__VALKEY_URL";
 
 /// Replay snapshots, MCP catalog entries, sessions and request leases keep the
 /// historical one-day default unless the shared setting says otherwise.
@@ -198,11 +198,13 @@ pub fn decide_shared_valkey_seed(
 
 /// Persist a first-start seed only when no shared Valkey row exists yet.
 ///
-/// A concurrent starter may win the advisory-locked CAS; that conflict is
-/// tolerated because the caller resolves the winning database value right
-/// after this returns. The seed never overwrites an existing or cleared row,
-/// and a valid URL is persisted before any connectivity probe: an unreachable
-/// configured Valkey is a fail-closed operator error, not a reason to reseed.
+/// The seed is the node configuration candidate (`PROMPT_FERRY__VALKEY_URL`),
+/// never a runtime override. A concurrent starter may win the advisory-locked
+/// CAS; that conflict is tolerated because the caller resolves the winning
+/// database value right after this returns. The seed never overwrites an
+/// existing or cleared row, and a valid URL is persisted before any
+/// connectivity probe: an unreachable configured Valkey is a fail-closed
+/// operator error, not a reason to reseed.
 pub async fn seed_shared_valkey_from_env(
     pool: &PgPool,
     manager: &RelaySecretManager,
@@ -213,7 +215,7 @@ pub async fn seed_shared_valkey_from_env(
         SharedValkeySeedDecision::None => Ok(()),
         SharedValkeySeedDecision::Ignored => {
             info!(
-                "ignoring the shared Valkey environment seed because a database setting \
+                "ignoring the shared Valkey first-start seed because a database setting \
                  already exists"
             );
             Ok(())
@@ -231,7 +233,7 @@ pub async fn seed_shared_valkey_from_env(
                 SharedValkeyWriteOutcome::Written(persisted) => {
                     info!(
                         revision = persisted.revision,
-                        "seeded the shared Valkey setting from the environment"
+                        "seeded the shared Valkey setting from the first-start candidate"
                     );
                 }
                 SharedValkeyWriteOutcome::Conflict { current_revision } => {

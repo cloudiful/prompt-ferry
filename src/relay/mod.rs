@@ -1,4 +1,3 @@
-pub mod admin;
 mod public_proxy;
 mod request_compression;
 mod response_forward;
@@ -9,21 +8,17 @@ mod state;
 mod worker_bridge;
 mod worker_proxy;
 
-pub use router::*;
 pub use state::{RelayHandle, RemoteAddr};
 
-pub(crate) use state::AppState;
-
-/// Build the relay state and its handle without serving anything.
-///
-/// The management listener needs both halves, and the tests need them without
-/// binding a socket.
+#[allow(unused_imports)] // P3b node integration entrypoint.
+pub(crate) use router::{merge_node_router, node_apps, node_edge_apps};
 #[cfg(test)]
-pub(crate) fn test_handle(config: crate::config::RelayConfig) -> (AppState, RelayHandle) {
-    let inner = router::test_relay_state();
-    let state = AppState {
-        config,
-        inner: inner.clone(),
-    };
-    (state, RelayHandle { inner })
-}
+pub(crate) use state::test_state;
+#[allow(unused_imports)] // P3b node integration entrypoints.
+pub(crate) use state::{AppState, WorkerSender};
+#[allow(unused_imports)] // P3c peer integration entrypoints.
+pub(crate) use state::{MAX_NODE_PEERS, node_peer_cap_reached};
+#[allow(unused_imports)] // P3b node integration entrypoint.
+pub(crate) use worker_bridge::attach_in_memory_worker;
+#[allow(unused_imports)] // P3c peer integration entrypoints.
+pub(crate) use worker_bridge::{cleanup_worker, dispatch_worker_bridge_message, register_worker};

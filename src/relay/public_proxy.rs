@@ -67,6 +67,21 @@ fn skip_websocket_upgrade(
 }
 
 pub(super) fn public_router(state: AppState) -> Router {
+    public_api_routes()
+        .fallback(any(proxy_admin_ui))
+        .layer(RequestDecompressionLayer::new())
+        .layer(CorsLayer::permissive())
+        .layer(middleware::from_fn(capture_request_compression))
+        .layer(response_compression_layer())
+        .with_state(state)
+}
+
+/// The explicit public routes without the legacy proxy fallback.
+///
+/// The node runtime merges these routes with the worker admin router, which
+/// owns the single SPA fallback of the node listener. The routes are returned
+/// with their own state unresolved, so the caller seals them exactly once.
+pub(super) fn public_api_routes() -> Router<AppState> {
     Router::new()
         .route("/healthz", get(public_healthz))
         .route("/ready", get(public_ready))
@@ -126,7 +141,15 @@ pub(super) fn public_router(state: AppState) -> Router {
                 .post(proxy_mcp_server)
                 .delete(proxy_mcp_server),
         )
-        .fallback(any(proxy_admin_ui))
+}
+
+/// The public routes sealed with their own state, for a merged node router.
+///
+/// The layers belong to the public subrouter alone: the admin router keeps
+/// its own compression and CORS layers, so a merged router never applies the
+/// public layers to the admin routes.
+pub(super) fn public_api_router(state: AppState) -> Router {
+    public_api_routes()
         .layer(RequestDecompressionLayer::new())
         .layer(CorsLayer::permissive())
         .layer(middleware::from_fn(capture_request_compression))
@@ -563,6 +586,45 @@ pub(super) async fn authorize_anthropic_client(
     authorize_client_with_format(state, headers, true).await
 }
 
+/// The outcome of the static client token check.
+///
+/// The node runtime authenticates managed client keys only, so the static
+/// token path is closed for it. The legacy relay keeps the configured static
+/// token working exactly as before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StaticTokenDecision {
+    /// The presented token is the configured static client token.
+    Accept,
+    /// The deployment accepts managed client keys only.
+    ManagedOnly,
+    /// No static client token is configured.
+    NotConfigured,
+    /// The presented token is not the configured static client token.
+    Mismatch,
+}
+
+/// Decide whether a presented token may authenticate through the static path.
+///
+/// The decision is pure: it never reads the environment and never touches a
+/// service, so the node/legacy difference is covered by a unit test.
+pub(super) fn decide_static_token(
+    managed_only: bool,
+    configured_token: &str,
+    presented_token: &str,
+) -> StaticTokenDecision {
+    if managed_only {
+        return StaticTokenDecision::ManagedOnly;
+    }
+    if configured_token.is_empty() {
+        return StaticTokenDecision::NotConfigured;
+    }
+    if presented_token == configured_token {
+        StaticTokenDecision::Accept
+    } else {
+        StaticTokenDecision::Mismatch
+    }
+}
+
 async fn authorize_client_with_format(
     state: &AppState,
     headers: &HeaderMap,
@@ -596,27 +658,36 @@ async fn authorize_client_with_format(
                 return Err(err);
             }
         };
-        if state.config.client_token.is_empty() {
-            warn!("client auth failed: relay client_token is not configured");
-            return Err(not_ready_error(anthropic_format));
+        match decide_static_token(state.managed_only_auth, &state.config.client_token, &token) {
+            StaticTokenDecision::Accept => Ok(None),
+            StaticTokenDecision::ManagedOnly => {
+                // The node runtime has no static client token at all: a
+                // managed `pfy_` key is the only accepted credential, and it
+                // needs the route snapshot that is not applied yet.
+                warn!("client auth failed: this deployment accepts managed client keys only");
+                Err(not_ready_error(anthropic_format))
+            }
+            StaticTokenDecision::NotConfigured => {
+                warn!("client auth failed: relay client_token is not configured");
+                Err(not_ready_error(anthropic_format))
+            }
+            StaticTokenDecision::Mismatch => {
+                // No route snapshot yet (cold start, or a worker-only rolling
+                // upgrade before the first `ConfigSnapshot`). A managed `pfy_`
+                // key cannot be authenticated here, and replying `invalid
+                // token` would make clients treat a rolling upgrade as a
+                // permanent error; fail fast so SDKs retry instead of queuing
+                // server-side. The configured legacy client token keeps
+                // working because it does not depend on the snapshot.
+                warn!(
+                    mode = "not_ready",
+                    token_len = token.len(),
+                    token_hash_prefix = %token_hash_prefix(&token),
+                    "client auth deferred: relay has no route snapshot"
+                );
+                Err(not_ready_error(anthropic_format))
+            }
         }
-        if token != state.config.client_token {
-            // No route snapshot yet (cold start, or a worker-only rolling
-            // upgrade before the first `ConfigSnapshot`). A managed `pfy_` key
-            // cannot be authenticated here, and replying `invalid token` would
-            // make clients treat a rolling upgrade as a permanent error; fail
-            // fast so SDKs retry instead of queuing server-side. The configured
-            // legacy client token keeps working because it does not depend on
-            // the snapshot.
-            warn!(
-                mode = "not_ready",
-                token_len = token.len(),
-                token_hash_prefix = %token_hash_prefix(&token),
-                "client auth deferred: relay has no route snapshot"
-            );
-            return Err(not_ready_error(anthropic_format));
-        }
-        Ok(None)
     } else {
         let token = match if anthropic_format {
             extract_client_token(headers)
@@ -721,6 +792,41 @@ fn public_ip_error(anthropic_format: bool) -> ApiError {
             "ip_not_allowed",
             "client IP is not allowed",
         )
+    }
+}
+
+#[cfg(test)]
+mod static_token_tests {
+    use super::{StaticTokenDecision, decide_static_token};
+
+    #[test]
+    fn the_legacy_relay_keeps_its_static_client_token() {
+        assert_eq!(
+            decide_static_token(false, "legacy-token", "legacy-token"),
+            StaticTokenDecision::Accept
+        );
+        assert_eq!(
+            decide_static_token(false, "legacy-token", "other-token"),
+            StaticTokenDecision::Mismatch
+        );
+        assert_eq!(
+            decide_static_token(false, "", "legacy-token"),
+            StaticTokenDecision::NotConfigured
+        );
+    }
+
+    #[test]
+    fn the_node_accepts_managed_client_keys_only() {
+        // The node has no static token at all, and the explicit guard keeps
+        // the static path closed even when a token would be configured.
+        assert_eq!(
+            decide_static_token(true, "", "any-token"),
+            StaticTokenDecision::ManagedOnly
+        );
+        assert_eq!(
+            decide_static_token(true, "legacy-token", "legacy-token"),
+            StaticTokenDecision::ManagedOnly
+        );
     }
 }
 

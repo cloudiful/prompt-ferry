@@ -47,8 +47,117 @@ pub(crate) fn quota_inference_available(
         && storage_available
 }
 
+pub(crate) struct NodeSetupAuth {
+    master: [u8; 32],
+    pub(crate) attempts: tokio::sync::Semaphore,
+}
+
+impl NodeSetupAuth {
+    pub(crate) fn new(master: [u8; 32]) -> Self {
+        Self {
+            master,
+            attempts: tokio::sync::Semaphore::new(4),
+        }
+    }
+
+    pub(crate) fn verify(&self, candidate: &str) -> bool {
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        if candidate.len() != 44 {
+            return false;
+        }
+        let Ok(bytes) = STANDARD.decode(candidate) else {
+            return false;
+        };
+        if bytes.len() != 32 {
+            return false;
+        }
+        self.master
+            .iter()
+            .zip(bytes.iter())
+            .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+            == 0
+    }
+}
+
+#[cfg(test)]
+mod node_setup_tests {
+    use super::NodeSetupAuth;
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    #[test]
+    fn peer_generation_cleanup_preserves_replacement() {
+        use super::NodeStatusState;
+        use crate::worker_admin_types::{NodePeerSummary, NodeStatusResponse};
+        let id = uuid::Uuid::from_u128(1);
+        let mut state = NodeStatusState {
+            own: NodeStatusResponse {
+                node_id: id,
+                group_id: id,
+                has_database: true,
+                runtime_version: "1".into(),
+                protocol_version: "1".into(),
+                peers: vec![],
+            },
+            peers: Default::default(),
+        };
+        let peer = NodePeerSummary {
+            node_id: uuid::Uuid::from_u128(2),
+            has_database: false,
+            runtime_version: "2".into(),
+            protocol_version: "1".into(),
+            connected_at: None,
+        };
+        state.admit(1, peer.clone());
+        let serialized = serde_json::to_string(&state.own).unwrap();
+        assert!(!serialized.contains("master"));
+        assert!(!serialized.contains("secret"));
+        assert!(!serialized.contains("password"));
+        state.admit(2, peer.clone());
+        state.release(peer.node_id, 1);
+        assert_eq!(state.peers.get(&peer.node_id).unwrap().0, 2);
+        state.release(peer.node_id, 2);
+        assert!(state.peers.is_empty());
+    }
+
+    #[test]
+    fn proof_is_fixed_length_base64_and_matches_master() {
+        let auth = NodeSetupAuth::new([7; 32]);
+        assert!(auth.verify(&STANDARD.encode([7; 32])));
+        assert!(!auth.verify(&STANDARD.encode([8; 32])));
+        assert!(!auth.verify("not base64"));
+        assert!(!auth.verify(&"A".repeat(8192)));
+        assert!(!auth.verify(&STANDARD.encode([7; 31])));
+    }
+}
+
+pub(crate) struct NodeStatusState {
+    pub(crate) own: crate::worker_admin_types::NodeStatusResponse,
+    pub(crate) peers: HashMap<uuid::Uuid, (u64, crate::worker_admin_types::NodePeerSummary)>,
+}
+
+impl NodeStatusState {
+    pub(crate) fn admit(
+        &mut self,
+        generation: u64,
+        peer: crate::worker_admin_types::NodePeerSummary,
+    ) {
+        self.peers.insert(peer.node_id, (generation, peer));
+    }
+    pub(crate) fn release(&mut self, id: uuid::Uuid, generation: u64) {
+        if self
+            .peers
+            .get(&id)
+            .is_some_and(|(current, _)| *current == generation)
+        {
+            self.peers.remove(&id);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AdminState {
+    pub(crate) node_setup: Option<Arc<NodeSetupAuth>>,
+    pub(crate) node_status: Option<Arc<StdMutex<NodeStatusState>>>,
     pub pool: PgPool,
     pub lease_pool: PgPool,
     pub user_store: UserStore,
@@ -348,6 +457,8 @@ impl AdminState {
         let user_store = UserStore::postgres(&init.pool);
         let config_repository = ConfigRepository::postgres(&init.pool);
         Self {
+            node_setup: None,
+            node_status: None,
             pool: init.pool,
             lease_pool: init.lease_pool,
             user_store,

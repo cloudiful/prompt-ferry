@@ -1,19 +1,23 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
-use db_init::{DatabaseUrlResolution, DbInitOptions, init_database, load_dotenv_if_exists};
-use sqlx::migrate::Migrator;
+use prompt_ferry::config::{load_repository_env, read_node_config};
+use prompt_ferry::db::gate::{NodeGate, RuntimeIdentity};
+use std::time::Duration;
+use uuid::Uuid;
 
-static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
-
-/// Canonical PostgreSQL URL environment variable. An explicit
-/// `--database-url` argument and the worker config field remain supported.
-const DATABASE_URL_ENV_KEYS: &[&str] = &["DATABASE_URL"];
+/// Upper bound for the gate claim and the migration it owns.
+const GATE_PREPARE_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Parser)]
-#[command(name = "db_init", about = "Database helpers for prompt-ferry")]
+#[command(
+    name = "db_init",
+    about = "Prepare the prompt-ferry database through the node gate"
+)]
 struct Cli {
-    #[arg(long, env = "DATABASE_URL")]
-    database_url: Option<String>,
+    /// Acknowledge that pre-node processes are stopped so the gate may cut
+    /// over a legacy schema. The gate only asks for it when it detects one.
+    #[arg(long, env = "PROMPT_FERRY_ACK_STOP_OLD_NODES")]
+    ack_stop_old_nodes: bool,
 }
 
 #[tokio::main]
@@ -25,33 +29,29 @@ async fn main() {
 }
 
 async fn run() -> Result<()> {
-    load_dotenv_if_exists(".env")?;
+    load_repository_env().context("failed to load the .env file")?;
     let cli = Cli::parse();
-    let resolution = resolve_database_url(cli.database_url)?;
-    let _pool = init_database(
-        &resolution.database_url,
-        &MIGRATOR,
-        DbInitOptions::default(),
+    let config = read_node_config().context("failed to read the node configuration")?;
+    let database_url = config.database_url.trim();
+    if database_url.is_empty() {
+        bail!("the node configuration has no database URL");
+    }
+    let identity = RuntimeIdentity::current().context("failed to resolve the runtime identity")?;
+    let gate = NodeGate::prepare_database(
+        database_url,
+        identity,
+        Uuid::new_v4(),
+        cli.ack_stop_old_nodes,
+        GATE_PREPARE_TIMEOUT,
     )
-    .await?;
-    println!("database init completed");
+    .await
+    .context("failed to prepare the node database")?;
+    println!(
+        "database init completed: runtime {}.{}.{}, protocol {}",
+        gate.identity.version.0,
+        gate.identity.version.1,
+        gate.identity.version.2,
+        gate.identity.protocol
+    );
     Ok(())
-}
-
-fn resolve_database_url(from_arg: Option<String>) -> Result<DatabaseUrlResolution> {
-    db_init::resolve_database_url(from_arg, DATABASE_URL_ENV_KEYS, || {
-        let config = config::read::<serde_json::Value>(
-            "prompt-ferry",
-            Some(config::ReadOptions::with_env_prefix("PROMPT_FERRY")),
-        )
-        .context("failed to load prompt-ferry config")?;
-        let worker = config
-            .get("worker")
-            .and_then(|value| value.get("database_url"))
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| anyhow!("worker.database_url is not configured"))?;
-        Ok(Some(worker.to_string()))
-    })
 }

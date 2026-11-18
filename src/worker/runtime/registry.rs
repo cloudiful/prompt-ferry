@@ -22,7 +22,7 @@ use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 use super::lifecycle::RuntimeControl;
-use crate::config::{WorkerConfig, host_startup};
+use crate::config::WorkerConfig;
 use crate::db;
 
 /// How long a failed heartbeat may be retried while the registry row is
@@ -155,10 +155,7 @@ pub(super) async fn admit_worker(
     coordination: db::CoordinationSnapshot,
 ) -> anyhow::Result<Instant> {
     let worker_id = config.resolved_worker_identity();
-    let role = host_startup::active()
-        .unwrap_or_default()
-        .as_str()
-        .to_string();
+    let role = "node";
     let version = env!("CARGO_PKG_VERSION").to_string();
     let incarnation = control.worker_instance_id();
     let restart_required = match db::desired_shared_valkey_revision(pool).await {
@@ -174,7 +171,7 @@ pub(super) async fn admit_worker(
     let outcome = db::register_worker(
         pool,
         &worker_id,
-        &role,
+        role,
         &version,
         incarnation,
         coordination,
@@ -183,14 +180,14 @@ pub(super) async fn admit_worker(
     .await?;
     match outcome {
         db::RegisterOutcome::Registered => {
-            info!(%worker_id, "worker admitted to the registry");
+            info!(%worker_id, "node admitted to the registry");
             Ok(admitted_at)
         }
         db::RegisterOutcome::IdentityCollision => Err(anyhow::anyhow!(
-            "another live worker owns the identity '{worker_id}'; retry after it expired"
+            "another live node owns the identity '{worker_id}'; retry after it expired"
         )),
         db::RegisterOutcome::WorkerLimitReached => Err(anyhow::anyhow!(
-            "the degraded bootstrap mode already has a live worker; retry after it expired"
+            "the degraded bootstrap mode already has a live node; retry after it expired"
         )),
         db::RegisterOutcome::CoordinationIncompatible => Err(anyhow::anyhow!(
             "the worker coordination mode or applied shared configuration revision is incompatible \

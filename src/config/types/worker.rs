@@ -1,9 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    cli::WorkerArgs,
-    storage::{StorageBackend, StorageContract},
-};
+use crate::storage::StorageBackend;
 
 use super::{BridgeEncryptionMode, McpWarmupMode, NativeApi, WorkerTlsMode};
 
@@ -171,98 +168,6 @@ impl WorkerConfig {
     /// persisted file-local fallback must never be silently used for it.
     pub(crate) fn mcp_oauth_shared_key_missing(&self) -> bool {
         self.storage_backend().is_postgres() && self.effective_encryption_key().trim().is_empty()
-    }
-
-    pub(crate) fn storage_contract(&self, valkey_url: &str) -> StorageContract {
-        StorageContract::for_backend(self.storage_backend(), valkey_url)
-    }
-
-    pub fn merge_args(mut self, args: WorkerArgs) -> Self {
-        if !args.relay_url.is_empty() {
-            self.relay_urls = args.relay_url;
-        }
-        if let Some(identity) = args.worker_identity {
-            self.worker_identity = identity;
-        }
-        if let Some(token) = args.worker_token {
-            self.worker_token = token;
-        }
-        if let Some(url) = args.upstream_base_url {
-            self.upstream_base_url = url;
-        }
-        if let Some(key) = args.upstream_api_key {
-            self.upstream_api_key = key;
-        }
-        if let Some(api) = args.upstream_native_api {
-            self.upstream_native_api = api;
-        }
-        if let Some(timeout) = args.connect_timeout_seconds {
-            self.connect_timeout_seconds = timeout;
-        }
-        if let Some(bind) = args.admin_bind {
-            self.admin_bind = bind;
-        }
-        if let Some(url) = args.database_url {
-            self.database_url = url;
-        }
-        if let Some(path) = args.standalone_database_path {
-            self.standalone_database_path = path;
-        }
-        if let Some(login) = args.bootstrap_admin_login {
-            self.bootstrap_admin_login = login;
-        }
-        if let Some(password) = args.bootstrap_admin_password {
-            self.bootstrap_admin_password = password;
-        }
-        if let Some(mode) = args.tls_mode {
-            self.tls_mode = mode;
-        }
-        if let Some(path) = args.relay_ca {
-            self.relay_ca = path;
-        }
-        if let Some(path) = args.client_cert {
-            self.client_cert = path;
-        }
-        if let Some(path) = args.client_key {
-            self.client_key = path;
-        }
-        if let Some(mode) = args.bridge_encryption_mode {
-            self.bridge_encryption_mode = mode;
-        }
-        if let Some(key) = args.bridge_encryption_key {
-            self.bridge_encryption_key = key;
-        }
-        if let Some(ttl) = args.session_ttl_seconds {
-            self.session_ttl_seconds = ttl;
-        }
-        if let Some(max_entries) = args.local_session_max_entries {
-            self.local_session_max_entries = max_entries.max(1);
-        }
-        if let Some(timeout) = args.shutdown_drain_seconds {
-            self.shutdown_drain_seconds = timeout;
-        }
-        if let Some(mode) = args.mcp_warmup {
-            self.mcp_warmup = mode;
-        }
-        if let Some(bytes) = args.max_upstream_response_bytes {
-            self.max_upstream_response_bytes = bytes.max(1);
-        }
-        if let Some(bytes) = args.max_raw_response_capture_bytes {
-            self.max_raw_response_capture_bytes = bytes.max(1);
-        }
-        if let Some(bytes) = args.max_response_text_capture_bytes {
-            self.max_response_text_capture_bytes = bytes.max(1);
-        }
-        if let Some(ttl) = args.endpoint_model_cache_ttl_seconds {
-            self.endpoint_model_cache_ttl_seconds = ttl.max(1);
-        }
-        if !args.mcp_allowed_origins.is_empty() {
-            self.mcp_allowed_origins = args.mcp_allowed_origins;
-        }
-        if let Some(base) = args.mcp_oauth_redirect_base {
-            self.mcp_oauth_redirect_base = base;
-        }
-        self
     }
 }
 

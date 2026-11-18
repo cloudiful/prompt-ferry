@@ -1,34 +1,49 @@
-use std::{fmt, sync::Arc, time::Duration};
+use std::{fmt, future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use crate::protocol::{BridgeMessage, McpResponseChunk, ResponseChunk};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
 const BRIDGE_OUTBOUND_MAX_BYTES: usize = 16 * 1024 * 1024;
 
+type WireSize = dyn for<'a> Fn(
+        &'a BridgeMessage,
+    ) -> Pin<Box<dyn Future<Output = Result<usize, BridgeSendError>> + Send + 'a>>
+    + Send
+    + Sync;
+
 #[derive(Clone)]
-pub(super) struct BridgeSender {
+pub(crate) struct BridgeSender {
     data_tx: mpsc::Sender<BridgeData>,
     control_tx: mpsc::UnboundedSender<BridgeMessage>,
     flush_tx: mpsc::UnboundedSender<oneshot::Sender<()>>,
     flush_rx: Arc<std::sync::Mutex<Option<mpsc::UnboundedReceiver<oneshot::Sender<()>>>>>,
     queued_bytes: Arc<Semaphore>,
+    wire_size: Option<Arc<WireSize>>,
 }
 
-pub(super) struct BridgeData {
-    pub(super) message: BridgeMessage,
-    #[allow(dead_code)]
+pub(crate) struct BridgeData {
+    pub(crate) message: BridgeMessage,
     permit: OwnedSemaphorePermit,
 }
 
+impl BridgeData {
+    /// Split the message from its byte-budget permit so a transport can hold
+    /// the permit across the destination write or dispatch and release it
+    /// only after that work completed.
+    pub(crate) fn into_parts(self) -> (BridgeMessage, OwnedSemaphorePermit) {
+        (self.message, self.permit)
+    }
+}
+
 #[derive(Debug)]
-pub(super) enum BridgeSendError {
+pub(crate) enum BridgeSendError {
     Closed,
     TooLarge,
     Encoding(String),
 }
 
 impl BridgeSendError {
-    pub(super) fn diagnostic_reason(&self) -> &'static str {
+    pub(crate) fn diagnostic_reason(&self) -> &'static str {
         match self {
             Self::Closed => "relay_bridge_closed",
             Self::TooLarge => "relay_bridge_message_too_large",
@@ -52,7 +67,7 @@ impl fmt::Display for BridgeSendError {
 impl std::error::Error for BridgeSendError {}
 
 impl BridgeSender {
-    pub(super) fn channel() -> (
+    pub(crate) fn channel() -> (
         Self,
         mpsc::UnboundedReceiver<BridgeMessage>,
         mpsc::Receiver<BridgeData>,
@@ -60,7 +75,7 @@ impl BridgeSender {
         Self::channel_with_byte_budget(BRIDGE_OUTBOUND_MAX_BYTES)
     }
 
-    pub(super) fn channel_with_byte_budget(
+    pub(crate) fn channel_with_byte_budget(
         byte_budget: usize,
     ) -> (
         Self,
@@ -77,10 +92,16 @@ impl BridgeSender {
                 flush_tx,
                 flush_rx: Arc::new(std::sync::Mutex::new(Some(flush_rx))),
                 queued_bytes: Arc::new(Semaphore::new(byte_budget)),
+                wire_size: None,
             },
             control_rx,
             data_rx,
         )
+    }
+
+    pub(crate) fn with_wire_size(mut self, wire_size: Arc<WireSize>) -> Self {
+        self.wire_size = Some(wire_size);
+        self
     }
 
     /// Hand the single ordered-flush request receiver to the session writer.
@@ -88,7 +109,7 @@ impl BridgeSender {
     /// The writer drains both outbound queues and flushes its websocket sink
     /// before acknowledging; the caller drops every producer first so nothing
     /// can be queued behind the marker.
-    pub(super) fn take_flush_receiver(
+    pub(crate) fn take_flush_receiver(
         &self,
     ) -> Option<mpsc::UnboundedReceiver<oneshot::Sender<()>>> {
         self.flush_rx
@@ -102,7 +123,7 @@ impl BridgeSender {
     /// Returns `false` when the writer is gone, the socket write fails, or the
     /// bounded allowance expires; a closed or failing socket never reports a
     /// successful flush.
-    pub(super) async fn flush(&self, allowance: Duration) -> bool {
+    pub(crate) async fn flush(&self, allowance: Duration) -> bool {
         let (ack_tx, ack_rx) = oneshot::channel();
         if self.flush_tx.send(ack_tx).is_err() {
             return false;
@@ -115,21 +136,21 @@ impl BridgeSender {
         Self::channel().0
     }
 
-    pub(super) async fn send(&self, message: BridgeMessage) -> Result<(), BridgeSendError> {
+    pub(crate) async fn send(&self, message: BridgeMessage) -> Result<(), BridgeSendError> {
         if is_control_message(&message) {
             return self
                 .control_tx
                 .send(message)
                 .map_err(|_| BridgeSendError::Closed);
         }
-        let prepared = prepare_bridge_messages(message)?;
+        let prepared = self.prepare_bridge_messages(message).await?;
         for (message, bytes) in prepared {
             self.send_data_message(message, bytes).await?;
         }
         Ok(())
     }
 
-    async fn send_data_message(
+    pub(crate) async fn send_data_message(
         &self,
         message: BridgeMessage,
         bytes: usize,
@@ -145,37 +166,45 @@ impl BridgeSender {
             .await
             .map_err(|_| BridgeSendError::Closed)
     }
-}
 
-fn prepare_bridge_messages(
-    message: BridgeMessage,
-) -> Result<Vec<(BridgeMessage, usize)>, BridgeSendError> {
-    let bytes = crate::bridge_wire::encode_message(&message)
-        .map_err(|error| BridgeSendError::Encoding(error.to_string()))?
-        .len();
-    if bytes <= BRIDGE_OUTBOUND_MAX_BYTES {
-        return Ok(vec![(message, bytes)]);
-    }
-    let mut pending: std::collections::VecDeque<BridgeMessage> = fragment_chunk_message(message)
-        .ok_or(BridgeSendError::TooLarge)?
-        .into();
-    let mut prepared = Vec::new();
-    while let Some(fragment) = pending.pop_front() {
-        let bytes = crate::bridge_wire::encode_message(&fragment)
+    async fn encoded_size(&self, message: &BridgeMessage) -> Result<usize, BridgeSendError> {
+        let local = crate::bridge_wire::encode_message(message)
             .map_err(|error| BridgeSendError::Encoding(error.to_string()))?
             .len();
-        if bytes <= BRIDGE_OUTBOUND_MAX_BYTES {
-            prepared.push((fragment, bytes));
-            continue;
+        match &self.wire_size {
+            Some(size) => Ok(local.max(size(message).await?)),
+            None => Ok(local),
         }
-        // zstd can expand an incompressible payload just past the budget; requesting
-        // more permits than the semaphore capacity would wait forever, so halve the
-        // fragment until its encoded size fits.
-        let (head, tail) = halve_chunk_message(fragment).ok_or(BridgeSendError::TooLarge)?;
-        pending.push_front(tail);
-        pending.push_front(head);
     }
-    Ok(prepared)
+
+    async fn prepare_bridge_messages(
+        &self,
+        message: BridgeMessage,
+    ) -> Result<Vec<(BridgeMessage, usize)>, BridgeSendError> {
+        let bytes = self.encoded_size(&message).await?;
+        if bytes <= BRIDGE_OUTBOUND_MAX_BYTES {
+            return Ok(vec![(message, bytes)]);
+        }
+        let mut pending: std::collections::VecDeque<BridgeMessage> =
+            fragment_chunk_message(message)
+                .ok_or(BridgeSendError::TooLarge)?
+                .into();
+        let mut prepared = Vec::new();
+        while let Some(fragment) = pending.pop_front() {
+            let bytes = self.encoded_size(&fragment).await?;
+            if bytes <= BRIDGE_OUTBOUND_MAX_BYTES {
+                prepared.push((fragment, bytes));
+                continue;
+            }
+            // zstd can expand an incompressible payload just past the budget; requesting
+            // more permits than the semaphore capacity would wait forever, so halve the
+            // fragment until its encoded size fits.
+            let (head, tail) = halve_chunk_message(fragment).ok_or(BridgeSendError::TooLarge)?;
+            pending.push_front(tail);
+            pending.push_front(head);
+        }
+        Ok(prepared)
+    }
 }
 
 fn is_control_message(message: &BridgeMessage) -> bool {

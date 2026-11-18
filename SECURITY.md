@@ -1,34 +1,13 @@
-# Security Policy
+# Security
 
-## Reporting a Vulnerability
+Report vulnerabilities privately to the maintainers; do not publish credentials or sensitive request data in issues.
 
-Please report suspected vulnerabilities through GitHub Security Advisories for
-this repository. Do not open a public issue or include credentials, API keys,
-database URLs, request bodies, or other sensitive data in a report.
+A node exposes browser, administration, AI and peer traffic on the same `PROMPT_FERRY__BIND` listener. Restrict access with network controls or a trusted reverse proxy. Preserve the original Host for setup Origin checks; do not trust arbitrary forwarded host headers. Setup sends the master proof in JSON over HTTPS or a trusted local proxy; it is not persisted and is not a reset bypass.
 
-Include the affected version, deployment mode, reproduction steps, and the
-smallest safe proof needed to validate the issue. Redact provider keys and
-private hostnames before submitting logs.
+`PROMPT_FERRY__MASTER_SECRET` is standard base64 encoding of 32 random bytes. Generate it once with `openssl rand -base64 32`, store and back it up securely, and share it only with fully trusted peers. It is directly reused for stored-secret encryption and peer trust; an AI API key and user password are separate credentials. Peer mutual AEAD proof binds both fresh challenges. The root secret itself is never sent on the WebSocket; proof ciphertext does travel. TLS off leaves business content plaintext: use TLS or a trusted network.
 
-Reports will be reviewed privately and handled according to the severity and
-the currently supported release line.
+A peer proves itself before the WebSocket upgrade. `GET /_internal/node/challenge` returns the hello of the node and a ticket that seals that hello, the issue time, the expiry and the startup epoch of the process under the master secret. The dialing peer answers with the headers `x-prompt-ferry-peer-ticket` and `x-prompt-ferry-peer-proof` of the WebSocket upgrade request; the proof seals its own hello and the transcript of both hellos. The accepting node answers with `x-prompt-ferry-peer-confirmation` in the 101 response; the confirmation seals the fresh hello of the dialer, the hello of the server, the nonce of the ticket and the startup epoch, and it is sealed only after the proof of the peer was verified. The dialing node checks that confirmation before it admits the peer or sends a single business frame, so a replayed challenge, a forged 101 response or an endpoint that only replays a challenge is never accepted. Only ciphertext travels, never the root secret, and no secret travels in a query string. A ticket is valid for at most 60 seconds, belongs to one node and one process, and its nonce is used once, so a captured request cannot be replayed. The challenge request uses the same origin, the same client certificate and the same trust anchor as the WebSocket link, and redirects are refused, so mutual TLS covers the bootstrap and the client identity is never offered to another host. Unauthenticated challenge and upgrade work is bounded to 32 concurrent requests per node.
 
-## Deployment Guidance
+For native TLS configure `PROMPT_FERRY__TLS_MODE=server` and `PROMPT_FERRY__TLS_CERT` / `PROMPT_FERRY__TLS_KEY` as certificate/key paths. For `mtls`, also configure `PROMPT_FERRY__TLS_CLIENT_CA`; mutual TLS covers the entire listener, including browsers and AI clients. The certificate/key are also used for outbound peer identity and require suitable serverAuth and clientAuth usages and SANs; the client CA must establish trust in both directions. Use `wss://` for protected peer links. Replace the Compose plaintext healthcheck for native TLS with a certificate-validating probe with appropriate client credentials for mTLS; never add a hidden plaintext listener or disable certificate validation.
 
-- Keep the relay worker WebSocket and worker admin port on private networks.
-- Keep the relay management listener (`relay.admin_bind`) on loopback. It serves
-  the relay's own control API and must never be published on a routable address;
-  reach it through a port forward or an SSH tunnel.
-- The relay management token (`relay.admin_token`) is distinct from the relay
-  client token, the `/ws/worker` worker token, and any worker admin login. Use a
-  strong, unique value for it, or let the relay generate one and keep the
-  generated host-local configuration file owner-only.
-- A host-local service role (`integrated`, `worker`, or `relay`) decides only what
-  this machine runs. It is stored in the host-local overlay beside the main
-  configuration and never in shared managed-relay configuration or the business
-  database; a saved role takes effect on the next restart.
-- Use strong, unique values for all tokens and bootstrap passwords.
-- Protect `PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY` like a database key.
-- Use HTTPS or mutual TLS when traffic crosses a network boundary.
-- Treat raw request and response logging as sensitive data.
-- Back up PostgreSQL before upgrades and destructive migrations.
+See [MIGRATING.md](MIGRATING.md) for backups and the maintenance boundary.

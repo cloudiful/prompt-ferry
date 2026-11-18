@@ -1,0 +1,1 @@
+SELECT pg_try_advisory_lock(8675309067)

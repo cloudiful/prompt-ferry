@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 import { LoginPage } from '@/pages/LoginPage'
-import { RelayHostPage } from '@/pages/RelayHostPage'
-import { WorkersPage } from '@/pages/WorkersPage'
+import { SetupPage } from '@/pages/SetupPage'
+import { NodeStatusPage } from '@/pages/NodeStatusPage'
+import { NodesPage } from '@/pages/NodesPage'
 import { AppShell } from '@/layouts/AppShell'
 import { ApiKeysPage } from '@/pages/ApiKeysPage'
 import { AvailableModelsPage } from '@/pages/AvailableModelsPage'
@@ -19,7 +20,7 @@ import { createAppQueryClient } from '@/lib/query'
 import {
   AdminGuard,
   GuardedFoundationRoute,
-  WorkerAuthGate,
+  SessionAuthGate,
 } from '@/lib/router'
 import { LocaleProvider } from '@/lib/i18n'
 import { NotifierProvider } from '@/lib/notifier'
@@ -77,10 +78,16 @@ function AppRouteElement({ route }: { route: AppRoute }) {
           <SettingsPage />
         </AdminGuard>
       )
-    case 'R-WORKERS':
+    case 'R-NODES':
       return (
         <AdminGuard>
-          <WorkersPage />
+          <NodesPage />
+        </AdminGuard>
+      )
+    case 'R-NODE':
+      return (
+        <AdminGuard>
+          <NodeStatusPage />
         </AdminGuard>
       )
     default:
@@ -99,10 +106,8 @@ export default function App() {
             <BrowserRouter>
               <Routes>
                 <Route element={<LoginPage />} path="/login" />
-                <Route element={<AppShell />} path="/relay-host">
-                  <Route element={<RelayHostPage />} index />
-                </Route>
-                <Route element={<WorkerAuthGate />}>
+                <Route element={<SetupPage />} path="/setup" />
+                <Route element={<SessionAuthGate />}>
                   <Route element={<AppShell />}>
                     <Route
                       element={<Navigate replace to="/api-keys" />}
@@ -124,15 +129,13 @@ export default function App() {
                       element={<Navigate replace to="/settings/general" />}
                       path="/settings"
                     />
-                    {appRoutes
-                      .filter((route) => route.path !== '/relay-host')
-                      .map((route) => (
-                        <Route
-                          element={<AppRouteElement route={route} />}
-                          key={route.id}
-                          path={route.path}
-                        />
-                      ))}
+                    {appRoutes.map((route) => (
+                      <Route
+                        element={<AppRouteElement route={route} />}
+                        key={route.id}
+                        path={route.path}
+                      />
+                    ))}
                     <Route
                       element={<Navigate replace to="/api-keys" />}
                       path="*"

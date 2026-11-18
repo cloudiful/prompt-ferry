@@ -17,7 +17,57 @@ use super::request_assembly::{
     BufferedBridgeRequest, ChunkCollection, PendingIncomingRequest, RequestCancellation,
 };
 
-pub(super) async fn handle_relay_bridge_message(
+/// Cancel only the requests that belong to one peer link.
+///
+/// A disconnecting link must not cancel the work of another link or of the
+/// local executor, so only the request ids the link owned are cancelled.
+/// The pending entries of the other links stay untouched.
+pub(crate) async fn cancel_link_requests(
+    runtime_state: &super::WorkerRuntimeState,
+    request_ids: &std::collections::HashSet<String>,
+    mcp_request_ids: &std::collections::HashSet<String>,
+    realtime_ids: &std::collections::HashSet<String>,
+) {
+    for request_id in request_ids {
+        if let Some(cancellation) = runtime_state
+            .request_cancellations
+            .lock()
+            .await
+            .remove(request_id)
+        {
+            cancellation.cancel();
+        }
+        runtime_state
+            .pending_requests
+            .lock()
+            .await
+            .remove(request_id);
+    }
+    for request_id in mcp_request_ids {
+        if let Some(cancellation) = runtime_state
+            .mcp_request_cancellations
+            .lock()
+            .await
+            .remove(request_id)
+        {
+            cancellation.cancel();
+        }
+        runtime_state
+            .pending_mcp_requests
+            .lock()
+            .await
+            .remove(request_id);
+    }
+    for request_id in realtime_ids {
+        runtime_state
+            .pending_realtime_sessions
+            .lock()
+            .await
+            .remove(request_id);
+    }
+}
+
+pub(crate) async fn handle_relay_bridge_message(
     message: BridgeMessage,
     config: &crate::config::WorkerConfig,
     services: &RuntimeServices,

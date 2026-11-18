@@ -20,6 +20,7 @@ mod lifecycle;
 mod lifecycle_standalone;
 mod mcp_catalog_refresh;
 mod mcp_support;
+mod node;
 mod prompt_log;
 mod quota_observation_collector;
 mod raw_maintenance;
@@ -28,16 +29,21 @@ mod request_assembly;
 mod routing;
 mod standalone;
 
+#[allow(unused_imports)] // P3b node integration entrypoints.
+pub(crate) use self::bridge::{BridgeData, BridgeSendError, BridgeSender};
+#[allow(unused_imports)] // P3b node integration entrypoint.
+pub(crate) use self::connect::ExecutorPump;
+/// The node runtime: one gated database node that serves one listener.
+pub use self::node::{NodeDbRuntime, run_node, serve_node};
+
 /// Issue #548: the cache alert check is public so integration tests can drive
 /// one alerting pass without standing up the scheduler.
 pub use self::cache_alert_monitor::{CacheAlertDependencies, run_cache_alert_check};
 
-use crate::{config::WorkerConfig, worker_admin::AdminState};
-use reqwest::Client;
+use crate::worker_admin::AdminState;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
 
-use self::bootstrap::{build_admin_state, build_standalone_state, validate_config};
 use self::context::RequestExecutionContext;
 use self::error_handling::{
     extract_mcp_error, format_mcp_response_body, redaction_enabled, safe_error,
@@ -63,7 +69,6 @@ use self::routing::{
 };
 use self::standalone::StandaloneRuntimeState;
 
-const RELAY_RECONNECT_DELAY_SECONDS: u64 = 1;
 const MCP_ERROR_BODY_CAPTURE_BYTES: usize = 64 * 1024;
 const MCP_RESPONSE_BODY_CAPTURE_BYTES: usize = 64 * 1024;
 const REQUEST_RECORD_LEASE_SECONDS: i64 = 90;
@@ -75,7 +80,7 @@ const ERROR_BODY_SAMPLE_BYTES: usize = 32 * 1024;
 
 /// Shared shutdown broadcast surfaced to long-running child tasks (admin
 /// HTTP server, raw maintenance scheduler, ...). The runtime triggers
-/// it from [`crate::worker::runtime::connect::run_embedded`] once the
+/// it when the node runtime receives the
 /// OS-level signal arrives; every subscriber observes the transition
 /// and runs its own bounded graceful path.
 #[derive(Clone)]
@@ -110,22 +115,8 @@ impl WorkerShutdown {
     }
 }
 
-/// The stop signal an outer role can send to the worker.
-///
-/// The integrated role uses it when its own half ends: the worker must stop
-/// together with it, and the way it stops depends on why the other half
-/// ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ExternalStop {
-    /// The other half stopped cleanly: the accepted work is drained.
-    Graceful,
-    /// The other half failed: the worker cannot serve any more, so the
-    /// accepted work is cancelled instead of drained.
-    FailClosed,
-}
-
 #[derive(Clone)]
-pub(super) struct WorkerRuntimeState {
+pub(crate) struct WorkerRuntimeState {
     pending_requests: Arc<Mutex<HashMap<String, PendingIncomingRequest>>>,
     pending_mcp_requests: Arc<Mutex<HashMap<String, PendingIncomingRequest>>>,
     request_cancellations: Arc<Mutex<HashMap<String, RequestCancellation>>>,
@@ -225,41 +216,6 @@ impl WorkerRuntimeState {
     fn begin_shutdown(&self) {
         self.control.begin_shutdown();
     }
-
-    async fn wait_for_shutdown(&self) {
-        self.control.wait_for_shutdown().await;
-    }
-}
-
-pub async fn run(config: WorkerConfig) -> anyhow::Result<()> {
-    connect::run_embedded(config, None).await
-}
-
-pub async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
-    connect::run_embedded(config, None).await
-}
-
-/// Run the worker with an additional stop signal.
-///
-/// The signal is the internal shutdown signal of the process: the caller
-/// (the integrated role) asks the worker to stop when its own half stops, so
-/// the two halves of the integrated role always end together.
-pub async fn run_embedded_with_shutdown(
-    config: WorkerConfig,
-    external_shutdown: Option<tokio::sync::watch::Receiver<ExternalStop>>,
-) -> anyhow::Result<()> {
-    connect::run_embedded(config, external_shutdown).await
-}
-
-pub async fn connect_for_test(config: WorkerConfig, client: Client) -> anyhow::Result<()> {
-    connect::connect_for_test(config, client).await
-}
-
-pub async fn connect_for_test_with_admin(
-    config: WorkerConfig,
-    client: Client,
-) -> anyhow::Result<()> {
-    connect::connect_for_test_with_admin(config, client).await
 }
 
 // P4 (issue #230): the model-route test probe and the Realtime

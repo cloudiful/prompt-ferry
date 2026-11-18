@@ -4,12 +4,11 @@ import { coreMessages } from './modules/core'
 import { endpointMessages } from './modules/endpoints'
 import { endpointOpenAiMessages } from './modules/endpoints.openai'
 import { mcpMessages } from './modules/mcp'
-import { relayMessages } from './modules/relays'
+import { nodeMessages } from './modules/node'
 import { redactionMessages } from './modules/redaction'
 import { settingsMessages } from './modules/settings'
 import { usageMessages } from './modules/usage'
 import { userMessages } from './modules/users'
-import { workerMessages } from './modules/workers'
 
 export type Locale = 'zh-CN' | 'en-US'
 
@@ -25,12 +24,11 @@ const modules = [
   endpointMessages,
   endpointOpenAiMessages,
   mcpMessages,
-  relayMessages,
+  nodeMessages,
   redactionMessages,
   settingsMessages,
   usageMessages,
   billingMessages,
-  workerMessages,
 ] as const
 
 function mergeLocale(locale: Locale) {

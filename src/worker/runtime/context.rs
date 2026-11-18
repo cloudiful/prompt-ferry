@@ -67,6 +67,10 @@ pub(super) struct RuntimeServices {
     pub(super) client: Client,
     pub(super) runtime_state: WorkerRuntimeState,
     pub(super) response_limits: ResponseLimits,
+    /// The node ownership bound to this link. It is injected into every log at
+    /// the funnel, so a writer cannot forget it. `None` is the legacy relay and
+    /// the standalone path, which have no proven node identity.
+    pub(super) node_attribution: Option<db::NodeAttribution>,
     /// Test-only observer of the log submitted to the recorder (issue #1179
     /// P2 repair). It witnesses the actual settlement boundary without adding
     /// a second production sink or any public API.
@@ -95,6 +99,7 @@ impl RuntimeServices {
             client,
             runtime_state,
             response_limits,
+            node_attribution: None,
             #[cfg(test)]
             submitted_logs: None,
         }
@@ -117,6 +122,28 @@ impl RuntimeServices {
             self.mcp_state = Some(mcp_state);
         }
         self.standalone_state = Some(state);
+        self
+    }
+
+    /// Bind the node ownership of the link to these services.
+    pub(super) fn with_node_attribution(mut self, attribution: db::NodeAttribution) -> Self {
+        self.node_attribution = Some(attribution);
+        self
+    }
+
+    /// The node ownership of the link, when the link has a proven node
+    /// identity. The `/v1/models` path reads it directly because it logs
+    /// outside the funnel.
+    pub(super) fn node_attribution(&self) -> Option<db::NodeAttribution> {
+        self.node_attribution
+    }
+
+    #[cfg(test)]
+    pub(super) fn observe_submitted_logs(
+        mut self,
+        observer: impl Fn(&UsageLog) + Send + Sync + 'static,
+    ) -> Self {
+        self.submitted_logs = Some(std::sync::Arc::new(observer));
         self
     }
 
@@ -144,7 +171,10 @@ impl RuntimeServices {
         Ok((None, None, None))
     }
 
-    pub(super) async fn record_usage_event(&self, log: UsageLog) -> Option<i64> {
+    pub(super) async fn record_usage_event(&self, mut log: UsageLog) -> Option<i64> {
+        // The attribution of the link is authoritative: a log cannot carry a
+        // different node identity into persistence.
+        log.node_attribution = self.node_attribution;
         #[cfg(test)]
         if let Some(observer) = &self.submitted_logs {
             observer(&log);
@@ -483,4 +513,54 @@ pub(super) struct AffinityFailureAudit {
     pub(super) model_route_rule_id: Option<uuid::Uuid>,
     pub(super) requested_endpoint_id: Option<uuid::Uuid>,
     pub(super) requested_key_id: Option<uuid::Uuid>,
+}
+
+#[cfg(test)]
+mod node_attribution_tests {
+    use super::{
+        BridgeSender, ResponseLimits, RuntimeServices, UsageRequestMetadata, WorkerRuntimeState,
+    };
+    use crate::db::NodeAttribution;
+    use crate::usage::UsageLog;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn the_funnel_stamps_the_attribution_bound_to_the_link() {
+        let bound = NodeAttribution::local(Uuid::from_u128(7));
+        let supplied = NodeAttribution::peer_link(Uuid::from_u128(8), Uuid::from_u128(9));
+        let observed = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let sink = observed.clone();
+        let services = RuntimeServices::new(
+            None,
+            BridgeSender::test_sender(),
+            reqwest::Client::new(),
+            WorkerRuntimeState::default(),
+            ResponseLimits::default(),
+        )
+        .with_node_attribution(bound)
+        .observe_submitted_logs(move |log| {
+            *sink.lock().expect("the observation lock is intact") = log.node_attribution;
+        });
+        let log = UsageLog::ai_request(Uuid::from_u128(1), UsageRequestMetadata::default(), None)
+            .with_node_attribution(Some(supplied));
+
+        services.record_usage_event(log).await;
+
+        assert_eq!(
+            *observed.lock().expect("the observation lock is intact"),
+            Some(bound)
+        );
+        let unattributed = RuntimeServices::new(
+            None,
+            BridgeSender::test_sender(),
+            reqwest::Client::new(),
+            WorkerRuntimeState::default(),
+            ResponseLimits::default(),
+        );
+        assert_eq!(
+            unattributed.node_attribution(),
+            None,
+            "the legacy relay path has no proven node identity"
+        );
+    }
 }

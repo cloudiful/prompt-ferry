@@ -1,10 +1,5 @@
-//! The public listener's fallback to the worker's management API.
-//!
-//! Every path the relay does not serve itself is handed to a connected worker
-//! over the bridge, which is the authenticated Worker-admin proxy contract this
-//! listener has always offered. The relay's own management listener uses the
-//! same forwarding core for the worker's business API, so the two entry points
-//! cannot drift apart.
+//! Forward edge browser and admin requests to the processing node over the
+//! authenticated peer bridge.
 
 use axum::{
     body::Body,

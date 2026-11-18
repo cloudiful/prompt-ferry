@@ -1,35 +1,7 @@
 use anyhow::Error;
-use std::time::Duration;
-use tokio_tungstenite::tungstenite::Error as WsError;
 use tracing::info;
 
 use crate::usage::truncate_chars;
-
-/// Bounded allowance for one draining session to flush queued bridge frames to
-/// its websocket sink. Concurrent sessions each get this allowance, never a
-/// serial per-session wait.
-pub(super) const BRIDGE_FLUSH_ALLOWANCE: Duration = Duration::from_secs(2);
-
-/// Global bound on joining session supervisors after the bridge session stop
-/// signal, so a stuck session cannot hold the process.
-pub(super) const SESSION_TEARDOWN_ALLOWANCE: Duration = Duration::from_secs(5);
-
-pub(crate) fn ws_connect_error_detail(err: &WsError) -> String {
-    if let WsError::Http(response) = err {
-        let status = response.status();
-        let body = response
-            .body()
-            .as_deref()
-            .map(|body| String::from_utf8_lossy(body).trim().to_string())
-            .filter(|body| !body.is_empty());
-
-        if let Some(body) = body {
-            return format!("HTTP error: {status}: {}", truncate_chars(&body, 256));
-        }
-    }
-
-    err.to_string()
-}
 
 pub(crate) fn is_expected_relay_disconnect(err: &Error) -> bool {
     err.chain().any(|cause| {
@@ -75,24 +47,6 @@ impl MissingRelayTarget {
             "no relay target is configured; the worker stays up and connects once \
              worker.relay_urls names one"
         );
-    }
-}
-
-pub(crate) async fn shutdown_signal() {
-    #[cfg(unix)]
-    {
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .expect("failed to install SIGTERM handler");
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = terminate.recv() => {}
-        }
-    }
-
-    #[cfg(not(unix))]
-    {
-        let _ = tokio::signal::ctrl_c().await;
     }
 }
 

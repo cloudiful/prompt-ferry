@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AuthLoginData, AuthLoginErrors, AuthLoginResponses, AuthLogoutData, AuthLogoutResponses, AuthMeData, AuthMeErrors, AuthMeResponses, BillingChargeDetailData, BillingChargeDetailResponses, BillingSummaryData, BillingSummaryResponses, BridgeStatusData, BridgeStatusResponses, ClearRequestRecordsData, ClearRequestRecordsResponses, ConfigExportMetadataData, ConfigExportMetadataErrors, ConfigExportMetadataResponses, CreateBillingPriceRuleData, CreateBillingPriceRuleResponses, CreateClientKeyData, CreateClientKeyErrors, CreateClientKeyResponses, CreateEndpointData, CreateEndpointErrors, CreateEndpointResponses, CreateMcpServerData, CreateMcpServerResponses, CreateModelRouteData, CreateModelRouteResponses, CreateUserData, CreateUserErrors, CreateUserResponses, DeleteBillingPriceRuleData, DeleteBillingPriceRuleErrors, DeleteBillingPriceRuleResponses, DeleteClientKeyData, DeleteClientKeyErrors, DeleteClientKeyResponses, DeleteConversationEndpointOverrideData, DeleteConversationEndpointOverrideErrors, DeleteConversationEndpointOverrideResponses, DeleteEndpointData, DeleteEndpointErrors, DeleteEndpointResponses, DeleteMcpServerData, DeleteMcpServerResponses, DeleteModelRouteData, DeleteModelRouteErrors, DeleteModelRouteResponses, DeleteUserData, DeleteUserErrors, DeleteUserResponses, DisconnectMcpOauthData, DisconnectMcpOauthResponses, EndpointModelsData, EndpointModelsErrors, EndpointModelsResponses, ExportBillingData, ExportBillingResponses, ExportConfigData, ExportConfigErrors, ExportConfigResponses, GetCacheAlertSettingData, GetCacheAlertSettingResponses, GetConversationEndpointOverrideData, GetConversationEndpointOverrideErrors, GetConversationEndpointOverrideResponses, GetEndpointSettingData, GetEndpointSettingResponses, GetMcpCatalogData, GetMcpCatalogResponses, GetMcpOauthStatusData, GetMcpOauthStatusResponses, GetModelRouteWhitelistData, GetModelRouteWhitelistResponses, GetRawObjectStoreData, GetRawObjectStoreResponses, GetRedactionSettingData, GetRedactionSettingResponses, GetRelayIpWhitelistData, GetRelayIpWhitelistResponses, GetRequestContentLoggingData, GetRequestContentLoggingResponses, GetSharedValkeyData, GetSharedValkeyResponses, GetStreamDeltaBatchingData, GetStreamDeltaBatchingResponses, GetUsageRetentionData, GetUsageRetentionResponses, ImportConfigData, ImportConfigErrors, ImportConfigResponses, ListBillingChargesData, ListBillingChargesResponses, ListBillingPriceRulesData, ListBillingPriceRulesResponses, ListClientKeysData, ListClientKeysErrors, ListClientKeysResponses, ListConfigAuditData, ListConfigAuditErrors, ListConfigAuditResponses, ListEndpointsData, ListEndpointsResponses, ListMcpProvidersData, ListMcpProvidersResponses, ListMcpServersData, ListMcpServersResponses, ListModelRoutesData, ListModelRoutesResponses, ListRedactionCustomStringsData, ListRedactionCustomStringsResponses, ListRequestRecordsData, ListRequestRecordsResponses, ListUserOptionsData, ListUserOptionsErrors, ListUserOptionsResponses, ListUsersData, ListUsersErrors, ListUsersResponses, ListWorkersData, ListWorkersErrors, ListWorkersResponses, McpOauthCallbackData, McpOauthCallbackResponses, MeCreateClientKeyData, MeCreateClientKeyErrors, MeCreateClientKeyResponses, MeDeleteClientKeyData, MeDeleteClientKeyErrors, MeDeleteClientKeyResponses, MeListClientKeysData, MeListClientKeysErrors, MeListClientKeysResponses, MeListModelsData, MeListModelsErrors, MeListModelsResponses, MeUpdateClientKeyData, MeUpdateClientKeyErrors, MeUpdateClientKeyResponses, OauthBrowserCompleteData, OauthBrowserCompleteErrors, OauthBrowserCompleteResponses, OauthBrowserStartData, OauthBrowserStartErrors, OauthBrowserStartResponses, OauthClearData, OauthClearErrors, OauthClearResponses, OauthDevicePollData, OauthDevicePollErrors, OauthDevicePollResponses, OauthDeviceStartData, OauthDeviceStartErrors, OauthDeviceStartResponses, OauthRefreshData, OauthRefreshErrors, OauthRefreshResponses, OauthStatusData, OauthStatusErrors, OauthStatusResponses, OrganizationUsageData, OrganizationUsageErrors, OrganizationUsageResponses, PatchBillingPriceRuleData, PatchBillingPriceRuleResponses, PreviewConfigImportData, PreviewConfigImportErrors, PreviewConfigImportResponses, PreviewRedactionData, PreviewRedactionResponses, PruneRequestRecordsData, PruneRequestRecordsResponses, QuotaInferenceData, QuotaInferenceErrors, QuotaInferenceResponses, QuotaKeyObservationHistoryData, QuotaKeyObservationHistoryErrors, QuotaKeyObservationHistoryResponses, QuotaKeyObservationTrendData, QuotaKeyObservationTrendErrors, QuotaKeyObservationTrendResponses, RefreshMcpOauthData, RefreshMcpOauthResponses, RelayAuthLoginData, RelayAuthLoginErrors, RelayAuthLoginResponses, RelayAuthLogoutData, RelayAuthLogoutResponses, RelayAuthMeData, RelayAuthMeResponses, RelayGetSettingsData, RelayGetSettingsErrors, RelayGetSettingsResponses, RelayHostData, RelayHostErrors, RelayHostResponses, RelayRequestRestartData, RelayRequestRestartErrors, RelayRequestRestartResponses, RelaySetHostRoleData, RelaySetHostRoleErrors, RelaySetHostRoleResponses, RelaySetSettingsData, RelaySetSettingsErrors, RelaySetSettingsResponses, RelayStatusData, RelayStatusErrors, RelayStatusResponses, RepriceBillingData, RepriceBillingResponses, RequestRecordDetailData, RequestRecordDetailResponses, RequestRecordFacetsData, RequestRecordFacetsResponses, RequestRecordFullData, RequestRecordFullResponses, RequestRecordOverviewData, RequestRecordOverviewResponses, RequestRecordResetSessionAffinityData, RequestRecordResetSessionAffinityErrors, RequestRecordResetSessionAffinityResponses, RequestRecordSeriesData, RequestRecordSeriesResponses, RequestRecordSessionRouteOptionsData, RequestRecordSessionRouteOptionsResponses, RequestRecordSummaryData, RequestRecordSummaryResponses, ResetPasswordData, ResetPasswordErrors, ResetPasswordResponses, SetCacheAlertSettingData, SetCacheAlertSettingResponses, SetConversationEndpointOverrideData, SetConversationEndpointOverrideErrors, SetConversationEndpointOverrideResponses, SetEndpointSettingData, SetEndpointSettingResponses, SetModelRouteWhitelistData, SetModelRouteWhitelistResponses, SetRawObjectStoreData, SetRawObjectStoreResponses, SetRedactionSettingData, SetRedactionSettingResponses, SetRelayIpWhitelistData, SetRelayIpWhitelistResponses, SetRequestContentLoggingData, SetRequestContentLoggingResponses, SetSharedValkeyData, SetSharedValkeyResponses, SetStreamDeltaBatchingData, SetStreamDeltaBatchingResponses, SetUsageRetentionData, SetUsageRetentionResponses, StartMcpOauthData, StartMcpOauthResponses, TestEndpointData, TestEndpointErrors, TestEndpointResponses, TestMcpServerData, TestMcpServerResponses, TestModelRouteData, TestModelRouteResponses, TokenPlanUsageData, TokenPlanUsageResponses, UpdateBillingPriceRuleData, UpdateBillingPriceRuleErrors, UpdateBillingPriceRuleResponses, UpdateClientKeyData, UpdateClientKeyErrors, UpdateClientKeyResponses, UpdateEndpointData, UpdateEndpointErrors, UpdateEndpointResponses, UpdateMcpServerData, UpdateMcpServerResponses, UpdateModelRouteData, UpdateModelRouteResponses, UpdateUserData, UpdateUserErrors, UpdateUserResponses } from './types.gen';
+import type { AuthLoginData, AuthLoginErrors, AuthLoginResponses, AuthLogoutData, AuthLogoutResponses, AuthMeData, AuthMeErrors, AuthMeResponses, BillingChargeDetailData, BillingChargeDetailResponses, BillingSummaryData, BillingSummaryResponses, BridgeStatusData, BridgeStatusResponses, ClearRequestRecordsData, ClearRequestRecordsResponses, ConfigExportMetadataData, ConfigExportMetadataErrors, ConfigExportMetadataResponses, CreateBillingPriceRuleData, CreateBillingPriceRuleResponses, CreateClientKeyData, CreateClientKeyErrors, CreateClientKeyResponses, CreateEndpointData, CreateEndpointErrors, CreateEndpointResponses, CreateMcpServerData, CreateMcpServerResponses, CreateModelRouteData, CreateModelRouteResponses, CreateUserData, CreateUserErrors, CreateUserResponses, DeleteBillingPriceRuleData, DeleteBillingPriceRuleErrors, DeleteBillingPriceRuleResponses, DeleteClientKeyData, DeleteClientKeyErrors, DeleteClientKeyResponses, DeleteConversationEndpointOverrideData, DeleteConversationEndpointOverrideErrors, DeleteConversationEndpointOverrideResponses, DeleteEndpointData, DeleteEndpointErrors, DeleteEndpointResponses, DeleteMcpServerData, DeleteMcpServerResponses, DeleteModelRouteData, DeleteModelRouteErrors, DeleteModelRouteResponses, DeleteUserData, DeleteUserErrors, DeleteUserResponses, DisconnectMcpOauthData, DisconnectMcpOauthResponses, EndpointModelsData, EndpointModelsErrors, EndpointModelsResponses, ExportBillingData, ExportBillingResponses, ExportConfigData, ExportConfigErrors, ExportConfigResponses, GetCacheAlertSettingData, GetCacheAlertSettingResponses, GetConversationEndpointOverrideData, GetConversationEndpointOverrideErrors, GetConversationEndpointOverrideResponses, GetEndpointSettingData, GetEndpointSettingResponses, GetMcpCatalogData, GetMcpCatalogResponses, GetMcpOauthStatusData, GetMcpOauthStatusResponses, GetModelRouteWhitelistData, GetModelRouteWhitelistResponses, GetRawObjectStoreData, GetRawObjectStoreResponses, GetRedactionSettingData, GetRedactionSettingResponses, GetRelayIpWhitelistData, GetRelayIpWhitelistResponses, GetRequestContentLoggingData, GetRequestContentLoggingResponses, GetSharedValkeyData, GetSharedValkeyResponses, GetStreamDeltaBatchingData, GetStreamDeltaBatchingResponses, GetUsageRetentionData, GetUsageRetentionResponses, ImportConfigData, ImportConfigErrors, ImportConfigResponses, ListBillingChargesData, ListBillingChargesResponses, ListBillingPriceRulesData, ListBillingPriceRulesResponses, ListClientKeysData, ListClientKeysErrors, ListClientKeysResponses, ListConfigAuditData, ListConfigAuditErrors, ListConfigAuditResponses, ListEndpointsData, ListEndpointsResponses, ListMcpProvidersData, ListMcpProvidersResponses, ListMcpServersData, ListMcpServersResponses, ListModelRoutesData, ListModelRoutesResponses, ListNodesData, ListNodesErrors, ListNodesResponses, ListRedactionCustomStringsData, ListRedactionCustomStringsResponses, ListRequestRecordsData, ListRequestRecordsResponses, ListUserOptionsData, ListUserOptionsErrors, ListUserOptionsResponses, ListUsersData, ListUsersErrors, ListUsersResponses, McpOauthCallbackData, McpOauthCallbackResponses, MeCreateClientKeyData, MeCreateClientKeyErrors, MeCreateClientKeyResponses, MeDeleteClientKeyData, MeDeleteClientKeyErrors, MeDeleteClientKeyResponses, MeListClientKeysData, MeListClientKeysErrors, MeListClientKeysResponses, MeListModelsData, MeListModelsErrors, MeListModelsResponses, MeUpdateClientKeyData, MeUpdateClientKeyErrors, MeUpdateClientKeyResponses, NodeStatusData, NodeStatusErrors, NodeStatusResponses, OauthBrowserCompleteData, OauthBrowserCompleteErrors, OauthBrowserCompleteResponses, OauthBrowserStartData, OauthBrowserStartErrors, OauthBrowserStartResponses, OauthClearData, OauthClearErrors, OauthClearResponses, OauthDevicePollData, OauthDevicePollErrors, OauthDevicePollResponses, OauthDeviceStartData, OauthDeviceStartErrors, OauthDeviceStartResponses, OauthRefreshData, OauthRefreshErrors, OauthRefreshResponses, OauthStatusData, OauthStatusErrors, OauthStatusResponses, OrganizationUsageData, OrganizationUsageErrors, OrganizationUsageResponses, PatchBillingPriceRuleData, PatchBillingPriceRuleResponses, PreviewConfigImportData, PreviewConfigImportErrors, PreviewConfigImportResponses, PreviewRedactionData, PreviewRedactionResponses, PruneRequestRecordsData, PruneRequestRecordsResponses, QuotaInferenceData, QuotaInferenceErrors, QuotaInferenceResponses, QuotaKeyObservationHistoryData, QuotaKeyObservationHistoryErrors, QuotaKeyObservationHistoryResponses, QuotaKeyObservationTrendData, QuotaKeyObservationTrendErrors, QuotaKeyObservationTrendResponses, RefreshMcpOauthData, RefreshMcpOauthResponses, RepriceBillingData, RepriceBillingResponses, RequestRecordDetailData, RequestRecordDetailResponses, RequestRecordFacetsData, RequestRecordFacetsResponses, RequestRecordFullData, RequestRecordFullResponses, RequestRecordOverviewData, RequestRecordOverviewResponses, RequestRecordResetSessionAffinityData, RequestRecordResetSessionAffinityErrors, RequestRecordResetSessionAffinityResponses, RequestRecordSeriesData, RequestRecordSeriesResponses, RequestRecordSessionRouteOptionsData, RequestRecordSessionRouteOptionsResponses, RequestRecordSummaryData, RequestRecordSummaryResponses, ResetPasswordData, ResetPasswordErrors, ResetPasswordResponses, SetCacheAlertSettingData, SetCacheAlertSettingResponses, SetConversationEndpointOverrideData, SetConversationEndpointOverrideErrors, SetConversationEndpointOverrideResponses, SetEndpointSettingData, SetEndpointSettingResponses, SetModelRouteWhitelistData, SetModelRouteWhitelistResponses, SetRawObjectStoreData, SetRawObjectStoreResponses, SetRedactionSettingData, SetRedactionSettingResponses, SetRelayIpWhitelistData, SetRelayIpWhitelistResponses, SetRequestContentLoggingData, SetRequestContentLoggingResponses, SetSharedValkeyData, SetSharedValkeyResponses, SetStreamDeltaBatchingData, SetStreamDeltaBatchingResponses, SetupInitializeData, SetupInitializeErrors, SetupInitializeResponses, SetupStatusData, SetupStatusErrors, SetupStatusResponses, SetUsageRetentionData, SetUsageRetentionResponses, StartMcpOauthData, StartMcpOauthResponses, TestEndpointData, TestEndpointErrors, TestEndpointResponses, TestMcpServerData, TestMcpServerResponses, TestModelRouteData, TestModelRouteResponses, TokenPlanUsageData, TokenPlanUsageResponses, UpdateBillingPriceRuleData, UpdateBillingPriceRuleErrors, UpdateBillingPriceRuleResponses, UpdateClientKeyData, UpdateClientKeyErrors, UpdateClientKeyResponses, UpdateEndpointData, UpdateEndpointErrors, UpdateEndpointResponses, UpdateMcpServerData, UpdateMcpServerResponses, UpdateModelRouteData, UpdateModelRouteResponses, UpdateUserData, UpdateUserErrors, UpdateUserResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -404,6 +404,12 @@ export const updateModelRoute = <ThrowOnError extends boolean = false>(options: 
     }
 });
 
+export const listNodes = <ThrowOnError extends boolean = false>(options?: Options<ListNodesData, ThrowOnError>): RequestResult<ListNodesResponses, ListNodesErrors, ThrowOnError, 'data'> => (options?.client ?? client).get<ListNodesResponses, ListNodesErrors, ThrowOnError, 'data'>({
+    responseStyle: 'data',
+    url: '/api/v1/admin/nodes',
+    ...options
+});
+
 export const listRequestRecords = <ThrowOnError extends boolean = false>(options?: Options<ListRequestRecordsData, ThrowOnError>): RequestResult<ListRequestRecordsResponses, unknown, ThrowOnError, 'data'> => (options?.client ?? client).get<ListRequestRecordsResponses, unknown, ThrowOnError, 'data'>({
     responseStyle: 'data',
     url: '/api/v1/admin/request-records',
@@ -554,12 +560,6 @@ export const resetPassword = <ThrowOnError extends boolean = false>(options: Opt
     }
 });
 
-export const listWorkers = <ThrowOnError extends boolean = false>(options?: Options<ListWorkersData, ThrowOnError>): RequestResult<ListWorkersResponses, ListWorkersErrors, ThrowOnError, 'data'> => (options?.client ?? client).get<ListWorkersResponses, ListWorkersErrors, ThrowOnError, 'data'>({
-    responseStyle: 'data',
-    url: '/api/v1/admin/workers',
-    ...options
-});
-
 export const authLogin = <ThrowOnError extends boolean = false>(options: Options<AuthLoginData, ThrowOnError>): RequestResult<AuthLoginResponses, AuthLoginErrors, ThrowOnError, 'data'> => (options.client ?? client).post<AuthLoginResponses, AuthLoginErrors, ThrowOnError, 'data'>({
     responseStyle: 'data',
     url: '/api/v1/auth/login',
@@ -580,6 +580,22 @@ export const authMe = <ThrowOnError extends boolean = false>(options?: Options<A
     responseStyle: 'data',
     url: '/api/v1/auth/me',
     ...options
+});
+
+export const setupStatus = <ThrowOnError extends boolean = false>(options?: Options<SetupStatusData, ThrowOnError>): RequestResult<SetupStatusResponses, SetupStatusErrors, ThrowOnError, 'data'> => (options?.client ?? client).get<SetupStatusResponses, SetupStatusErrors, ThrowOnError, 'data'>({
+    responseStyle: 'data',
+    url: '/api/v1/auth/setup',
+    ...options
+});
+
+export const setupInitialize = <ThrowOnError extends boolean = false>(options: Options<SetupInitializeData, ThrowOnError>): RequestResult<SetupInitializeResponses, SetupInitializeErrors, ThrowOnError, 'data'> => (options.client ?? client).post<SetupInitializeResponses, SetupInitializeErrors, ThrowOnError, 'data'>({
+    responseStyle: 'data',
+    url: '/api/v1/auth/setup',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
 });
 
 export const bridgeStatus = <ThrowOnError extends boolean = false>(options?: Options<BridgeStatusData, ThrowOnError>): RequestResult<BridgeStatusResponses, unknown, ThrowOnError, 'data'> => (options?.client ?? client).get<BridgeStatusResponses, unknown, ThrowOnError, 'data'>({
@@ -626,69 +642,9 @@ export const meListModels = <ThrowOnError extends boolean = false>(options?: Opt
     ...options
 });
 
-export const relayAuthLogin = <ThrowOnError extends boolean = false>(options: Options<RelayAuthLoginData, ThrowOnError>): RequestResult<RelayAuthLoginResponses, RelayAuthLoginErrors, ThrowOnError, 'data'> => (options.client ?? client).post<RelayAuthLoginResponses, RelayAuthLoginErrors, ThrowOnError, 'data'>({
+export const nodeStatus = <ThrowOnError extends boolean = false>(options?: Options<NodeStatusData, ThrowOnError>): RequestResult<NodeStatusResponses, NodeStatusErrors, ThrowOnError, 'data'> => (options?.client ?? client).get<NodeStatusResponses, NodeStatusErrors, ThrowOnError, 'data'>({
     responseStyle: 'data',
-    url: '/api/v1/relay/auth/login',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-export const relayAuthLogout = <ThrowOnError extends boolean = false>(options?: Options<RelayAuthLogoutData, ThrowOnError>): RequestResult<RelayAuthLogoutResponses, unknown, ThrowOnError, 'data'> => (options?.client ?? client).post<RelayAuthLogoutResponses, unknown, ThrowOnError, 'data'>({
-    responseStyle: 'data',
-    url: '/api/v1/relay/auth/logout',
-    ...options
-});
-
-export const relayAuthMe = <ThrowOnError extends boolean = false>(options?: Options<RelayAuthMeData, ThrowOnError>): RequestResult<RelayAuthMeResponses, unknown, ThrowOnError, 'data'> => (options?.client ?? client).get<RelayAuthMeResponses, unknown, ThrowOnError, 'data'>({
-    responseStyle: 'data',
-    url: '/api/v1/relay/auth/me',
-    ...options
-});
-
-export const relayHost = <ThrowOnError extends boolean = false>(options?: Options<RelayHostData, ThrowOnError>): RequestResult<RelayHostResponses, RelayHostErrors, ThrowOnError, 'data'> => (options?.client ?? client).get<RelayHostResponses, RelayHostErrors, ThrowOnError, 'data'>({
-    responseStyle: 'data',
-    url: '/api/v1/relay/host',
-    ...options
-});
-
-export const relayRequestRestart = <ThrowOnError extends boolean = false>(options?: Options<RelayRequestRestartData, ThrowOnError>): RequestResult<RelayRequestRestartResponses, RelayRequestRestartErrors, ThrowOnError, 'data'> => (options?.client ?? client).post<RelayRequestRestartResponses, RelayRequestRestartErrors, ThrowOnError, 'data'>({
-    responseStyle: 'data',
-    url: '/api/v1/relay/host/restart',
-    ...options
-});
-
-export const relaySetHostRole = <ThrowOnError extends boolean = false>(options: Options<RelaySetHostRoleData, ThrowOnError>): RequestResult<RelaySetHostRoleResponses, RelaySetHostRoleErrors, ThrowOnError, 'data'> => (options.client ?? client).put<RelaySetHostRoleResponses, RelaySetHostRoleErrors, ThrowOnError, 'data'>({
-    responseStyle: 'data',
-    url: '/api/v1/relay/host/role',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-export const relayGetSettings = <ThrowOnError extends boolean = false>(options?: Options<RelayGetSettingsData, ThrowOnError>): RequestResult<RelayGetSettingsResponses, RelayGetSettingsErrors, ThrowOnError, 'data'> => (options?.client ?? client).get<RelayGetSettingsResponses, RelayGetSettingsErrors, ThrowOnError, 'data'>({
-    responseStyle: 'data',
-    url: '/api/v1/relay/settings',
-    ...options
-});
-
-export const relaySetSettings = <ThrowOnError extends boolean = false>(options: Options<RelaySetSettingsData, ThrowOnError>): RequestResult<RelaySetSettingsResponses, RelaySetSettingsErrors, ThrowOnError, 'data'> => (options.client ?? client).patch<RelaySetSettingsResponses, RelaySetSettingsErrors, ThrowOnError, 'data'>({
-    responseStyle: 'data',
-    url: '/api/v1/relay/settings',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-export const relayStatus = <ThrowOnError extends boolean = false>(options?: Options<RelayStatusData, ThrowOnError>): RequestResult<RelayStatusResponses, RelayStatusErrors, ThrowOnError, 'data'> => (options?.client ?? client).get<RelayStatusResponses, RelayStatusErrors, ThrowOnError, 'data'>({
-    responseStyle: 'data',
-    url: '/api/v1/relay/status',
+    url: '/api/v1/node',
     ...options
 });
 
