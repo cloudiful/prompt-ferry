@@ -1,9 +1,8 @@
 {
   "name": "prompt-ferry-frontend",
   "private": true,
-  "version": "1.42.32",
+  "version": "1.42.35",
   "type": "module",
-  "packageManager": "bun@1.3.14",
   "scripts": {
     "dev": "vite",
     "openapi-ts": "bun install --no-save --cwd tools/codegen && bun run --cwd tools/codegen generate",
