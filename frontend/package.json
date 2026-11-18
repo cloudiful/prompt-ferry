@@ -1,7 +1,7 @@
 {
   "name": "prompt-ferry-frontend",
   "private": true,
-  "version": "1.42.35",
+  "version": "1.43.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
