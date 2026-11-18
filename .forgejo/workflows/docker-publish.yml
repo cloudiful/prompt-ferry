@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build-and-publish:
-    uses: actions/workflows/.forgejo/workflows/docker-publish.yml@v0.6.0
+    uses: actions/workflows/.forgejo/workflows/docker-publish.yml@v0.6.1
     with:
       builds: >-
         [{"platform":"linux/amd64","runner":"aio"}]
