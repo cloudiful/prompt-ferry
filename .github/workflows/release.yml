@@ -10,7 +10,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BIN_NAME: prompt-ferry
   IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
@@ -57,8 +56,10 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.11
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -89,17 +90,7 @@ jobs:
           arch: ${{ matrix.msvc_arch }}
 
       - name: Build binary
-        env:
-          RUSTC_WRAPPER: sccache
-          SCCACHE_GHA_ENABLED: "true"
         run: cargo build --release --bin prompt-ferry --target "${{ matrix.target }}"
-
-      - name: Show sccache stats
-        if: always()
-        env:
-          RUSTC_WRAPPER: sccache
-          SCCACHE_GHA_ENABLED: "true"
-        run: sccache --show-stats
 
       - name: Prepare binary
         shell: bash
