@@ -40,11 +40,6 @@ jobs:
             executable: prompt-ferry.exe
             release_suffix: .exe
             msvc_arch: x64
-          - target: aarch64-pc-windows-msvc
-            runner: windows-latest
-            executable: prompt-ferry.exe
-            release_suffix: .exe
-            msvc_arch: amd64_arm64
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
