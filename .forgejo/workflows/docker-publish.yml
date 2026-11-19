@@ -41,7 +41,6 @@ jobs:
         git diff --exit-code -- openapi/admin-api.yaml
       runtime_tools: '["uv"]'
       runtime_packages: '["bash"]'
-      runtime_init: true
       runtime_expose: "8787"
       builder_name_prefix: prompt-ferry
       inline_cache_tag: latest-amd64
