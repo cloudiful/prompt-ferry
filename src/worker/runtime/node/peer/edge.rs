@@ -101,7 +101,13 @@ pub(crate) async fn run_edge_node(config: NodeConfig, node_id: NodeId) -> anyhow
         let dial_context = context.clone();
         let dial_shutdown = peer_shutdown_rx.clone();
         dial_task = Some(tokio::spawn(async move {
-            run_peer_dialer(dial_context, target, peer_tls, dial_shutdown).await;
+            Box::pin(run_peer_dialer(
+                dial_context,
+                target,
+                peer_tls,
+                dial_shutdown,
+            ))
+            .await;
         }));
     }
 
@@ -164,20 +170,6 @@ async fn wait_for_edge_shutdown(mut shutdown: watch::Receiver<bool>) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    #[tokio::test]
-    async fn listener_shutdown_waits_for_signal_and_observes_early_signal() {
-        let (tx, rx) = tokio::sync::watch::channel(false);
-        let task = tokio::spawn(super::wait_for_edge_shutdown(rx.clone()));
-        tokio::task::yield_now().await;
-        assert!(!task.is_finished());
-        tx.send_replace(true);
-        task.await.expect("listener shutdown completes");
-        super::wait_for_edge_shutdown(rx).await;
-    }
-}
-
 /// Wait for the shutdown signal of the process.
 async fn wait_for_shutdown_signal() {
     #[cfg(unix)]
@@ -198,5 +190,19 @@ async fn wait_for_shutdown_signal() {
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn listener_shutdown_waits_for_signal_and_observes_early_signal() {
+        let (tx, rx) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(super::wait_for_edge_shutdown(rx.clone()));
+        tokio::task::yield_now().await;
+        assert!(!task.is_finished());
+        tx.send_replace(true);
+        task.await.expect("listener shutdown completes");
+        super::wait_for_edge_shutdown(rx).await;
     }
 }

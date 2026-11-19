@@ -25,7 +25,6 @@ use tracing::{debug, info, warn};
 /// cleanup as the websocket path; only the transport differs. The returned
 /// task drains the executor responses until the executor drops its outbound
 /// half, then performs the ordinary worker cleanup.
-#[allow(dead_code)] // Integration entrypoint for the P3b node; exercised by link tests now.
 pub(crate) async fn attach_in_memory_worker(
     state: AppState,
     worker_id: usize,

@@ -13,8 +13,8 @@ use uuid::Uuid;
 
 use crate::db::{
     EndpointProvider, MAX_ERROR_CODE_CHARS, MAX_KEY_LABEL_CHARS, ProviderEndpoint,
-    QuotaObservationCreate, QuotaObservationProvider, QuotaObservationSource,
-    quota_key_observations,
+    QuotaObservationCreate, QuotaObservationInput, QuotaObservationProvider,
+    QuotaObservationSource, quota_key_observations,
 };
 use crate::worker_admin_types::TokenPlanUsageResponse;
 
@@ -77,23 +77,35 @@ pub(crate) fn enabled_key_identities(endpoint: &ProviderEndpoint) -> Vec<(Uuid, 
     }
 }
 
+/// The endpoint-wide inputs shared by every key of one fetch result.
+pub(crate) struct QuotaObservationContext {
+    pub(crate) endpoint_id: Uuid,
+    pub(crate) provider: EndpointProvider,
+    pub(crate) source: QuotaObservationSource,
+    pub(crate) observed_at: DateTime<Utc>,
+    pub(crate) plan_type: Option<String>,
+    pub(crate) limit_reached: Option<bool>,
+}
+
 /// Persist one fetch result, key by key. Successful keys carry their typed
 /// canonical windows (`None` reads as an explicit empty); failed keys carry
 /// `ok=false` with empty windows and a sanitized code. Generic providers
 /// without plan metadata persist null plan fields. Every write is
 /// best-effort: failures log a constant message with the endpoint id and the
 /// call still succeeds so the cache keeps serving the fresh usage.
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn persist_response(
     pool: &PgPool,
-    endpoint_id: Uuid,
-    provider: EndpointProvider,
+    context: QuotaObservationContext,
     response: &TokenPlanUsageResponse,
-    source: QuotaObservationSource,
-    observed_at: DateTime<Utc>,
-    plan_type: Option<String>,
-    limit_reached: Option<bool>,
 ) {
+    let QuotaObservationContext {
+        endpoint_id,
+        provider,
+        source,
+        observed_at,
+        plan_type,
+        limit_reached,
+    } = context;
     let Some(storage_provider) = observation_provider(provider) else {
         return;
     };
@@ -103,20 +115,20 @@ pub(crate) async fn persist_response(
         } else {
             Vec::new()
         };
-        let create = match QuotaObservationCreate::new(
+        let create = match QuotaObservationCreate::new(QuotaObservationInput {
             endpoint_id,
-            key.key_id,
-            storage_provider,
-            truncate_label(&key.key_label),
+            key_id: key.key_id,
+            provider: storage_provider,
+            key_label: truncate_label(&key.key_label),
             source,
             observed_at,
-            key.ok,
-            key.status.map(|status| status.to_string()),
-            sanitize_error_code(key.error_code.as_deref()),
-            plan_type.clone(),
+            ok: key.ok,
+            status: key.status.map(|status| status.to_string()),
+            error_code: sanitize_error_code(key.error_code.as_deref()),
+            plan_type: plan_type.clone(),
             limit_reached,
             windows,
-        ) {
+        }) {
             Ok(create) => create,
             Err(_) => {
                 tracing::warn!(
@@ -154,20 +166,20 @@ pub(crate) async fn persist_endpoint_failure(
         return;
     };
     for (key_id, key_label) in keys {
-        let create = match QuotaObservationCreate::new(
+        let create = match QuotaObservationCreate::new(QuotaObservationInput {
             endpoint_id,
-            *key_id,
-            storage_provider,
-            truncate_label(key_label),
+            key_id: *key_id,
+            provider: storage_provider,
+            key_label: truncate_label(key_label),
             source,
             observed_at,
-            false,
-            None,
-            Some("upstream".to_string()),
-            None,
-            None,
-            Vec::new(),
-        ) {
+            ok: false,
+            status: None,
+            error_code: Some("upstream".to_string()),
+            plan_type: None,
+            limit_reached: None,
+            windows: Vec::new(),
+        }) {
             Ok(create) => create,
             Err(_) => continue,
         };

@@ -74,7 +74,6 @@ pub(super) fn opencode_go_usage(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUs
 
 /// One OpencodeGo key whose windows carry explicit reset deltas, so the
 /// urgency factor has real `resets_in_seconds` data to work with.
-
 pub(super) fn target(
     endpoint_id: uuid::Uuid,
     position: i32,

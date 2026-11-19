@@ -24,10 +24,9 @@ fn oauth_callback_response() -> Response {
         .into_response()
 }
 
-#[allow(clippy::result_large_err)]
-fn oauth_service(state: &AdminState) -> Result<std::sync::Arc<McpOAuthService>, Response> {
+fn oauth_service(state: &AdminState) -> Result<std::sync::Arc<McpOAuthService>, ApiError> {
     state.mcp_oauth.clone().ok_or_else(|| {
-        error(
+        ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "mcp_oauth_unavailable",
             "personal MCP OAuth is not configured",
@@ -53,19 +52,18 @@ fn oauth_error_response(err: McpOAuthError) -> Response {
 /// Load the server and enforce the owner defence *before* any network access.
 ///
 /// A personal OAuth server may only be managed by its owner, admins included.
-#[allow(clippy::result_large_err)]
 async fn load_owned_server(
     state: &AdminState,
     user: &SessionUser,
     server_id: Uuid,
-) -> Result<McpServer, Response> {
+) -> Result<McpServer, ApiError> {
     let server = state
         .config_repository
         .get_mcp_server(server_id)
         .await
-        .map_err(|err| internal(state, err))?;
+        .map_err(|err| ApiError::internal(state, err))?;
     let Some(server) = server else {
-        return Err(error(
+        return Err(ApiError::new(
             StatusCode::NOT_FOUND,
             "not_found",
             "mcp server not found",
@@ -73,14 +71,14 @@ async fn load_owned_server(
     };
     if server.auth_mode == MCP_AUTH_MODE_OAUTH {
         if !oauth_owner_matches(&server, user.user_id) {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::FORBIDDEN,
                 "forbidden",
                 "only the server owner may manage personal MCP OAuth",
             ));
         }
     } else if !user.is_admin && server.owner_user_id != Some(user.user_id) {
-        return Err(error(
+        return Err(ApiError::new(
             StatusCode::NOT_FOUND,
             "not_found",
             "mcp server not found",
@@ -89,17 +87,16 @@ async fn load_owned_server(
     Ok(server)
 }
 
-#[allow(clippy::result_large_err)]
-fn require_oauth_server(server: &McpServer) -> Result<(), Response> {
+fn require_oauth_server(server: &McpServer) -> Result<(), ApiError> {
     if server.auth_mode != MCP_AUTH_MODE_OAUTH {
-        return Err(error(
+        return Err(ApiError::new(
             StatusCode::CONFLICT,
             "mcp_oauth_disabled",
             "this MCP server does not use OAuth",
         ));
     }
     if server.transport != crate::db::MCP_OAUTH_SUPPORTED_TRANSPORT {
-        return Err(error(
+        return Err(ApiError::new(
             StatusCode::CONFLICT,
             "mcp_oauth_disabled",
             "personal MCP OAuth supports only the http transport",
@@ -112,6 +109,13 @@ fn session_binding(headers: &HeaderMap) -> String {
     session_id(headers).map(hash_client_key).unwrap_or_default()
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/mcp-servers/{server_id}/oauth",
+    params(("server_id" = uuid::Uuid, Path, description = "MCP server ID")),
+    responses((status = 200, body = McpOAuthStatusResponse, description = "Personal MCP OAuth status")),
+    tag = "mcp"
+)]
 pub(super) async fn get_mcp_oauth_status(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -123,7 +127,7 @@ pub(super) async fn get_mcp_oauth_status(
     };
     let server = match load_owned_server(&state, &user, server_id).await {
         Ok(server) => server,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if server.auth_mode != MCP_AUTH_MODE_OAUTH {
         return Json(McpOAuthStatusResponse {
@@ -136,7 +140,7 @@ pub(super) async fn get_mcp_oauth_status(
     }
     let service = match oauth_service(&state) {
         Ok(service) => service,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     match service.status(&server, user.user_id).await {
         Ok(status) => Json(McpOAuthStatusResponse {
@@ -150,6 +154,13 @@ pub(super) async fn get_mcp_oauth_status(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/mcp-servers/{server_id}/oauth",
+    params(("server_id" = uuid::Uuid, Path, description = "MCP server ID")),
+    responses((status = 200, body = McpOAuthStartResponse, description = "Authorization URL to visit")),
+    tag = "mcp"
+)]
 pub(super) async fn start_mcp_oauth(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -161,14 +172,14 @@ pub(super) async fn start_mcp_oauth(
     };
     let server = match load_owned_server(&state, &user, server_id).await {
         Ok(server) => server,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(response) = require_oauth_server(&server) {
-        return response;
+        return response.into_response();
     }
     let service = match oauth_service(&state) {
         Ok(service) => service,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     match service
         .start(&server, user.user_id, &session_binding(&headers))
@@ -179,6 +190,16 @@ pub(super) async fn start_mcp_oauth(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/mcp-servers/{server_id}/oauth/callback",
+    params(
+        ("server_id" = uuid::Uuid, Path, description = "MCP server ID"),
+        McpOAuthCallbackQuery
+    ),
+    responses((status = 200, description = "Fixed authorization result page")),
+    tag = "mcp"
+)]
 pub(super) async fn mcp_oauth_callback(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -236,6 +257,13 @@ pub(super) async fn mcp_oauth_callback(
     oauth_callback_response()
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/mcp-servers/{server_id}/oauth/refresh",
+    params(("server_id" = uuid::Uuid, Path, description = "MCP server ID")),
+    responses((status = 200, body = McpOAuthRefreshResponse, description = "Refreshed grant status")),
+    tag = "mcp"
+)]
 pub(super) async fn refresh_mcp_oauth(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -247,14 +275,14 @@ pub(super) async fn refresh_mcp_oauth(
     };
     let server = match load_owned_server(&state, &user, server_id).await {
         Ok(server) => server,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(response) = require_oauth_server(&server) {
-        return response;
+        return response.into_response();
     }
     let service = match oauth_service(&state) {
         Ok(service) => service,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     match service.refresh(&server, user.user_id).await {
         Ok(status) => Json(McpOAuthRefreshResponse {
@@ -267,6 +295,13 @@ pub(super) async fn refresh_mcp_oauth(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/admin/mcp-servers/{server_id}/oauth",
+    params(("server_id" = uuid::Uuid, Path, description = "MCP server ID")),
+    responses((status = 204, description = "Grant, pending states and leases cleared")),
+    tag = "mcp"
+)]
 pub(super) async fn disconnect_mcp_oauth(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -278,11 +313,11 @@ pub(super) async fn disconnect_mcp_oauth(
     };
     let server = match load_owned_server(&state, &user, server_id).await {
         Ok(server) => server,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let service = match oauth_service(&state) {
         Ok(service) => service,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     match service.disconnect(&server, user.user_id).await {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),

@@ -29,9 +29,7 @@ mod request_assembly;
 mod routing;
 mod standalone;
 
-#[allow(unused_imports)] // P3b node integration entrypoints.
-pub(crate) use self::bridge::{BridgeData, BridgeSendError, BridgeSender};
-#[allow(unused_imports)] // P3b node integration entrypoint.
+pub(crate) use self::bridge::{BridgeData, BridgeSender};
 pub(crate) use self::connect::ExecutorPump;
 /// The node runtime: one gated database node that serves one listener.
 pub use self::node::{NodeDbRuntime, run_node, serve_node};

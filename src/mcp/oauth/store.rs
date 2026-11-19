@@ -420,18 +420,30 @@ pub(crate) struct OAuthPendingStateStore {
     inner: std::sync::Arc<OAuthPendingStateStoreInner>,
 }
 
+/// Construction inputs of the pending-authorization state store.
+pub(crate) struct PendingStateStoreInit {
+    pub(crate) repository: ConfigRepository,
+    pub(crate) secrets: RelaySecretManager,
+    pub(crate) server_id: Uuid,
+    pub(crate) owner_user_id: i64,
+    pub(crate) session_binding_hash: String,
+    pub(crate) connection_id: Uuid,
+    pub(crate) config_fingerprint: String,
+    pub(crate) redirect_uri: String,
+}
+
 impl OAuthPendingStateStore {
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        repository: ConfigRepository,
-        secrets: RelaySecretManager,
-        server_id: Uuid,
-        owner_user_id: i64,
-        session_binding_hash: String,
-        connection_id: Uuid,
-        config_fingerprint: String,
-        redirect_uri: String,
-    ) -> Self {
+    pub(crate) fn new(init: PendingStateStoreInit) -> Self {
+        let PendingStateStoreInit {
+            repository,
+            secrets,
+            server_id,
+            owner_user_id,
+            session_binding_hash,
+            connection_id,
+            config_fingerprint,
+            redirect_uri,
+        } = init;
         Self {
             inner: std::sync::Arc::new(OAuthPendingStateStoreInner {
                 repository,

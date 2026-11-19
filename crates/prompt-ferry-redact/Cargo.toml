@@ -9,7 +9,7 @@ description = "Redaction runtime and policy types for prompt-ferry"
 chrono = { version = "0.4.45", features = ["serde"] }
 redactor = { package = "cloudiful-redactor", version = "0.5.1", git = "https://github.com/cloudiful/redactor.git", tag = "v0.5.1" }
 serde = { version = "1.0.229", features = ["derive"] }
-tokio = { version = "1.53.1", features = ["sync"] }
+tokio = { version = "1.54.1", features = ["sync"] }
 
 [dev-dependencies]
-serde_json = "1.0.151"
+serde_json = "1.0.154"

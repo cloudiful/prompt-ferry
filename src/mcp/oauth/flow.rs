@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::Result;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use rmcp::transport::auth::{
     AuthError, AuthorizationManager, AuthorizationMetadata, OAuthClientConfig, OAuthHttpClient,
@@ -20,7 +20,8 @@ use super::MCP_OAUTH_SCOPE;
 use super::http::PinnedOAuthHttpClient;
 use super::store::{
     CredentialStoreMode, OAuthConsumedStateStore, OAuthCredentialStore, OAuthPendingStateStore,
-    RegistrationSnapshot, access_token, client_config, decode_authorization, grant,
+    PendingStateStoreInit, RegistrationSnapshot, access_token, client_config, decode_authorization,
+    grant,
 };
 use crate::db::{
     ConfigRepository, MCP_OAUTH_SUPPORTED_TRANSPORT, McpOAuthCredential, McpServer, UserStore,
@@ -350,16 +351,16 @@ impl McpOAuthService {
             .configure_client(config)
             .map_err(|error| McpOAuthError::Upstream(describe(&error)))?;
 
-        let state_store = OAuthPendingStateStore::new(
-            self.repository.clone(),
-            settings.secrets.clone(),
-            server.server_id,
+        let state_store = OAuthPendingStateStore::new(PendingStateStoreInit {
+            repository: self.repository.clone(),
+            secrets: settings.secrets.clone(),
+            server_id: server.server_id,
             owner_user_id,
-            session_binding_hash.to_string(),
-            Uuid::new_v4(),
-            settings.fingerprint.clone(),
-            settings.redirect_uri.clone(),
-        );
+            session_binding_hash: session_binding_hash.to_string(),
+            connection_id: Uuid::new_v4(),
+            config_fingerprint: settings.fingerprint.clone(),
+            redirect_uri: settings.redirect_uri.clone(),
+        });
         manager.set_state_store(state_store.clone());
 
         let authorization_url = manager
@@ -1162,24 +1163,4 @@ fn describe(error: &AuthError) -> String {
         _ => "authorization error",
     };
     kind.to_string()
-}
-
-/// Convenience wrapper used by callers that only have an `anyhow` error.
-#[allow(dead_code)]
-fn anyhow_upstream(error: anyhow::Error) -> McpOAuthError {
-    McpOAuthError::Upstream(error.to_string())
-}
-
-#[allow(dead_code)]
-fn unexpected(message: &str) -> anyhow::Error {
-    anyhow!(message.to_string())
-}
-
-#[allow(dead_code)]
-fn ensure(condition: bool, message: &str) -> Result<()> {
-    if condition {
-        Ok(())
-    } else {
-        bail!(message.to_string())
-    }
 }

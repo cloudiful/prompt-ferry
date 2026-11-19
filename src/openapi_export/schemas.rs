@@ -2,30 +2,30 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 #[derive(Debug, Serialize, ToSchema)]
-pub(super) struct ErrorEnvelope {
+pub(crate) struct ErrorEnvelope {
     pub error: ErrorBody,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub(super) struct ErrorBody {
+pub(crate) struct ErrorBody {
     pub code: String,
     pub message: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub(super) struct EndpointSettingResponse {
+pub(crate) struct EndpointSettingResponse {
     pub endpoint_id: Option<uuid::Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum RedactionInputKindSchema {
+pub(crate) enum RedactionInputKindSchema {
     Text,
     GitDiff,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub(super) struct RedactionRulesSchema {
+pub(crate) struct RedactionRulesSchema {
     pub secret: bool,
     pub domain: bool,
     pub url: bool,
@@ -39,7 +39,7 @@ pub(super) struct RedactionRulesSchema {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum CustomStringMatchSchema {
+pub(crate) enum CustomStringMatchSchema {
     Exact,
     Contains,
     Regex,
@@ -47,13 +47,13 @@ pub(super) enum CustomStringMatchSchema {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum CustomStringScopeSchema {
+pub(crate) enum CustomStringScopeSchema {
     Text,
     Line,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub(super) struct CustomStringRuleSchema {
+pub(crate) struct CustomStringRuleSchema {
     pub pattern: String,
     pub match_type: CustomStringMatchSchema,
     pub scope: CustomStringScopeSchema,
@@ -62,7 +62,7 @@ pub(super) struct CustomStringRuleSchema {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub(super) struct RedactionConfigSchema {
+pub(crate) struct RedactionConfigSchema {
     pub enabled: bool,
     pub rules: RedactionRulesSchema,
     pub custom_strings: Vec<CustomStringRuleSchema>,
@@ -70,20 +70,20 @@ pub(super) struct RedactionConfigSchema {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum RedactionScopeSchema {
+pub(crate) enum RedactionScopeSchema {
     Global,
     User,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub(super) struct RedactionSettingResponseSchema {
+pub(crate) struct RedactionSettingResponseSchema {
     pub scope: RedactionScopeSchema,
     pub user_id: Option<i64>,
     pub config: RedactionConfigSchema,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub(super) struct RedactionCustomStringRuleRowSchema {
+pub(crate) struct RedactionCustomStringRuleRowSchema {
     pub array_index: i64,
     pub pattern: String,
     pub match_type: String,
@@ -93,7 +93,7 @@ pub(super) struct RedactionCustomStringRuleRowSchema {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub(super) struct RedactionCustomStringRulePageResponseSchema {
+pub(crate) struct RedactionCustomStringRulePageResponseSchema {
     pub items: Vec<RedactionCustomStringRuleRowSchema>,
     pub total: i64,
     pub first: i64,
@@ -101,7 +101,7 @@ pub(super) struct RedactionCustomStringRulePageResponseSchema {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub(super) struct RedactionPreviewRequestSchema {
+pub(crate) struct RedactionPreviewRequestSchema {
     pub text: String,
     pub input_kind: RedactionInputKindSchema,
     pub enabled: bool,
@@ -110,7 +110,7 @@ pub(super) struct RedactionPreviewRequestSchema {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub(super) struct RedactionFindingSchema {
+pub(crate) struct RedactionFindingSchema {
     pub kind: String,
     pub source: String,
     pub match_text: String,
@@ -121,7 +121,7 @@ pub(super) struct RedactionFindingSchema {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub(super) struct AppliedReplacementSchema {
+pub(crate) struct AppliedReplacementSchema {
     pub kind: String,
     pub replacement: String,
     pub strategy: String,
@@ -129,7 +129,7 @@ pub(super) struct AppliedReplacementSchema {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub(super) struct RedactionStatsSchema {
+pub(crate) struct RedactionStatsSchema {
     pub total_findings: usize,
     pub applied_replacements: usize,
     pub dropped_findings: usize,
@@ -141,7 +141,7 @@ pub(super) struct RedactionStatsSchema {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub(super) struct RedactionPreviewSchema {
+pub(crate) struct RedactionPreviewSchema {
     pub redacted_text: String,
     pub findings: Vec<RedactionFindingSchema>,
     pub applied_replacements: Vec<AppliedReplacementSchema>,
@@ -149,6 +149,6 @@ pub(super) struct RedactionPreviewSchema {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub(super) struct RedactionPreviewResponseSchema {
+pub(crate) struct RedactionPreviewResponseSchema {
     pub preview: RedactionPreviewSchema,
 }

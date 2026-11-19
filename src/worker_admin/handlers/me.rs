@@ -2,7 +2,19 @@ use super::*;
 use std::collections::HashSet;
 
 use crate::db::config_repository::client_keys::parse_client_key_identifier;
+use crate::openapi_export::schemas::ErrorEnvelope;
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/me/client-keys",
+    operation_id = "me_list_client_keys",
+    params(TablePageQuery),
+    responses(
+        (status = 200, body = ClientKeyPageResponse, description = "Current user client keys"),
+        (status = 401, body = ErrorEnvelope, description = "Unauthorized")
+    ),
+    tag = "me"
+)]
 pub(super) async fn list_client_keys(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -30,6 +42,18 @@ pub(super) async fn list_client_keys(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/me/client-keys",
+    operation_id = "me_create_client_key",
+    request_body = CreateClientKeyRequest,
+    responses(
+        (status = 200, body = CreateClientKeyResponse, description = "Created current user client key"),
+        (status = 400, body = ErrorEnvelope, description = "Client key limit exceeded"),
+        (status = 401, body = ErrorEnvelope, description = "Unauthorized")
+    ),
+    tag = "me"
+)]
 pub(super) async fn create_client_key(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -53,6 +77,19 @@ pub(super) async fn create_client_key(
     }
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/me/client-keys/{key_id}",
+    operation_id = "me_update_client_key",
+    params(("key_id" = String, Path, description = "Client key UUID; legacy numeric identifiers are also accepted")),
+    request_body = UpdateClientKeyRequest,
+    responses(
+        (status = 200, body = ClientKey, description = "Updated current user client key"),
+        (status = 401, body = ErrorEnvelope, description = "Unauthorized"),
+        (status = 404, body = ErrorEnvelope, description = "Key not found")
+    ),
+    tag = "me"
+)]
 pub(super) async fn update_client_key(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -90,6 +127,18 @@ pub(super) async fn update_client_key(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/me/client-keys/{key_id}",
+    operation_id = "me_delete_client_key",
+    params(("key_id" = String, Path, description = "Client key UUID; legacy numeric identifiers are also accepted")),
+    responses(
+        (status = 204, description = "Deleted current user client key"),
+        (status = 401, body = ErrorEnvelope, description = "Unauthorized"),
+        (status = 404, body = ErrorEnvelope, description = "Key not found")
+    ),
+    tag = "me"
+)]
 pub(super) async fn delete_client_key(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -126,6 +175,17 @@ pub(super) async fn delete_client_key(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/me/models",
+    operation_id = "me_list_models",
+    params(TablePageQuery),
+    responses(
+        (status = 200, body = AvailableModelsResponse, description = "Available models for current user"),
+        (status = 401, body = ErrorEnvelope, description = "Unauthorized")
+    ),
+    tag = "me"
+)]
 pub(super) async fn list_available_models(
     State(state): State<AdminState>,
     headers: HeaderMap,

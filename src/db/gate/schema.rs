@@ -356,12 +356,12 @@ pub fn decide_migrations(
                 .collect(),
         });
     }
-    if applied.len() > embedded.len() {
-        if let Some(extra) = applied.get(embedded.len()) {
-            return Err(MigrationRefusal::UnknownApplied {
-                version: extra.version,
-            });
-        }
+    if applied.len() > embedded.len()
+        && let Some(extra) = applied.get(embedded.len())
+    {
+        return Err(MigrationRefusal::UnknownApplied {
+            version: extra.version,
+        });
     }
     Ok(())
 }

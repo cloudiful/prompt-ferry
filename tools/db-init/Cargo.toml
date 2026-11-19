@@ -2,6 +2,8 @@
 name = "prompt-ferry-db-init"
 version = "0.1.0"
 edition = "2024"
+license = "Apache-2.0"
+description = "Database initialization helper for prompt-ferry"
 
 [[bin]]
 name = "db_init"
@@ -9,7 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.104"
-clap = { version = "4.6.6", features = ["derive", "env"] }
+clap = { version = "4.6.8", features = ["derive", "env"] }
 prompt-ferry = { path = "../.." }
-tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
-uuid = { version = "1.26.1", features = ["v4"] }
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1.29.3", features = ["v4"] }

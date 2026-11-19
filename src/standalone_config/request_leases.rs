@@ -19,15 +19,6 @@ pub(crate) enum RequestLeaseAcquireOutcome {
     Blocked,
 }
 
-/// In-memory view of an active standalone request lease row.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ActiveRequestLease {
-    pub(crate) request_id: Uuid,
-    pub(crate) owner_worker_id: Uuid,
-    pub(crate) lease_expires_at: i64,
-    pub(crate) last_heartbeat_at: i64,
-}
-
 /// Owner-checked SQLite store for standalone request leases.
 ///
 /// Phase 1C-c ships the dedicated `standalone_request_leases` table
@@ -110,53 +101,6 @@ impl StandaloneRequestLeaseStore {
             .execute(&self.pool)
             .await?;
         Ok(result.rows_affected() == 1)
-    }
-
-    /// Return all currently live leases (rows whose `lease_expires_at`
-    /// is strictly after the bind-time `now` snapshot).
-    pub(crate) async fn list_active(&self) -> Result<Vec<ActiveRequestLease>> {
-        let now = unix_seconds();
-        let rows = standalone_query!("src/sql/standalone/request_lease_list_active.sql")
-            .bind(now)
-            .fetch_all(&self.pool)
-            .await?;
-        let mut leases = Vec::with_capacity(rows.len());
-        for row in rows {
-            let request_id: String = row.try_get("request_id")?;
-            let request_id = Uuid::parse_str(&request_id).map_err(|error| {
-                crate::standalone_config::StandaloneConfigError::CorruptDatabase(format!(
-                    "column request_id is not a UUID: {error}"
-                ))
-            })?;
-            let owner: String = row.try_get("owner_worker_id")?;
-            let owner = Uuid::parse_str(&owner).map_err(|error| {
-                crate::standalone_config::StandaloneConfigError::CorruptDatabase(format!(
-                    "column owner_worker_id is not a UUID: {error}"
-                ))
-            })?;
-            let lease_expires_at: i64 = row.try_get("lease_expires_at")?;
-            let last_heartbeat_at: i64 = row.try_get("last_heartbeat_at")?;
-            leases.push(ActiveRequestLease {
-                request_id,
-                owner_worker_id: owner,
-                lease_expires_at,
-                last_heartbeat_at,
-            });
-        }
-        Ok(leases)
-    }
-
-    /// Delete every lease row whose `lease_expires_at` is at or before
-    /// the bind-time `now` snapshot. The reconciler must not be
-    /// described as aborting a durable request record; standalone
-    /// request records do not yet exist.
-    pub(crate) async fn abort_stale(&self) -> Result<u64> {
-        let now = unix_seconds();
-        let result = standalone_query!("src/sql/standalone/request_lease_abort_stale.sql")
-            .bind(now)
-            .execute(&self.pool)
-            .await?;
-        Ok(result.rows_affected())
     }
 }
 

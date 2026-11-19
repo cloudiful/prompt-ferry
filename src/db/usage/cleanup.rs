@@ -113,7 +113,7 @@ async fn run_raw_payload_maintenance_locked(
             continue;
         };
 
-        let mut tx = (&mut **conn).begin().await?;
+        let mut tx = (**conn).begin().await?;
         sqlx::query(sqlx::AssertSqlSafe(chunk.lock_sql.as_str()))
             .execute(&mut *tx)
             .await?;

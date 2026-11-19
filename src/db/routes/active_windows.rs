@@ -180,11 +180,7 @@ pub fn stored_is_active_now(raw: Option<&str>, today: u8, now_min: u16) -> bool 
 /// Worker-local minutes since midnight.
 pub fn worker_local_minutes_now() -> u16 {
     let now = chrono::Local::now().time();
-    #[allow(clippy::cast_possible_truncation)]
-    let hour = now.hour() as u16;
-    #[allow(clippy::cast_possible_truncation)]
-    let min = now.minute() as u16;
-    hour * 60 + min
+    u16::try_from(now.hour() * 60 + now.minute()).expect("minutes since midnight fit in u16")
 }
 
 /// Worker-local `HH:MM` for fail-closed messages.

@@ -68,7 +68,7 @@ export type CacheAlertSettingsRequest = {
     dingtalk_webhook_url?: string;
     enabled?: boolean;
     min_turns?: number;
-    smtp?: null | CacheAlertSmtpSettings;
+    smtp?: CacheAlertSmtpSettings | null;
     threshold?: number;
     window_minutes?: number;
 };
@@ -86,7 +86,7 @@ export type CacheAlertSettingsResponse = {
     enabled: boolean;
     has_dingtalk_secret: boolean;
     min_turns: number;
-    smtp?: null | CacheAlertSmtpSettingsResponse;
+    smtp?: CacheAlertSmtpSettingsResponse | null;
     threshold: number;
     window_minutes: number;
 };
@@ -518,12 +518,12 @@ export type EndpointRequest = {
     key_lb_enabled?: boolean;
     mcp_enabled?: boolean | null;
     name: string;
-    native_api_override?: null | NativeApi;
+    native_api_override?: NativeApi | null;
     owner_user_id?: number | null;
-    plan?: null | EndpointPlan;
+    plan?: EndpointPlan | null;
     protocol_mode: EndpointProtocolMode;
     provider?: EndpointProvider;
-    provider_region?: null | EndpointRegion;
+    provider_region?: EndpointRegion | null;
     /**
      * Issue #368 Phase B: outbound proxy default (full URL with optional
      * userinfo). `None` (omitted/null) means keep on PATCH / direct on
@@ -850,7 +850,7 @@ export type ModelRouteRequest = {
     model_pattern: string;
     owner_user_id?: number | null;
     priority?: number | null;
-    routing_strategy?: null | ModelRouteRoutingStrategy;
+    routing_strategy?: ModelRouteRoutingStrategy | null;
     scope: string;
     targets?: Array<ModelRouteTargetRequest> | null;
 };
@@ -971,7 +971,7 @@ export type ModelRouteTargetRequest = {
      * `proxy_url_override` is omitted.
      */
     has_proxy_url_override?: boolean | null;
-    native_api?: null | NativeApi;
+    native_api?: NativeApi | null;
     /**
      * Mark this target as the route's manual preference for
      * future unbound sessions. At most one target per route may carry it;
@@ -1181,7 +1181,7 @@ export type OAuthFlowRequest = {
  * the device code yet; `complete` carries the freshly stamped endpoint.
  */
 export type OAuthLoginResponse = {
-    endpoint?: null | ProviderEndpoint;
+    endpoint?: ProviderEndpoint | null;
     flow_id: string;
     status: OAuthLoginStatus;
 };
@@ -1288,7 +1288,7 @@ export type ProviderEndpoint = {
      */
     plan?: EndpointPlan;
     provider: EndpointProvider;
-    provider_region?: null | EndpointRegion;
+    provider_region?: EndpointRegion | null;
     scope: string;
     /**
      * Issue #637: free-form endpoint service-tier override. `None` means
@@ -1493,8 +1493,8 @@ export type RequestRecordBucket = {
 export type RequestRecordCategory = 'ai' | 'mcp';
 
 export type RequestRecordDetail = {
-    abort_from_state?: null | RequestRecordState;
-    abort_reason?: null | RequestAbortReason;
+    abort_from_state?: RequestRecordState | null;
+    abort_reason?: RequestAbortReason | null;
     abort_response_started?: boolean | null;
     /**
      * Snapshot of the routed target's `thinking_effort_override` taken when
@@ -1529,7 +1529,7 @@ export type RequestRecordDetail = {
     endpoint_name?: string | null;
     error_code?: string | null;
     error_message?: string | null;
-    failure_family?: null | RequestFailureFamily;
+    failure_family?: RequestFailureFamily | null;
     has_full_request: boolean;
     has_parent: boolean;
     has_reasoning_content?: boolean | null;
@@ -1642,8 +1642,8 @@ export type RequestRecordFullResponse = {
 };
 
 export type RequestRecordListRow = {
-    abort_from_state?: null | RequestRecordState;
-    abort_reason?: null | RequestAbortReason;
+    abort_from_state?: RequestRecordState | null;
+    abort_reason?: RequestAbortReason | null;
     abort_response_started?: boolean | null;
     cache_rate?: number | null;
     cache_read_tokens?: number | null;
@@ -1659,7 +1659,7 @@ export type RequestRecordListRow = {
     endpoint_name?: string | null;
     error_code?: string | null;
     error_message?: string | null;
-    failure_family?: null | RequestFailureFamily;
+    failure_family?: RequestFailureFamily | null;
     has_full_request: boolean;
     has_parent: boolean;
     input_tokens?: number | null;
@@ -1730,7 +1730,7 @@ export type RequestRecordOverviewBreakdownRow = {
      */
     error_rate?: number | null;
     label: string;
-    mcp_scope?: null | RequestRecordMcpScope;
+    mcp_scope?: RequestRecordMcpScope | null;
     mcp_server_id?: string | null;
     model?: string | null;
     /**
@@ -1927,7 +1927,7 @@ export type RequestRecordToolCall = {
 export type RequestRecordsClearRequest = {
     delete_all?: boolean | null;
     end_at?: string | null;
-    scope?: null | UsageClearScope;
+    scope?: UsageClearScope | null;
     start_at?: string | null;
     user_id?: number | null;
 };
@@ -2019,7 +2019,7 @@ export type SharedValkeySecretPatch = {
 
 export type SharedValkeySettingsRequest = {
     ttl_seconds?: number;
-    url?: null | SharedValkeySecretPatch;
+    url?: SharedValkeySecretPatch | null;
 };
 
 /**
@@ -2099,23 +2099,23 @@ export type SubscriptionWindowUsage = {
 };
 
 export type TokenPlanKeyUsage = {
-    balances?: null | CommandCodeBalances;
-    deepseek_balance?: null | DeepSeekBalance;
+    balances?: CommandCodeBalances | null;
+    deepseek_balance?: DeepSeekBalance | null;
     error_code?: string | null;
     error_message?: string | null;
-    five_hour?: null | CommandCodeWindowUsage;
-    glm_five_hour?: null | GlmWindowUsage;
-    glm_weekly?: null | GlmWindowUsage;
+    five_hour?: CommandCodeWindowUsage | null;
+    glm_five_hour?: GlmWindowUsage | null;
+    glm_weekly?: GlmWindowUsage | null;
     key_id: string;
     key_label: string;
     model_remains: Array<TokenPlanModelUsage>;
     ok: boolean;
-    opencodego_monthly?: null | OpencodeGoWindowUsage;
-    opencodego_rolling?: null | OpencodeGoWindowUsage;
-    opencodego_weekly?: null | OpencodeGoWindowUsage;
-    openrouter_balance?: null | OpenRouterBalance;
-    openrouter_spend?: null | OpenRouterSpend;
-    quota_status?: null | TokenPlanQuotaStatus;
+    opencodego_monthly?: OpencodeGoWindowUsage | null;
+    opencodego_rolling?: OpencodeGoWindowUsage | null;
+    opencodego_weekly?: OpencodeGoWindowUsage | null;
+    openrouter_balance?: OpenRouterBalance | null;
+    openrouter_spend?: OpenRouterSpend | null;
+    quota_status?: TokenPlanQuotaStatus | null;
     /**
      * Additive canonical quota observations (issue #844 P1). `None` means
      * legacy fallback (populated only by newer backends); `Some([])` is an
@@ -2125,14 +2125,14 @@ export type TokenPlanKeyUsage = {
      */
     quota_windows?: Array<CanonicalQuotaWindow> | null;
     status?: number | null;
-    weekly?: null | CommandCodeWindowUsage;
+    weekly?: CommandCodeWindowUsage | null;
 };
 
 export type TokenPlanModelUsage = {
-    interval?: null | TokenPlanWindowUsage;
+    interval?: TokenPlanWindowUsage | null;
     model_name: string;
-    observation?: null | SubscriptionQuotaObservation;
-    weekly?: null | TokenPlanWindowUsage;
+    observation?: SubscriptionQuotaObservation | null;
+    weekly?: TokenPlanWindowUsage | null;
     /**
      * Issue #759 P1: canonical ChatGPT subscription windows with their real
      * reported duration. Populated only for ChatGPT subscription endpoints;
@@ -2163,7 +2163,7 @@ export type TokenPlanUsageResponse = {
      */
     local_today_tokens?: number | null;
     provider: EndpointProvider;
-    provider_region?: null | EndpointRegion;
+    provider_region?: EndpointRegion | null;
     quota_inference_available?: boolean | null;
 };
 
@@ -2392,6 +2392,9 @@ export type DeleteConversationEndpointOverrideData = {
 };
 
 export type DeleteConversationEndpointOverrideErrors = {
+    /**
+     * Conversation endpoint override not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -2419,6 +2422,9 @@ export type GetConversationEndpointOverrideData = {
 };
 
 export type GetConversationEndpointOverrideErrors = {
+    /**
+     * Conversation endpoint override not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -2446,6 +2452,9 @@ export type SetConversationEndpointOverrideData = {
 };
 
 export type SetConversationEndpointOverrideErrors = {
+    /**
+     * Invalid endpoint key or endpoint selection
+     */
     400: ErrorEnvelope;
 };
 
@@ -2487,6 +2496,9 @@ export type CreateEndpointData = {
 };
 
 export type CreateEndpointErrors = {
+    /**
+     * Invalid endpoint request
+     */
     400: ErrorEnvelope;
 };
 
@@ -2514,6 +2526,9 @@ export type DeleteEndpointData = {
 };
 
 export type DeleteEndpointErrors = {
+    /**
+     * Endpoint not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -2541,6 +2556,9 @@ export type UpdateEndpointData = {
 };
 
 export type UpdateEndpointErrors = {
+    /**
+     * Endpoint not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -2575,8 +2593,17 @@ export type EndpointModelsData = {
 };
 
 export type EndpointModelsErrors = {
+    /**
+     * Missing endpoint API key or invalid endpoint proxy configuration
+     */
     400: ErrorEnvelope;
+    /**
+     * Endpoint not found
+     */
     404: ErrorEnvelope;
+    /**
+     * Upstream model discovery failed
+     */
     502: ErrorEnvelope;
 };
 
@@ -2604,6 +2631,9 @@ export type OauthClearData = {
 };
 
 export type OauthClearErrors = {
+    /**
+     * Endpoint not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -2631,6 +2661,9 @@ export type OauthStatusData = {
 };
 
 export type OauthStatusErrors = {
+    /**
+     * Endpoint not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -2658,7 +2691,13 @@ export type OauthBrowserStartData = {
 };
 
 export type OauthBrowserStartErrors = {
+    /**
+     * Endpoint is not eligible for ChatGPT OAuth
+     */
     400: ErrorEnvelope;
+    /**
+     * Endpoint not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -2686,8 +2725,17 @@ export type OauthBrowserCompleteData = {
 };
 
 export type OauthBrowserCompleteErrors = {
+    /**
+     * Invalid authorization callback or missing refresh token
+     */
     400: ErrorEnvelope;
+    /**
+     * Endpoint or pending browser login not found
+     */
     404: ErrorEnvelope;
+    /**
+     * OAuth flow expired
+     */
     410: ErrorEnvelope;
 };
 
@@ -2715,7 +2763,13 @@ export type OauthDeviceStartData = {
 };
 
 export type OauthDeviceStartErrors = {
+    /**
+     * Endpoint is not eligible for ChatGPT OAuth
+     */
     400: ErrorEnvelope;
+    /**
+     * Endpoint not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -2743,8 +2797,17 @@ export type OauthDevicePollData = {
 };
 
 export type OauthDevicePollErrors = {
+    /**
+     * OAuth authorization denied
+     */
     400: ErrorEnvelope;
+    /**
+     * Endpoint or pending device login not found
+     */
     404: ErrorEnvelope;
+    /**
+     * OAuth flow expired
+     */
     410: ErrorEnvelope;
 };
 
@@ -2772,7 +2835,13 @@ export type OauthRefreshData = {
 };
 
 export type OauthRefreshErrors = {
+    /**
+     * No stored ChatGPT OAuth token or refresh rejected
+     */
     400: ErrorEnvelope;
+    /**
+     * Endpoint not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -2800,6 +2869,9 @@ export type OrganizationUsageData = {
 };
 
 export type OrganizationUsageErrors = {
+    /**
+     * Endpoint does not support organization usage or its Admin API key is missing
+     */
     400: ErrorEnvelope;
 };
 
@@ -2827,7 +2899,13 @@ export type QuotaInferenceData = {
 };
 
 export type QuotaInferenceErrors = {
+    /**
+     * Endpoint is not a ChatGPT subscription or its OAuth login is missing
+     */
     400: ErrorEnvelope;
+    /**
+     * Endpoint not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -2860,9 +2938,21 @@ export type QuotaKeyObservationHistoryData = {
 };
 
 export type QuotaKeyObservationHistoryErrors = {
+    /**
+     * Invalid key, kind, limit, or cursor filter
+     */
     400: ErrorEnvelope;
+    /**
+     * Endpoint not found
+     */
     404: ErrorEnvelope;
+    /**
+     * Quota observation storage unavailable
+     */
     500: ErrorEnvelope;
+    /**
+     * Quota observation storage unavailable
+     */
     503: ErrorEnvelope;
 };
 
@@ -2895,9 +2985,21 @@ export type QuotaKeyObservationTrendData = {
 };
 
 export type QuotaKeyObservationTrendErrors = {
+    /**
+     * Invalid key, kind, or range filter
+     */
     400: ErrorEnvelope;
+    /**
+     * Endpoint not found
+     */
     404: ErrorEnvelope;
+    /**
+     * Quota observation storage unavailable
+     */
     500: ErrorEnvelope;
+    /**
+     * Quota observation storage unavailable
+     */
     503: ErrorEnvelope;
 };
 
@@ -2925,7 +3027,13 @@ export type TestEndpointData = {
 };
 
 export type TestEndpointErrors = {
+    /**
+     * Missing endpoint API key
+     */
     400: ErrorEnvelope;
+    /**
+     * Endpoint not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -3272,6 +3380,9 @@ export type DeleteModelRouteData = {
 };
 
 export type DeleteModelRouteErrors = {
+    /**
+     * Model route not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -3600,7 +3711,13 @@ export type RequestRecordResetSessionAffinityErrors = {
      * Request record has no conversation
      */
     400: ErrorEnvelope;
+    /**
+     * Administrator access required
+     */
     403: ErrorEnvelope;
+    /**
+     * Request record not found
+     */
     404: ErrorEnvelope;
     /**
      * Response affinity backend unavailable
@@ -3651,7 +3768,13 @@ export type ListUsersData = {
 };
 
 export type ListUsersErrors = {
+    /**
+     * Not authenticated
+     */
     401: ErrorEnvelope;
+    /**
+     * Administrator access required
+     */
     403: ErrorEnvelope;
 };
 
@@ -3674,8 +3797,17 @@ export type CreateUserData = {
 };
 
 export type CreateUserErrors = {
+    /**
+     * Invalid user request
+     */
     400: ErrorEnvelope;
+    /**
+     * Not authenticated
+     */
     401: ErrorEnvelope;
+    /**
+     * Administrator access required
+     */
     403: ErrorEnvelope;
 };
 
@@ -3698,7 +3830,13 @@ export type ListUserOptionsData = {
 };
 
 export type ListUserOptionsErrors = {
+    /**
+     * Not authenticated
+     */
     401: ErrorEnvelope;
+    /**
+     * Administrator access required
+     */
     403: ErrorEnvelope;
 };
 
@@ -3726,6 +3864,9 @@ export type DeleteUserData = {
 };
 
 export type DeleteUserErrors = {
+    /**
+     * User not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -3753,6 +3894,9 @@ export type UpdateUserData = {
 };
 
 export type UpdateUserErrors = {
+    /**
+     * User not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -3783,6 +3927,9 @@ export type ListClientKeysData = {
 };
 
 export type ListClientKeysErrors = {
+    /**
+     * User not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -3810,6 +3957,9 @@ export type CreateClientKeyData = {
 };
 
 export type CreateClientKeyErrors = {
+    /**
+     * User not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -3841,6 +3991,9 @@ export type DeleteClientKeyData = {
 };
 
 export type DeleteClientKeyErrors = {
+    /**
+     * User or client key not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -3872,6 +4025,9 @@ export type UpdateClientKeyData = {
 };
 
 export type UpdateClientKeyErrors = {
+    /**
+     * User or client key not found
+     */
     404: ErrorEnvelope;
 };
 
@@ -3899,6 +4055,9 @@ export type ResetPasswordData = {
 };
 
 export type ResetPasswordErrors = {
+    /**
+     * User not found
+     */
     404: ErrorEnvelope;
 };
 

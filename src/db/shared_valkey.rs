@@ -349,8 +349,7 @@ pub async fn save_shared_valkey_settings(
     )
     .fetch_optional(&mut *transaction)
     .await?
-    .map(|row| row.revision)
-    .flatten();
+    .and_then(|row| row.revision);
     if current_revision != expected_revision {
         transaction.rollback().await?;
         return Ok(SharedValkeyWriteOutcome::Conflict { current_revision });

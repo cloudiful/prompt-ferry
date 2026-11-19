@@ -353,7 +353,6 @@ async fn insert_route_rules(conn: &mut PgConnection, domains: &SnapshotDomains) 
             enabled: Set(route.enabled),
             created_at: Set(route.created_at.unwrap_or(now)),
             updated_at: Set(now),
-            ..Default::default()
         })
         .exec(&connection)
         .await

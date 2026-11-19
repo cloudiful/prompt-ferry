@@ -57,7 +57,6 @@ impl StandaloneConfigStore {
     /// Atomically replace the standalone configuration with the imported
     /// snapshot. The caller supplies already-decoded domain records; every
     /// secret is re-encrypted through `manager` inside the transaction.
-    #[allow(clippy::too_many_arguments)]
     pub async fn replace_snapshot_for_import(
         &self,
         manager: &RelaySecretManager,

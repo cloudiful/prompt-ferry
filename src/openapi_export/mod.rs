@@ -1,26 +1,5 @@
-// The modules below are `#[utoipa::path]` stubs: they exist only so utoipa can
-// emit the generated `__path_*` items consumed by the `OpenApi` derives. The
-// anchor functions themselves are never called, so dead-code analysis is
-// intentionally relaxed for this scaffolding-only subtree.
-#![allow(dead_code)]
-
-mod auth;
-mod bridge;
-mod config_audit;
-mod config_export;
-mod config_import;
 mod doc;
 mod doc_groups;
-mod endpoints;
-mod init;
-mod mcp;
-mod me;
-mod model_routes;
-mod node;
-mod nodes;
-mod schemas;
-mod settings;
-mod usage;
-mod users;
+pub(crate) mod schemas;
 
 pub use doc::export_admin_api;

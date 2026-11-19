@@ -1,6 +1,14 @@
 use super::*;
+use crate::openapi_export::schemas::ErrorEnvelope;
 use crate::session_affinity::{apply_opencode_headers, opencode_headers_apply};
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/model-routes",
+    params(TablePageQuery),
+    responses((status = 200, body = ModelRoutePageResponse, description = "Model route page")),
+    tag = "model-routes"
+)]
 pub(super) async fn list_model_routes(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -19,6 +27,13 @@ pub(super) async fn list_model_routes(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/model-routes",
+    request_body = ModelRouteRequest,
+    responses((status = 200, body = db::ModelEndpointRule, description = "Created model route")),
+    tag = "model-routes"
+)]
 pub(super) async fn create_model_route(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -51,6 +66,14 @@ pub(super) async fn create_model_route(
     }
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/admin/model-routes/{rule_id}",
+    params(("rule_id" = uuid::Uuid, Path, description = "Rule ID")),
+    request_body = ModelRouteRequest,
+    responses((status = 200, body = db::ModelEndpointRule, description = "Updated model route")),
+    tag = "model-routes"
+)]
 pub(super) async fn update_model_route(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -210,6 +233,16 @@ fn parse_sqlite_windows(raw: &Option<String>) -> Vec<db::ActiveWindow> {
     db::parse_stored_windows(raw.as_deref()).unwrap_or_default()
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/admin/model-routes/{rule_id}",
+    params(("rule_id" = uuid::Uuid, Path, description = "Rule ID")),
+    responses(
+        (status = 204, description = "Deleted model route"),
+        (status = 404, body = ErrorEnvelope, description = "Model route not found")
+    ),
+    tag = "model-routes"
+)]
 pub(super) async fn delete_model_route(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -237,6 +270,13 @@ const MODEL_ROUTE_TEST_TARGET_BUDGET: Duration = Duration::from_secs(20);
 const MODEL_ROUTE_TEST_ACTION_BUDGET: Duration = Duration::from_secs(60);
 const MODEL_ROUTE_TEST_CONCURRENCY: usize = 4;
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/model-routes/test",
+    request_body = ModelRouteTestRequest,
+    responses((status = 200, body = ModelRouteTestResponse, description = "Route test result")),
+    tag = "model-routes"
+)]
 pub(super) async fn test_model_route(
     State(state): State<AdminState>,
     headers: HeaderMap,

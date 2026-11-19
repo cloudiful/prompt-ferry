@@ -1,8 +1,14 @@
 use super::*;
 
-/// Read-only MCP provider registry so the admin UI renders preset ids, labels,
-/// default URLs, auth styles, and units from one server-owned source instead of
-/// duplicating them in the frontend.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/mcp-providers",
+    responses((status = 200, body = Vec<McpProviderDescriptor>, description = "MCP provider presets")),
+    tag = "mcp"
+)]
+// Read-only MCP provider registry so the admin UI renders preset ids, labels,
+// default URLs, auth styles, and units from one server-owned source instead of
+// duplicating them in the frontend.
 pub(super) async fn list_mcp_providers(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -13,6 +19,13 @@ pub(super) async fn list_mcp_providers(
     Json(mcp_provider_descriptors()).into_response()
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/mcp-servers",
+    params(TablePageQuery),
+    responses((status = 200, body = McpServerPageResponse, description = "MCP servers")),
+    tag = "mcp"
+)]
 pub(super) async fn list_mcp_servers(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -40,6 +53,13 @@ pub(super) async fn list_mcp_servers(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/mcp-servers",
+    request_body = McpServerRequest,
+    responses((status = 200, body = McpServer, description = "Created MCP server")),
+    tag = "mcp"
+)]
 pub(super) async fn create_mcp_server(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -75,6 +95,14 @@ pub(super) async fn create_mcp_server(
     }
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/admin/mcp-servers/{server_id}",
+    params(("server_id" = uuid::Uuid, Path, description = "MCP server ID")),
+    request_body = McpServerRequest,
+    responses((status = 200, body = McpServer, description = "Updated MCP server")),
+    tag = "mcp"
+)]
 pub(super) async fn update_mcp_server(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -134,6 +162,13 @@ pub(super) async fn update_mcp_server(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/admin/mcp-servers/{server_id}",
+    params(("server_id" = uuid::Uuid, Path, description = "MCP server ID")),
+    responses((status = 204, description = "Deleted MCP server")),
+    tag = "mcp"
+)]
 pub(super) async fn delete_mcp_server(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -164,6 +199,13 @@ pub(super) async fn delete_mcp_server(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/mcp-servers/{server_id}/test",
+    params(("server_id" = uuid::Uuid, Path, description = "MCP server ID")),
+    responses((status = 200, body = McpTestResponse, description = "MCP server test result")),
+    tag = "mcp"
+)]
 pub(super) async fn test_mcp_server(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -292,6 +334,13 @@ pub(super) async fn test_mcp_server(
     .into_response()
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/mcp-servers/{server_id}/catalog",
+    params(("server_id" = uuid::Uuid, Path, description = "MCP server ID")),
+    responses((status = 200, body = McpCatalogResponse, description = "Server catalog")),
+    tag = "mcp"
+)]
 pub(super) async fn get_mcp_catalog(
     State(state): State<AdminState>,
     headers: HeaderMap,

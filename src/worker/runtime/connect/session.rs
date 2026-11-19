@@ -75,7 +75,6 @@ impl ExecutorPump {
     }
 
     /// Consume typed bridge messages until the inbound half closes.
-    #[allow(dead_code)] // Integration entrypoint for the P3b node; exercised by the pump test.
     pub(crate) async fn run(&self, mut inbound: mpsc::Receiver<BridgeMessage>) {
         while let Some(message) = inbound.recv().await {
             self.handle(message).await;
@@ -270,21 +269,23 @@ mod tests {
             "the writer acknowledges a completed sink flush"
         );
 
-        let events = events
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let data_index = events
-            .iter()
-            .position(|event| *event == SinkEvent::Data)
-            .expect("the queued data reached the sink");
-        let flush_index = events
-            .iter()
-            .position(|event| *event == SinkEvent::Flush)
-            .expect("the sink was flushed");
-        assert!(
-            data_index < flush_index,
-            "the flush marker follows the preceding queued data: {events:?}"
-        );
+        {
+            let events = events
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let data_index = events
+                .iter()
+                .position(|event| *event == SinkEvent::Data)
+                .expect("the queued data reached the sink");
+            let flush_index = events
+                .iter()
+                .position(|event| *event == SinkEvent::Flush)
+                .expect("the sink was flushed");
+            assert!(
+                data_index < flush_index,
+                "the flush marker follows the preceding queued data: {events:?}"
+            );
+        }
 
         drop(sender);
         let _ = writer.await;

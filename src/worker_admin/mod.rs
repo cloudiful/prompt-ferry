@@ -33,5 +33,9 @@ pub(crate) mod token_plan_cache;
 pub(crate) mod token_plan_weight;
 pub mod types;
 
-pub use handlers::*;
+pub(crate) use handlers::openapi_paths;
+pub use handlers::{
+    chatgpt_backend, oauth, publish_snapshot, publish_snapshot_if_changed, router,
+    set_bridge_sender,
+};
 pub use state::AdminState;

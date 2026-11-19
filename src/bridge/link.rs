@@ -118,7 +118,6 @@ impl LinkReceiver {
 /// [`BRIDGE_LINK_BUFFER`]; `executor_response_tx` is the existing budgeted
 /// [`BridgeSender`]. The local executor pump consumes `executor_request_rx`,
 /// while the relay dispatcher consumes `relay_response_rx`.
-#[allow(dead_code)] // Integration entrypoint for the P3b node; exercised by link tests now.
 pub(crate) struct InMemoryLink {
     pub(crate) relay_request_tx: mpsc::Sender<BridgeMessage>,
     pub(crate) executor_request_rx: mpsc::Receiver<BridgeMessage>,
@@ -126,7 +125,6 @@ pub(crate) struct InMemoryLink {
     pub(crate) relay_response_rx: LinkReceiver,
 }
 
-#[allow(dead_code)] // Integration entrypoint for the P3b node; exercised by link tests now.
 pub(crate) fn in_memory_link() -> InMemoryLink {
     let (relay_request_tx, executor_request_rx) = mpsc::channel(BRIDGE_LINK_BUFFER);
     let (executor_response_tx, control_rx, data_rx) = BridgeSender::channel();

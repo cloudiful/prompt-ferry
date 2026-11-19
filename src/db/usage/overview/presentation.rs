@@ -14,17 +14,29 @@ pub(super) fn summary_from_metrics(row: MetricsRow) -> RequestRecordOverviewSumm
         p95_total_ms: row.p95_total_ms,
         p95_first_token_ms: row.p95_first_token_ms,
         avg_output_tokens_per_second: row.avg_output_tokens_per_second,
-        tokens: token_usage(
-            row.input_tokens,
-            row.cache_read_tokens,
-            row.cache_write_tokens,
-            row.output_tokens,
-            row.total_tokens,
-            row.cache_hit_count,
-            row.request_count,
-            row.full_input_tokens,
-        ),
+        tokens: token_usage(TokenUsageCounts {
+            input_tokens: row.input_tokens,
+            cache_read_tokens: row.cache_read_tokens,
+            cache_write_tokens: row.cache_write_tokens,
+            output_tokens: row.output_tokens,
+            total_tokens: row.total_tokens,
+            cache_hit_count: row.cache_hit_count,
+            request_count: row.request_count,
+            full_input_tokens: row.full_input_tokens,
+        }),
     }
+}
+
+/// Raw token counters of one metrics, trend or breakdown row.
+pub(super) struct TokenUsageCounts {
+    pub(super) input_tokens: i64,
+    pub(super) cache_read_tokens: i64,
+    pub(super) cache_write_tokens: i64,
+    pub(super) output_tokens: i64,
+    pub(super) total_tokens: i64,
+    pub(super) cache_hit_count: i64,
+    pub(super) request_count: i64,
+    pub(super) full_input_tokens: i64,
 }
 
 /// Build the aggregate token-usage presentation from a metrics row. `input_tokens`
@@ -32,17 +44,17 @@ pub(super) fn summary_from_metrics(row: MetricsRow) -> RequestRecordOverviewSumm
 /// fold-aware denominator (`SUM(normalized_full_input_tokens)`) carried through
 /// from SQL and used only for `cache_rate`; the denominator cannot be derived here
 /// because still-folded rows must fall back to `max(input, read+write)` per-row.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn token_usage(
-    input_tokens: i64,
-    cache_read_tokens: i64,
-    cache_write_tokens: i64,
-    output_tokens: i64,
-    total_tokens: i64,
-    cache_hit_count: i64,
-    request_count: i64,
-    full_input_tokens: i64,
-) -> RequestRecordOverviewTokenUsage {
+pub(super) fn token_usage(counts: TokenUsageCounts) -> RequestRecordOverviewTokenUsage {
+    let TokenUsageCounts {
+        input_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
+        output_tokens,
+        total_tokens,
+        cache_hit_count,
+        request_count,
+        full_input_tokens,
+    } = counts;
     RequestRecordOverviewTokenUsage {
         input_tokens,
         cache_read_tokens,
@@ -115,8 +127,8 @@ pub(crate) fn overview_cache_rate(full_input_tokens: i64, cache_read_tokens: i64
 #[cfg(test)]
 mod tests {
     use super::{
-        breakdown_mcp_scope, error_rate, opt_error_rate, overview_cache_rate, summary_from_metrics,
-        token_usage,
+        TokenUsageCounts, breakdown_mcp_scope, error_rate, opt_error_rate, overview_cache_rate,
+        summary_from_metrics, token_usage,
     };
     use crate::db::RequestRecordMcpScope;
     use crate::db::usage::overview::queries::MetricsRow;
@@ -139,7 +151,16 @@ mod tests {
     fn cache_rate_uses_normalized_input_and_stays_bounded() {
         // Old row shape: ordinary=0, cache_read=80_000, write=0, output=64.
         // full_input = ordinary + read + write = 0 + 80_000 + 0 = 80_000.
-        let usage = token_usage(0, 80_000, 0, 64, 80_064, 1, 1, 80_000);
+        let usage = token_usage(TokenUsageCounts {
+            input_tokens: 0,
+            cache_read_tokens: 80_000,
+            cache_write_tokens: 0,
+            output_tokens: 64,
+            total_tokens: 80_064,
+            cache_hit_count: 1,
+            request_count: 1,
+            full_input_tokens: 80_000,
+        });
 
         assert_eq!(usage.cache_rate, Some(1.0));
         assert_eq!(usage.cache_hit_rate, Some(1.0));
@@ -147,7 +168,16 @@ mod tests {
 
     #[test]
     fn cache_rate_is_not_available_without_input_tokens() {
-        let usage = token_usage(0, 0, 0, 64, 64, 0, 1, 0);
+        let usage = token_usage(TokenUsageCounts {
+            input_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            output_tokens: 64,
+            total_tokens: 64,
+            cache_hit_count: 0,
+            request_count: 1,
+            full_input_tokens: 0,
+        });
 
         assert_eq!(usage.cache_rate, None);
         assert_eq!(usage.cache_hit_rate, Some(0.0));

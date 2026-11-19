@@ -1,5 +1,23 @@
 use super::*;
+use crate::db::StreamDeltaBatchingSettings;
+use crate::openapi_export::schemas::{
+    EndpointSettingResponse, RedactionConfigSchema, RedactionCustomStringRulePageResponseSchema,
+    RedactionPreviewRequestSchema, RedactionPreviewResponseSchema, RedactionScopeSchema,
+    RedactionSettingResponseSchema,
+};
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/redaction",
+    params(
+        ("scope" = Option<RedactionScopeSchema>, Query, description = "Redaction rule scope"),
+        ("user_id" = Option<i64>, Query, description = "Target user id for user-scoped rules")
+    ),
+    responses(
+        (status = 200, body = RedactionSettingResponseSchema, description = "Redaction settings")
+    ),
+    tag = "settings"
+)]
 pub(super) async fn get_redaction_setting(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -37,6 +55,19 @@ pub(super) async fn get_redaction_setting(
     .into_response()
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/settings/redaction",
+    params(
+        ("scope" = Option<RedactionScopeSchema>, Query, description = "Redaction rule scope"),
+        ("user_id" = Option<i64>, Query, description = "Target user id for user-scoped rules")
+    ),
+    request_body = RedactionConfigSchema,
+    responses(
+        (status = 200, body = RedactionSettingResponseSchema, description = "Updated redaction settings")
+    ),
+    tag = "settings"
+)]
 pub(super) async fn set_redaction_setting(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -123,6 +154,15 @@ pub(super) async fn set_redaction_setting(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/settings/redaction/preview",
+    request_body = RedactionPreviewRequestSchema,
+    responses(
+        (status = 200, body = RedactionPreviewResponseSchema, description = "Redaction preview")
+    ),
+    tag = "settings"
+)]
 pub(super) async fn preview_redaction(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -138,6 +178,21 @@ pub(super) async fn preview_redaction(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/redaction/custom-strings",
+    params(
+        ("scope" = Option<RedactionScopeSchema>, Query, description = "Redaction rule scope"),
+        ("user_id" = Option<i64>, Query, description = "Target user id for user-scoped rules"),
+        ("first" = Option<i64>, Query, description = "Zero-based offset"),
+        ("rows" = Option<i64>, Query, description = "Page size, default 10"),
+        ("search" = Option<String>, Query, description = "Pattern substring search")
+    ),
+    responses(
+        (status = 200, body = RedactionCustomStringRulePageResponseSchema, description = "Paged custom string rules")
+    ),
+    tag = "settings"
+)]
 pub(super) async fn list_redaction_custom_strings(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -223,6 +278,12 @@ fn normalize_redaction_page(first: Option<i64>, rows: Option<i64>) -> (i64, i64)
     (first.unwrap_or(0).max(0), rows.unwrap_or(10).clamp(1, 100))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/request-content-logging",
+    responses((status = 200, body = RequestContentLoggingResponse, description = "Request content logging")),
+    tag = "settings"
+)]
 pub(super) async fn get_request_content_logging(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -233,6 +294,13 @@ pub(super) async fn get_request_content_logging(
     Json(state.request_content_logging.read().await.clone()).into_response()
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/settings/request-content-logging",
+    request_body = RequestContentLoggingRequest,
+    responses((status = 200, body = RequestContentLoggingResponse, description = "Updated request content logging")),
+    tag = "settings"
+)]
 pub(super) async fn set_request_content_logging(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -276,6 +344,12 @@ pub(super) async fn set_request_content_logging(
     Json(normalized).into_response()
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/usage-retention",
+    responses((status = 200, body = UsageRetentionSettings, description = "Usage content retention")),
+    tag = "settings"
+)]
 pub(super) async fn get_usage_retention(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -286,6 +360,13 @@ pub(super) async fn get_usage_retention(
     Json(state.usage_retention.read().await.clone()).into_response()
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/settings/usage-retention",
+    request_body = UsageRetentionSettings,
+    responses((status = 200, body = UsageRetentionSettings, description = "Updated usage content retention")),
+    tag = "settings"
+)]
 pub(super) async fn set_usage_retention(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -328,6 +409,12 @@ fn normalize_stream_delta_batching_settings(
     value
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/stream-delta-batching",
+    responses((status = 200, body = StreamDeltaBatchingSettings, description = "Stream delta batching settings")),
+    tag = "settings"
+)]
 pub(super) async fn get_stream_delta_batching(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -338,6 +425,13 @@ pub(super) async fn get_stream_delta_batching(
     Json(state.stream_delta_batching.read().await.clone()).into_response()
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/settings/stream-delta-batching",
+    request_body = StreamDeltaBatchingSettings,
+    responses((status = 200, body = StreamDeltaBatchingSettings, description = "Updated stream delta batching settings")),
+    tag = "settings"
+)]
 pub(super) async fn set_stream_delta_batching(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -360,6 +454,12 @@ pub(super) async fn set_stream_delta_batching(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/endpoint",
+    responses((status = 200, body = EndpointSettingResponse, description = "Endpoint preference")),
+    tag = "settings"
+)]
 pub(super) async fn get_endpoint_setting(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -388,6 +488,13 @@ pub(super) async fn get_endpoint_setting(
     }
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/settings/endpoint",
+    request_body = EndpointSettingRequest,
+    responses((status = 204, description = "Endpoint preference updated")),
+    tag = "settings"
+)]
 pub(super) async fn set_endpoint_setting(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -419,6 +526,12 @@ pub(super) async fn set_endpoint_setting(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/relay-ip-whitelist",
+    responses((status = 200, body = RelayIpPolicyResponse, description = "Ingress IP whitelist")),
+    tag = "settings"
+)]
 pub(super) async fn get_relay_ip_whitelist(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -436,6 +549,13 @@ pub(super) async fn get_relay_ip_whitelist(
     }
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/settings/relay-ip-whitelist",
+    request_body = RelayIpPolicy,
+    responses((status = 200, body = RelayIpPolicyResponse, description = "Updated ingress IP whitelist")),
+    tag = "settings"
+)]
 pub(super) async fn set_relay_ip_whitelist(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -464,6 +584,12 @@ pub(super) async fn set_relay_ip_whitelist(
     Json(RelayIpPolicyResponse::from(policy)).into_response()
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/model-route-whitelist",
+    responses((status = 200, body = ModelRouteWhitelistResponse, description = "Model route whitelist")),
+    tag = "settings"
+)]
 pub(super) async fn get_model_route_whitelist(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -481,6 +607,13 @@ pub(super) async fn get_model_route_whitelist(
     }
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/settings/model-route-whitelist",
+    request_body = ModelRouteWhitelistRequest,
+    responses((status = 200, body = ModelRouteWhitelistResponse, description = "Updated model route whitelist")),
+    tag = "settings"
+)]
 pub(super) async fn set_model_route_whitelist(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -532,6 +665,12 @@ async fn shared_valkey_response(
     .into_response()
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/shared-valkey",
+    responses((status = 200, body = SharedValkeySettingsResponse, description = "Shared Valkey settings; the URL is masked and the desired/applied revisions expose restart status")),
+    tag = "settings"
+)]
 pub(super) async fn get_shared_valkey(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -566,6 +705,13 @@ pub(super) async fn get_shared_valkey(
     .await
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/settings/shared-valkey",
+    request_body = SharedValkeySettingsRequest,
+    responses((status = 200, body = SharedValkeySettingsResponse, description = "Persisted shared Valkey settings; every running worker stays on its applied revision until it restarts")),
+    tag = "settings"
+)]
 pub(super) async fn set_shared_valkey(
     State(state): State<AdminState>,
     headers: HeaderMap,

@@ -1,4 +1,5 @@
 use super::*;
+use crate::openapi_export::schemas::ErrorEnvelope;
 use crate::{
     db::quota_inference::{self as evidence_db, QuotaInferenceSnapshot, SnapshotEvidence},
     worker_admin::{
@@ -8,6 +9,17 @@ use crate::{
 };
 use chrono::{DateTime, Duration as ChronoDuration};
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/quota-inference",
+    params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
+    responses(
+        (status = 200, body = InferenceResponse, description = "Observed subscription quota estimates"),
+        (status = 400, body = ErrorEnvelope, description = "Endpoint is not a ChatGPT subscription or its OAuth login is missing"),
+        (status = 404, body = ErrorEnvelope, description = "Endpoint not found")
+    ),
+    tag = "endpoints"
+)]
 pub(super) async fn quota_inference(
     State(state): State<AdminState>,
     headers: HeaderMap,

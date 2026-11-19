@@ -45,7 +45,7 @@ pub(super) fn spawn_node_config_refresh(
     database_url: String,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        run_node_config_refresh(state, control, database_url).await;
+        Box::pin(run_node_config_refresh(state, control, database_url)).await;
     })
 }
 
@@ -261,12 +261,7 @@ async fn refresh_configuration(
         db::get_usage_retention(&pool),
         db::get_cache_alert_settings(&pool),
     )?;
-    let redaction_config = redaction_config;
-    let user_redaction_configs = user_redaction_configs;
-    let model_route_whitelist_enabled = model_route_whitelist_enabled;
     let mut request_content_logging = request_content_logging;
-    let stream_delta_batching = stream_delta_batching;
-    let usage_retention = usage_retention;
     request_content_logging.raw_retention_days = usage_retention.raw_retention_days;
 
     // Redaction is applied process wide, so it is only re-applied when the

@@ -81,45 +81,45 @@ pub(super) fn remove_browser_flow(flow_id: Uuid) {
     lock_flows(&BROWSER_FLOWS).remove(&flow_id);
 }
 
-// Axum's `Response` is inherently larger than clippy's 128-byte threshold, and
-// boxing it would only change these internal helper signatures.
-#[allow(clippy::result_large_err)]
 pub(super) async fn ensure_login_endpoint(
     state: &AdminState,
     endpoint_id: Uuid,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     match state.config_repository.get_endpoint(endpoint_id).await {
         Ok(Some(endpoint)) if endpoint.provider.supports_chatgpt_subscription_plan() => Ok(()),
-        Ok(Some(_)) => Err(error(
+        Ok(Some(_)) => Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "oauth_unsupported_provider",
             "ChatGPT OAuth login requires an openai endpoint",
         )),
-        Ok(None) => Err(endpoint_not_found()),
-        Err(err) => Err(internal(state, err)),
+        Ok(None) => Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "endpoint not found",
+        )),
+        Err(err) => Err(ApiError::internal(state, err)),
     }
 }
 
 /// Endpoint-aware protocol client: honors the endpoint proxy and fails closed.
-#[allow(clippy::result_large_err)]
 pub(super) async fn oauth_client(
     state: &AdminState,
     endpoint_id: Uuid,
-) -> Result<Client, Response> {
+) -> Result<Client, ApiError> {
     let proxy_url = state
         .config_repository
         .endpoint_proxy_url(endpoint_id)
         .await
-        .map_err(|err| internal(state, err))?;
+        .map_err(|err| ApiError::internal(state, err))?;
     crate::endpoint_protocol::endpoint_protocol_client_for_endpoint(
         proxy_url.as_deref(),
         CHATGPT_ISSUER,
     )
     .map_err(|message| {
-        error(
+        ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_proxy_url",
-            &truncate_message(&maybe_redact(state, &message)),
+            truncate_message(&maybe_redact(state, &message)),
         )
     })
 }
@@ -161,14 +161,13 @@ pub(super) async fn oauth_status_response(state: &AdminState, endpoint_id: Uuid)
     }
 }
 
-#[allow(clippy::result_large_err)]
 pub(super) async fn persist_token(
     state: &AdminState,
     endpoint_id: Uuid,
     access_token: String,
     refresh_token: String,
     expires_in_seconds: Option<u64>,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     let token = db::EndpointOAuthTokenSet {
         access_token,
         refresh_token,
@@ -178,7 +177,7 @@ pub(super) async fn persist_token(
         .config_repository
         .set_endpoint_oauth_token(endpoint_id, Some(token))
         .await
-        .map_err(|err| internal(state, err))?;
+        .map_err(|err| ApiError::internal(state, err))?;
     publish_token_snapshot(state).await;
     Ok(())
 }
@@ -207,7 +206,7 @@ pub(super) async fn complete_login(
     )
     .await
     {
-        return response;
+        return response.into_response();
     }
     match state.config_repository.get_endpoint(endpoint_id).await {
         Ok(Some(endpoint)) => Json(OAuthLoginResponse {

@@ -498,6 +498,7 @@ fn warn_unexpected() {
 /// same close signal the relay path uses. They are not accepted inference
 /// rounds, so they must not hold the drain open: every send shares one deadline
 /// and a saturated queue is abandoned rather than awaited individually.
+#[cfg(test)]
 pub(super) async fn close_realtime_sessions(
     state: &super::WorkerRuntimeState,
     deadline: tokio::time::Instant,

@@ -1,5 +1,11 @@
 use super::*;
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/cache-alert",
+    responses((status = 200, body = CacheAlertSettingsResponse, description = "Continuous-session cache alert settings; the stored DingTalk secret and SMTP password are never echoed back and `has_dingtalk_secret` / `smtp.has_smtp_password` report whether one is stored")),
+    tag = "settings"
+)]
 pub(super) async fn get_cache_alert_setting(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -14,6 +20,13 @@ pub(super) async fn get_cache_alert_setting(
     Json(settings.redacted_response()).into_response()
 }
 
+#[utoipa::path(
+    put,
+    path = "/api/v1/settings/cache-alert",
+    request_body = CacheAlertSettingsRequest,
+    responses((status = 200, body = CacheAlertSettingsResponse, description = "Updated cache alert settings; a blank dingtalk_secret or smtp.password keeps the stored value and an omitted smtp object keeps the stored SMTP configuration")),
+    tag = "settings"
+)]
 pub(super) async fn set_cache_alert_setting(
     State(state): State<AdminState>,
     headers: HeaderMap,

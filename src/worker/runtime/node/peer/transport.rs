@@ -28,8 +28,6 @@ pub(crate) trait PeerReader {
 
 /// The writing half of a peer link.
 pub(crate) trait PeerWriter {
-    /// Write a text frame.
-    fn send_text(&mut self, text: String) -> impl Future<Output = anyhow::Result<()>> + Send;
     /// Write a binary frame.
     fn send_binary(&mut self, bytes: Vec<u8>) -> impl Future<Output = anyhow::Result<()>> + Send;
     /// Flush the written frames to the peer.
@@ -84,13 +82,6 @@ impl PeerReader for AxumPeerReader {
 }
 
 impl PeerWriter for AxumPeerWriter {
-    async fn send_text(&mut self, text: String) -> anyhow::Result<()> {
-        self.writer
-            .send(AxumMessage::Text(text.into()))
-            .await
-            .map_err(|err| anyhow!("failed to write the peer handshake frame: {err}"))
-    }
-
     async fn send_binary(&mut self, bytes: Vec<u8>) -> anyhow::Result<()> {
         self.writer
             .send(AxumMessage::Binary(bytes.into()))
@@ -156,13 +147,6 @@ impl<S> PeerWriter for TungstenitePeerWriter<S>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
 {
-    async fn send_text(&mut self, text: String) -> anyhow::Result<()> {
-        self.writer
-            .send(WsMessage::Text(text.into()))
-            .await
-            .map_err(|err| anyhow!("failed to write the peer handshake frame: {err}"))
-    }
-
     async fn send_binary(&mut self, bytes: Vec<u8>) -> anyhow::Result<()> {
         self.writer
             .send(WsMessage::Binary(bytes.into()))
@@ -183,7 +167,6 @@ where
 /// The two halves exchange frames over bounded channels, so the handshake
 /// and the session can be exercised without a socket and without a server.
 #[cfg(test)]
-#[allow(dead_code)] // The in-memory link is a test tool.
 pub(crate) struct MemoryPeer {
     /// The frames this half writes.
     outbound: tokio::sync::mpsc::Sender<PeerFrame>,
@@ -193,20 +176,17 @@ pub(crate) struct MemoryPeer {
 
 /// The reading half of an in-memory peer link.
 #[cfg(test)]
-#[allow(dead_code)] // The in-memory link is a test tool.
 pub(crate) struct MemoryPeerReader {
     inbound: tokio::sync::mpsc::Receiver<PeerFrame>,
 }
 
 /// The writing half of an in-memory peer link.
 #[cfg(test)]
-#[allow(dead_code)] // The in-memory link is a test tool.
 pub(crate) struct MemoryPeerWriter {
     outbound: tokio::sync::mpsc::Sender<PeerFrame>,
 }
 
 #[cfg(test)]
-#[allow(dead_code)] // The in-memory link is a test tool.
 impl MemoryPeer {
     /// Build the two halves of an in-memory link.
     ///
@@ -249,13 +229,6 @@ impl PeerReader for MemoryPeerReader {
 
 #[cfg(test)]
 impl PeerWriter for MemoryPeerWriter {
-    async fn send_text(&mut self, text: String) -> anyhow::Result<()> {
-        self.outbound
-            .send(PeerFrame::Text(text))
-            .await
-            .map_err(|_| anyhow!("the peer link is closed"))
-    }
-
     async fn send_binary(&mut self, bytes: Vec<u8>) -> anyhow::Result<()> {
         self.outbound
             .send(PeerFrame::Binary(bytes))

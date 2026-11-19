@@ -410,13 +410,15 @@ mod tests {
         flushes: Arc<AtomicUsize>,
     }
 
+    type GatedSinkParts = (
+        GatedSink,
+        Arc<Mutex<Vec<PeerFrame>>>,
+        Arc<Semaphore>,
+        Arc<AtomicUsize>,
+    );
+
     impl GatedSink {
-        fn new() -> (
-            Self,
-            Arc<Mutex<Vec<PeerFrame>>>,
-            Arc<Semaphore>,
-            Arc<AtomicUsize>,
-        ) {
+        fn new() -> GatedSinkParts {
             let frames = Arc::new(Mutex::new(Vec::new()));
             let gate = Arc::new(Semaphore::new(0));
             let flushes = Arc::new(AtomicUsize::new(0));
@@ -440,14 +442,6 @@ mod tests {
     }
 
     impl PeerWriter for GatedSink {
-        async fn send_text(&mut self, text: String) -> anyhow::Result<()> {
-            self.frames
-                .lock()
-                .expect("frames lock")
-                .push(PeerFrame::Text(text));
-            Ok(())
-        }
-
         async fn send_binary(&mut self, bytes: Vec<u8>) -> anyhow::Result<()> {
             let permit = self
                 .gate
@@ -813,9 +807,6 @@ mod tests {
     struct FailedWriter;
 
     impl PeerWriter for FailedWriter {
-        async fn send_text(&mut self, _: String) -> anyhow::Result<()> {
-            Ok(())
-        }
         async fn send_binary(&mut self, _: Vec<u8>) -> anyhow::Result<()> {
             Err(anyhow::anyhow!("sink failed"))
         }

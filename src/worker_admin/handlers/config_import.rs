@@ -17,7 +17,8 @@
 use super::*;
 use crate::db::config_repository::archive::ArchiveError;
 use crate::db::config_repository::{
-    ConfigAuditAction, ConfigAuditDomainCount, ConfigAuditRecord, ImportError, apply_config_import,
+    ConfigAuditAction, ConfigAuditDomainCount, ConfigAuditRecord, ConfigImportApplied,
+    ConfigImportPreview, ImportError, apply_config_import,
     preview_config_import as preview_import_data, record_best_effort, repository_backend_kind,
 };
 use crate::worker_admin_types::decode_archive_base64;
@@ -27,6 +28,23 @@ use crate::worker_admin_types::decode_archive_base64;
 /// already returns.
 const WRITE_FAILED_MESSAGE: &str = "configuration import failed";
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/config-import/preview",
+    request_body = ConfigImportRequest,
+    responses(
+        (
+            status = 200,
+            body = ConfigImportPreview,
+            description = "Per-domain create/update/delete counts and warnings. Read-only; no configuration is written and no payload is returned."
+        ),
+        (status = 400, description = "Wrong passphrase, tampered archive, or invalid request body"),
+        (status = 403, description = "Administrator session required"),
+        (status = 413, description = "Archive exceeds the accepted size"),
+        (status = 422, description = "Backend mismatch or a domain the target cannot store")
+    ),
+    tag = "config"
+)]
 pub(super) async fn preview_config_import(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -53,6 +71,23 @@ pub(super) async fn preview_config_import(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/config-import",
+    request_body = ConfigImportRequest,
+    responses(
+        (
+            status = 200,
+            body = ConfigImportApplied,
+            description = "The archive was validated and applied atomically. Counts and fingerprint only; the passphrase is never echoed."
+        ),
+        (status = 400, description = "Wrong passphrase, tampered archive, or invalid request body"),
+        (status = 403, description = "Administrator session required"),
+        (status = 413, description = "Archive exceeds the accepted size"),
+        (status = 422, description = "Backend mismatch or a domain the target cannot store")
+    ),
+    tag = "config"
+)]
 pub(super) async fn import_config(
     State(state): State<AdminState>,
     headers: HeaderMap,

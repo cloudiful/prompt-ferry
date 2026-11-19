@@ -112,26 +112,6 @@ async fn stream_admin_response(
     Ok(())
 }
 
-#[cfg(test)]
-mod request_header_tests {
-    use super::*;
-
-    #[test]
-    fn setup_host_survives_bridge_reconstruction() {
-        let headers = vec![
-            ("host".to_string(), "public.example".to_string()),
-            ("origin".to_string(), "https://public.example".to_string()),
-        ];
-        let mut reconstructed = HeaderMap::new();
-        apply_request_headers(&mut reconstructed, &headers);
-        assert_eq!(reconstructed.get(header::HOST).unwrap(), "public.example");
-        assert_eq!(
-            reconstructed.get(header::ORIGIN).unwrap(),
-            "https://public.example"
-        );
-    }
-}
-
 fn bridge_response_headers(headers: &HeaderMap) -> Vec<(String, String)> {
     headers
         .iter()
@@ -195,4 +175,24 @@ async fn send_static_response(
         .await
         .context("relay response channel closed")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod request_header_tests {
+    use super::*;
+
+    #[test]
+    fn setup_host_survives_bridge_reconstruction() {
+        let headers = vec![
+            ("host".to_string(), "public.example".to_string()),
+            ("origin".to_string(), "https://public.example".to_string()),
+        ];
+        let mut reconstructed = HeaderMap::new();
+        apply_request_headers(&mut reconstructed, &headers);
+        assert_eq!(reconstructed.get(header::HOST).unwrap(), "public.example");
+        assert_eq!(
+            reconstructed.get(header::ORIGIN).unwrap(),
+            "https://public.example"
+        );
+    }
 }

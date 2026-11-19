@@ -150,7 +150,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ConversationEndpointOverride'
         '404':
-          description: ''
+          description: Conversation endpoint override not found
           content:
             application/json:
               schema:
@@ -181,7 +181,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ConversationEndpointOverride'
         '400':
-          description: ''
+          description: Invalid endpoint key or endpoint selection
           content:
             application/json:
               schema:
@@ -202,7 +202,7 @@ paths:
         '204':
           description: Deleted conversation endpoint override
         '404':
-          description: ''
+          description: Conversation endpoint override not found
           content:
             application/json:
               schema:
@@ -250,7 +250,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProviderEndpoint'
         '400':
-          description: ''
+          description: Invalid endpoint request
           content:
             application/json:
               schema:
@@ -272,7 +272,7 @@ paths:
         '204':
           description: Deleted endpoint
         '404':
-          description: ''
+          description: Endpoint not found
           content:
             application/json:
               schema:
@@ -303,7 +303,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProviderEndpoint'
         '404':
-          description: ''
+          description: Endpoint not found
           content:
             application/json:
               schema:
@@ -338,19 +338,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/EndpointModelsResponse'
         '400':
-          description: ''
+          description: Missing endpoint API key or invalid endpoint proxy configuration
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
-          description: ''
+          description: Endpoint not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '502':
-          description: ''
+          description: Upstream model discovery failed
           content:
             application/json:
               schema:
@@ -376,7 +376,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/EndpointOAuthStatusResponse'
         '404':
-          description: ''
+          description: Endpoint not found
           content:
             application/json:
               schema:
@@ -397,7 +397,7 @@ paths:
         '204':
           description: Stored ChatGPT OAuth token cleared
         '404':
-          description: ''
+          description: Endpoint not found
           content:
             application/json:
               schema:
@@ -423,13 +423,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/OAuthBrowserStartResponse'
         '400':
-          description: ''
+          description: Endpoint is not eligible for ChatGPT OAuth
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
-          description: ''
+          description: Endpoint not found
           content:
             application/json:
               schema:
@@ -461,19 +461,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/OAuthLoginResponse'
         '400':
-          description: ''
+          description: Invalid authorization callback or missing refresh token
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
-          description: ''
+          description: Endpoint or pending browser login not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '410':
-          description: ''
+          description: OAuth flow expired
           content:
             application/json:
               schema:
@@ -499,13 +499,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/OAuthDeviceStartResponse'
         '400':
-          description: ''
+          description: Endpoint is not eligible for ChatGPT OAuth
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
-          description: ''
+          description: Endpoint not found
           content:
             application/json:
               schema:
@@ -537,19 +537,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/OAuthLoginResponse'
         '400':
-          description: ''
+          description: OAuth authorization denied
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
-          description: ''
+          description: Endpoint or pending device login not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '410':
-          description: ''
+          description: OAuth flow expired
           content:
             application/json:
               schema:
@@ -575,13 +575,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/EndpointOAuthStatusResponse'
         '400':
-          description: ''
+          description: No stored ChatGPT OAuth token or refresh rejected
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
-          description: ''
+          description: Endpoint not found
           content:
             application/json:
               schema:
@@ -607,7 +607,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/OpenAiOrganizationUsageResponse'
         '400':
-          description: ''
+          description: Endpoint does not support organization usage or its Admin API key is missing
           content:
             application/json:
               schema:
@@ -633,13 +633,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/InferenceResponse'
         '400':
-          description: ''
+          description: Endpoint is not a ChatGPT subscription or its OAuth login is missing
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
-          description: ''
+          description: Endpoint not found
           content:
             application/json:
               schema:
@@ -690,25 +690,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/QuotaKeyObservationHistoryResponse'
         '400':
-          description: ''
+          description: Invalid key, kind, limit, or cursor filter
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
-          description: ''
+          description: Endpoint not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '500':
-          description: ''
+          description: Quota observation storage unavailable
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '503':
-          description: ''
+          description: Quota observation storage unavailable
           content:
             application/json:
               schema:
@@ -756,25 +756,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/QuotaKeyObservationTrendResponse'
         '400':
-          description: ''
+          description: Invalid key, kind, or range filter
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
-          description: ''
+          description: Endpoint not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '500':
-          description: ''
+          description: Quota observation storage unavailable
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '503':
-          description: ''
+          description: Quota observation storage unavailable
           content:
             application/json:
               schema:
@@ -800,13 +800,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/EndpointTestResponse'
         '400':
-          description: ''
+          description: Missing endpoint API key
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
-          description: ''
+          description: Endpoint not found
           content:
             application/json:
               schema:
@@ -1157,7 +1157,7 @@ paths:
         '204':
           description: Deleted model route
         '404':
-          description: ''
+          description: Model route not found
           content:
             application/json:
               schema:
@@ -1665,13 +1665,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '403':
-          description: ''
+          description: Administrator access required
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
-          description: ''
+          description: Request record not found
           content:
             application/json:
               schema:
@@ -1728,13 +1728,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/UserPageResponse'
         '401':
-          description: ''
+          description: Not authenticated
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '403':
-          description: ''
+          description: Administrator access required
           content:
             application/json:
               schema:
@@ -1757,19 +1757,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/User'
         '400':
-          description: ''
+          description: Invalid user request
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '401':
-          description: ''
+          description: Not authenticated
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '403':
-          description: ''
+          description: Administrator access required
           content:
             application/json:
               schema:
@@ -1787,13 +1787,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/UserOptionsResponse'
         '401':
-          description: ''
+          description: Not authenticated
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '403':
-          description: ''
+          description: Administrator access required
           content:
             application/json:
               schema:
@@ -1815,7 +1815,7 @@ paths:
         '204':
           description: Deleted user
         '404':
-          description: ''
+          description: User not found
           content:
             application/json:
               schema:
@@ -1846,7 +1846,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/User'
         '404':
-          description: ''
+          description: User not found
           content:
             application/json:
               schema:
@@ -1884,7 +1884,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ClientKeyPageResponse'
         '404':
-          description: ''
+          description: User not found
           content:
             application/json:
               schema:
@@ -1915,7 +1915,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/CreateClientKeyResponse'
         '404':
-          description: ''
+          description: User not found
           content:
             application/json:
               schema:
@@ -1943,7 +1943,7 @@ paths:
         '204':
           description: Deleted client key
         '404':
-          description: ''
+          description: User or client key not found
           content:
             application/json:
               schema:
@@ -1980,7 +1980,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ClientKey'
         '404':
-          description: ''
+          description: User or client key not found
           content:
             application/json:
               schema:
@@ -2008,7 +2008,7 @@ paths:
         '204':
           description: Password reset
         '404':
-          description: ''
+          description: User not found
           content:
             application/json:
               schema:
@@ -2820,8 +2820,8 @@ components:
           default: 5
         smtp:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/CacheAlertSmtpSettings'
+          - type: 'null'
           default: null
         threshold:
           type: number
@@ -2864,11 +2864,11 @@ components:
           format: int32
         smtp:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/CacheAlertSmtpSettingsResponse'
             description: |-
               Optional in the schema so a legacy client that never read it keeps
               compiling; the server always sends it.
+          - type: 'null'
         threshold:
           type: number
           format: double
@@ -2901,8 +2901,7 @@ components:
           default: 465
           minimum: 0
         tls:
-          oneOf:
-          - $ref: '#/components/schemas/CacheAlertSmtpTls'
+          $ref: '#/components/schemas/CacheAlertSmtpTls'
           default: implicit_tls
         to:
           type: array
@@ -3845,8 +3844,8 @@ components:
           type: string
         native_api_override:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/NativeApi'
+          - type: 'null'
         owner_user_id:
           type:
           - integer
@@ -3854,21 +3853,21 @@ components:
           format: int64
         plan:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/EndpointPlan'
             description: |-
               Issue #599 R2a: requested upstream plan. Omitted keeps the stored
               credential state; `platform_api_key` is always accepted (and clears
               any stored OAuth token on update); `chatgpt_subscription` requires
               the R2b OAuth login flow and is rejected until it lands.
+          - type: 'null'
         protocol_mode:
           $ref: '#/components/schemas/EndpointProtocolMode'
         provider:
           $ref: '#/components/schemas/EndpointProvider'
         provider_region:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/EndpointRegion'
+          - type: 'null'
         proxy_url:
           type:
           - string
@@ -4662,8 +4661,8 @@ components:
           format: int32
         routing_strategy:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/ModelRouteRoutingStrategy'
+          - type: 'null'
         scope:
           type: string
         targets:
@@ -4852,12 +4851,12 @@ components:
             `proxy_url_override` is omitted.
         native_api:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/NativeApi'
             description: |-
               Issue #409 Phase 1: per-target port type. `None` (omitted/null)
               means `Auto` (follow the caller); an explicit value wins over the
               upstream endpoint `native_api`.
+          - type: 'null'
         prefer_new_sessions:
           type: boolean
           description: |-
@@ -5323,8 +5322,8 @@ components:
       properties:
         endpoint:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/ProviderEndpoint'
+          - type: 'null'
         flow_id:
           type: string
           format: uuid
@@ -5540,8 +5539,8 @@ components:
           $ref: '#/components/schemas/EndpointProvider'
         provider_region:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/EndpointRegion'
+          - type: 'null'
         scope:
           type: string
         service_tier:
@@ -6117,12 +6116,12 @@ components:
       properties:
         abort_from_state:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/RequestRecordState'
+          - type: 'null'
         abort_reason:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/RequestAbortReason'
+          - type: 'null'
         abort_response_started:
           type:
           - boolean
@@ -6220,8 +6219,8 @@ components:
           - 'null'
         failure_family:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/RequestFailureFamily'
+          - type: 'null'
         has_full_request:
           type: boolean
         has_parent:
@@ -6563,12 +6562,12 @@ components:
       properties:
         abort_from_state:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/RequestRecordState'
+          - type: 'null'
         abort_reason:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/RequestAbortReason'
+          - type: 'null'
         abort_response_started:
           type:
           - boolean
@@ -6636,8 +6635,8 @@ components:
           - 'null'
         failure_family:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/RequestFailureFamily'
+          - type: 'null'
         has_full_request:
           type: boolean
         has_parent:
@@ -6808,7 +6807,6 @@ components:
           type: string
         mcp_scope:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/RequestRecordMcpScope'
             description: |-
               Which MCP scope the row belongs to, taken from the record identity the
@@ -6816,6 +6814,7 @@ components:
               `gateway` for gateway chatter. `None` for AI rows. The client uses it
               to open the matching records, so a name-only service row never looks
               like gateway chatter.
+          - type: 'null'
         mcp_server_id:
           type:
           - string
@@ -7321,8 +7320,8 @@ components:
           format: date-time
         scope:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/UsageClearScope'
+          - type: 'null'
         start_at:
           type:
           - string
@@ -7575,8 +7574,8 @@ components:
           minimum: 0
         url:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/SharedValkeySecretPatch'
+          - type: 'null'
     SharedValkeySettingsResponse:
       type: object
       description: |-
@@ -7738,17 +7737,17 @@ components:
       properties:
         balances:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/CommandCodeBalances'
             description: CommandCode credit balances (monthly/purchased/free). None for MiniMax.
+          - type: 'null'
         deepseek_balance:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/DeepSeekBalance'
             description: |-
               DeepSeek balance (`GET /user/balance`). `is_available=false` means the
               account cannot spend: the key is weighted 0 and excluded from routing.
               None when missing — degraded.
+          - type: 'null'
         error_code:
           type:
           - string
@@ -7759,23 +7758,23 @@ components:
           - 'null'
         five_hour:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/CommandCodeWindowUsage'
             description: CommandCode 5-hour USD window. None when missing (e.g. PAYG) — degraded.
+          - type: 'null'
         glm_five_hour:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/GlmWindowUsage'
             description: |-
               GLM 5-hour token/credit window. None when missing — degraded or the
               configured key is not on a Coding Plan that exposes that window.
+          - type: 'null'
         glm_weekly:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/GlmWindowUsage'
             description: |-
               GLM weekly token/credit window. None when missing — degraded or the
               configured key is not on a Coding Plan that exposes that window.
+          - type: 'null'
         key_id:
           type: string
           format: uuid
@@ -7789,38 +7788,38 @@ components:
           type: boolean
         opencodego_monthly:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/OpencodeGoWindowUsage'
             description: OpencodeGo monthly window usage. None when missing — degraded.
+          - type: 'null'
         opencodego_rolling:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/OpencodeGoWindowUsage'
             description: OpencodeGo rolling window usage. None when missing — degraded.
+          - type: 'null'
         opencodego_weekly:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/OpencodeGoWindowUsage'
             description: OpencodeGo weekly window usage. None when missing — degraded.
+          - type: 'null'
         openrouter_balance:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/OpenRouterBalance'
             description: |-
               OpenRouter credit balance (`GET /api/v1/key` limit fields plus
               `GET /api/v1/credits` totals). None when missing — degraded.
+          - type: 'null'
         openrouter_spend:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/OpenRouterSpend'
             description: |-
               OpenRouter spend (`GET /api/v1/key` usage fields). None when missing
               — degraded.
+          - type: 'null'
         quota_status:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/TokenPlanQuotaStatus'
             description: Effective default-text quota state; raw provider detail remains unchanged.
+          - type: 'null'
         quota_windows:
           type:
           - array
@@ -7841,9 +7840,9 @@ components:
           minimum: 0
         weekly:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/CommandCodeWindowUsage'
             description: CommandCode weekly USD window. None when missing — degraded.
+          - type: 'null'
     TokenPlanModelUsage:
       type: object
       required:
@@ -7851,19 +7850,19 @@ components:
       properties:
         interval:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/TokenPlanWindowUsage'
+          - type: 'null'
         model_name:
           type: string
         observation:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/SubscriptionQuotaObservation'
             description: Observation freshness/error state for persisted ChatGPT quota snapshots.
+          - type: 'null'
         weekly:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/TokenPlanWindowUsage'
+          - type: 'null'
         windows:
           type:
           - array
@@ -7932,8 +7931,8 @@ components:
           $ref: '#/components/schemas/EndpointProvider'
         provider_region:
           oneOf:
-          - type: 'null'
           - $ref: '#/components/schemas/EndpointRegion'
+          - type: 'null'
         quota_inference_available:
           type:
           - boolean

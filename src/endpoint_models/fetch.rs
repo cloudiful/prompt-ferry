@@ -303,9 +303,7 @@ mod tests {
     }
 
     /// A route for the catalog fetch, with an explicit provider.
-
     /// A loopback catalog upstream that records the OpenCode session header.
-
     #[tokio::test]
     async fn the_runtime_failure_keeps_its_wording() {
         let route = route_with_proxy(None, "https://models.test");

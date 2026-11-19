@@ -61,7 +61,7 @@ impl NodeId {
     }
 
     /// The persisted text form of the node id.
-    pub fn to_persisted_text(&self) -> String {
+    pub fn to_persisted_text(self) -> String {
         self.0.to_string()
     }
 }

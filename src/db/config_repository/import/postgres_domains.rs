@@ -61,7 +61,6 @@ pub(super) async fn insert_route_targets(
             embedding_dimensions_override: Set(target.embedding_dimensions_override),
             // Manual new-session preference.
             prefer_new_sessions: Set(target.prefer_new_sessions),
-            ..Default::default()
         })
         .exec(&connection)
         .await

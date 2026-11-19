@@ -30,7 +30,9 @@ pub(super) struct RuntimeControl {
     /// path.
     shutdown_broadcast: Arc<Mutex<Option<super::WorkerShutdown>>>,
     admission_lock: Arc<Mutex<()>>,
+    #[cfg(test)]
     session_stopped: Arc<AtomicBool>,
+    #[cfg(test)]
     session_stop_notify: Arc<Notify>,
     active_requests: Arc<AtomicUsize>,
     active_notify: Arc<Notify>,
@@ -46,7 +48,9 @@ impl RuntimeControl {
             fail_closed_notify: Arc::new(Notify::new()),
             shutdown_broadcast: Arc::new(Mutex::new(None)),
             admission_lock: Arc::new(Mutex::new(())),
+            #[cfg(test)]
             session_stopped: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
             session_stop_notify: Arc::new(Notify::new()),
             active_requests: Arc::new(AtomicUsize::new(0)),
             active_notify: Arc::new(Notify::new()),
@@ -139,6 +143,7 @@ impl RuntimeControl {
         Duration::from_secs(configured_seconds.max(1))
     }
 
+    #[cfg(test)]
     pub(super) fn is_session_stopped(&self) -> bool {
         self.session_stopped.load(Ordering::SeqCst)
     }
@@ -146,6 +151,7 @@ impl RuntimeControl {
     /// Close the bridge sessions once the accepted rounds have drained. It is
     /// separate from admission shutdown so a supervisor keeps its existing
     /// session loops alive while those rounds are still running.
+    #[cfg(test)]
     pub(super) fn begin_session_stop(&self) {
         if !self.session_stopped.swap(true, Ordering::SeqCst) {
             self.session_stop_notify.notify_waiters();
@@ -162,6 +168,7 @@ impl RuntimeControl {
         notified.await;
     }
 
+    #[cfg(test)]
     pub(super) async fn wait_for_session_stop(&self) {
         let notified = self.session_stop_notify.notified();
         tokio::pin!(notified);
@@ -325,19 +332,8 @@ impl Drop for ActiveRequestGuard {
 }
 
 pub(super) struct RequestLeaseGuard {
-    #[allow(dead_code)]
-    inner: RequestLeaseGuardKind,
-}
-
-/// Backend-specific request-lease guard. The Postgres/Valkey heartbeat
-/// stays in this module; the standalone SQLite lease lives in the
-/// sibling `lifecycle_standalone` module and is wrapped here so the
-/// caller only needs to know the abstract `RequestLeaseGuard` type.
-pub(super) enum RequestLeaseGuardKind {
-    #[allow(dead_code)]
-    Managed(Box<ManagedLeaseGuard>),
-    #[allow(dead_code)]
-    Standalone(super::lifecycle_standalone::StandaloneRequestLeaseGuard),
+    _managed: Option<Box<ManagedLeaseGuard>>,
+    _standalone: Option<super::lifecycle_standalone::StandaloneRequestLeaseGuard>,
 }
 
 pub(super) struct ManagedLeaseGuard {
@@ -427,11 +423,12 @@ impl RequestLeaseGuard {
             }
         });
         Some(Self {
-            inner: RequestLeaseGuardKind::Managed(Box::new(ManagedLeaseGuard {
+            _managed: Some(Box::new(ManagedLeaseGuard {
                 handle,
                 request_id,
                 admin_state: admin_state.cloned(),
             })),
+            _standalone: None,
         })
     }
 
@@ -443,7 +440,8 @@ impl RequestLeaseGuard {
         guard: super::lifecycle_standalone::StandaloneRequestLeaseGuard,
     ) -> Self {
         Self {
-            inner: RequestLeaseGuardKind::Standalone(guard),
+            _managed: None,
+            _standalone: Some(guard),
         }
     }
 }

@@ -3,6 +3,8 @@ use super::super::openai_org_usage;
 use super::super::quota_status;
 use super::super::token_plan;
 use super::*;
+use crate::openapi_export::schemas::ErrorEnvelope;
+use crate::worker_admin::openai_org_usage::OpenAiOrganizationUsageResponse;
 
 /// Token-plan usage exists for the six preset providers with a fetcher; every
 /// other provider gets this one answer, whether it is rejected up front or
@@ -17,6 +19,16 @@ fn unsupported_token_plan_provider() -> Response {
     )
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/token-plan-usage",
+    params(
+        ("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID"),
+        TokenPlanUsageQuery
+    ),
+    responses((status = 200, body = TokenPlanUsageResponse, description = "Token plan usage")),
+    tag = "endpoints"
+)]
 pub(super) async fn token_plan_usage(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -247,10 +259,20 @@ fn chatgpt_quota_response(
     chatgpt_quota_normalize::response_from_quota(endpoint, quota)
 }
 
-/// Issue #589 P2b: OpenAI Platform organization usage and spend. Reads the
-/// official `usage/completions` and `costs` endpoints with the endpoint's
-/// dedicated Admin API key and returns UTC month-to-date token and USD totals.
-/// Display-only: it never feeds routing weights or quota.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/organization-usage",
+    params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
+    responses(
+        (status = 200, body = OpenAiOrganizationUsageResponse, description = "OpenAI Platform organization usage (UTC month to date)"),
+        (status = 400, body = ErrorEnvelope, description = "Endpoint does not support organization usage or its Admin API key is missing")
+    ),
+    tag = "endpoints"
+)]
+// Issue #589 P2b: OpenAI Platform organization usage and spend. Reads the
+// official `usage/completions` and `costs` endpoints with the endpoint's
+// dedicated Admin API key and returns UTC month-to-date token and USD totals.
+// Display-only: it never feeds routing weights or quota.
 pub(super) async fn organization_usage(
     State(state): State<AdminState>,
     headers: HeaderMap,

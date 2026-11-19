@@ -225,14 +225,15 @@ pub(super) fn spawn_worker_registry(
     pool: sqlx::PgPool,
     config: &WorkerConfig,
     control: &RuntimeControl,
-    config_applied_revision: Option<i64>,
-    coordination_mode: db::WorkerCoordinationMode,
+    coordination: db::CoordinationSnapshot,
     admitted_at: Instant,
     tracker: LeaseTracker,
     stop: watch::Receiver<bool>,
 ) -> JoinHandle<()> {
     let worker_id = config.resolved_worker_identity();
     let incarnation = control.worker_instance_id();
+    let config_applied_revision = coordination.revision;
+    let coordination_mode = coordination.mode;
     let control = control.clone();
     tokio::spawn(async move {
         let lease = Duration::from_secs(db::WORKER_OFFLINE_AFTER_SECONDS as u64);
