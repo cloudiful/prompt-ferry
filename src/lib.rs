@@ -46,6 +46,7 @@ pub(crate) mod upstream_error;
 pub use prompt_ferry_upstream_presets as upstream_presets;
 pub use upstream_error::{MappedInvalid, map_upstream_invalid_request};
 pub mod usage;
+#[cfg(feature = "embedded-frontend")]
 pub mod web_assets;
 pub mod web_assets_server;
 pub mod worker;

@@ -1,29 +1,41 @@
 //! Serving of the frontend from the admin listener.
 //!
-//! The production binary carries the built SPA inside itself, so the container
-//! and the desktop executable need no runtime frontend directory. A frontend
-//! developer overrides this deliberately with [`FRONTEND_DIST_ENV`] (or the
-//! historical filesystem locations) and edits the UI without recompiling Rust.
+//! The default binary embeds the SPA; runtime-only builds serve it from disk.
+//! [`FRONTEND_DIST_ENV`] overrides the historical filesystem locations.
 //!
 //! Hashed assets get long-lived cache headers because their names change with
 //! their contents; the SPA entry is served fresh so a redeploy is picked up on
 //! the next reload.
 
 use axum::Router;
+#[cfg(any(feature = "embedded-frontend", test))]
 use axum::body::Body;
+#[cfg(feature = "embedded-frontend")]
 use axum::extract::Path;
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
-use axum::response::{IntoResponse, Response};
+use axum::extract::Request;
+#[cfg(any(feature = "embedded-frontend", test))]
+use axum::http::HeaderMap;
+use axum::http::{HeaderValue, StatusCode, header};
+use axum::middleware::{self, Next};
+#[cfg(any(feature = "embedded-frontend", test))]
+use axum::response::IntoResponse;
+use axum::response::Response;
+#[cfg(feature = "embedded-frontend")]
 use axum::routing::get;
 use std::path::PathBuf;
 use tower_http::services::{ServeDir, ServeFile};
 
+#[cfg(feature = "embedded-frontend")]
 use crate::web_assets;
+
+/// Environment variable pointing at a filesystem frontend `dist` directory.
+pub const FRONTEND_DIST_ENV: &str = "PROMPT_FERRY_FRONTEND_DIST";
 
 /// Which frontend the admin router should serve.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Frontend {
     /// The SPA compiled into the binary.
+    #[cfg(feature = "embedded-frontend")]
     Embedded,
     /// A filesystem `dist` directory; the deliberate development override.
     Filesystem(PathBuf),
@@ -39,7 +51,10 @@ pub enum Frontend {
 pub fn frontend() -> Frontend {
     match override_dist_dir() {
         Some(dist) => Frontend::Filesystem(dist),
+        #[cfg(feature = "embedded-frontend")]
         None => Frontend::Embedded,
+        #[cfg(not(feature = "embedded-frontend"))]
+        None => Frontend::Filesystem(PathBuf::from("/app/frontend/dist")),
     }
 }
 
@@ -51,21 +66,26 @@ pub(crate) const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immu
 const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 
 /// A frontend file ready to serve: the body plus the headers a browser needs.
+#[cfg(any(feature = "embedded-frontend", test))]
 struct FrontendFile {
     body: &'static [u8],
     content_type: &'static str,
     cache: CacheControl,
 }
 
+#[cfg(any(feature = "embedded-frontend", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CacheControl {
     /// Hashed asset: immutable, cacheable for a year.
+    #[cfg(feature = "embedded-frontend")]
     Immutable,
     /// `index.html`: revalidate on every load so a redeploy is picked up.
     NoCache,
 }
 
+#[cfg(any(feature = "embedded-frontend", test))]
 impl FrontendFile {
+    #[cfg(feature = "embedded-frontend")]
     fn from_path(path: &str) -> Option<Self> {
         let body = web_assets::embedded_file(path)?;
         // Only files below the asset root may carry the immutable policy; the
@@ -91,6 +111,7 @@ impl FrontendFile {
         headers.insert(
             header::CACHE_CONTROL,
             HeaderValue::from_static(match self.cache {
+                #[cfg(feature = "embedded-frontend")]
                 CacheControl::Immutable => IMMUTABLE_CACHE_CONTROL,
                 CacheControl::NoCache => "no-cache",
             }),
@@ -101,6 +122,7 @@ impl FrontendFile {
 
 /// Serve `index.html` from the embedded build, or the fallback page that
 /// explains a binary compiled without a frontend build.
+#[cfg(feature = "embedded-frontend")]
 pub(crate) async fn serve_embedded_index() -> Response {
     FrontendFile {
         body: web_assets::embedded_index(),
@@ -111,6 +133,7 @@ pub(crate) async fn serve_embedded_index() -> Response {
 }
 
 /// Serve one embedded frontend file, or `404` when the build does not have it.
+#[cfg(feature = "embedded-frontend")]
 pub(crate) async fn serve_embedded_file(path: &str) -> Response {
     match FrontendFile::from_path(path) {
         Some(file) => file.response(),
@@ -121,7 +144,7 @@ pub(crate) async fn serve_embedded_file(path: &str) -> Response {
 /// Resolve the filesystem frontend directory, honouring the explicit override
 /// first and then the historical locations that contain a built index.
 fn override_dist_dir() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var(web_assets::FRONTEND_DIST_ENV)
+    if let Ok(path) = std::env::var(FRONTEND_DIST_ENV)
         && !path.trim().is_empty()
     {
         return Some(PathBuf::from(path));
@@ -132,6 +155,7 @@ fn override_dist_dir() -> Option<PathBuf> {
         .find(|path| path.join("index.html").is_file())
 }
 
+#[cfg(any(feature = "embedded-frontend", test))]
 fn not_found() -> Response {
     let mut response = (
         StatusCode::NOT_FOUND,
@@ -147,6 +171,7 @@ fn not_found() -> Response {
 
 /// Content type for an embedded frontend path, defaulting to
 /// `application/octet-stream` so browsers never sniff an unknown body.
+#[cfg(any(feature = "embedded-frontend", test))]
 fn content_type_for(path: &str) -> &'static str {
     let extension = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     match extension.as_str() {
@@ -186,11 +211,13 @@ where
     S: Clone + Send + Sync + 'static,
 {
     match frontend() {
+        #[cfg(feature = "embedded-frontend")]
         Frontend::Embedded => embedded_routes(),
         Frontend::Filesystem(dist) => filesystem_routes(dist),
     }
 }
 
+#[cfg(feature = "embedded-frontend")]
 fn embedded_routes<S>() -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
@@ -217,11 +244,34 @@ where
         .nest_service("/assets", ServeDir::new(dist.join("assets")))
         .route_service("/favicon.svg", ServeFile::new(dist.join("favicon.svg")))
         .fallback_service(ServeFile::new(dist.join("index.html")))
+        .layer(middleware::from_fn(filesystem_cache))
+}
+
+fn filesystem_cache_control(path: &str, status: StatusCode) -> &'static str {
+    if status.is_success() && path.starts_with("/assets/") {
+        IMMUTABLE_CACHE_CONTROL
+    } else {
+        "no-cache"
+    }
+}
+
+async fn filesystem_cache(request: Request, next: Next) -> Response {
+    let path = request.uri().path().to_owned();
+    let mut response = next.run(request).await;
+    let cache = filesystem_cache_control(&path, response.status());
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
+    response
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CacheControl, FrontendFile, IMMUTABLE_CACHE_CONTROL, content_type_for, not_found};
+    use super::{
+        CacheControl, FrontendFile, IMMUTABLE_CACHE_CONTROL, content_type_for,
+        filesystem_cache_control, not_found,
+    };
+    use axum::http::StatusCode;
     use axum::http::header;
 
     #[test]
@@ -241,6 +291,30 @@ mod tests {
         }
         .response();
         assert_eq!(entry.headers()[header::CACHE_CONTROL], "no-cache");
+    }
+
+    #[test]
+    fn filesystem_cache_matches_asset_and_document_policy() {
+        assert_eq!(
+            filesystem_cache_control("/assets/app.js", StatusCode::OK),
+            IMMUTABLE_CACHE_CONTROL
+        );
+        assert_eq!(
+            filesystem_cache_control("/assets/missing.js", StatusCode::NOT_FOUND),
+            "no-cache"
+        );
+        assert_eq!(
+            filesystem_cache_control("/assets-other", StatusCode::OK),
+            "no-cache"
+        );
+        assert_eq!(
+            filesystem_cache_control("/settings", StatusCode::OK),
+            "no-cache"
+        );
+        assert_eq!(
+            filesystem_cache_control("/index.html", StatusCode::OK),
+            "no-cache"
+        );
     }
 
     #[test]

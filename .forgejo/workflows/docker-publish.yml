@@ -15,14 +15,14 @@ concurrency:
 
 jobs:
   build-and-publish:
-    uses: actions/workflows/.forgejo/workflows/docker-publish.yml@v0.6.2
+    uses: actions/workflows/.forgejo/workflows/docker-publish.yml@main
     with:
       builds: >-
         [{"platform":"linux/amd64","runner":"aio"}]
-      before_build_command: |
-        rm -rf ci-image-input
-        cd frontend
-        bun install --no-save --minimum-release-age 604800
+      dockerfile_mode: builtin
+      frontend_install_args: '["--minimum-release-age=604800"]'
+      frontend_build_command: |
+        set -euo pipefail
         bun run openapi-ts
         git diff --exit-code -- src/generated/admin-api
         bun run build
@@ -32,17 +32,17 @@ jobs:
         CARGO_PROFILE_RELEASE_CODEGEN_UNITS=256
         RUSTC_WRAPPER=sccache
         SQLX_OFFLINE=true
-        cargo build --release --bin prompt-ferry --timings
+        cargo build --release --no-default-features --bin prompt-ferry --timings
       binary_mappings: >-
         [{"source":"target/release/prompt-ferry","destination":"prompt-ferry"}]
       after_build_command: |
         sccache --show-stats
         "$RUST_OUTPUT_DIRECTORY/prompt-ferry" openapi export
         git diff --exit-code -- openapi/admin-api.yaml
-      dockerfile: ./forgejo.Dockerfile
-      targets: >-
-        [{"target":"runtime"}]
+      runtime_tools: '["uv"]'
+      runtime_packages: '["bash"]'
+      runtime_init: true
+      runtime_expose: "8787"
       builder_name_prefix: prompt-ferry
       inline_cache_tag: latest-amd64
       publish_latest: "false"
-      push: true
