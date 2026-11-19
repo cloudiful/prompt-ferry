@@ -213,7 +213,6 @@ export type NavigationSection =
   | 'node'
   | 'redaction'
   | 'request-records'
-  | 'billing'
   | 'settings'
 
 export type RequestRecordFilterModel = {

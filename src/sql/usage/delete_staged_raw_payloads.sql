@@ -1,1 +1,0 @@
-DELETE FROM request_record_raw_payloads_overflow;

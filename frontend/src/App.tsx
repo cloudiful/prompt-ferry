@@ -12,7 +12,6 @@ import { EndpointsPage } from '@/pages/EndpointsPage'
 import { ModelRoutesPage } from '@/pages/ModelRoutesPage'
 import { McpPage } from '@/pages/McpPage'
 import { RedactionPage } from '@/pages/RedactionPage'
-import { BillingPage } from '@/pages/BillingPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { UsagePage } from '@/pages/UsagePage'
 import { appRoutes, type AppRoute } from '@/lib/nav'
@@ -56,8 +55,6 @@ function AppRouteElement({ route }: { route: AppRoute }) {
     case 'R-REDACTION-RULES':
     case 'R-REDACTION-PREVIEW':
       return <RedactionPage />
-    case 'R-BILLING':
-      return <BillingPage />
     case 'R-USAGE-AI':
     case 'R-USAGE-MCP':
       return <UsagePage />

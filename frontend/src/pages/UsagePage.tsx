@@ -751,7 +751,14 @@ export function UsagePage() {
         'clear',
       )
       if (!outcome.executed) return
-      notifySuccess(usageClearToastMessage(t, outcome.value.deleted))
+      notifySuccess(
+        usageClearToastMessage(
+          t,
+          outcome.value.deleted,
+          outcome.value.deleted_prompt_blocks,
+          outcome.value.chunks_dropped,
+        ),
+      )
       setClearOpen(false)
     } catch (cause) {
       reportApiError(cause)

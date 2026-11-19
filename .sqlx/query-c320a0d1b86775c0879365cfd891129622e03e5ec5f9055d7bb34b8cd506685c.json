@@ -1,0 +1,80 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH windows AS (\n    SELECT NOW() - ($1::BIGINT * INTERVAL '1 day') AS start_at\n),\nrows AS (\n    SELECT usage.*\n    FROM windows\n    CROSS JOIN LATERAL public.request_usage_window(\n        $2::BIGINT,\n        NULL,\n        windows.start_at,\n        NULL,\n        'all'\n    ) usage\n)\nSELECT\n    COALESCE(SUM(request_count), 0)::BIGINT AS \"request_count!\",\n    COALESCE(SUM(success_by_state), 0)::BIGINT AS \"success_count!\",\n    COALESCE(SUM(error_by_state), 0)::BIGINT AS \"error_count!\",\n    COALESCE(SUM(input_tokens_raw), 0)::BIGINT AS \"input_tokens!\",\n    COALESCE(SUM(output_tokens_clamped), 0)::BIGINT AS \"output_tokens!\",\n    COALESCE(SUM(total_tokens), 0)::BIGINT AS \"total_tokens!\",\n    COALESCE(SUM(cached_tokens), 0)::BIGINT AS \"cached_tokens!\",\n    CASE WHEN COALESCE(SUM(full_input_tokens), 0) > 0\n        THEN LEAST(\n            1.0::DOUBLE PRECISION,\n            COALESCE(SUM(cache_read_tokens_clamped), 0)::DOUBLE PRECISION\n                / SUM(full_input_tokens)::DOUBLE PRECISION\n        )\n        ELSE NULL\n    END AS cache_rate,\n    CASE WHEN COALESCE(SUM(duration_count), 0) > 0\n        THEN SUM(duration_sum_ms)::DOUBLE PRECISION / SUM(duration_count)::DOUBLE PRECISION\n        ELSE NULL\n    END AS avg_duration_ms\nFROM rows\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "request_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "success_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "error_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "output_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "total_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "cached_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "cache_rate",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "avg_duration_ms",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "c320a0d1b86775c0879365cfd891129622e03e5ec5f9055d7bb34b8cd506685c"
+}

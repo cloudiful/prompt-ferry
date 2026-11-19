@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, anyhow};
 use db_init::run_migrations;
 use sqlx::{
-    PgPool, SqlitePool, migrate::Migrator, postgres::PgPoolOptions, sqlite::SqliteConnectOptions,
-    sqlite::SqlitePoolOptions,
+    PgConnection, PgPool, SqlitePool, migrate::Migrator, postgres::PgPoolOptions,
+    sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions,
 };
 use std::{env, path::Path, time::Duration};
 
@@ -26,6 +26,51 @@ const POSTGRES_MIN_CONNECTIONS_ENV: &str = "PROMPT_FERRY_DB_POOL_MIN_CONNECTIONS
 
 pub async fn connect(database_url: &str) -> Result<PgPool> {
     connect_with_max_connections(database_url, 8).await
+}
+
+/// Connect a bounded pool whose every physical session is read-only.
+///
+/// The session is opened with `default_transaction_read_only=on` and the
+/// setting is verified before the connection is handed out, so a maintenance
+/// export can never write to the source database even by mistake. The pool is
+/// capped at two connections because an export only needs one worker.
+pub async fn connect_read_only(database_url: &str, max_connections: u32) -> Result<PgPool> {
+    let options = database_url
+        .parse::<sqlx::postgres::PgConnectOptions>()
+        .context("invalid read-only database URL")?
+        .options([
+            ("default_transaction_read_only", "on"),
+            ("application_name", "prompt-ferry-export-config"),
+        ]);
+    let attempt = PgPoolOptions::new()
+        .max_connections(max_connections.clamp(1, 2))
+        .min_connections(1)
+        .acquire_timeout(postgres_acquire_timeout())
+        .after_connect(|connection, _| {
+            Box::pin(async move { verify_session_is_read_only(connection).await })
+        })
+        .connect_with(options);
+    match tokio::time::timeout(POSTGRES_CONNECT_TIMEOUT, attempt).await {
+        Ok(result) => result.context("failed to connect the read-only postgres pool"),
+        Err(_) => Err(anyhow!(
+            "read-only postgres connect timed out after {}s (database_url={})",
+            POSTGRES_CONNECT_TIMEOUT.as_secs(),
+            redact_database_url(database_url),
+        )),
+    }
+}
+
+/// Prove a freshly opened session is read-only before it is used.
+async fn verify_session_is_read_only(connection: &mut PgConnection) -> sqlx::Result<()> {
+    let mode: String = sqlx::query_scalar(include_str!("../sql/maintenance/read_only_mode.sql"))
+        .fetch_one(&mut *connection)
+        .await?;
+    if mode.trim() != "on" {
+        return Err(sqlx::Error::Protocol(
+            "refusing a session that is not read-only".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Build a PostgreSQL pool with an explicit acquire timeout.

@@ -201,16 +201,29 @@ pub(crate) async fn handle_relay_bridge_message(
             .await;
         }
         BridgeMessage::RequestCancel(cancel) => {
-            cancellation::cancel_request(cancellation::CancelRequestParams {
-                pending_requests: &services.runtime_state.pending_requests,
-                cancellations: &services.runtime_state.request_cancellations,
-                admin_state: services.admin_state(),
-                standalone_state: services.standalone_state(),
-                category: crate::db::RequestRecordCategory::Ai,
-                request_id: &cancel.request_id,
-                reason: &cancel.reason,
-                response_started: cancel.response_started,
-            })
+            let request_id = cancel.request_id;
+            let reason = cancel.reason;
+            let response_started = cancel.response_started;
+            let runtime_state = services.runtime_state.clone();
+            let target = cancellation::CancellationTarget {
+                pending_requests: &runtime_state.pending_requests,
+                cancellations: &runtime_state.request_cancellations,
+                request_id: request_id.clone(),
+            };
+            let bookkeeping_services = services.clone();
+            cancellation::dispatch_cancellation(
+                &runtime_state,
+                cancellation::trigger_cancellation(target),
+                move || {
+                    cancellation::record_cancellation(
+                        bookkeeping_services,
+                        request_id,
+                        reason,
+                        crate::db::RequestRecordCategory::Ai,
+                        response_started,
+                    )
+                },
+            )
             .await;
         }
         BridgeMessage::McpRequestStart(request) => {
@@ -324,16 +337,29 @@ pub(crate) async fn handle_relay_bridge_message(
             .await;
         }
         BridgeMessage::McpRequestCancel(cancel) => {
-            cancellation::cancel_request(cancellation::CancelRequestParams {
-                pending_requests: &services.runtime_state.pending_mcp_requests,
-                cancellations: &services.runtime_state.mcp_request_cancellations,
-                admin_state: services.admin_state(),
-                standalone_state: services.standalone_state(),
-                category: crate::db::RequestRecordCategory::Mcp,
-                request_id: &cancel.request_id,
-                reason: &cancel.reason,
-                response_started: cancel.response_started,
-            })
+            let request_id = cancel.request_id;
+            let reason = cancel.reason;
+            let response_started = cancel.response_started;
+            let runtime_state = services.runtime_state.clone();
+            let target = cancellation::CancellationTarget {
+                pending_requests: &runtime_state.pending_mcp_requests,
+                cancellations: &runtime_state.mcp_request_cancellations,
+                request_id: request_id.clone(),
+            };
+            let bookkeeping_services = services.clone();
+            cancellation::dispatch_cancellation(
+                &runtime_state,
+                cancellation::trigger_cancellation(target),
+                move || {
+                    cancellation::record_cancellation(
+                        bookkeeping_services,
+                        request_id,
+                        reason,
+                        crate::db::RequestRecordCategory::Mcp,
+                        response_started,
+                    )
+                },
+            )
             .await;
         }
         BridgeMessage::RealtimeSessionStart(request) => {

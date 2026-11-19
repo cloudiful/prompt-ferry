@@ -14,3 +14,6 @@ pub use codec::{
     encode_archive, validate_passphrase,
 };
 pub use error::ArchiveError;
+
+#[cfg(test)]
+pub(crate) use codec::decode_payload_for_tests;

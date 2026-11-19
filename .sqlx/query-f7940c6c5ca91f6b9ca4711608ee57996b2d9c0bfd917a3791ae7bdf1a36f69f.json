@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Scoped orphan sweep for a bounded clear.\n--\n-- Only blocks captured from this clear's candidates are considered, and only\n-- blocks created before the current UTC day. A block survives when any ref\n-- remains, including refs written by another user after the family delete\n-- (READ COMMITTED sees them). Unrelated preexisting orphans are left for the\n-- normal retention/full-history paths.\n--\n--   $1  captured candidate block hashes\nDELETE FROM usage_prompt_blocks upb\nWHERE upb.block_hash = ANY($1::TEXT[])\n  AND upb.created_at < (date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')\n  AND NOT EXISTS (\n      SELECT 1\n      FROM request_record_block_refs ref\n      WHERE ref.block_hash = upb.block_hash\n  );\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f7940c6c5ca91f6b9ca4711608ee57996b2d9c0bfd917a3791ae7bdf1a36f69f"
+}

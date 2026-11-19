@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Raw parent chunks that still hold rows older than the exact prune cutoff.\n--\n-- The cutoff is `now - raw_retention_days`. A chunk is listed only when it\n-- starts before the cutoff and an actual raw row inside its catalog range is\n-- older than the cutoff, so empty and fully recent chunks are never locked.\n-- The server formats the ACCESS EXCLUSIVE statement; the caller takes that\n-- lock before looking at compression state or deleting anything.\n--\n--   $1  exact prune cutoff\nSELECT\n    ch.chunk_schema AS \"chunk_schema!\",\n    ch.chunk_name AS \"chunk_name!\",\n    ch.range_start AS \"range_start!\",\n    ch.range_end AS \"range_end!\",\n    format(\n        'LOCK TABLE %I.%I IN ACCESS EXCLUSIVE MODE',\n        ch.chunk_schema,\n        ch.chunk_name\n    ) AS \"lock_sql!\"\nFROM timescaledb_information.chunks ch\nWHERE ch.hypertable_schema = 'public'\n  AND ch.hypertable_name = 'request_record_raw_payloads'\n  AND ch.range_start < $1\n  AND EXISTS (\n      SELECT 1\n      FROM public.request_record_raw_payloads raw\n      WHERE raw.created_at >= ch.range_start\n        AND raw.created_at < ch.range_end\n        AND raw.created_at < $1\n  )\nORDER BY ch.range_start, ch.chunk_schema, ch.chunk_name;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chunk_schema!",
+        "type_info": "Name",
+        "origin": {
+          "Table": {
+            "table": "timescaledb_information.chunks",
+            "name": "chunk_schema"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "chunk_name!",
+        "type_info": "Name",
+        "origin": {
+          "Table": {
+            "table": "timescaledb_information.chunks",
+            "name": "chunk_name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "range_start!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "timescaledb_information.chunks",
+            "name": "range_start"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "range_end!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "timescaledb_information.chunks",
+            "name": "range_end"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "lock_sql!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "c28eb8f1dfd2b5a50ccd24760833a7c656156b1b7c11d36c5646238296b99ec0"
+}

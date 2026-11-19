@@ -225,24 +225,6 @@ fn api_router(state: AdminState) -> Router<AdminState> {
         .route("/admin/request-records/series", get(usage_series))
         .route("/admin/request-records/prune", post(prune_usage_events))
         .route(
-            "/admin/billing/price-rules",
-            get(list_billing_price_rules).post(create_billing_price_rule),
-        )
-        .route(
-            "/admin/billing/price-rules/{price_rule_id}",
-            patch(patch_billing_price_rule)
-                .put(update_billing_price_rule)
-                .delete(delete_billing_price_rule),
-        )
-        .route("/admin/billing/summary", get(billing_summary))
-        .route("/admin/billing/charges", get(list_billing_charges))
-        .route(
-            "/admin/billing/charges/{charge_id}",
-            get(billing_charge_detail),
-        )
-        .route("/admin/billing/reprice-unpriced", post(reprice_billing))
-        .route("/admin/billing/export", get(export_billing))
-        .route(
             "/admin/conversations/{conversation_id}/endpoint-override",
             get(get_conversation_endpoint_override)
                 .put(set_conversation_endpoint_override)
@@ -284,10 +266,6 @@ fn api_router(state: AdminState) -> Router<AdminState> {
         .route(
             "/settings/relay-ip-whitelist",
             get(get_relay_ip_whitelist).patch(set_relay_ip_whitelist),
-        )
-        .route(
-            "/settings/raw-object-store",
-            get(get_raw_object_store).patch(set_raw_object_store),
         )
         .route(
             "/settings/shared-valkey",
@@ -473,10 +451,6 @@ mod admin_routing_tests {
             ("/settings/endpoint", Some(Capability::EndpointSetting)),
             ("/settings/redaction", Some(Capability::Settings)),
             ("/settings/usage-retention", Some(Capability::Settings)),
-            (
-                "/settings/raw-object-store",
-                Some(Capability::RawObjectStore),
-            ),
             ("/settings/shared-valkey", Some(Capability::SharedValkey)),
             (
                 "/admin/conversations/abc/endpoint-override",
@@ -489,7 +463,6 @@ mod admin_routing_tests {
             // The read-only provider registry is served from memory and stays
             // available on SQLite; it must not map to an unsupported capability.
             ("/admin/mcp-providers", None),
-            ("/admin/billing/summary", Some(Capability::Billing)),
             ("/me/models", Some(Capability::AvailableModels)),
             ("/admin/config-export", Some(Capability::ConfigExport)),
             (

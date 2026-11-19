@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::db::McpOAuthGrantSnapshot;
+
 /// Whether a secret-shaped field survived on the source backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -166,6 +168,9 @@ pub struct McpServerSnapshot {
     pub updated_at: DateTime<Utc>,
 }
 
+/// One archived MCP credential. The retired cost/strict-mode fields of an
+/// older payload format are read by the bounded legacy reader and never reach
+/// this record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpCredentialSnapshot {
     pub credential_id: Uuid,
@@ -175,10 +180,6 @@ pub struct McpCredentialSnapshot {
     pub position: i32,
     pub enabled: bool,
     pub provider_kind: Option<String>,
-    pub default_cost: f64,
-    pub strict_mode: bool,
-    pub billing_period_start: Option<DateTime<Utc>>,
-    pub billing_period_end: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -197,8 +198,24 @@ pub struct UserRedactionConfigSnapshot {
     pub config: Value,
 }
 
+/// Explicit per-user endpoint selection.
+///
+/// A row with `endpoint_id = None` means "use the routing default" and is
+/// distinct from the absence of a row: both survive a round trip. The table's
+/// `updated_at` is bookkeeping for the routing/config-revision cache, not
+/// functional configuration, so it does not travel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserEndpointSettingSnapshot {
+    pub user_id: i64,
+    pub endpoint_id: Option<Uuid>,
+}
+
 /// The domain records only. Serializing this struct is what the manifest
 /// fingerprint covers, so the fingerprint is stable across re-encodes.
+///
+/// This is the current (format 3) shape: ten portable domains. Deployment
+/// state — the shared Valkey coordination row, the raw object-store
+/// configuration and other internal settings — never travels here.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotDomains {
     pub users: Vec<UserSnapshot>,
@@ -209,7 +226,13 @@ pub struct SnapshotDomains {
     pub mcp_credentials: Vec<McpCredentialSnapshot>,
     pub settings: Vec<SettingSnapshot>,
     pub user_redaction_configs: Vec<UserRedactionConfigSnapshot>,
-    /// Decrypted raw object-store configuration when the source backend could
-    /// recover it; `None` means absent or unrecoverable.
-    pub raw_object_store: Option<Value>,
+    /// Personal MCP OAuth grants, decrypted for travel inside the encrypted
+    /// archive. A format-2 archive written before this domain existed
+    /// deserializes as an empty set and restores no grant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_oauth: Vec<McpOAuthGrantSnapshot>,
+    /// Explicit per-user endpoint selections. Legacy archives omit the field,
+    /// which deserializes as "no explicit selection".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub user_endpoint_settings: Vec<UserEndpointSettingSnapshot>,
 }

@@ -1,4 +1,3 @@
-mod billing;
 pub mod config_repository;
 pub mod config_revision;
 mod connection;
@@ -9,7 +8,6 @@ pub(crate) mod initial_admin;
 mod mcp;
 mod mcp_credentials;
 pub mod mcp_oauth;
-mod partition_ddl;
 mod partition_maintenance;
 mod pool_wait;
 pub mod quota_inference;
@@ -26,7 +24,6 @@ mod usage;
 mod users;
 mod workers;
 
-pub use billing::*;
 pub use config_repository::{
     Capability, ConfigRepository, PostgresConfigRepository, SqliteConfigRepository,
     UnifiedClientKey, UnifiedClientKeyCreated, UnifiedEndpointApiKey, UnifiedEndpointPage,
@@ -34,19 +31,9 @@ pub use config_repository::{
     UnifiedSetting,
 };
 pub use connection::{
-    connect, connect_sqlite, connect_sqlite_with_max_connections, connect_with_max_connections,
-    migrate, migrate_standalone, revert_latest_migration,
+    connect, connect_read_only, connect_sqlite, connect_sqlite_with_max_connections,
+    connect_with_max_connections, migrate, migrate_standalone, revert_latest_migration,
 };
-pub use partition_maintenance::{
-    PARTITION_MAINTENANCE_LOCK_KEY, PartitionHorizons, PartitionMaintenanceReport,
-    drop_partitions_before_today, run_partition_maintenance,
-};
-pub use pool_wait::{PoolWaitSnapshot, snapshot as pool_wait_snapshot};
-
-/// Issue #277 Phase P8: content-family retention days, kept as a named
-/// constant because content expiry is now partition-drop driven and no longer
-/// user-configurable.
-pub const PARTITION_CONTENT_RETENTION_DAYS: i32 = 3;
 pub use endpoints::{
     create_endpoint, create_endpoint_with_mcp, delete_endpoint, get_endpoint, list_endpoints,
     list_endpoints_page, list_visible_endpoints, set_endpoint_mcp_enabled,
@@ -64,6 +51,11 @@ pub use mcp_credentials::{
     list_credentials_by_server, list_firecrawl_credentials, sync_credentials_from_tokens,
     update_credential_token,
 };
+pub use partition_maintenance::{
+    AffectedRange, PARTITION_MAINTENANCE_LOCK_KEY, PartitionHorizons, PartitionMaintenanceReport,
+    drop_chunks_before_today, run_partition_maintenance,
+};
+pub use pool_wait::{PoolWaitSnapshot, snapshot as pool_wait_snapshot};
 pub use routes::{
     ActiveWindow, candidate_target_is_active, cleanup_orphan_model_routes,
     create_model_endpoint_rule, delete_model_endpoint_rule, effective_route,
@@ -81,15 +73,13 @@ pub use routing_state::{
     get_conversation_endpoint_override, upsert_conversation_endpoint_override,
 };
 pub use settings::{
-    INTERNAL_COORDINATION_SETTING_KEYS, RAW_OBJECT_STORE_SETTINGS_KEY,
-    RELAY_SNAPSHOT_VERSION_SETTINGS_KEY, REQUEST_CONTENT_LOGGING_SETTINGS_KEY,
-    RedactionCustomStringRuleListItem, STREAM_DELTA_BATCHING_SETTINGS_KEY,
-    USAGE_RETENTION_SETTINGS_KEY, begin_snapshot_publication, get_bool_setting, get_json_setting,
-    get_raw_object_store_config, get_raw_object_store_persisted, get_redaction_config,
-    get_redaction_config_updated_at, get_request_content_logging, get_stream_delta_batching,
-    get_usage_retention, get_user_redaction_config, list_redaction_custom_string_rules,
-    list_user_redaction_configs, next_relay_snapshot_version, set_bool_setting, set_json_setting,
-    set_raw_object_store_config, set_raw_object_store_persisted, set_redaction_config,
+    INTERNAL_COORDINATION_SETTING_KEYS, RELAY_SNAPSHOT_VERSION_SETTINGS_KEY,
+    REQUEST_CONTENT_LOGGING_SETTINGS_KEY, RedactionCustomStringRuleListItem,
+    STREAM_DELTA_BATCHING_SETTINGS_KEY, USAGE_RETENTION_SETTINGS_KEY, begin_snapshot_publication,
+    get_bool_setting, get_json_setting, get_redaction_config, get_redaction_config_updated_at,
+    get_request_content_logging, get_stream_delta_batching, get_usage_retention,
+    get_user_redaction_config, list_redaction_custom_string_rules, list_user_redaction_configs,
+    next_relay_snapshot_version, set_bool_setting, set_json_setting, set_redaction_config,
     set_request_content_logging, set_stream_delta_batching, set_usage_retention,
     set_user_redaction_config,
 };
@@ -104,14 +94,12 @@ pub use shared_valkey::{
     shared_valkey_failure, validate_shared_valkey_ttl, validate_shared_valkey_url,
 };
 pub use types::*;
-pub(crate) use usage::get_visible_usage_event_detail_with_raw_store;
-pub(crate) use usage::run_raw_payload_maintenance_with_store;
 pub use usage::{
     CACHE_ALERT_SETTINGS_KEY, LowCacheConversation, OverviewBucket, OverviewWindow,
     RawPayloadMaintenanceReport, RequestRecordClearReport, RequestRecordPruneReport,
     RequestRecordRouteLocator, RequestRecordStateInput, abort_request_record,
     abort_request_records_by_ids, abort_stale_request_records, allocate_conversation_seq,
-    cleanup_orphan_request_record_leases, cleanup_orphan_usage_prompt_blocks,
+    cleanup_orphan_conversation_redaction_sessions, cleanup_orphan_request_record_leases,
     cleanup_stale_conversation_redaction_sessions, clear_usage_events, decode_prompt_message_refs,
     delete_conversation_redaction_session, delete_request_record_lease, endpoint_today_tokens,
     find_low_cache_conversations, find_request_record_tool_calls_by_call_ids,
@@ -130,11 +118,10 @@ pub use usage::{
     latest_usage_event_locator_by_provider_conversation_key, list_active_request_record_ids,
     list_request_record_facets, list_request_record_tool_calls, list_request_records,
     prune_usage_events, record_cache_alert, record_request_first_output, record_request_record,
-    record_request_record_with_raw_store, record_request_state, replay_snapshot_before_or_at_seq,
-    request_record_summary, request_records_overview, run_raw_payload_maintenance,
-    set_cache_alert_settings, upsert_conversation_redaction_session,
-    upsert_request_record_tool_call, upsert_usage_assistant_artifact, upsert_usage_prompt_block,
-    usage_buckets,
+    record_request_state, replay_snapshot_before_or_at_seq, request_record_summary,
+    request_records_overview, run_raw_payload_maintenance, set_cache_alert_settings,
+    upsert_conversation_redaction_session, upsert_request_record_tool_call,
+    upsert_usage_assistant_artifact, upsert_usage_prompt_block, usage_buckets,
 };
 pub use users::{
     UserStore, bootstrap_admin, count_client_keys, create_client_key, create_user,

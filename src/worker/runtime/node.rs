@@ -745,7 +745,6 @@ fn spawn_background_tasks(
         shared_valkey,
         admin_state.pool.clone(),
         admin_state.usage_retention.clone(),
-        admin_state.raw_payload_store.clone(),
         control.clone(),
         coordinated_store.clone(),
     );
@@ -779,7 +778,6 @@ fn spawn_background_tasks(
     );
     let config_refresh = super::config_refresh::spawn_node_config_refresh(
         admin_state.clone(),
-        worker_config.clone(),
         control.clone(),
         database_url.to_string(),
     );

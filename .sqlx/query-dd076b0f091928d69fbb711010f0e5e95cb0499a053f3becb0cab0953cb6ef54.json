@@ -1,0 +1,43 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Scoped row deletion across the whole request family.\n--\n-- Only the manual admin clear endpoint reaches this statement: the 15-minute\n-- tick never deletes request-family rows (it drops whole chunks instead).\n-- `clear_family_rows` calls it either with an explicit scope/range (per-user\n-- or windowed clear) or, for a full-history clear, with scope=all and the\n-- current UTC day as `start_at` so only today's rows remain to delete after\n-- every earlier chunk was dropped.\n--\n-- $6/$7 are the inclusive envelope of the same candidates. They are logically\n-- redundant with the row predicates, but stating them on the parent and on\n-- every arm lets TimescaleDB exclude chunks during startup instead of reading\n-- chunks the envelope cannot touch.\n--\n-- Scope semantics:\n--   $1  target_user_id (TargetUser scope; NULL otherwise)\n--   $2  visible_user_id (CurrentUser scope; NULL otherwise)\n--   $3  start_at (NULL = unbounded)\n--   $4  end_at (NULL = unbounded, inclusive)\n--   $5  scope code: 0 = all users, 1 = current user, 2 = target user\n--   $6  envelope min created_at (inclusive)\n--   $7  envelope max created_at (inclusive)\nWITH candidates AS MATERIALIZED (\n    SELECT rr.event_id, rr.created_at\n    FROM request_records rr\n    WHERE ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3)\n      AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at <= $4)\n      AND rr.created_at >= $6::TIMESTAMPTZ\n      AND rr.created_at <= $7::TIMESTAMPTZ\n      AND (\n          $5::INT = 0\n          OR ($5::INT = 1 AND rr.user_id = $2::BIGINT)\n          OR ($5::INT = 2 AND rr.user_id = $1::BIGINT)\n      )\n), deleted_metadata AS (\n    DELETE FROM request_records rr\n    USING candidates\n    WHERE rr.event_id = candidates.event_id\n      AND rr.created_at = candidates.created_at\n      AND rr.created_at >= $6::TIMESTAMPTZ\n      AND rr.created_at <= $7::TIMESTAMPTZ\n    RETURNING rr.event_id\n), deleted_content AS (\n    DELETE FROM request_record_content content\n    USING candidates\n    WHERE content.event_id = candidates.event_id\n      AND content.created_at = candidates.created_at\n      AND content.created_at >= $6::TIMESTAMPTZ\n      AND content.created_at <= $7::TIMESTAMPTZ\n    RETURNING content.event_id\n), deleted_block_refs AS (\n    DELETE FROM request_record_block_refs refs\n    USING candidates\n    WHERE refs.event_id = candidates.event_id\n      AND refs.created_at = candidates.created_at\n      AND refs.created_at >= $6::TIMESTAMPTZ\n      AND refs.created_at <= $7::TIMESTAMPTZ\n    RETURNING refs.event_id\n), deleted_artifacts AS (\n    DELETE FROM request_record_assistant_artifacts artifacts\n    USING candidates\n    WHERE artifacts.event_id = candidates.event_id\n      AND artifacts.created_at = candidates.created_at\n      AND artifacts.created_at >= $6::TIMESTAMPTZ\n      AND artifacts.created_at <= $7::TIMESTAMPTZ\n    RETURNING artifacts.event_id\n), deleted_tool_calls AS (\n    DELETE FROM request_record_tool_calls calls\n    USING candidates\n    WHERE calls.parent_event_id = candidates.event_id\n      AND calls.created_at = candidates.created_at\n      AND calls.created_at >= $6::TIMESTAMPTZ\n      AND calls.created_at <= $7::TIMESTAMPTZ\n    RETURNING calls.tool_call_event_id\n), deleted_snapshots AS (\n    DELETE FROM request_record_replay_snapshots snapshots\n    USING candidates\n    WHERE snapshots.created_at = candidates.created_at\n      AND snapshots.created_at >= $6::TIMESTAMPTZ\n      AND snapshots.created_at <= $7::TIMESTAMPTZ\n      AND (\n          snapshots.event_id = candidates.event_id\n          OR snapshots.base_event_id = candidates.event_id\n      )\n    RETURNING snapshots.event_id\n), deleted_raw_payloads AS (\n    DELETE FROM request_record_raw_payloads raw\n    USING candidates\n    WHERE raw.event_id = candidates.event_id\n      AND raw.created_at = candidates.created_at\n      AND raw.created_at >= $6::TIMESTAMPTZ\n      AND raw.created_at <= $7::TIMESTAMPTZ\n    RETURNING raw.event_id\n)\nSELECT\n    (SELECT COUNT(*) FROM deleted_metadata)::BIGINT AS \"deleted_count!\",\n    (SELECT MIN(created_at) FROM candidates) AS min_created_at,\n    (SELECT MAX(created_at) FROM candidates) AS max_created_at;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "deleted_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "min_created_at",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "max_created_at",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Timestamptz",
+        "Timestamptz",
+        "Int4",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "dd076b0f091928d69fbb711010f0e5e95cb0499a053f3becb0cab0953cb6ef54"
+}

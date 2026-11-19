@@ -251,7 +251,7 @@ pub(super) async fn clear_usage_events(
         Ok(report) => Json(UsageClearResponse {
             deleted: report.deleted,
             deleted_prompt_blocks: report.deleted_prompt_blocks,
-            protected_by_billing: report.protected_by_billing,
+            chunks_dropped: report.chunks_dropped,
         })
         .into_response(),
         Err(err) => internal(&state, err),
@@ -265,11 +265,16 @@ pub(super) async fn prune_usage_events(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response.into_response();
     }
-    let retention_days = state.usage_retention.read().await.metadata_retention_days;
-    match db::prune_usage_events(&state.pool, i64::from(retention_days)).await {
+    let retention = state.usage_retention.read().await.clone();
+    match db::prune_usage_events(
+        &state.pool,
+        i64::from(retention.metadata_retention_days),
+        i64::from(retention.content_retention_days),
+    )
+    .await
+    {
         Ok(report) => Json(UsagePruneResponse {
-            deleted: report.deleted,
-            protected_by_billing: report.protected_by_billing,
+            chunks_dropped: report.chunks_dropped,
         })
         .into_response(),
         Err(err) => internal(&state, err),

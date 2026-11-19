@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Explicit per-user endpoint selections for the configuration archive.\n--\n-- A NULL endpoint_id is a real state (\"use the routing default\") that must\n-- round-trip distinctly from an absent row, so the reader selects the nullable\n-- column instead of the per-user getter, which conflates both states.\nSELECT user_id, endpoint_id\nFROM public.user_endpoint_settings\nORDER BY user_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "user_endpoint_settings",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "user_endpoint_settings",
+            "name": "endpoint_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "d7b3d61bd0ef62615a49e2ef0e880aca8ff892d5fcef05350bc2a09f80b99547"
+}

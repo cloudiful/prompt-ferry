@@ -7,7 +7,6 @@ use crate::{
 };
 use anyhow::Context;
 use std::{sync::Arc, time::Duration};
-use tracing::warn;
 
 /// Attach the personal MCP OAuth backend to a freshly built admin state.
 ///
@@ -79,30 +78,6 @@ async fn build_postgres_admin_state(
 ) -> anyhow::Result<AdminState> {
     let usage_retention = db::get_usage_retention(&pool).await?;
     let cache_alert = db::get_cache_alert_settings(&pool).await?;
-    // Raw payloads always go to the managed store (bucket or local fallback);
-    // when a persisted raw object-store setting exists it replaces the
-    // environment-based fallback without a restart.
-    let raw_payload_store = {
-        let persisted = crate::db::get_raw_object_store_persisted(&pool).await?;
-        let raw_config = if let Some(persisted) = persisted {
-            match persisted.into_config(&relay_secret_manager) {
-                Ok(cfg) => cfg,
-                Err(err) => {
-                    warn!(error = %err, "failed to decrypt persisted raw object store config; falling back to environment-based configuration");
-                    crate::raw_payload_store::RawObjectStoreConfig::from_worker_config(config)
-                }
-            }
-        } else {
-            crate::raw_payload_store::RawObjectStoreConfig::from_worker_config(config)
-        };
-        match raw_config.build_store() {
-            Ok(store) => store.map(Arc::new),
-            Err(err) => {
-                warn!(error = %err, "failed to build raw payload store; raw payloads will be dropped");
-                None
-            }
-        }
-    };
     // These settings live on independent rows so their reads are safe to
     // overlap; previously they ran one after another and added several
     // round-trips of cold-start latency.
@@ -149,7 +124,6 @@ async fn build_postgres_admin_state(
         model_route_whitelist_enabled,
         request_content_logging,
         usage_retention,
-        raw_payload_store,
         stream_delta_batching,
         mcp_catalog_cache,
         mcp_catalog_service,

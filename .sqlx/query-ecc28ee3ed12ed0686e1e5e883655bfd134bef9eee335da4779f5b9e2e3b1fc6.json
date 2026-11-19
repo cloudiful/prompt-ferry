@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH rows AS (\n    SELECT usage.*\n    FROM public.request_usage_window($1::BIGINT, $2::TEXT, $3::TIMESTAMPTZ, $4::TIMESTAMPTZ, $6::TEXT) usage\n    WHERE ($5::TEXT IS NULL OR COALESCE(\n        (SELECT u.login_name FROM users u WHERE u.user_id = usage.user_id),\n        CASE WHEN usage.user_id IS NULL THEN '-' ELSE '#' || usage.user_id::TEXT END\n    ) = $5)\n), aggregates AS (\n    SELECT date_trunc('hour', bucket_at) AS bucket_at,\n           SUM(request_count)::BIGINT AS request_count,\n           SUM(success_by_ok)::BIGINT AS success_count,\n           SUM(error_by_ok)::BIGINT AS error_count,\n           SUM(cache_hit_count)::BIGINT AS cache_hit_count,\n           SUM(input_tokens)::BIGINT AS input_tokens,\n           SUM(cache_read_tokens)::BIGINT AS cache_read_tokens,\n           SUM(cache_write_tokens)::BIGINT AS cache_write_tokens,\n           SUM(output_tokens)::BIGINT AS output_tokens,\n           SUM(total_tokens)::BIGINT AS total_tokens,\n           SUM(full_input_tokens)::BIGINT AS full_input_tokens\n    FROM rows\n    GROUP BY 1\n), p95 AS (\n    SELECT date_trunc('hour', rr.created_at) AS bucket_at,\n           percentile_cont(0.95) WITHIN GROUP (ORDER BY rr.duration_ms)\n               FILTER (WHERE rr.duration_ms IS NOT NULL) AS p95_total_ms,\n           percentile_cont(0.95) WITHIN GROUP (ORDER BY rr.ttft_ms)\n               FILTER (WHERE rr.ttft_ms IS NOT NULL) AS p95_first_token_ms\n    FROM request_records rr\n    LEFT JOIN users u ON u.user_id = rr.user_id\n    WHERE rr.event_kind = 'request'\n      AND rr.request_category = $2\n      AND ($1::BIGINT IS NULL OR rr.user_id = $1)\n      AND ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3)\n      AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at < $4)\n      AND ($5::TEXT IS NULL OR COALESCE(u.login_name, '#' || rr.user_id::TEXT, '-') = $5)\n      AND (\n          $6::TEXT = 'all'\n          OR $2 <> 'mcp'\n          OR (\n              $6::TEXT = 'service'\n              AND (rr.mcp_server_name IS NOT NULL OR rr.mcp_server_id IS NOT NULL)\n          )\n          OR (\n              $6::TEXT = 'gateway'\n              AND rr.mcp_server_name IS NULL\n              AND rr.mcp_server_id IS NULL\n          )\n      )\n    GROUP BY 1\n)\nSELECT a.bucket_at AS \"bucket_at!\", a.request_count::BIGINT AS \"request_count!\",\n       a.success_count::BIGINT AS \"success_count!\", a.error_count::BIGINT AS \"error_count!\",\n       a.cache_hit_count::BIGINT AS \"cache_hit_count!\", a.input_tokens::BIGINT AS \"input_tokens!\",\n       a.cache_read_tokens::BIGINT AS \"cache_read_tokens!\", a.cache_write_tokens::BIGINT AS \"cache_write_tokens!\",\n       a.output_tokens::BIGINT AS \"output_tokens!\", a.total_tokens::BIGINT AS \"total_tokens!\",\n       a.full_input_tokens::BIGINT AS \"full_input_tokens!\", p.p95_total_ms, p.p95_first_token_ms\nFROM aggregates a\nLEFT JOIN p95 p ON p.bucket_at = a.bucket_at\nORDER BY a.bucket_at ASC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "bucket_at!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "request_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "success_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "error_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "cache_hit_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "cache_read_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "cache_write_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "output_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "total_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "full_input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "p95_total_ms",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 12,
+        "name": "p95_first_token_ms",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "ecc28ee3ed12ed0686e1e5e883655bfd134bef9eee335da4779f5b9e2e3b1fc6"
+}

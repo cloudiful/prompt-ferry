@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Actual identity heads after the archived rows were inserted.\n--\n-- `pg_sequences.last_value` is NULL for a never-called sequence, which would\n-- read as \"no head\" and could restart an advanced uncalled sequence backwards.\n-- Reading the sequence relations directly returns the real last_value and\n-- is_called pair.\nSELECT\n    (SELECT MAX(user_id) FROM public.users) AS max_user_id,\n    (SELECT MAX(key_id) FROM public.client_keys) AS max_client_key_id,\n    users_seq.last_value AS user_last_value,\n    users_seq.is_called AS user_is_called,\n    keys_seq.last_value AS client_key_last_value,\n    keys_seq.is_called AS client_key_is_called\nFROM public.users_user_id_seq AS users_seq\nCROSS JOIN public.client_keys_key_id_seq AS keys_seq;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "max_user_id",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "max_client_key_id",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_last_value",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users_user_id_seq",
+            "name": "last_value"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "user_is_called",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "users_user_id_seq",
+            "name": "is_called"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "client_key_last_value",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys_key_id_seq",
+            "name": "last_value"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "client_key_is_called",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "client_keys_key_id_seq",
+            "name": "is_called"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e9cb27dd6f1692006cf88da8afd18c5a40913d9fa71c7e2bb62072370a0d89f0"
+}

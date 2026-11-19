@@ -110,6 +110,8 @@ export function usageClearPayload(
 export function usageClearToastMessage(
   t: (key: 'clearHistorySubmit') => string,
   deleted: number,
+  deletedPromptBlocks: number,
+  chunksDropped: number,
 ): string {
-  return `${t('clearHistorySubmit')}: ${deleted}`
+  return `${t('clearHistorySubmit')}: ${deleted} rows, ${deletedPromptBlocks} blocks, ${chunksDropped} chunks`
 }

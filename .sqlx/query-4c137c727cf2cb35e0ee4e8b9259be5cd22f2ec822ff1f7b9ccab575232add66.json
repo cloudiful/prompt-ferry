@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Drop exactly one raw chunk by its catalog range.\n--\n-- The caller has already locked the chunk and verified its range. `drop_chunks`\n-- is bounded on both sides, so only the listed chunk can be returned. The\n-- caller requires exactly one returned regclass name and matches it to the\n-- listed chunk before committing.\n--\n--   $1  raw parent regclass text\n--   $2  chunk range end (exclusive newer_than bound)\n--   $3  chunk range start (inclusive older_than bound)\nSELECT dropped::text AS \"dropped!\"\nFROM drop_chunks(\n    $1::text::regclass,\n    older_than => $2::timestamptz,\n    newer_than => $3::timestamptz\n) AS dropped;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "dropped!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4c137c727cf2cb35e0ee4e8b9259be5cd22f2ec822ff1f7b9ccab575232add66"
+}

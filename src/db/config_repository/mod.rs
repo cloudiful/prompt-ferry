@@ -170,7 +170,8 @@ mod tests {
     fn sqlite_supported_listing_is_explicit() {
         // The router middleware uses `capability.sqlite_supported()` to decide
         // whether a path is allowed. SQLite supports the unified configuration
-        // and MCP configuration/catalog surface, but not advanced ledgers.
+        // and MCP configuration/catalog surface, but not the durable usage
+        // records and other PostgreSQL-only surfaces.
         assert!(Capability::SnapshotPublication.sqlite_supported());
         assert!(Capability::Endpoints.sqlite_supported());
         assert!(Capability::ModelRoutes.sqlite_supported());
@@ -181,7 +182,6 @@ mod tests {
         assert!(Capability::McpCredentials.sqlite_supported());
         assert!(Capability::McpCatalog.sqlite_supported());
         assert!(!Capability::RequestRecords.sqlite_supported());
-        assert!(!Capability::Billing.sqlite_supported());
         assert!(!Capability::ConversationEndpointOverride.sqlite_supported());
         assert!(!Capability::AvailableModels.sqlite_supported());
     }

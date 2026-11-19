@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Current compression state of one listed chunk.\n--\n-- Read only after the clear has acquired its ROW SHARE lock on the chunk and\n-- before deciding whether to decompress it. READ COMMITTED gives every\n-- statement a fresh snapshot, so a compression committed while the clear was\n-- waiting for the lock is visible here even though the chunk list saw the old\n-- rowstore state. A missing row means the chunk disappeared mid-clear and the\n-- caller must fail instead of assuming it is uncompressed.\n--\n--   $1  chunk schema\n--   $2  chunk name\nSELECT is_compressed AS \"is_compressed!\"\nFROM timescaledb_information.chunks\nWHERE chunk_schema = $1\n  AND chunk_name = $2;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "is_compressed!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "timescaledb_information.chunks",
+            "name": "is_compressed"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Name",
+        "Name"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "2bbad7d67e88e9c3fa6286c8d37025719e6b56b0d357ffde243d66229577f499"
+}

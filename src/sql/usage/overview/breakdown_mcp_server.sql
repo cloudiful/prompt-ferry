@@ -1,102 +1,37 @@
-WITH normalized AS (
-    SELECT COALESCE(rr.mcp_server_name, ms.name, '(unknown)') AS label,
-           rr.mcp_server_id,
+WITH rows AS (
+    SELECT usage.*
+    FROM public.request_usage_window($1::BIGINT, $2::TEXT, $3::TIMESTAMPTZ, $4::TIMESTAMPTZ, $6::TEXT) usage
+    WHERE ($5::TEXT IS NULL OR COALESCE(
+        (SELECT u.login_name FROM users u WHERE u.user_id = usage.user_id),
+        CASE WHEN usage.user_id IS NULL THEN '-' ELSE '#' || usage.user_id::TEXT END
+    ) = $5)
+), grouped AS (
+    SELECT COALESCE(n.mcp_server_name, ms.name, '(unknown)') AS label,
+           n.mcp_server_id,
            ms.provider_kind AS server_provider_kind,
            CASE
-               WHEN rr.mcp_server_name IS NOT NULL OR rr.mcp_server_id IS NOT NULL
+               WHEN n.mcp_server_name IS NOT NULL OR n.mcp_server_id IS NOT NULL
                THEN 'service'
                ELSE 'gateway'
            END AS mcp_scope,
-           rr.ok,
-           COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)::BIGINT AS normalized_cache_read_tokens,
-           COALESCE(rr.cache_write_tokens, 0)::BIGINT AS normalized_cache_write_tokens,
-           -- Post-0072 rows already store the ordinary (non-cache) input; rows
-           -- still in the folded shape keep the cache inside `input_tokens`, so
-           -- expand them to the ordinary miss `input - cache_read - cache_write`
-           -- (floored at 0) using the same guard as the full-input denominator.
-           -- Closed loop: ordinary + cache_read + cache_write + output == total.
-           CASE
-               WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0
-                   AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)
-                   AND COALESCE(rr.input_tokens, 0)
-                       >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)
-               THEN GREATEST(
-                   COALESCE(rr.input_tokens, 0)
-                       - GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                       - GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
-                   0
-               )
-               ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)
-           END::BIGINT AS normalized_input_tokens,
-            -- P2 (issue #205): full-input denominator `ordinary+read+write`,
-            -- 真 0.49 (e.g. 9728/18144) vs old `max` 1.0 which dropped the
-            -- ordinary part. Still-folded rows (0072/0073 guard:
-            -- cache>0 AND total>=output AND input>=total-output, input already
-            -- holds the cache) fall back to `max(input, read+write)` to avoid
-            -- the ≈1.9x double-count; total keeps closed-loop
-            -- ordinary+read+write+output.
-            CASE
-                WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0
-                    AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)
-                    AND COALESCE(rr.input_tokens, 0)
-                        >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)
-                THEN GREATEST(
-                    COALESCE(rr.input_tokens, 0),
-                    GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                        + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
-                    0
-                )
-                ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)
-                    + GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                    + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)
-            END::BIGINT AS normalized_full_input_tokens,
-           COALESCE(rr.output_tokens, 0)::BIGINT AS output_tokens,
-           COALESCE(rr.total_tokens, 0)::BIGINT AS total_tokens
-    FROM request_records rr
-    LEFT JOIN users u ON u.user_id = rr.user_id
-    LEFT JOIN mcp_servers ms ON ms.server_id = rr.mcp_server_id
-    WHERE rr.event_kind = 'request'
-      AND rr.request_category = $2
-      AND ($1::BIGINT IS NULL OR rr.user_id = $1)
-      AND ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3)
-      AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at < $4)
-      AND ($5::TEXT IS NULL OR COALESCE(u.login_name, '#' || rr.user_id::TEXT, '-') = $5)
-      AND (
-          $6::TEXT = 'all'
-          OR $2 <> 'mcp'
-          OR (
-              $6::TEXT = 'service'
-              AND (rr.mcp_server_name IS NOT NULL OR rr.mcp_server_id IS NOT NULL)
-          )
-          OR (
-              $6::TEXT = 'gateway'
-              AND rr.mcp_server_name IS NULL
-              AND rr.mcp_server_id IS NULL
-          )
-      )
-), grouped AS (
-    SELECT label,
-           mcp_server_id,
-           server_provider_kind,
-           mcp_scope,
-           COUNT(*)::BIGINT AS request_count,
-           COUNT(*) FILTER (WHERE ok IS TRUE)::BIGINT AS success_count,
-           COUNT(*) FILTER (
-               WHERE normalized_cache_read_tokens > 0
-           )::BIGINT AS cache_hit_count,
-           COALESCE(SUM(normalized_input_tokens), 0)::BIGINT AS input_tokens,
-           COALESCE(SUM(normalized_cache_read_tokens), 0)::BIGINT AS cache_read_tokens,
-           COALESCE(SUM(normalized_cache_write_tokens), 0)::BIGINT AS cache_write_tokens,
-           COALESCE(SUM(output_tokens), 0)::BIGINT AS output_tokens,
-           -- Issue #342: persisted closed-loop total summed once per row, so
-           -- the grouped MCP exit reconciles with `usage_summary`.
-           COALESCE(SUM(GREATEST(total_tokens, 0)), 0)::BIGINT AS total_tokens,
-           -- Per-row-summed fold-aware denominator for `cache_rate`; still-folded
-           -- rows use the `max(input, read+write)` fallback, so the aggregate must
-           -- not re-derive the guard on the raw input SUM (issue #338).
-           COALESCE(SUM(normalized_full_input_tokens), 0)::BIGINT AS full_input_tokens
-    FROM normalized
-    GROUP BY label, mcp_server_id, server_provider_kind, mcp_scope
+           COALESCE(SUM(n.request_count), 0)::BIGINT AS request_count,
+           COALESCE(SUM(n.success_by_ok), 0)::BIGINT AS success_count,
+           COALESCE(SUM(n.cache_hit_count), 0)::BIGINT AS cache_hit_count,
+           COALESCE(SUM(n.input_tokens), 0)::BIGINT AS input_tokens,
+           COALESCE(SUM(n.cache_read_tokens), 0)::BIGINT AS cache_read_tokens,
+           COALESCE(SUM(n.cache_write_tokens), 0)::BIGINT AS cache_write_tokens,
+           COALESCE(SUM(n.output_tokens), 0)::BIGINT AS output_tokens,
+           COALESCE(SUM(n.total_tokens), 0)::BIGINT AS total_tokens,
+           COALESCE(SUM(n.full_input_tokens), 0)::BIGINT AS full_input_tokens
+    FROM rows n
+    LEFT JOIN mcp_servers ms ON ms.server_id = n.mcp_server_id
+    GROUP BY COALESCE(n.mcp_server_name, ms.name, '(unknown)'), n.mcp_server_id,
+             ms.provider_kind,
+             CASE
+                 WHEN n.mcp_server_name IS NOT NULL OR n.mcp_server_id IS NOT NULL
+                 THEN 'service'
+                 ELSE 'gateway'
+             END
 ), totals AS (
     SELECT SUM(request_count)::DOUBLE PRECISION AS request_count
     FROM grouped

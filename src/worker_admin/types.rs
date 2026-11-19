@@ -1,7 +1,5 @@
 #[path = "types/auth_users.rs"]
 mod auth_users;
-#[path = "types/billing.rs"]
-mod billing;
 #[path = "types/cache_alert.rs"]
 mod cache_alert;
 mod config_audit;
@@ -31,7 +29,6 @@ mod token_plan;
 mod usage;
 
 pub use auth_users::*;
-pub use billing::*;
 pub use cache_alert::*;
 pub use config_audit::*;
 pub use config_export::*;

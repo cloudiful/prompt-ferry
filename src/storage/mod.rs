@@ -41,7 +41,6 @@ impl StorageBackend {
                 request_usage: true,
                 raw_payload_retention: true,
                 mcp: true,
-                billing: true,
                 durable_replay: true,
                 shared_workers: true,
             },
@@ -57,7 +56,6 @@ impl StorageBackend {
                 request_usage: false,
                 raw_payload_retention: false,
                 mcp: true,
-                billing: false,
                 durable_replay: false,
                 shared_workers: false,
             },
@@ -158,7 +156,6 @@ pub struct StorageCapabilities {
     pub request_usage: bool,
     pub raw_payload_retention: bool,
     pub mcp: bool,
-    pub billing: bool,
     pub durable_replay: bool,
     pub shared_workers: bool,
 }
@@ -311,7 +308,6 @@ mod tests {
         assert!(contract.capabilities.mcp);
         assert!(!contract.capabilities.request_usage);
         assert!(!contract.capabilities.raw_payload_retention);
-        assert!(!contract.capabilities.billing);
         assert!(!contract.capabilities.durable_replay);
         assert!(
             !contract.capabilities.shared_workers,
@@ -367,7 +363,6 @@ mod tests {
 
         assert!(contract.capabilities.request_usage);
         assert!(contract.capabilities.raw_payload_retention);
-        assert!(contract.capabilities.billing);
         assert!(contract.capabilities.durable_replay);
         // Without a shared coordinator the deployment runs in the degraded
         // single-worker mode: only one live worker may serve, so the
@@ -396,7 +391,6 @@ mod tests {
         assert_eq!(contract.maintenance, StateBackend::Valkey);
 
         assert!(contract.capabilities.shared_workers);
-        assert!(contract.capabilities.billing);
         assert!(contract.capabilities.request_usage);
 
         // A shared Valkey removes the degraded single-worker mode.

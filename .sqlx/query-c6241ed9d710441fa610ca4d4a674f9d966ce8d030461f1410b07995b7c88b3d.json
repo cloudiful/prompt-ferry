@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Prompt blocks referenced by the clear candidates, captured before the\n-- family delete removes those refs.\n--\n-- The block set is scoped to the candidates through the same ref join the\n-- family delete uses; it is not the global orphan population. Prompt blocks\n-- created today stay in the hot, uncompressed chunk and are not selected.\n--\n--   $1  target_user_id (TargetUser scope; NULL otherwise)\n--   $2  visible_user_id (CurrentUser scope; NULL otherwise)\n--   $3  start_at (NULL = unbounded)\n--   $4  end_at (NULL = unbounded, inclusive)\n--   $5  scope code: 0 = all users, 1 = current user, 2 = target user\nSELECT DISTINCT upb.block_hash AS \"block_hash!\"\nFROM request_records rr\nJOIN request_record_block_refs refs\n  ON refs.event_id = rr.event_id\n AND refs.created_at = rr.created_at\nJOIN usage_prompt_blocks upb\n  ON upb.block_hash = refs.block_hash\nWHERE ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3)\n  AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at <= $4)\n  AND (\n      $5::INT = 0\n      OR ($5::INT = 1 AND rr.user_id = $2::BIGINT)\n      OR ($5::INT = 2 AND rr.user_id = $1::BIGINT)\n  )\n  AND upb.created_at < (date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')\nORDER BY upb.block_hash;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "block_hash!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_prompt_blocks",
+            "name": "block_hash"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Timestamptz",
+        "Timestamptz",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c6241ed9d710441fa610ca4d4a674f9d966ce8d030461f1410b07995b7c88b3d"
+}

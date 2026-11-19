@@ -353,7 +353,7 @@ impl RequestRecordCreate {
         self
     }
 
-    pub fn with_billing_models(
+    pub fn with_models(
         mut self,
         requested_model: Option<String>,
         upstream_model: Option<String>,

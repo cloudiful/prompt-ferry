@@ -125,7 +125,7 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
         log.mcp_operation_name,
     )
     .with_model(log.model)
-    .with_billing_models(log.requested_model, log.upstream_model)
+    .with_models(log.requested_model, log.upstream_model)
     .with_timing(log.status, log.ok, log.duration_ms, log.ttft_ms)
     .with_usage(
         log.usage.input_tokens,
@@ -193,14 +193,8 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
     )
     .with_node_attribution(log.node_attribution);
     let retention = state.usage_retention.read().await.clone().normalized();
-    let raw_store = state.raw_payload_store.read().await.clone();
-    match db::record_request_record_with_raw_store(
-        &state.pool,
-        create,
-        raw_store.as_deref(),
-        i64::from(retention.raw_retention_days),
-    )
-    .await
+    match db::record_request_record(&state.pool, create, i64::from(retention.raw_retention_days))
+        .await
     {
         Ok(event_id) => {
             if let Some(conversation_id) = conversation_id {

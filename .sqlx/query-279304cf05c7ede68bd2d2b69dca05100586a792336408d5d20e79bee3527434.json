@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Chunks the clear will touch, with the server-quoted lock statement for each.\n--\n-- The seven deleted parents contribute the chunks whose range intersects the\n-- inclusive candidate envelope. Prompt blocks contribute the chunks holding\n-- the captured block hashes dated before the current UTC day. Uncompressed\n-- chunks are listed too: the caller locks every touched chunk so the\n-- compression policy cannot take one mid-clear; only compressed ones are\n-- decompressed.\n--\n-- `format('%I.%I', ...)` runs on the server, so the lock statement never\n-- depends on client-side identifier quoting. Compression state is deliberately\n-- not projected here: it is re-read after all locks are held.\n--\n--   $1  envelope min created_at (inclusive)\n--   $2  envelope max created_at (inclusive)\n--   $3  captured candidate block hashes\nSELECT\n    ch.chunk_schema AS \"chunk_schema!\",\n    ch.chunk_name AS \"chunk_name!\",\n    format('LOCK TABLE %I.%I IN ROW SHARE MODE', ch.chunk_schema, ch.chunk_name)\n        AS \"lock_sql!\"\nFROM timescaledb_information.chunks ch\nWHERE ch.hypertable_schema = 'public'\n  AND (\n      (\n          ch.hypertable_name IN (\n              'request_records',\n              'request_record_content',\n              'request_record_block_refs',\n              'request_record_assistant_artifacts',\n              'request_record_tool_calls',\n              'request_record_replay_snapshots',\n              'request_record_raw_payloads'\n          )\n          AND ch.range_end > $1\n          AND ch.range_start <= $2\n      )\n      OR (\n          ch.hypertable_name = 'usage_prompt_blocks'\n          AND EXISTS (\n              SELECT 1\n              FROM usage_prompt_blocks upb\n              WHERE upb.block_hash = ANY($3::TEXT[])\n                AND upb.created_at < (\n                    date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'\n                )\n                AND upb.created_at >= ch.range_start\n                AND upb.created_at < ch.range_end\n          )\n      )\n  )\nORDER BY ch.chunk_schema, ch.chunk_name;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chunk_schema!",
+        "type_info": "Name",
+        "origin": {
+          "Table": {
+            "table": "timescaledb_information.chunks",
+            "name": "chunk_schema"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "chunk_name!",
+        "type_info": "Name",
+        "origin": {
+          "Table": {
+            "table": "timescaledb_information.chunks",
+            "name": "chunk_name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "lock_sql!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "279304cf05c7ede68bd2d2b69dca05100586a792336408d5d20e79bee3527434"
+}

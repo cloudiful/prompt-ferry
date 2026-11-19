@@ -17,10 +17,13 @@
 use argon2::Argon2;
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead};
 use rand::Rng;
+use serde::Deserialize;
 use std::io::{Read, Write};
 
 use super::error::ArchiveError;
-use crate::db::config_repository::snapshot::{ConfigBackendKind, ConfigSnapshot};
+use crate::db::config_repository::snapshot::{
+    ConfigBackendKind, ConfigSnapshot, SNAPSHOT_FORMAT_VERSION, legacy,
+};
 
 pub const ARCHIVE_MAGIC: [u8; 8] = *b"PFCEXP01";
 pub const ARCHIVE_FORMAT_VERSION: u16 = 1;
@@ -201,8 +204,45 @@ pub fn decode_archive_for_backend(
         )
         .map_err(|_| ArchiveError::DecryptionFailed)?;
     let plaintext = decompress(&compressed)?;
-    let snapshot: ConfigSnapshot = serde_json::from_slice(&plaintext)
+    decode_payload(&plaintext, backend)
+}
+
+/// The payload version, read from the manifest before the rest of the payload
+/// is interpreted, so the reader knows which frozen shape to parse.
+#[derive(Deserialize)]
+struct PayloadProbe {
+    manifest: PayloadProbeManifest,
+}
+
+#[derive(Deserialize)]
+struct PayloadProbeManifest {
+    format_version: u16,
+}
+
+/// Dispatch a decrypted, decompressed payload by its declared format version.
+///
+/// A format-2 payload is verified and normalized by the bounded legacy reader;
+/// a format-3 payload is parsed directly; anything else is an unsupported
+/// version. Both paths must agree with the authenticated archive backend tag.
+fn decode_payload(
+    plaintext: &[u8],
+    backend: ConfigBackendKind,
+) -> Result<ConfigSnapshot, ArchiveError> {
+    let probe: PayloadProbe = serde_json::from_slice(plaintext)
         .map_err(|_| ArchiveError::InvalidPayload("unreadable snapshot"))?;
+    let snapshot = match probe.manifest.format_version {
+        SNAPSHOT_FORMAT_VERSION => serde_json::from_slice::<ConfigSnapshot>(plaintext)
+            .map_err(|_| ArchiveError::InvalidPayload("unreadable snapshot"))?,
+        legacy::LEGACY_FORMAT_VERSION => {
+            legacy::normalize(plaintext).map_err(ArchiveError::InvalidPayload)?
+        }
+        found => {
+            return Err(ArchiveError::UnsupportedVersion {
+                found,
+                supported: SNAPSHOT_FORMAT_VERSION,
+            });
+        }
+    };
     if snapshot.manifest.backend_kind != backend {
         return Err(ArchiveError::InvalidPayload(
             "backend tag does not match the payload",
@@ -212,6 +252,16 @@ pub fn decode_archive_for_backend(
         .validate()
         .map_err(|_| ArchiveError::InvalidPayload("snapshot failed validation"))?;
     Ok(snapshot)
+}
+
+/// Decode one already-decrypted payload. Tests use this to exercise the format
+/// dispatch without constructing a sealed container.
+#[cfg(test)]
+pub(crate) fn decode_payload_for_tests(
+    plaintext: &[u8],
+    backend: ConfigBackendKind,
+) -> Result<ConfigSnapshot, ArchiveError> {
+    decode_payload(plaintext, backend)
 }
 
 fn backend_tag(kind: ConfigBackendKind) -> u8 {

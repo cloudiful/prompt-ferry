@@ -1,55 +1,35 @@
-WITH normalized AS (
-    -- Same fold-aware denominator as `usage/overview/metrics.sql` and
-    -- `usage_events_page.sql`: still-folded rows (cache already inside
-    -- `input_tokens`) use `max(input, read+write)`; normalized rows sum the
-    -- ordinary input with the cache meters.
-    SELECT
-        request_state,
-        duration_ms,
-        GREATEST(COALESCE(input_tokens, 0), 0)::BIGINT AS input_tokens,
-        GREATEST(COALESCE(output_tokens, 0), 0)::BIGINT AS output_tokens,
-        GREATEST(COALESCE(total_tokens, 0), 0)::BIGINT AS total_tokens,
-        GREATEST(
-            COALESCE(COALESCE(cache_read_tokens, cached_tokens), 0),
-            0
-        )::BIGINT AS normalized_cache_read_tokens,
-        GREATEST(COALESCE(cached_tokens, 0), 0)::BIGINT AS normalized_cached_tokens,
-        GREATEST(COALESCE(cache_write_tokens, 0), 0)::BIGINT AS normalized_cache_write_tokens,
-        CASE
-            WHEN COALESCE(COALESCE(cache_read_tokens, cached_tokens), 0) > 0
-                AND COALESCE(total_tokens, 0) >= COALESCE(output_tokens, 0)
-                AND COALESCE(input_tokens, 0)
-                    >= COALESCE(total_tokens, 0) - COALESCE(output_tokens, 0)
-            THEN GREATEST(
-                COALESCE(input_tokens, 0),
-                GREATEST(COALESCE(cache_read_tokens, cached_tokens, 0), 0)
-                    + GREATEST(COALESCE(cache_write_tokens, 0), 0),
-                0
-            )
-            ELSE GREATEST(COALESCE(input_tokens, 0), 0)
-                + GREATEST(COALESCE(cache_read_tokens, cached_tokens, 0), 0)
-                + GREATEST(COALESCE(cache_write_tokens, 0), 0)
-        END::BIGINT AS normalized_full_input_tokens
-    FROM request_records
-    WHERE event_kind = 'request'
-      AND created_at >= NOW() - ($1::BIGINT * INTERVAL '1 day')
-      AND ($2::BIGINT IS NULL OR user_id = $2)
+WITH windows AS (
+    SELECT NOW() - ($1::BIGINT * INTERVAL '1 day') AS start_at
+),
+rows AS (
+    SELECT usage.*
+    FROM windows
+    CROSS JOIN LATERAL public.request_usage_window(
+        $2::BIGINT,
+        NULL,
+        windows.start_at,
+        NULL,
+        'all'
+    ) usage
 )
 SELECT
-    COUNT(*)::BIGINT AS "request_count!",
-    COUNT(*) FILTER (WHERE request_state = 'completed')::BIGINT AS "success_count!",
-    COUNT(*) FILTER (WHERE request_state IN ('failed', 'aborted'))::BIGINT AS "error_count!",
-    COALESCE(SUM(input_tokens), 0)::BIGINT AS "input_tokens!",
-    COALESCE(SUM(output_tokens), 0)::BIGINT AS "output_tokens!",
+    COALESCE(SUM(request_count), 0)::BIGINT AS "request_count!",
+    COALESCE(SUM(success_by_state), 0)::BIGINT AS "success_count!",
+    COALESCE(SUM(error_by_state), 0)::BIGINT AS "error_count!",
+    COALESCE(SUM(input_tokens_raw), 0)::BIGINT AS "input_tokens!",
+    COALESCE(SUM(output_tokens_clamped), 0)::BIGINT AS "output_tokens!",
     COALESCE(SUM(total_tokens), 0)::BIGINT AS "total_tokens!",
-    COALESCE(SUM(normalized_cached_tokens), 0)::BIGINT AS "cached_tokens!",
-    CASE WHEN COALESCE(SUM(normalized_full_input_tokens), 0) > 0
+    COALESCE(SUM(cached_tokens), 0)::BIGINT AS "cached_tokens!",
+    CASE WHEN COALESCE(SUM(full_input_tokens), 0) > 0
         THEN LEAST(
             1.0::DOUBLE PRECISION,
-            COALESCE(SUM(normalized_cache_read_tokens), 0)::DOUBLE PRECISION
-                / SUM(normalized_full_input_tokens)::DOUBLE PRECISION
+            COALESCE(SUM(cache_read_tokens_clamped), 0)::DOUBLE PRECISION
+                / SUM(full_input_tokens)::DOUBLE PRECISION
         )
         ELSE NULL
     END AS cache_rate,
-    AVG(duration_ms)::DOUBLE PRECISION AS avg_duration_ms
-FROM normalized
+    CASE WHEN COALESCE(SUM(duration_count), 0) > 0
+        THEN SUM(duration_sum_ms)::DOUBLE PRECISION / SUM(duration_count)::DOUBLE PRECISION
+        ELSE NULL
+    END AS avg_duration_ms
+FROM rows

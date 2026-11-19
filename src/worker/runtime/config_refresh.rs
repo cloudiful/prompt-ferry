@@ -9,14 +9,12 @@
 //! the settings that the database owns.
 
 use rand::RngExt;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 use tracing::{info, warn};
 
 use super::lifecycle::RuntimeControl;
-use crate::config::WorkerConfig;
 use crate::db;
 use crate::db::config_repository::relay_snapshot::content_fingerprint;
 use crate::redact;
@@ -43,21 +41,15 @@ const NODE_CONFIG_RECONNECT_MAX: Duration = Duration::from_secs(10);
 /// session of the gated pool.
 pub(super) fn spawn_node_config_refresh(
     state: AdminState,
-    config: WorkerConfig,
     control: RuntimeControl,
     database_url: String,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        run_node_config_refresh(state, config, control, database_url).await;
+        run_node_config_refresh(state, control, database_url).await;
     })
 }
 
-async fn run_node_config_refresh(
-    state: AdminState,
-    config: WorkerConfig,
-    control: RuntimeControl,
-    database_url: String,
-) {
+async fn run_node_config_refresh(state: AdminState, control: RuntimeControl, database_url: String) {
     let mut listener: Option<db::config_revision::ConfigRevisionListener> = None;
     let mut applied = db::config_revision::AppliedRevision::default();
     let mut fingerprints = RefreshFingerprints::default();
@@ -100,7 +92,7 @@ async fn run_node_config_refresh(
             let force = force_refresh;
             force_refresh = false;
             if let Err(err) =
-                reconcile_node_config(&state, &config, &mut applied, &mut fingerprints, force).await
+                reconcile_node_config(&state, &mut applied, &mut fingerprints, force).await
             {
                 // The revision was not applied. The failure is remembered, so
                 // the next poll retries the same revision instead of waiting
@@ -167,7 +159,6 @@ async fn run_node_config_refresh(
 /// the next notification or poll retries it.
 async fn reconcile_node_config(
     state: &AdminState,
-    config: &WorkerConfig,
     applied: &mut db::config_revision::AppliedRevision,
     fingerprints: &mut RefreshFingerprints,
     force: bool,
@@ -177,13 +168,7 @@ async fn reconcile_node_config(
         return Ok(());
     }
     for _ in 0..NODE_CONFIG_REFRESH_ATTEMPTS {
-        refresh_configuration(
-            state,
-            config,
-            &mut fingerprints.redaction,
-            &mut fingerprints.raw_store,
-        )
-        .await?;
+        refresh_configuration(state, &mut fingerprints.redaction).await?;
         // Do not publish a pass whose gather raced a newer revision.
         let after_gather = db::config_revision::read_revision(&state.pool).await?;
         if after_gather != revision {
@@ -251,15 +236,12 @@ fn node_reconnect_delay(attempt: u32) -> Duration {
 #[derive(Default)]
 struct RefreshFingerprints {
     redaction: Option<u64>,
-    raw_store: Option<u64>,
 }
 
 /// Gather and apply the database-backed configuration without publishing.
 async fn refresh_configuration(
     state: &AdminState,
-    config: &WorkerConfig,
     last_redaction_fingerprint: &mut Option<u64>,
-    last_raw_store_fingerprint: &mut Option<u64>,
 ) -> anyhow::Result<()> {
     let pool = state.pool.clone();
     let (
@@ -346,45 +328,6 @@ async fn refresh_configuration(
             info!("refreshed the cache alert policy");
         }
     }
-
-    refresh_raw_payload_store(state, config, last_raw_store_fingerprint).await?;
-    Ok(())
-}
-
-/// Rebuild the raw payload store when the persisted setting changed.
-///
-/// A failure is propagated to the caller: the store that is in use stays
-/// untouched, and the fingerprint of the persisted setting is not advanced, so
-/// the next pass of the same revision tries again. A refresh that swallows the
-/// failure would mark the revision as applied and keep the stale storage
-/// configuration until another revision arrives.
-async fn refresh_raw_payload_store(
-    state: &AdminState,
-    config: &WorkerConfig,
-    last_raw_store_fingerprint: &mut Option<u64>,
-) -> anyhow::Result<()> {
-    let Some(manager) = state.relay_secret_manager.as_ref() else {
-        return Ok(());
-    };
-    let persisted = db::get_raw_object_store_persisted(&state.pool).await?;
-    let fingerprint = content_fingerprint(&persisted)?;
-    if *last_raw_store_fingerprint == Some(fingerprint) {
-        return Ok(());
-    }
-    let raw_config = match persisted {
-        Some(persisted) => persisted.into_config(manager).map_err(|err| {
-            anyhow::anyhow!("failed to decrypt the persisted raw object store config: {err}")
-        })?,
-        None => crate::raw_payload_store::RawObjectStoreConfig::from_worker_config(config),
-    };
-    let store = raw_config
-        .build_store()
-        .map_err(|err| anyhow::anyhow!("failed to build the raw payload store: {err}"))?;
-    // The store is replaced only when the new configuration is usable, so a
-    // failing build never drops a store that still works.
-    *state.raw_payload_store.write().await = store.map(Arc::new);
-    *last_raw_store_fingerprint = Some(fingerprint);
-    info!("refreshed the raw payload store setting");
     Ok(())
 }
 

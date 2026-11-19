@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Decompress one touched chunk inside the clear transaction.\n--\n-- `if_compressed => true` makes the call idempotent: a chunk that another\n-- process already decompressed between listing and this call stays valid, and\n-- an uncompressed chunk is a no-op. Identifier quoting is done by the server.\n--\n--   $1  chunk schema\n--   $2  chunk name\nSELECT public.decompress_chunk(\n    format('%I.%I', $1::TEXT, $2::TEXT)::regclass,\n    if_compressed => true\n)::TEXT AS \"result\";\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "result",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9469548b3c2fc2c7688d04e97ba6138be2d0e7d78be44260ec9934ac53dd2887"
+}

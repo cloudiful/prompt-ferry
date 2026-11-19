@@ -1,13 +1,46 @@
 use super::*;
 use crate::db::seaorm::PostgresNativeConnection;
-use crate::raw_payload_store::{RawPayloadEnvelope, RawPayloadStore};
-use chrono::Duration as ChronoDuration;
 use sea_orm::ConnectionTrait;
 use sea_orm::sea_query::{Alias, Expr, Query};
 use tracing::warn;
 
-pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) -> Result<i64> {
-    let (event_id, _created_at) = record_request_record_with_created_at(pool, input).await?;
+/// Persist the request record, then optionally store the captured raw request
+/// and response bodies next to it.
+///
+/// The metadata and normalized content are written in one transaction first;
+/// the bodies are a post-commit upsert so a body failure can never roll back
+/// the request event. When both bodies are absent, or `raw_retention_days` is
+/// zero, no body row is written at all.
+pub async fn record_request_record(
+    pool: &PgPool,
+    input: RequestRecordCreate,
+    raw_retention_days: i64,
+) -> Result<i64> {
+    let request_raw_json = input.request_raw_json.clone();
+    let response_raw_body = input.response_raw_body.clone();
+    let (event_id, created_at) = record_request_record_with_created_at(pool, input).await?;
+
+    if raw_retention_days > 0
+        && (request_raw_json.is_some() || response_raw_body.is_some())
+        && let Err(err) = sqlx::query_file!(
+            "src/sql/usage/upsert_request_record_raw_bodies.sql",
+            event_id,
+            created_at,
+            request_raw_json,
+            response_raw_body,
+        )
+        .execute(pool)
+        .await
+    {
+        warn!(
+            error = %err,
+            event_id,
+            has_request_body = request_raw_json.is_some(),
+            has_response_body = response_raw_body.is_some(),
+            "failed to persist raw request bodies; keeping the request record"
+        );
+    }
+
     Ok(event_id)
 }
 
@@ -142,18 +175,6 @@ async fn record_request_record_with_created_at(
 
     tx.commit().await?;
 
-    if let Err(err) = crate::db::record_usage_charge(pool, event_id, &input).await {
-        warn!(
-            error = %err,
-            event_id,
-            input_tokens = input.input_tokens,
-            cache_read_tokens = input.cache_read_tokens,
-            cache_write_tokens = input.cache_write_tokens,
-            output_tokens = input.output_tokens,
-            "failed to persist usage billing snapshot"
-        );
-    }
-
     if input.request_state.is_terminal() {
         delete_request_record_lease(pool, input.request_id).await?;
     } else if let (Some(lease_expires_at), Some(last_heartbeat_at)) =
@@ -179,65 +200,6 @@ async fn record_request_record_with_created_at(
     .await?;
 
     Ok((event_id, created_at))
-}
-
-/// Persist the request-record metadata first, then upload the raw payload to
-/// the selected store and record its object metadata. There is deliberately no
-/// PostgreSQL body fallback: when the store upload fails the raw payload is
-/// dropped with a warning while the metadata event survives.
-/// The partition key comes from the insert that just wrote the request record,
-/// so neither the raw reference nor the object metadata needs a lookup across
-/// the daily partitions of the request family.
-pub async fn record_request_record_with_raw_store(
-    pool: &PgPool,
-    input: RequestRecordCreate,
-    raw_store: Option<&RawPayloadStore>,
-    raw_retention_days: i64,
-) -> Result<i64> {
-    let payload = RawPayloadEnvelope {
-        request_raw_json: input.request_raw_json.clone(),
-        response_raw_body: input.response_raw_body.clone(),
-    };
-    let (event_id, created_at) = record_request_record_with_created_at(pool, input).await?;
-    let Some(raw_store) = raw_store else {
-        return Ok(event_id);
-    };
-    if payload.request_raw_json.is_none() && payload.response_raw_body.is_none() {
-        return Ok(event_id);
-    }
-
-    let expires_at = created_at + ChronoDuration::days(raw_retention_days.max(1));
-    // The store merges this phase's fields into any existing per-event object,
-    // so a request-only write followed by a response-only write is idempotent.
-    let object = match raw_store
-        .put(event_id, created_at, payload, expires_at)
-        .await
-    {
-        Ok(object) => object,
-        Err(err) => {
-            warn!(error = %err, event_id, "failed to upload raw payload; dropping raw payload");
-            return Ok(event_id);
-        }
-    };
-    if let Err(err) = sqlx::query_file!(
-        "src/sql/usage/upsert_request_record_raw_object.sql",
-        event_id,
-        created_at,
-        object.object_key,
-        object.size_bytes,
-        object.sha256,
-        object.expires_at,
-    )
-    .execute(pool)
-    .await
-    {
-        warn!(
-            error = %err,
-            event_id,
-            "failed to persist raw payload object metadata"
-        );
-    }
-    Ok(event_id)
 }
 
 async fn insert_request_record_block_refs(

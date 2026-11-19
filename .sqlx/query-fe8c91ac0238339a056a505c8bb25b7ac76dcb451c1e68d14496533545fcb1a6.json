@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Database-side whole-minute cap for the rollup refresh window. The caller\n-- computes floor/ceiling bounds; this returns the current minute so a future\n-- or incomplete bucket is never materialized.\nSELECT date_trunc('minute', NOW()) AS \"current_minute!\"\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "current_minute!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "fe8c91ac0238339a056a505c8bb25b7ac76dcb451c1e68d14496533545fcb1a6"
+}

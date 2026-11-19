@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Explicit isolation for the atomic request-family clear.\n--\n-- READ COMMITTED is the default, but the clear states it so the semantics do\n-- not depend on a future default change: the scoped orphan NOT EXISTS check\n-- must see refs committed by concurrent writers before the family delete, not\n-- a transaction snapshot taken before the chunk decompression.\nSET TRANSACTION ISOLATION LEVEL READ COMMITTED;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "1c3d09137ad99206af49d9aa1cc4ee79a7a40a92288b7e1b5a5145e58781806d"
+}

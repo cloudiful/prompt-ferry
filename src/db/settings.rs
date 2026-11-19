@@ -13,9 +13,7 @@ use crate::{
     db::StreamDeltaBatchingSettings,
     db::entities::postgres::{user_redaction_configs, worker_settings},
     db::seaorm::{native_error, postgres_connection},
-    raw_payload_store::{RawObjectStoreConfig, RawObjectStorePersisted},
     redact::RedactionConfig,
-    relay_secrets::RelaySecretManager,
     worker_admin_types::UsageRetentionSettings,
     worker_admin_types::{RequestContentLoggingMode, RequestContentLoggingResponse},
 };
@@ -44,7 +42,6 @@ fn parse_rfc3339_utc(value: Option<String>) -> Option<DateTime<Utc>> {
 pub const REQUEST_CONTENT_LOGGING_SETTINGS_KEY: &str = "request_content_logging";
 pub const USAGE_RETENTION_SETTINGS_KEY: &str = "usage_retention";
 pub const STREAM_DELTA_BATCHING_SETTINGS_KEY: &str = "stream_delta_batching";
-pub const RAW_OBJECT_STORE_SETTINGS_KEY: &str = "raw_object_store";
 /// Legacy location of the relay snapshot fence. The fence now comes from the
 /// `relay_snapshot_version_seq` sequence; the key stays excluded from the
 /// configuration archive so an older archive can never reset coordination
@@ -55,8 +52,13 @@ pub const RELAY_SNAPSHOT_VERSION_SETTINGS_KEY: &str = "relay_snapshot_version";
 ///
 /// They belong to the running deployment and not to the archived
 /// configuration: a configuration export never contains them and a
-/// configuration import never resets them.
-pub const INTERNAL_COORDINATION_SETTING_KEYS: [&str; 1] = [RELAY_SNAPSHOT_VERSION_SETTINGS_KEY];
+/// configuration import never resets them. The shared Valkey row carries the
+/// deployment's own coordination URL, revision and seed, so it is excluded
+/// like the other coordination rows and the destination keeps its own.
+pub const INTERNAL_COORDINATION_SETTING_KEYS: [&str; 2] = [
+    RELAY_SNAPSHOT_VERSION_SETTINGS_KEY,
+    super::shared_valkey::SHARED_VALKEY_SETTINGS_KEY,
+];
 const REQUEST_CONTENT_LOGGING_ENABLED_KEY: &str = "request_content_logging_enabled";
 const LEGACY_USAGE_CONTENT_LOGGING_SETTINGS_KEY: &str = "usage_content_logging";
 const LEGACY_USAGE_CONTENT_LOGGING_ENABLED_KEY: &str = "usage_content_logging_enabled";
@@ -499,40 +501,6 @@ pub async fn next_relay_snapshot_version(
             .fetch_one(&mut **transaction)
             .await?;
     version.ok_or_else(|| anyhow::anyhow!("the relay snapshot sequence returned no version"))
-}
-
-pub async fn get_raw_object_store_persisted(
-    pool: &PgPool,
-) -> Result<Option<RawObjectStorePersisted>> {
-    get_json_setting::<RawObjectStorePersisted>(pool, RAW_OBJECT_STORE_SETTINGS_KEY).await
-}
-
-pub async fn set_raw_object_store_persisted(
-    pool: &PgPool,
-    value: &RawObjectStorePersisted,
-) -> Result<()> {
-    set_json_setting(pool, RAW_OBJECT_STORE_SETTINGS_KEY, value).await
-}
-
-pub async fn get_raw_object_store_config(
-    pool: &PgPool,
-    manager: &RelaySecretManager,
-) -> Result<Option<RawObjectStoreConfig>> {
-    if let Some(persisted) = get_raw_object_store_persisted(pool).await? {
-        Ok(Some(persisted.into_config(manager)?))
-    } else {
-        Ok(None)
-    }
-}
-
-pub async fn set_raw_object_store_config(
-    pool: &PgPool,
-    manager: &RelaySecretManager,
-    config: &RawObjectStoreConfig,
-) -> Result<RawObjectStorePersisted> {
-    let persisted = RawObjectStorePersisted::from_config(config, manager)?;
-    set_raw_object_store_persisted(pool, &persisted).await?;
-    Ok(persisted)
 }
 
 #[cfg(test)]

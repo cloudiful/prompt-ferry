@@ -97,15 +97,7 @@ pub(in crate::worker_admin::handlers) async fn get_visible_usage_event_detail_or
     record_id: i64,
     visible_user_id: Option<i64>,
 ) -> Result<db::UsageEventDetail, ApiError> {
-    let raw_store = state.raw_payload_store.read().await.clone();
-    match db::get_visible_usage_event_detail_with_raw_store(
-        &state.pool,
-        record_id,
-        visible_user_id,
-        raw_store.as_deref(),
-    )
-    .await
-    {
+    match db::get_visible_usage_event_detail(&state.pool, record_id, visible_user_id).await {
         Ok(Some(event)) => Ok(event),
         Ok(None) => Err(request_record_not_found()),
         Err(err) => Err(ApiError::internal(state, err)),

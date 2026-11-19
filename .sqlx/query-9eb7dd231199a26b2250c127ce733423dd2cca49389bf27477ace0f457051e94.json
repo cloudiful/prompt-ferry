@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Clear continuation metadata for expired raw rows in one metadata chunk.\n--\n-- This runs inside the same per-chunk transaction as the raw chunk drop.\n-- `$1` is the exact prune cutoff, `$2`/`$3` are the paired metadata chunk\n-- range. Only rows in that chunk are updated, so no other raw chunk or\n-- metadata chunk is read or written by the full-drop branch.\n--\n--   $1  exact prune cutoff\n--   $2  paired metadata chunk range start\n--   $3  paired metadata chunk range end\nUPDATE request_records rr\nSET\n    request_has_previous_response_id = FALSE,\n    request_previous_response_id = NULL,\n    request_previous_response_parent_found = NULL,\n    request_conversation_key = NULL,\n    request_conversation_parent_found = NULL\nFROM request_record_raw_payloads raw\nWHERE raw.created_at < $1\n  AND rr.event_id = raw.event_id\n  AND rr.created_at >= $2\n  AND rr.created_at < $3;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9eb7dd231199a26b2250c127ce733423dd2cca49389bf27477ace0f457051e94"
+}

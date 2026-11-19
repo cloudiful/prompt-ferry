@@ -1,139 +1,45 @@
-WITH normalized AS (
-    SELECT rr.model,
-           rr.upstream_model,
-           rr.ok,
-           rr.request_state,
-           rr.endpoint_id,
-           rr.failure_family,
-           rr.output_tokens AS raw_output_tokens,
-           rr.duration_ms,
-           -- Post-0072 rows already store the ordinary (non-cache) input; rows
-           -- still in the folded shape keep the cache inside `input_tokens`, so
-           -- expand them to the ordinary miss `input - cache_read - cache_write`
-           -- (floored at 0) using the same guard as the full-input denominator.
-           -- Closed loop: ordinary + cache_read + cache_write + output == total.
-           CASE
-               WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0
-                   AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)
-                   AND COALESCE(rr.input_tokens, 0)
-                       >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)
-               THEN GREATEST(
-                   COALESCE(rr.input_tokens, 0)
-                       - GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                       - GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
-                   0
-               )
-               ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)
-           END::BIGINT AS normalized_input_tokens,
-           COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)::BIGINT AS normalized_cache_read_tokens,
-           COALESCE(rr.cache_write_tokens, 0)::BIGINT AS normalized_cache_write_tokens,
-            -- P2 (issue #205): full-input denominator `ordinary+read+write`,
-            -- 真 0.49 (e.g. 9728/18144) vs old `max` 1.0 which dropped the
-            -- ordinary part. Still-folded rows (0072/0073 guard:
-            -- cache>0 AND total>=output AND input>=total-output, input already
-            -- holds the cache) fall back to `max(input, read+write)` to avoid
-            -- the ≈1.9x double-count; total keeps closed-loop
-            -- ordinary+read+write+output.
-            CASE
-                WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0
-                    AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)
-                    AND COALESCE(rr.input_tokens, 0)
-                        >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)
-                THEN GREATEST(
-                    COALESCE(rr.input_tokens, 0),
-                    GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                        + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
-                    0
-                )
-                ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)
-                    + GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                    + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)
-            END::BIGINT AS normalized_full_input_tokens,
-           COALESCE(rr.output_tokens, 0)::BIGINT AS output_tokens,
-           COALESCE(rr.total_tokens, 0)::BIGINT AS total_tokens
-    FROM request_records rr
-    LEFT JOIN users u ON u.user_id = rr.user_id
-    WHERE rr.event_kind = 'request'
-      AND rr.request_category = $2
-      AND ($1::BIGINT IS NULL OR rr.user_id = $1)
-      AND ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3)
-      AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at < $4)
-      AND ($5::TEXT IS NULL OR COALESCE(u.login_name, '#' || rr.user_id::TEXT, '-') = $5)
+WITH rows AS (
+    SELECT usage.*
+    FROM public.request_usage_window($1::BIGINT, $2::TEXT, $3::TIMESTAMPTZ, $4::TIMESTAMPTZ, 'all') usage
+    WHERE ($5::TEXT IS NULL OR COALESCE(
+        (SELECT u.login_name FROM users u WHERE u.user_id = usage.user_id),
+        CASE WHEN usage.user_id IS NULL THEN '-' ELSE '#' || usage.user_id::TEXT END
+    ) = $5)
 ), grouped AS (
     SELECT COALESCE(model, '(unknown)') AS label,
            model,
-           COUNT(*)::BIGINT AS request_count,
-           COUNT(*) FILTER (WHERE ok IS TRUE)::BIGINT AS success_count,
-           COUNT(*) FILTER (
-               WHERE ok IS FALSE OR request_state IN ('failed', 'aborted')
-           )::BIGINT AS error_count,
-            COUNT(*) FILTER (
-                WHERE normalized_cache_read_tokens > 0
-            )::BIGINT AS cache_hit_count,
-           COALESCE(SUM(normalized_input_tokens), 0)::BIGINT AS input_tokens,
-           COALESCE(SUM(normalized_cache_read_tokens), 0)::BIGINT AS cache_read_tokens,
-           COALESCE(SUM(normalized_cache_write_tokens), 0)::BIGINT AS cache_write_tokens,
+           COALESCE(SUM(request_count), 0)::BIGINT AS request_count,
+           COALESCE(SUM(success_by_ok), 0)::BIGINT AS success_count,
+           COALESCE(SUM(error_by_ok), 0)::BIGINT AS error_count,
+           COALESCE(SUM(cache_hit_count), 0)::BIGINT AS cache_hit_count,
+           COALESCE(SUM(input_tokens), 0)::BIGINT AS input_tokens,
+           COALESCE(SUM(cache_read_tokens), 0)::BIGINT AS cache_read_tokens,
+           COALESCE(SUM(cache_write_tokens), 0)::BIGINT AS cache_write_tokens,
            COALESCE(SUM(output_tokens), 0)::BIGINT AS output_tokens,
-           -- Issue #342: persisted closed-loop total, so per-model
-           -- `token_share` and the ordering reconcile with `usage_summary`.
-           COALESCE(SUM(GREATEST(total_tokens, 0)), 0)::BIGINT AS total_tokens,
-           -- P1 (issue #226): aggregated `cache_rate` denominator is
-           -- SUM(normalized_full_input_tokens) computed row-by-row (fold-aware),
-           -- not the raw `input_tokens` SUM which double-counts the cache.
-           COALESCE(SUM(normalized_full_input_tokens), 0)::BIGINT AS full_input_tokens,
-           AVG(
-               CASE
-                   WHEN request_state = 'completed'
-                       AND raw_output_tokens IS NOT NULL
-                       AND raw_output_tokens > 0
-                       AND duration_ms IS NOT NULL
-                       AND duration_ms > 0
-                   THEN raw_output_tokens::NUMERIC / duration_ms::NUMERIC * 1000.0
-                   ELSE NULL
-               END
-           )::DOUBLE PRECISION AS avg_output_tokens_per_second
-    FROM normalized
+           COALESCE(SUM(total_tokens), 0)::BIGINT AS total_tokens,
+           COALESCE(SUM(full_input_tokens), 0)::BIGINT AS full_input_tokens,
+           SUM(tps_sum)::DOUBLE PRECISION / NULLIF(SUM(tps_count), 0) AS avg_output_tokens_per_second
+    FROM rows
     GROUP BY model
 ), totals AS (
     SELECT SUM(request_count)::DOUBLE PRECISION AS request_count,
            SUM(total_tokens)::DOUBLE PRECISION AS total_tokens
     FROM grouped
 ), upstream AS (
-    -- P1 (issue #207): per (model x endpoint_id) aggregates for the hover
-    -- breakdown. Error predicate mirrors `metrics.sql`
-    -- (`ok IS FALSE OR request_state IN (...)`, `failure_family` kept for
-    -- observability) so the existing `ok` / `failure_family` / `endpoint_id`
-    -- indexes can serve the grouping without a new migration.
-    -- Issue #593: the grouping also keys on `upstream_model` so a route
-    -- override shows the actual upstream model as its own entry.
     SELECT COALESCE(n.model, '(unknown)') AS model_key,
            n.endpoint_id,
            n.upstream_model,
            COALESCE(pe.name, n.endpoint_id::TEXT, '(direct)') AS endpoint_name,
-           COUNT(*)::BIGINT AS request_count,
-           COUNT(*) FILTER (
-               WHERE n.ok IS FALSE OR n.request_state IN ('failed', 'aborted')
-           )::BIGINT AS error_count,
-           COALESCE(SUM(GREATEST(n.total_tokens, 0)), 0)::BIGINT AS total_tokens,
-           COALESCE(SUM(n.normalized_cache_read_tokens), 0)::BIGINT AS cache_read_tokens,
-           COALESCE(SUM(n.normalized_full_input_tokens), 0)::BIGINT AS full_input_tokens,
-           AVG(
-               CASE
-                   WHEN n.request_state = 'completed'
-                       AND n.raw_output_tokens IS NOT NULL
-                       AND n.raw_output_tokens > 0
-                       AND n.duration_ms IS NOT NULL
-                       AND n.duration_ms > 0
-                   THEN n.raw_output_tokens::NUMERIC / n.duration_ms::NUMERIC * 1000.0
-                   ELSE NULL
-               END
-           )::DOUBLE PRECISION AS avg_output_tokens_per_second
-    FROM normalized n
+           COALESCE(SUM(n.request_count), 0)::BIGINT AS request_count,
+           COALESCE(SUM(n.error_by_ok), 0)::BIGINT AS error_count,
+           COALESCE(SUM(n.total_tokens), 0)::BIGINT AS total_tokens,
+           COALESCE(SUM(n.cache_read_tokens), 0)::BIGINT AS cache_read_tokens,
+           COALESCE(SUM(n.full_input_tokens), 0)::BIGINT AS full_input_tokens,
+           SUM(n.tps_sum)::DOUBLE PRECISION / NULLIF(SUM(n.tps_count), 0) AS avg_output_tokens_per_second
+    FROM rows n
     LEFT JOIN provider_endpoints pe ON pe.endpoint_id = n.endpoint_id
     GROUP BY COALESCE(n.model, '(unknown)'), n.endpoint_id, n.upstream_model, pe.name
 ), upstream_agg AS (
-    -- Issue #593: upstream entries reuse the main table's seven metrics with
-    -- the same semantics (global request/token shares, fold-aware cache rate).
     SELECT u.model_key,
            COUNT(*)::BIGINT AS upstream_count,
            json_agg(
@@ -146,8 +52,6 @@ WITH normalized AS (
                    'error_count', u.error_count,
                    'error_rate', CASE WHEN u.request_count > 0 THEN u.error_count::DOUBLE PRECISION / u.request_count ELSE 0 END,
                    'total_tokens', u.total_tokens,
-                   -- Issue #593: match the main table's nullable token share
-                   -- (`/ NULLIF(total, 0)`), so a zero-token window stays NULL.
                    'token_share', u.total_tokens::DOUBLE PRECISION / NULLIF(t.total_tokens, 0),
                    'cache_rate', CASE
                        WHEN u.full_input_tokens > 0

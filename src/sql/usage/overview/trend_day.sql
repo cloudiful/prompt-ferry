@@ -1,55 +1,30 @@
-WITH normalized AS (
-    -- The day bucket is a logical UTC calendar date: truncating in UTC keeps
-    -- the label on that date whatever the session time zone is.
+WITH rows AS (
+    SELECT usage.*
+    FROM public.request_usage_window($1::BIGINT, $2::TEXT, $3::TIMESTAMPTZ, $4::TIMESTAMPTZ, $6::TEXT) usage
+    WHERE ($5::TEXT IS NULL OR COALESCE(
+        (SELECT u.login_name FROM users u WHERE u.user_id = usage.user_id),
+        CASE WHEN usage.user_id IS NULL THEN '-' ELSE '#' || usage.user_id::TEXT END
+    ) = $5)
+), aggregates AS (
+    SELECT date_trunc('day', bucket_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS bucket_at,
+           SUM(request_count)::BIGINT AS request_count,
+           SUM(success_by_ok)::BIGINT AS success_count,
+           SUM(error_by_ok)::BIGINT AS error_count,
+           SUM(cache_hit_count)::BIGINT AS cache_hit_count,
+           SUM(input_tokens)::BIGINT AS input_tokens,
+           SUM(cache_read_tokens)::BIGINT AS cache_read_tokens,
+           SUM(cache_write_tokens)::BIGINT AS cache_write_tokens,
+           SUM(output_tokens)::BIGINT AS output_tokens,
+           SUM(total_tokens)::BIGINT AS total_tokens,
+           SUM(full_input_tokens)::BIGINT AS full_input_tokens
+    FROM rows
+    GROUP BY 1
+), p95 AS (
     SELECT date_trunc('day', rr.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS bucket_at,
-           rr.ok,
-           rr.request_state,
-           rr.duration_ms,
-           rr.ttft_ms,
-           -- Post-0072 rows already store the ordinary (non-cache) input; rows
-           -- still in the folded shape keep the cache inside `input_tokens`, so
-           -- expand them to the ordinary miss `input - cache_read - cache_write`
-           -- (floored at 0) using the same guard as the full-input denominator.
-           -- Closed loop: ordinary + cache_read + cache_write + output == total.
-           CASE
-               WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0
-                   AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)
-                   AND COALESCE(rr.input_tokens, 0)
-                       >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)
-               THEN GREATEST(
-                   COALESCE(rr.input_tokens, 0)
-                       - GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                       - GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
-                   0
-               )
-               ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)
-           END::BIGINT AS normalized_input_tokens,
-           COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)::BIGINT AS normalized_cache_read_tokens,
-           COALESCE(rr.cache_write_tokens, 0)::BIGINT AS normalized_cache_write_tokens,
-            -- P2 (issue #205): full-input denominator `ordinary+read+write`,
-            -- 真 0.49 (e.g. 9728/18144) vs old `max` 1.0 which dropped the
-            -- ordinary part. Still-folded rows (0072/0073 guard:
-            -- cache>0 AND total>=output AND input>=total-output, input already
-            -- holds the cache) fall back to `max(input, read+write)` to avoid
-            -- the ≈1.9x double-count; total keeps closed-loop
-            -- ordinary+read+write+output.
-            CASE
-                WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0
-                    AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)
-                    AND COALESCE(rr.input_tokens, 0)
-                        >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)
-                THEN GREATEST(
-                    COALESCE(rr.input_tokens, 0),
-                    GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                        + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
-                    0
-                )
-                ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)
-                    + GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                    + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)
-            END::BIGINT AS normalized_full_input_tokens,
-           COALESCE(rr.output_tokens, 0)::BIGINT AS output_tokens,
-           COALESCE(rr.total_tokens, 0)::BIGINT AS total_tokens
+           percentile_cont(0.95) WITHIN GROUP (ORDER BY rr.duration_ms)
+               FILTER (WHERE rr.duration_ms IS NOT NULL) AS p95_total_ms,
+           percentile_cont(0.95) WITHIN GROUP (ORDER BY rr.ttft_ms)
+               FILTER (WHERE rr.ttft_ms IS NOT NULL) AS p95_first_token_ms
     FROM request_records rr
     LEFT JOIN users u ON u.user_id = rr.user_id
     WHERE rr.event_kind = 'request'
@@ -71,32 +46,14 @@ WITH normalized AS (
               AND rr.mcp_server_id IS NULL
           )
       )
+    GROUP BY 1
 )
-SELECT bucket_at AS "bucket_at!",
-       COUNT(*)::BIGINT AS "request_count!",
-       COUNT(*) FILTER (WHERE ok IS TRUE)::BIGINT AS "success_count!",
-       COUNT(*) FILTER (
-           WHERE ok IS FALSE OR request_state IN ('failed', 'aborted')
-       )::BIGINT AS "error_count!",
-       COUNT(*) FILTER (
-           WHERE normalized_cache_read_tokens > 0
-       )::BIGINT AS "cache_hit_count!",
-       COALESCE(SUM(normalized_input_tokens), 0)::BIGINT AS "input_tokens!",
-       COALESCE(SUM(normalized_cache_read_tokens), 0)::BIGINT AS "cache_read_tokens!",
-       COALESCE(SUM(normalized_cache_write_tokens), 0)::BIGINT AS "cache_write_tokens!",
-       COALESCE(SUM(output_tokens), 0)::BIGINT AS "output_tokens!",
-       -- Issue #342: use the persisted closed-loop total so each trend bucket
-       -- reconciles with `usage_summary.sql`/bucket queries instead of
-       -- re-adding the cache meters for still-folded rows.
-       COALESCE(SUM(GREATEST(total_tokens, 0)), 0)::BIGINT AS "total_tokens!",
-       -- Per-row-summed fold-aware denominator for `cache_rate`; still-folded
-       -- rows use the `max(input, read+write)` fallback, so the aggregate must
-       -- not re-derive the guard on the raw input SUM (issue #338).
-       COALESCE(SUM(normalized_full_input_tokens), 0)::BIGINT AS "full_input_tokens!",
-       percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms)
-           FILTER (WHERE duration_ms IS NOT NULL) AS p95_total_ms,
-       percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms)
-           FILTER (WHERE ttft_ms IS NOT NULL) AS p95_first_token_ms
-FROM normalized
-GROUP BY bucket_at
-ORDER BY bucket_at ASC
+SELECT a.bucket_at AS "bucket_at!", a.request_count::BIGINT AS "request_count!",
+       a.success_count::BIGINT AS "success_count!", a.error_count::BIGINT AS "error_count!",
+       a.cache_hit_count::BIGINT AS "cache_hit_count!", a.input_tokens::BIGINT AS "input_tokens!",
+       a.cache_read_tokens::BIGINT AS "cache_read_tokens!", a.cache_write_tokens::BIGINT AS "cache_write_tokens!",
+       a.output_tokens::BIGINT AS "output_tokens!", a.total_tokens::BIGINT AS "total_tokens!",
+       a.full_input_tokens::BIGINT AS "full_input_tokens!", p.p95_total_ms, p.p95_first_token_ms
+FROM aggregates a
+LEFT JOIN p95 p ON p.bucket_at = a.bucket_at
+ORDER BY a.bucket_at ASC

@@ -6,9 +6,7 @@ use sea_orm::{
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::maintenance::rekey::{
-    decide_rekey, rekey_envelope, rekey_raw_object_store_value, rekey_shared_valkey_value,
-};
+use crate::maintenance::rekey::{decide_rekey, rekey_envelope, rekey_shared_valkey_value};
 use crate::relay_secrets::{EncryptedSecretEnvelope, RelaySecretManager};
 
 const PAGE_SIZE: u64 = 100;
@@ -366,7 +364,7 @@ async fn settings(
         .from(id("worker_settings"))
         .column(id("setting_key"))
         .column(id("setting_value"))
-        .and_where(Expr::col(id("setting_key")).is_in(["shared_valkey", "raw_object_store"]))
+        .and_where(Expr::col(id("setting_key")).eq("shared_valkey"))
         .to_owned();
     for row in tx.query_all(&q).await.map_err(|_| failure())? {
         let key: String = row.try_get("", "setting_key").map_err(|_| failure())?;
@@ -374,7 +372,6 @@ async fn settings(
             row.try_get("", "setting_value").map_err(|_| failure())?;
         let count = match key.as_str() {
             "shared_valkey" => rekey_shared_valkey_value(&mut value, old, new)?,
-            "raw_object_store" => rekey_raw_object_store_value(&mut value, old, new)?,
             _ => bail!("unexpected settings key"),
         };
         if apply && count > 0 {

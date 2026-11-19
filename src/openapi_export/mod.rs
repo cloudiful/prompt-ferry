@@ -5,7 +5,6 @@
 #![allow(dead_code)]
 
 mod auth;
-mod billing;
 mod bridge;
 mod config_audit;
 mod config_export;

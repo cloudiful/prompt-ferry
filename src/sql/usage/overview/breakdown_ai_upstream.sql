@@ -1,94 +1,40 @@
-WITH normalized AS (
-    -- Upstream perspective aggregates the raw request rows (no model-level
-    -- LIMIT 50) so endpoint totals and per-model detail both use the full
-    -- filtered window. `effective_model` is the route-target override when set,
-    -- otherwise the originally requested model.
-    SELECT COALESCE(rr.upstream_model, rr.model, '(unknown)') AS effective_model,
-           rr.ok,
-           rr.request_state,
-           rr.endpoint_id,
-           rr.output_tokens AS raw_output_tokens,
-           rr.duration_ms,
-           -- Post-0072 rows already store the ordinary (non-cache) input; rows
-           -- still in the folded shape keep the cache inside `input_tokens`, so
-           -- expand them to the ordinary miss `input - cache_read - cache_write`
-           -- (floored at 0) using the same guard as the full-input denominator.
-           -- Closed loop: ordinary + cache_read + cache_write + output == total.
-           CASE
-               WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0
-                   AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)
-                   AND COALESCE(rr.input_tokens, 0)
-                       >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)
-               THEN GREATEST(
-                   COALESCE(rr.input_tokens, 0)
-                       - GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                       - GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
-                   0
-               )
-               ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)
-           END::BIGINT AS normalized_input_tokens,
-           COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)::BIGINT AS normalized_cache_read_tokens,
-           COALESCE(rr.cache_write_tokens, 0)::BIGINT AS normalized_cache_write_tokens,
-           -- P2 (issue #205): full-input denominator `ordinary+read+write`.
-           -- Still-folded rows (0072/0073 guard) fall back to `max(input,
-           -- read+write)` to avoid the ≈1.9x double-count.
-           CASE
-               WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0
-                   AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)
-                   AND COALESCE(rr.input_tokens, 0)
-                       >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)
-               THEN GREATEST(
-                   COALESCE(rr.input_tokens, 0),
-                   GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                       + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
-                   0
-               )
-               ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)
-                   + GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                   + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)
-           END::BIGINT AS normalized_full_input_tokens,
-           COALESCE(rr.output_tokens, 0)::BIGINT AS output_tokens,
-           COALESCE(rr.total_tokens, 0)::BIGINT AS total_tokens
-    FROM request_records rr
-    LEFT JOIN users u ON u.user_id = rr.user_id
-    WHERE rr.event_kind = 'request'
-      AND rr.request_category = $2
-      AND ($1::BIGINT IS NULL OR rr.user_id = $1)
-      AND ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3)
-      AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at < $4)
-      AND ($5::TEXT IS NULL OR COALESCE(u.login_name, '#' || rr.user_id::TEXT, '-') = $5)
+WITH rows AS (
+    SELECT usage.*
+    FROM public.request_usage_window($1::BIGINT, $2::TEXT, $3::TIMESTAMPTZ, $4::TIMESTAMPTZ, 'all') usage
+    WHERE ($5::TEXT IS NULL OR COALESCE(
+        (SELECT u.login_name FROM users u WHERE u.user_id = usage.user_id),
+        CASE WHEN usage.user_id IS NULL THEN '-' ELSE '#' || usage.user_id::TEXT END
+    ) = $5)
+), normalized AS (
+    SELECT COALESCE(upstream_model, model, '(unknown)') AS effective_model,
+           endpoint_id,
+           request_count,
+           success_by_ok,
+           error_by_ok,
+           cache_hit_count,
+           input_tokens,
+           cache_read_tokens,
+           cache_write_tokens,
+           output_tokens,
+           total_tokens,
+           full_input_tokens,
+           tps_sum,
+           tps_count
+    FROM rows
 ), grouped AS (
-    -- Endpoint identity is `endpoint_id`; requests without one collapse into
-    -- the `(direct)` row instead of merging by a shared name.
     SELECT COALESCE(pe.name, n.endpoint_id::TEXT, '(direct)') AS label,
            n.endpoint_id,
-           COUNT(*)::BIGINT AS request_count,
-           COUNT(*) FILTER (WHERE n.ok IS TRUE)::BIGINT AS success_count,
-           COUNT(*) FILTER (
-               WHERE n.ok IS FALSE OR n.request_state IN ('failed', 'aborted')
-           )::BIGINT AS error_count,
-           COUNT(*) FILTER (
-               WHERE n.normalized_cache_read_tokens > 0
-           )::BIGINT AS cache_hit_count,
-           COALESCE(SUM(n.normalized_input_tokens), 0)::BIGINT AS input_tokens,
-           COALESCE(SUM(n.normalized_cache_read_tokens), 0)::BIGINT AS cache_read_tokens,
-           COALESCE(SUM(n.normalized_cache_write_tokens), 0)::BIGINT AS cache_write_tokens,
+           COALESCE(SUM(n.request_count), 0)::BIGINT AS request_count,
+           COALESCE(SUM(n.success_by_ok), 0)::BIGINT AS success_count,
+           COALESCE(SUM(n.error_by_ok), 0)::BIGINT AS error_count,
+           COALESCE(SUM(n.cache_hit_count), 0)::BIGINT AS cache_hit_count,
+           COALESCE(SUM(n.input_tokens), 0)::BIGINT AS input_tokens,
+           COALESCE(SUM(n.cache_read_tokens), 0)::BIGINT AS cache_read_tokens,
+           COALESCE(SUM(n.cache_write_tokens), 0)::BIGINT AS cache_write_tokens,
            COALESCE(SUM(n.output_tokens), 0)::BIGINT AS output_tokens,
-           COALESCE(SUM(GREATEST(n.total_tokens, 0)), 0)::BIGINT AS total_tokens,
-           -- Issue #226: aggregated cache denominator is the row-by-row
-           -- fold-aware SUM, not the raw `input_tokens` SUM.
-           COALESCE(SUM(n.normalized_full_input_tokens), 0)::BIGINT AS full_input_tokens,
-           AVG(
-               CASE
-                   WHEN n.request_state = 'completed'
-                       AND n.raw_output_tokens IS NOT NULL
-                       AND n.raw_output_tokens > 0
-                       AND n.duration_ms IS NOT NULL
-                       AND n.duration_ms > 0
-                   THEN n.raw_output_tokens::NUMERIC / n.duration_ms::NUMERIC * 1000.0
-                   ELSE NULL
-               END
-           )::DOUBLE PRECISION AS avg_output_tokens_per_second
+           COALESCE(SUM(n.total_tokens), 0)::BIGINT AS total_tokens,
+           COALESCE(SUM(n.full_input_tokens), 0)::BIGINT AS full_input_tokens,
+           SUM(n.tps_sum)::DOUBLE PRECISION / NULLIF(SUM(n.tps_count), 0) AS avg_output_tokens_per_second
     FROM normalized n
     LEFT JOIN provider_endpoints pe ON pe.endpoint_id = n.endpoint_id
     GROUP BY COALESCE(pe.name, n.endpoint_id::TEXT, '(direct)'), n.endpoint_id
@@ -99,24 +45,12 @@ WITH normalized AS (
 ), models AS (
     SELECT n.endpoint_id,
            n.effective_model,
-           COUNT(*)::BIGINT AS request_count,
-           COUNT(*) FILTER (
-               WHERE n.ok IS FALSE OR n.request_state IN ('failed', 'aborted')
-           )::BIGINT AS error_count,
-           COALESCE(SUM(GREATEST(n.total_tokens, 0)), 0)::BIGINT AS total_tokens,
-           COALESCE(SUM(n.normalized_cache_read_tokens), 0)::BIGINT AS cache_read_tokens,
-           COALESCE(SUM(n.normalized_full_input_tokens), 0)::BIGINT AS full_input_tokens,
-           AVG(
-               CASE
-                   WHEN n.request_state = 'completed'
-                       AND n.raw_output_tokens IS NOT NULL
-                       AND n.raw_output_tokens > 0
-                       AND n.duration_ms IS NOT NULL
-                       AND n.duration_ms > 0
-                   THEN n.raw_output_tokens::NUMERIC / n.duration_ms::NUMERIC * 1000.0
-                   ELSE NULL
-               END
-           )::DOUBLE PRECISION AS avg_output_tokens_per_second
+           COALESCE(SUM(n.request_count), 0)::BIGINT AS request_count,
+           COALESCE(SUM(n.error_by_ok), 0)::BIGINT AS error_count,
+           COALESCE(SUM(n.total_tokens), 0)::BIGINT AS total_tokens,
+           COALESCE(SUM(n.cache_read_tokens), 0)::BIGINT AS cache_read_tokens,
+           COALESCE(SUM(n.full_input_tokens), 0)::BIGINT AS full_input_tokens,
+           SUM(n.tps_sum)::DOUBLE PRECISION / NULLIF(SUM(n.tps_count), 0) AS avg_output_tokens_per_second
     FROM normalized n
     GROUP BY n.endpoint_id, n.effective_model
 ), model_agg AS (

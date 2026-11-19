@@ -1,5 +1,4 @@
 mod auth;
-mod billing;
 mod init;
 mod node;
 // Issue #599 R2c: the ChatGPT (Codex) private-interface mapping layer is
@@ -75,10 +74,10 @@ pub(super) use crate::{
 use tower_http::cors::CorsLayer;
 
 use self::{
-    auth::*, billing::*, config_audit::*, config_export::*, config_import::*, endpoint_usage::*,
-    endpoints::*, init::*, mcp::*, mcp_oauth::*, model_routes::*, node::*, nodes::*,
-    quota_inference::*, quota_key_observations::*, session_routing::*, settings::*,
-    settings_cache_alert::*, usage::*, users::*,
+    auth::*, config_audit::*, config_export::*, config_import::*, endpoint_usage::*, endpoints::*,
+    init::*, mcp::*, mcp_oauth::*, model_routes::*, node::*, nodes::*, quota_inference::*,
+    quota_key_observations::*, session_routing::*, settings::*, settings_cache_alert::*, usage::*,
+    users::*,
 };
 
 pub(super) use self::support::*;
