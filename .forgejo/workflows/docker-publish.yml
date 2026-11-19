@@ -22,7 +22,6 @@ jobs:
       dockerfile_mode: builtin
       frontend_install_args: '["--minimum-release-age=604800"]'
       frontend_build_command: |
-        set -euo pipefail
         bun run openapi-ts
         git diff --exit-code -- src/generated/admin-api
         bun run build
