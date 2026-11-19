@@ -13,7 +13,7 @@ use super::*;
     tag = "bridge"
 )]
 pub(super) async fn bridge_status(State(state): State<AdminState>, headers: HeaderMap) -> Response {
-    if let Err(response) = current_user(&state, &headers).await {
+    if let Err(response) = ensure_user(&state, &headers, UserAction::BridgeRead).await {
         return response.into_response();
     }
     let relay_senders = state.relay_senders.lock().await;
@@ -47,7 +47,7 @@ pub(super) async fn usage_summary(
     headers: HeaderMap,
     Query(query): Query<UsageSummaryQuery>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::UsageRead).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -75,7 +75,7 @@ pub(super) async fn usage_overview(
     headers: HeaderMap,
     Query(query): Query<RequestRecordOverviewQuery>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::UsageRead).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -121,7 +121,7 @@ pub(super) async fn usage_events(
     headers: HeaderMap,
     Query(query): Query<UsageEventsQuery>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::UsageRead).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -169,7 +169,7 @@ pub(super) async fn usage_facets(
     headers: HeaderMap,
     Query(query): Query<RequestRecordFacetsQuery>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::UsageRead).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -213,7 +213,7 @@ pub(super) async fn usage_event_detail(
     headers: HeaderMap,
     Path(record_id): Path<i64>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::UsageRead).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -247,7 +247,7 @@ pub(super) async fn usage_request_full(
     Path(record_id): Path<i64>,
     Query(query): Query<RequestRecordFullQuery>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::UsageRead).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -271,7 +271,7 @@ pub(super) async fn usage_series(
     headers: HeaderMap,
     Query(query): Query<UsageSeriesQuery>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::UsageRead).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -309,7 +309,7 @@ pub(super) async fn clear_usage_events(
     headers: HeaderMap,
     Json(body): Json<UsageClearRequest>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::UsageManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -339,7 +339,7 @@ pub(super) async fn prune_usage_events(
     State(state): State<AdminState>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Usage).await {
         return response.into_response();
     }
     let retention = state.usage_retention.read().await.clone();

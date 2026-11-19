@@ -1,4 +1,5 @@
 use crate::{
+    authz::Authorizer,
     config::RelayConfig,
     ip_acl::CompiledRelayIpPolicy,
     protocol::{
@@ -86,6 +87,11 @@ impl axum::extract::connect_info::Connected<SocketAddr> for RemoteAddr {
 pub(crate) struct AppState {
     pub(crate) config: RelayConfig,
     pub(crate) inner: Arc<RelayState>,
+    /// The process-wide authorization engine. Production states always carry
+    /// the engine built at startup; fixture-only states that never exercise
+    /// managed client authentication may leave it absent, and the managed
+    /// branch then fails closed.
+    pub(crate) authorizer: Option<Arc<Authorizer>>,
     /// Managed client keys are the only accepted AI credential.
     ///
     /// The node runtime has no static client token: a managed `pfy_` key is
@@ -194,6 +200,18 @@ pub(crate) fn test_state() -> AppState {
             config_version: Mutex::new(None),
             next_worker_id: AtomicUsize::new(1),
         }),
+        authorizer: None,
         managed_only_auth: false,
     }
+}
+
+#[cfg(test)]
+pub(crate) async fn test_state_with_authorizer() -> AppState {
+    let mut state = test_state();
+    state.authorizer = Some(Arc::new(
+        crate::authz::build()
+            .await
+            .expect("test authorization engine builds"),
+    ));
+    state
 }

@@ -285,7 +285,11 @@ impl NodeDbRuntime {
         // heartbeat of a remote worker.
         let peer_heartbeat_timeout =
             Duration::from_secs(relay_config.worker_heartbeat_timeout_seconds.max(1));
-        let (app, relay_state) = node_apps(relay_config, worker_admin::router(admin_state.clone()));
+        let (app, relay_state) = node_apps(
+            relay_config,
+            worker_admin::router(admin_state.clone()),
+            admin_state.authorizer.clone(),
+        );
 
         // The peer endpoint of the node is part of its single listener: an
         // edge node may dial the database node as well as the other way

@@ -18,7 +18,7 @@ pub(super) async fn usage_event_session_route_options(
     headers: HeaderMap,
     Path(record_id): Path<i64>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::SessionRoutingRead).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -50,7 +50,7 @@ pub(super) async fn usage_event_session_affinity_reset(
     headers: HeaderMap,
     Path(record_id): Path<i64>,
 ) -> Response {
-    let admin = match ensure_admin(&state, &headers).await {
+    let admin = match ensure_admin(&state, &headers, ControlAction::SessionRouting).await {
         Ok(admin) => admin,
         Err(response) => return response.into_response(),
     };
@@ -140,7 +140,7 @@ pub(super) async fn get_conversation_endpoint_override(
     headers: HeaderMap,
     Path(conversation_id): Path<Uuid>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::SessionRouting).await {
         return response.into_response();
     }
     match db::get_conversation_endpoint_override(&state.pool, conversation_id).await {
@@ -171,7 +171,7 @@ pub(super) async fn set_conversation_endpoint_override(
     Path(conversation_id): Path<Uuid>,
     Json(body): Json<ConversationEndpointOverrideRequest>,
 ) -> Response {
-    let user = match ensure_admin(&state, &headers).await {
+    let user = match ensure_admin(&state, &headers, ControlAction::SessionRouting).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -230,7 +230,7 @@ pub(super) async fn delete_conversation_endpoint_override(
     headers: HeaderMap,
     Path(conversation_id): Path<Uuid>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::SessionRouting).await {
         return response.into_response();
     }
     match db::delete_conversation_endpoint_override(&state.pool, conversation_id).await {

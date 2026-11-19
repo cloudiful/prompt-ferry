@@ -48,7 +48,7 @@ pub(super) async fn list_users(
     headers: HeaderMap,
     Query(query): Query<TablePageQuery>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::User).await {
         return response.into_response();
     }
     let first = query.first.unwrap_or(0).max(0);
@@ -79,7 +79,7 @@ pub(super) async fn list_user_options(
     State(state): State<AdminState>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::User).await {
         return response.into_response();
     }
     match state.user_store.list_users().await {
@@ -105,7 +105,7 @@ pub(super) async fn create_user(
     headers: HeaderMap,
     Json(body): Json<CreateUserRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::User).await {
         return response.into_response();
     }
     if body.login_name.trim().is_empty() {
@@ -153,7 +153,7 @@ pub(super) async fn update_user(
     Path(user_id): Path<i64>,
     Json(body): Json<UserUpdate>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::User).await {
         return response.into_response();
     }
     match state.user_store.update_user(user_id, body).await {
@@ -180,7 +180,7 @@ pub(super) async fn reset_password(
     Path(user_id): Path<i64>,
     Json(body): Json<ResetPasswordRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::User).await {
         return response.into_response();
     }
     if body.password.trim().is_empty() {
@@ -216,7 +216,7 @@ pub(super) async fn delete_user(
     headers: HeaderMap,
     Path(user_id): Path<i64>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::User).await {
         return response.into_response();
     }
     match state.user_store.delete_user(user_id).await {
@@ -242,7 +242,7 @@ pub(super) async fn list_client_keys(
     Path(user_id): Path<i64>,
     Query(query): Query<TablePageQuery>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::ClientKey).await {
         return response.into_response();
     }
     let first = query.first.unwrap_or(0).max(0);
@@ -280,7 +280,7 @@ pub(super) async fn create_client_key(
     Path(user_id): Path<i64>,
     Json(body): Json<CreateClientKeyRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::ClientKey).await {
         return response.into_response();
     }
     let label = body.label.as_deref();
@@ -317,7 +317,7 @@ pub(super) async fn update_client_key(
     Path((user_id, key_id)): Path<(i64, String)>,
     Json(body): Json<UpdateClientKeyRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::ClientKey).await {
         return response.into_response();
     }
     let identifier = match parse_client_key_identifier(&key_id) {
@@ -365,7 +365,7 @@ pub(super) async fn delete_client_key(
     headers: HeaderMap,
     Path((user_id, key_id)): Path<(i64, String)>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::ClientKey).await {
         return response.into_response();
     }
     let identifier = match parse_client_key_identifier(&key_id) {

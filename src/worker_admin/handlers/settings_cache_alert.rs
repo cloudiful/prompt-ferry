@@ -10,7 +10,7 @@ pub(super) async fn get_cache_alert_setting(
     State(state): State<AdminState>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Settings).await {
         return response.into_response();
     }
     if state.config_repository.is_sqlite() {
@@ -32,7 +32,7 @@ pub(super) async fn set_cache_alert_setting(
     headers: HeaderMap,
     Json(body): Json<CacheAlertSettingsRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Settings).await {
         return response.into_response();
     }
     let Some(pool) = state.config_repository.as_postgres() else {

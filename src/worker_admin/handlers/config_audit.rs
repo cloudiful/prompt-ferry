@@ -27,7 +27,7 @@ pub(super) async fn list_config_audit(
     headers: HeaderMap,
     Query(query): Query<ConfigAuditPageQuery>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::ConfigAudit).await {
         return response.into_response();
     }
     match state

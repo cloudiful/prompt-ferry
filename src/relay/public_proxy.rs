@@ -712,7 +712,32 @@ async fn authorize_client_with_format(
         };
         let key_hash = hash_client_key(&token);
         match routes.get(&key_hash).cloned() {
-            Some(route) => Ok(Some(route)),
+            Some(route) => {
+                let allowed = state.authorizer.as_ref().is_some_and(|authorizer| {
+                    crate::authz::authorize_inference(authorizer, route.user_id, &route.route_id)
+                        .is_allowed()
+                });
+                if allowed {
+                    Ok(Some(route))
+                } else {
+                    warn!(
+                        mode = "managed_client_key",
+                        route_count = routes.len(),
+                        token_len = token.len(),
+                        key_hash_prefix = %key_hash.chars().take(12).collect::<String>(),
+                        "client auth failed: managed key is not authorized for inference"
+                    );
+                    Err(auth_error(
+                        StatusCode::FORBIDDEN,
+                        if anthropic_format {
+                            "authentication_error"
+                        } else {
+                            "forbidden"
+                        },
+                        "invalid client key",
+                    ))
+                }
+            }
             None => {
                 warn!(
                     mode = "managed_client_key",

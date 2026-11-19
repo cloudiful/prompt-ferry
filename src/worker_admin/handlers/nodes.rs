@@ -16,7 +16,7 @@ pub(super) async fn list_nodes(
     headers: HeaderMap,
     Query(query): Query<TablePageQuery>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Node).await {
         return response.into_response();
     }
     let Some(pool) = state.config_repository.as_postgres() else {

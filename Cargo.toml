@@ -38,6 +38,7 @@ bytes = "1.12.2"
 chacha20poly1305 = "0.11.0"
 chrono = { version = "0.4.45", features = ["serde"] }
 clap = { version = "4.6.8", features = ["derive", "env"] }
+cloudiful-authz = { version = "0.1.0", git = "https://forgejo.cloud1ful.com/crates/authz.git", rev = "237463d7bec0726d90b530e346735d43ec485047" }
 cloudiful-notifier = { version = "0.3", git = "https://github.com/cloudiful/notifier.git", tag = "v0.3.2", default-features = false, features = ["dingtalk", "email"] }
 config = { package = "cloudiful-config", version = "0.6.3", git = "https://github.com/cloudiful/config.git", tag = "v0.6.3" }
 db-init = { package = "cloudiful-db-init", version = "0.1.0", git = "https://github.com/cloudiful/db-init.git", rev = "a3612a2ae92343540077bd625aa7c228de75f254" }

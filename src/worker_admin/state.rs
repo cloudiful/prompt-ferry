@@ -22,6 +22,7 @@ use super::openai_org_usage_cache::OpenAiOrgUsageCache;
 use super::quota_inference_cache::QuotaInferenceCache;
 use super::token_plan_cache::TokenPlanQuotaCache;
 use crate::{
+    authz::{Authorizer, ControlAction, UserAction},
     db::{ConfigRepository, SharedValkeyConfig, StreamDeltaBatchingSettings, UserStore},
     endpoint_models::EndpointModelCache,
     keys::generate_client_key,
@@ -157,6 +158,8 @@ impl NodeStatusState {
 pub struct AdminState {
     pub(crate) node_setup: Option<Arc<NodeSetupAuth>>,
     pub(crate) node_status: Option<Arc<StdMutex<NodeStatusState>>>,
+    /// The process-wide authorization engine shared with the relay state.
+    pub authorizer: Arc<Authorizer>,
     pub pool: PgPool,
     pub lease_pool: PgPool,
     pub user_store: UserStore,
@@ -430,6 +433,7 @@ mod tests {
 }
 
 pub struct AdminStateInit {
+    pub authorizer: Arc<Authorizer>,
     pub pool: PgPool,
     pub lease_pool: PgPool,
     pub replay_cache: ReplayCache,
@@ -456,6 +460,7 @@ impl AdminState {
         Self {
             node_setup: None,
             node_status: None,
+            authorizer: init.authorizer,
             pool: init.pool,
             lease_pool: init.lease_pool,
             user_store,
@@ -618,15 +623,41 @@ pub fn bad_request(message: &str) -> Response {
 pub async fn ensure_admin(
     state: &AdminState,
     headers: &HeaderMap,
+    action: ControlAction,
 ) -> Result<SessionUser, ApiError> {
     let user = current_user(state, headers).await?;
-    if user.is_admin {
+    if crate::authz::authorize_control(&state.authorizer, user.user_id, user.is_admin, action)
+        .is_allowed()
+    {
         Ok(user)
     } else {
         Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "forbidden",
             "admin required",
+        ))
+    }
+}
+
+/// Admit one authenticated user business action.
+///
+/// The existing SQL owner filters stay authoritative for row visibility; this
+/// decision only rejects a session the live user role does not model.
+pub async fn ensure_user(
+    state: &AdminState,
+    headers: &HeaderMap,
+    action: UserAction,
+) -> Result<SessionUser, ApiError> {
+    let user = current_user(state, headers).await?;
+    if crate::authz::authorize_user(&state.authorizer, user.user_id, user.is_admin, action)
+        .is_allowed()
+    {
+        Ok(user)
+    } else {
+        Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "forbidden",
         ))
     }
 }

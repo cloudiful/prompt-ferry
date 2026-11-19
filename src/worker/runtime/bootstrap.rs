@@ -1,4 +1,5 @@
 use crate::{
+    authz,
     config::WorkerConfig,
     db, redact,
     relay_secrets::RelaySecretManager,
@@ -113,7 +114,13 @@ async fn build_postgres_admin_state(
     let mcp_catalog_service =
         crate::mcp::McpCatalogService::new(pool.clone(), mcp_catalog_cache.clone());
     let user_store = db::UserStore::postgres(&pool);
+    let authorizer = Arc::new(
+        authz::build()
+            .await
+            .context("failed to build the authorization engine")?,
+    );
     let state = AdminState::new(crate::worker_admin_state::AdminStateInit {
+        authorizer,
         pool,
         lease_pool,
         replay_cache,

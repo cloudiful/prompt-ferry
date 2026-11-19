@@ -1,6 +1,7 @@
 pub mod anthropic_compat;
 pub mod app;
 pub mod auth;
+pub mod authz;
 pub mod bridge;
 pub mod certs;
 pub mod chat_replay;

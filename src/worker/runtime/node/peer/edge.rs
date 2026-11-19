@@ -47,7 +47,7 @@ pub(crate) async fn run_edge_node(config: NodeConfig, node_id: NodeId) -> anyhow
     let relay_config = config.relay_config();
     let heartbeat_timeout =
         std::time::Duration::from_secs(relay_config.worker_heartbeat_timeout_seconds.max(1));
-    let (app, relay_state) = node_edge_apps(relay_config);
+    let (app, relay_state) = node_edge_apps(relay_config).await?;
     let context = PeerLinkContext::new(
         identity.clone(),
         PeerRoleContext::Edge(Arc::new(relay_state)),

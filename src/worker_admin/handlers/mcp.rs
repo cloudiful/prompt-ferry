@@ -13,7 +13,7 @@ pub(super) async fn list_mcp_providers(
     State(state): State<AdminState>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = current_user(&state, &headers).await {
+    if let Err(response) = ensure_user(&state, &headers, UserAction::McpServerManage).await {
         return response.into_response();
     }
     Json(mcp_provider_descriptors()).into_response()
@@ -31,7 +31,7 @@ pub(super) async fn list_mcp_servers(
     headers: HeaderMap,
     Query(query): Query<TablePageQuery>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::McpServerManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -65,7 +65,7 @@ pub(super) async fn create_mcp_server(
     headers: HeaderMap,
     Json(body): Json<McpServerRequest>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::McpServerManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -109,7 +109,7 @@ pub(super) async fn update_mcp_server(
     Path(server_id): Path<Uuid>,
     Json(body): Json<McpServerRequest>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::McpServerManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -174,7 +174,7 @@ pub(super) async fn delete_mcp_server(
     headers: HeaderMap,
     Path(server_id): Path<Uuid>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::McpServerManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -211,7 +211,7 @@ pub(super) async fn test_mcp_server(
     headers: HeaderMap,
     Path(server_id): Path<Uuid>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::McpServerManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -346,7 +346,7 @@ pub(super) async fn get_mcp_catalog(
     headers: HeaderMap,
     Path(server_id): Path<Uuid>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::McpServerManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
