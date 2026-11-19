@@ -13,7 +13,7 @@ use crate::openapi_export::schemas::ErrorEnvelope;
     tag = "node"
 )]
 pub(super) async fn node_status(State(state): State<AdminState>, headers: HeaderMap) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Node).await {
         return response.into_response();
     }
     let Some(status) = &state.node_status else {

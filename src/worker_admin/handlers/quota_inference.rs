@@ -25,7 +25,7 @@ pub(super) async fn quota_inference(
     headers: HeaderMap,
     Path(endpoint_id): Path<Uuid>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Quota).await {
         return response.into_response();
     }
     let _guard = state.quota_inference.lock(endpoint_id).await;

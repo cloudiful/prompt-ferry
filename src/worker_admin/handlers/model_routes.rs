@@ -14,7 +14,7 @@ pub(super) async fn list_model_routes(
     headers: HeaderMap,
     Query(query): Query<TablePageQuery>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::ModelRoute).await {
         return response.into_response();
     }
     match state
@@ -39,7 +39,7 @@ pub(super) async fn create_model_route(
     headers: HeaderMap,
     Json(body): Json<ModelRouteRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::ModelRoute).await {
         return response.into_response();
     }
     match body.validate_for_create(&state).await {
@@ -80,7 +80,7 @@ pub(super) async fn update_model_route(
     Path(rule_id): Path<Uuid>,
     Json(body): Json<ModelRouteRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::ModelRoute).await {
         return response.into_response();
     }
     match body.validate_for_update(&state, rule_id).await {
@@ -248,7 +248,7 @@ pub(super) async fn delete_model_route(
     headers: HeaderMap,
     Path(rule_id): Path<Uuid>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::ModelRoute).await {
         return response.into_response();
     }
     match state.config_repository.delete_model_route(rule_id).await {
@@ -282,7 +282,7 @@ pub(super) async fn test_model_route(
     headers: HeaderMap,
     Json(body): Json<ModelRouteTestRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::ModelRoute).await {
         return response.into_response();
     }
     // For Phase 3 the test path is only implemented against PostgreSQL because

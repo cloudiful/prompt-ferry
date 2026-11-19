@@ -50,7 +50,7 @@ pub(super) async fn preview_config_import(
     headers: HeaderMap,
     Json(body): Json<ConfigImportRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::ConfigImport).await {
         return response.into_response();
     }
     let bytes = match decode_archive_base64(&body.archive_base64) {
@@ -93,7 +93,7 @@ pub(super) async fn import_config(
     headers: HeaderMap,
     Json(body): Json<ConfigImportRequest>,
 ) -> Response {
-    let user = match ensure_admin(&state, &headers).await {
+    let user = match ensure_admin(&state, &headers, ControlAction::ConfigImport).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };

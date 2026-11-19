@@ -73,7 +73,7 @@ pub(super) async fn oauth_status(
     headers: HeaderMap,
     Path(endpoint_id): Path<Uuid>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Oauth).await {
         return response.into_response();
     }
     oauth_status_response(&state, endpoint_id).await
@@ -95,7 +95,7 @@ pub(super) async fn oauth_device_start(
     headers: HeaderMap,
     Path(endpoint_id): Path<Uuid>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Oauth).await {
         return response.into_response();
     }
     if let Err(response) = ensure_login_endpoint(&state, endpoint_id).await {
@@ -151,7 +151,7 @@ pub(super) async fn oauth_device_poll(
     Path(endpoint_id): Path<Uuid>,
     Json(body): Json<OAuthFlowRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Oauth).await {
         return response.into_response();
     }
     let Some(flow) = device_flow(endpoint_id, body.flow_id) else {
@@ -235,7 +235,7 @@ pub(super) async fn oauth_browser_start(
     headers: HeaderMap,
     Path(endpoint_id): Path<Uuid>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Oauth).await {
         return response.into_response();
     }
     if let Err(response) = ensure_login_endpoint(&state, endpoint_id).await {
@@ -283,7 +283,7 @@ pub(super) async fn oauth_browser_complete(
     Path(endpoint_id): Path<Uuid>,
     Json(body): Json<OAuthBrowserCompleteRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Oauth).await {
         return response.into_response();
     }
     let Some(flow) = browser_flow(endpoint_id, body.flow_id) else {
@@ -350,7 +350,7 @@ pub(super) async fn oauth_refresh(
     headers: HeaderMap,
     Path(endpoint_id): Path<Uuid>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Oauth).await {
         return response.into_response();
     }
     if let Err(response) = ensure_login_endpoint(&state, endpoint_id).await {
@@ -429,7 +429,7 @@ pub(super) async fn oauth_clear(
     headers: HeaderMap,
     Path(endpoint_id): Path<Uuid>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Oauth).await {
         return response.into_response();
     }
     match state.config_repository.get_endpoint(endpoint_id).await {

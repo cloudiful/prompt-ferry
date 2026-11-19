@@ -20,7 +20,7 @@ pub(super) async fn list_client_keys(
     headers: HeaderMap,
     Query(query): Query<TablePageQuery>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::ClientKeyManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -59,7 +59,7 @@ pub(super) async fn create_client_key(
     headers: HeaderMap,
     Json(body): Json<CreateClientKeyRequest>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::ClientKeyManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -96,7 +96,7 @@ pub(super) async fn update_client_key(
     Path(key_id): Path<String>,
     Json(body): Json<UpdateClientKeyRequest>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::ClientKeyManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -144,7 +144,7 @@ pub(super) async fn delete_client_key(
     headers: HeaderMap,
     Path(key_id): Path<String>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::ClientKeyManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -191,7 +191,7 @@ pub(super) async fn list_available_models(
     headers: HeaderMap,
     Query(query): Query<TablePageQuery>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::ModelRead).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };

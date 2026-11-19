@@ -23,14 +23,15 @@ pub(super) async fn get_redaction_setting(
     headers: HeaderMap,
     Query(query): Query<RedactionSettingQuery>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::SettingsRead).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
-    let (scope, user_id) = match resolve_redaction_scope(&user, query) {
-        Ok(target) => target,
-        Err(response) => return response.into_response(),
-    };
+    let (scope, user_id) =
+        match resolve_redaction_scope(&state, &user, query, UserAction::SettingsRead) {
+            Ok(target) => target,
+            Err(response) => return response.into_response(),
+        };
     let config = match scope {
         RedactionScope::Global => match db::get_redaction_config(&state.pool).await {
             Ok(config) => config,
@@ -74,14 +75,15 @@ pub(super) async fn set_redaction_setting(
     Query(query): Query<RedactionSettingQuery>,
     Json(body): Json<RedactionSettingRequest>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::SettingsManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
-    let (scope, user_id) = match resolve_redaction_scope(&user, query) {
-        Ok(target) => target,
-        Err(response) => return response.into_response(),
-    };
+    let (scope, user_id) =
+        match resolve_redaction_scope(&state, &user, query, UserAction::SettingsManage) {
+            Ok(target) => target,
+            Err(response) => return response.into_response(),
+        };
     let previous = match scope {
         RedactionScope::Global => db::get_redaction_config(&state.pool).await,
         RedactionScope::User => {
@@ -168,7 +170,7 @@ pub(super) async fn preview_redaction(
     headers: HeaderMap,
     Json(body): Json<RedactionPreviewRequestBody>,
 ) -> Response {
-    if let Err(response) = current_user(&state, &headers).await {
+    if let Err(response) = ensure_user(&state, &headers, UserAction::SettingsRead).await {
         return response.into_response();
     }
     let request = RedactionPreviewRequestBody(body.0.normalized());
@@ -198,16 +200,18 @@ pub(super) async fn list_redaction_custom_strings(
     headers: HeaderMap,
     Query(query): Query<RedactionRulePageQuery>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::SettingsRead).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
     let (scope, user_id) = match resolve_redaction_scope(
+        &state,
         &user,
         RedactionSettingQuery {
             scope: query.scope,
             user_id: query.user_id,
         },
+        UserAction::SettingsRead,
     ) {
         Ok(target) => target,
         Err(response) => return response.into_response(),
@@ -245,16 +249,39 @@ pub(super) async fn list_redaction_custom_strings(
 }
 
 fn resolve_redaction_scope(
+    state: &AdminState,
     user: &SessionUser,
     query: RedactionSettingQuery,
+    action: UserAction,
 ) -> Result<(RedactionScope, Option<i64>), ApiError> {
-    let scope = query.scope.unwrap_or(if user.is_admin {
+    let can_control = crate::authz::check(
+        &state.authorizer,
+        user.user_id,
+        user.is_admin,
+        crate::authz::Operation::Control(ControlAction::Settings),
+    )
+    .is_allowed();
+    if !crate::authz::check(
+        &state.authorizer,
+        user.user_id,
+        user.is_admin,
+        crate::authz::Operation::User(action),
+    )
+    .is_allowed()
+    {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "forbidden",
+        ));
+    }
+    let scope = query.scope.unwrap_or(if can_control {
         RedactionScope::Global
     } else {
         RedactionScope::User
     });
     match scope {
-        RedactionScope::Global if !user.is_admin => Err(ApiError::new(
+        RedactionScope::Global if !can_control => Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "forbidden",
             "admin required for global redaction rules",
@@ -262,7 +289,7 @@ fn resolve_redaction_scope(
         RedactionScope::Global => Ok((scope, None)),
         RedactionScope::User => {
             let target_user_id = query.user_id.unwrap_or(user.user_id);
-            if !user.is_admin && target_user_id != user.user_id {
+            if !can_control && target_user_id != user.user_id {
                 return Err(ApiError::new(
                     StatusCode::FORBIDDEN,
                     "forbidden",
@@ -288,7 +315,7 @@ pub(super) async fn get_request_content_logging(
     State(state): State<AdminState>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Settings).await {
         return response.into_response();
     }
     Json(state.request_content_logging.read().await.clone()).into_response()
@@ -306,7 +333,7 @@ pub(super) async fn set_request_content_logging(
     headers: HeaderMap,
     Json(body): Json<RequestContentLoggingRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Settings).await {
         return response.into_response();
     }
     let normalized = RequestContentLoggingResponse {
@@ -354,7 +381,7 @@ pub(super) async fn get_usage_retention(
     State(state): State<AdminState>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Settings).await {
         return response.into_response();
     }
     Json(state.usage_retention.read().await.clone()).into_response()
@@ -372,7 +399,7 @@ pub(super) async fn set_usage_retention(
     headers: HeaderMap,
     Json(body): Json<UsageRetentionSettings>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Settings).await {
         return response.into_response();
     }
     if let Some(pool) = state.config_repository.as_postgres() {
@@ -419,7 +446,7 @@ pub(super) async fn get_stream_delta_batching(
     State(state): State<AdminState>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Settings).await {
         return response.into_response();
     }
     Json(state.stream_delta_batching.read().await.clone()).into_response()
@@ -437,7 +464,7 @@ pub(super) async fn set_stream_delta_batching(
     headers: HeaderMap,
     Json(body): Json<db::StreamDeltaBatchingSettings>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Settings).await {
         return response.into_response();
     }
     let normalized = normalize_stream_delta_batching_settings(body);
@@ -464,7 +491,7 @@ pub(super) async fn get_endpoint_setting(
     State(state): State<AdminState>,
     headers: HeaderMap,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::SettingsRead).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -500,7 +527,7 @@ pub(super) async fn set_endpoint_setting(
     headers: HeaderMap,
     Json(body): Json<EndpointSettingRequest>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::SettingsManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -536,7 +563,7 @@ pub(super) async fn get_relay_ip_whitelist(
     State(state): State<AdminState>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Settings).await {
         return response.into_response();
     }
     match state
@@ -561,7 +588,7 @@ pub(super) async fn set_relay_ip_whitelist(
     headers: HeaderMap,
     Json(body): Json<RelayIpPolicy>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Settings).await {
         return response.into_response();
     }
     let policy = match validate_relay_ip_policy(body) {
@@ -594,7 +621,7 @@ pub(super) async fn get_model_route_whitelist(
     State(state): State<AdminState>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Settings).await {
         return response.into_response();
     }
     match state
@@ -619,7 +646,7 @@ pub(super) async fn set_model_route_whitelist(
     headers: HeaderMap,
     Json(body): Json<ModelRouteWhitelistRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Settings).await {
         return response.into_response();
     }
     if let Err(err) = state
@@ -675,7 +702,7 @@ pub(super) async fn get_shared_valkey(
     State(state): State<AdminState>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Settings).await {
         return response.into_response();
     }
     if state.config_repository.is_sqlite() {
@@ -717,7 +744,7 @@ pub(super) async fn set_shared_valkey(
     headers: HeaderMap,
     Json(body): Json<SharedValkeySettingsRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Settings).await {
         return response.into_response();
     }
     if state.config_repository.is_sqlite() {

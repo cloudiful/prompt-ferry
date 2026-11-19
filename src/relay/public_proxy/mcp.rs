@@ -452,7 +452,7 @@ mod tests {
             response_forward::{
                 handle_mcp_response_end, handle_mcp_response_error, handle_mcp_response_start,
             },
-            state::test_state,
+            state::{test_state, test_state_with_authorizer},
         },
     };
     use axum::{
@@ -654,7 +654,7 @@ mod tests {
 
     #[tokio::test]
     async fn managed_mcp_route_forwards_its_key_hash_to_the_worker() {
-        let mut state = test_state();
+        let mut state = test_state_with_authorizer().await;
         state.config.client_token = "test-token".to_string();
 
         let token = "pfy-managed-client-key";

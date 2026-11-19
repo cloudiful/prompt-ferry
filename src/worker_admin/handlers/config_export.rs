@@ -44,7 +44,7 @@ pub(super) async fn export_config(
     headers: HeaderMap,
     Json(body): Json<ConfigExportRequest>,
 ) -> Response {
-    let user = match ensure_admin(&state, &headers).await {
+    let user = match ensure_admin(&state, &headers, ControlAction::ConfigExport).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -128,7 +128,7 @@ pub(super) async fn config_export_metadata(
     State(state): State<AdminState>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::ConfigExport).await {
         return response.into_response();
     }
     let snapshot = match build_snapshot(&state).await {

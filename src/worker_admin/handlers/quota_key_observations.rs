@@ -32,7 +32,7 @@ pub(super) async fn quota_key_observation_history(
     Path(endpoint_id): Path<Uuid>,
     Query(query): Query<QuotaKeyObservationHistoryQuery>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Quota).await {
         return response.into_response();
     }
     let (limit, before_id, key_ids) = match parse_observation_query(&query) {
@@ -259,7 +259,7 @@ pub(super) async fn quota_key_observation_trend(
     Path(endpoint_id): Path<Uuid>,
     Query(query): Query<QuotaKeyObservationTrendQuery>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Quota).await {
         return response.into_response();
     }
     let key_ids = match parse_key_filters(query.key_id.as_deref(), query.key_ids.as_deref()) {

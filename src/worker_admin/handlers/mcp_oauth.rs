@@ -121,7 +121,7 @@ pub(super) async fn get_mcp_oauth_status(
     headers: HeaderMap,
     Path(server_id): Path<Uuid>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::McpOauthManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -166,7 +166,7 @@ pub(super) async fn start_mcp_oauth(
     headers: HeaderMap,
     Path(server_id): Path<Uuid>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::McpOauthManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -207,7 +207,7 @@ pub(super) async fn mcp_oauth_callback(
     Query(query): Query<McpOAuthCallbackQuery>,
 ) -> Response {
     let mut outcome: Result<(), McpOAuthError> = Err(McpOAuthError::Forbidden);
-    if let Ok(user) = current_user(&state, &headers).await {
+    if let Ok(user) = ensure_user(&state, &headers, UserAction::McpOauthManage).await {
         match load_owned_server(&state, &user, server_id).await {
             Ok(server) if server.auth_mode == MCP_AUTH_MODE_OAUTH => match oauth_service(&state) {
                 Ok(service) => match (query.code.as_deref(), query.state.as_deref()) {
@@ -269,7 +269,7 @@ pub(super) async fn refresh_mcp_oauth(
     headers: HeaderMap,
     Path(server_id): Path<Uuid>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::McpOauthManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
@@ -307,7 +307,7 @@ pub(super) async fn disconnect_mcp_oauth(
     headers: HeaderMap,
     Path(server_id): Path<Uuid>,
 ) -> Response {
-    let user = match current_user(&state, &headers).await {
+    let user = match ensure_user(&state, &headers, UserAction::McpOauthManage).await {
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };

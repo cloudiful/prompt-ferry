@@ -35,7 +35,7 @@ pub(super) async fn token_plan_usage(
     Path(endpoint_id): Path<Uuid>,
     Query(query): Query<TokenPlanUsageQuery>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Endpoint).await {
         return response.into_response();
     }
     let unified = match state.config_repository.get_endpoint(endpoint_id).await {
@@ -278,7 +278,7 @@ pub(super) async fn organization_usage(
     headers: HeaderMap,
     Path(endpoint_id): Path<Uuid>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Endpoint).await {
         return response.into_response();
     }
     let endpoint = match state.config_repository.get_endpoint(endpoint_id).await {

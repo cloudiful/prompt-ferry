@@ -1,8 +1,11 @@
-use crate::{config::RelayConfig, ip_acl::CompiledRelayIpPolicy};
-
 use super::{
     public_proxy::{public_api_router, public_router},
     state::{AppState, RelayState},
+};
+use crate::{
+    authz::{self, Authorizer},
+    config::RelayConfig,
+    ip_acl::CompiledRelayIpPolicy,
 };
 use axum::{Router, body::Body, response::Response};
 use futures::StreamExt;
@@ -22,11 +25,16 @@ use tokio::sync::Mutex;
 /// The static client token is disabled for the node: the public AI surface
 /// authenticates managed client keys only, and the master secret never
 /// authenticates an AI request.
-pub(crate) fn node_apps(config: RelayConfig, admin_router: Router) -> (Router, AppState) {
+pub(crate) fn node_apps(
+    config: RelayConfig,
+    admin_router: Router,
+    authorizer: Arc<Authorizer>,
+) -> (Router, AppState) {
     let inner = relay_state();
     let state = AppState {
         config,
         inner,
+        authorizer: Some(authorizer),
         managed_only_auth: true,
     };
     let public_app = public_api_router(state.clone());
@@ -40,14 +48,20 @@ pub(crate) fn node_apps(config: RelayConfig, admin_router: Router) -> (Router, A
 /// administration pages, the API and the assets — to its database node. It
 /// has no local administration listener and no static client token: the
 /// managed keys of the database node are the only credential.
-pub(crate) fn node_edge_apps(config: RelayConfig) -> (Router, AppState) {
+pub(crate) async fn node_edge_apps(config: RelayConfig) -> anyhow::Result<(Router, AppState)> {
     let inner = relay_state();
+    let authorizer = Arc::new(
+        authz::build()
+            .await
+            .map_err(|err| anyhow::anyhow!("failed to build the authorization engine: {err}"))?,
+    );
     let state = AppState {
         config,
         inner,
+        authorizer: Some(authorizer),
         managed_only_auth: true,
     };
-    (public_router(state.clone()), state)
+    Ok((public_router(state.clone()), state))
 }
 
 /// Merge the admin router with the public API routes.
@@ -146,7 +160,9 @@ mod node_router_tests {
         use axum::body::to_bytes;
         use tokio::sync::mpsc;
 
-        let (app, state) = super::node_edge_apps(crate::config::RelayConfig::default());
+        let (app, state) = super::node_edge_apps(crate::config::RelayConfig::default())
+            .await
+            .expect("edge apps build");
         let (tx, mut rx) = mpsc::channel(16);
         assert!(register_worker(&state, 1, tx).await);
         let executor_state = state.clone();

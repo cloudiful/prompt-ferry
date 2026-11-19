@@ -16,7 +16,7 @@ pub(super) async fn list_endpoints(
     headers: HeaderMap,
     Query(query): Query<TablePageQuery>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Endpoint).await {
         return response.into_response();
     }
     match state
@@ -44,7 +44,7 @@ pub(super) async fn create_endpoint(
     headers: HeaderMap,
     Json(body): Json<EndpointRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Endpoint).await {
         return response.into_response();
     }
     let mcp_enabled = body
@@ -110,7 +110,7 @@ pub(super) async fn update_endpoint(
     Path(endpoint_id): Path<Uuid>,
     Json(body): Json<EndpointRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Endpoint).await {
         return response.into_response();
     }
     let existing = match state.config_repository.get_endpoint(endpoint_id).await {
@@ -301,7 +301,7 @@ pub(super) async fn delete_endpoint(
     headers: HeaderMap,
     Path(endpoint_id): Path<Uuid>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Endpoint).await {
         return response.into_response();
     }
     let managed_server = match state
@@ -358,7 +358,7 @@ pub(super) async fn list_endpoint_models(
     Path(endpoint_id): Path<Uuid>,
     Query(query): Query<ModelCatalogQuery>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Endpoint).await {
         return response.into_response();
     }
     let endpoint = match state.config_repository.get_endpoint(endpoint_id).await {
@@ -507,7 +507,7 @@ pub(super) async fn test_endpoint(
     headers: HeaderMap,
     Path(endpoint_id): Path<Uuid>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
+    if let Err(response) = ensure_admin(&state, &headers, ControlAction::Endpoint).await {
         return response.into_response();
     }
     let endpoint = match state.config_repository.get_endpoint(endpoint_id).await {
