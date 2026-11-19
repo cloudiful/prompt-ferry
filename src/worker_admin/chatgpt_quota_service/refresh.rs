@@ -308,13 +308,15 @@ impl ChatGptQuotaService {
         };
         quota_observation_service::persist_response(
             &self.inner.pool,
-            endpoint_id,
-            crate::db::EndpointProvider::OpenAi,
+            quota_observation_service::QuotaObservationContext {
+                endpoint_id,
+                provider: crate::db::EndpointProvider::OpenAi,
+                source,
+                observed_at,
+                plan_type: quota.plan_type.clone(),
+                limit_reached: quota.limit_reached,
+            },
             &response,
-            source,
-            observed_at,
-            quota.plan_type.clone(),
-            quota.limit_reached,
         )
         .await;
     }

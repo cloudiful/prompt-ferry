@@ -1,5 +1,7 @@
 use super::{TREND_SERIES_MAX, TrendMetric, TrendRange, TrendSnapshot, project_trend};
-use crate::db::types::{QuotaObservationCreate, QuotaObservationProvider, QuotaObservationSource};
+use crate::db::types::{
+    QuotaObservationCreate, QuotaObservationInput, QuotaObservationProvider, QuotaObservationSource,
+};
 use crate::worker_admin_types::{
     CanonicalQuotaWindow, CanonicalQuotaWindowKind, SubscriptionWindowAvailability,
 };
@@ -68,25 +70,25 @@ fn success_create(
     key_id: Uuid,
     observed_at: DateTime<Utc>,
 ) -> QuotaObservationCreate {
-    QuotaObservationCreate::new(
+    QuotaObservationCreate::new(QuotaObservationInput {
         endpoint_id,
         key_id,
-        QuotaObservationProvider::Minimax,
-        "test-key".to_string(),
-        QuotaObservationSource::Request,
+        provider: QuotaObservationProvider::Minimax,
+        key_label: "test-key".to_string(),
+        source: QuotaObservationSource::Request,
         observed_at,
-        true,
-        None,
-        None,
-        Some("team".to_string()),
-        Some(false),
-        vec![
+        ok: true,
+        status: None,
+        error_code: None,
+        plan_type: Some("team".to_string()),
+        limit_reached: Some(false),
+        windows: vec![
             known_window("usage", 75.0),
             known_window("empty-slot", 0.0),
             unknown_window("unsupported-slot"),
             balance_window("credits", 50.0),
         ],
-    )
+    })
     .expect("valid success observation builds")
 }
 
@@ -96,20 +98,20 @@ async fn constructor_rejects_invalid_observations() {
     let key_id = Uuid::new_v4();
     let valid_window = known_window("usage", 75.0);
     let build = |windows: Vec<CanonicalQuotaWindow>| {
-        QuotaObservationCreate::new(
+        QuotaObservationCreate::new(QuotaObservationInput {
             endpoint_id,
             key_id,
-            QuotaObservationProvider::Minimax,
-            "test-key".to_string(),
-            QuotaObservationSource::Request,
-            observed_at(10),
-            true,
-            None,
-            None,
-            None,
-            None,
+            provider: QuotaObservationProvider::Minimax,
+            key_label: "test-key".to_string(),
+            source: QuotaObservationSource::Request,
+            observed_at: observed_at(10),
+            ok: true,
+            status: None,
+            error_code: None,
+            plan_type: None,
+            limit_reached: None,
             windows,
-        )
+        })
     };
 
     let mut non_finite = valid_window.clone();
@@ -155,38 +157,38 @@ async fn constructor_rejects_invalid_observations() {
         "a failed observation carrying windows must be rejected"
     );
     assert!(
-        QuotaObservationCreate::new(
+        QuotaObservationCreate::new(QuotaObservationInput {
             endpoint_id,
             key_id,
-            QuotaObservationProvider::Minimax,
-            "k".repeat(201),
-            QuotaObservationSource::Request,
-            observed_at(10),
-            true,
-            None,
-            None,
-            None,
-            None,
-            vec![valid_window.clone()],
-        )
+            provider: QuotaObservationProvider::Minimax,
+            key_label: "k".repeat(201),
+            source: QuotaObservationSource::Request,
+            observed_at: observed_at(10),
+            ok: true,
+            status: None,
+            error_code: None,
+            plan_type: None,
+            limit_reached: None,
+            windows: vec![valid_window.clone()],
+        })
         .is_err(),
         "a 201-char key label must be rejected"
     );
     assert!(
-        QuotaObservationCreate::new(
+        QuotaObservationCreate::new(QuotaObservationInput {
             endpoint_id,
             key_id,
-            QuotaObservationProvider::Minimax,
-            "test-key".to_string(),
-            QuotaObservationSource::Request,
-            observed_at(10),
-            false,
-            None,
-            Some("BAD CODE!".to_string()),
-            None,
-            None,
-            vec![],
-        )
+            provider: QuotaObservationProvider::Minimax,
+            key_label: "test-key".to_string(),
+            source: QuotaObservationSource::Request,
+            observed_at: observed_at(10),
+            ok: false,
+            status: None,
+            error_code: Some("BAD CODE!".to_string()),
+            plan_type: None,
+            limit_reached: None,
+            windows: vec![],
+        })
         .is_err(),
         "a non-stable error code must be rejected"
     );

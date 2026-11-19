@@ -51,7 +51,7 @@ pub fn export_admin_api(out: &str) -> Result<()> {
 mod tests {
     use super::admin_api_doc;
 
-    use utoipa::openapi::{PathItem, path::Operation};
+    use utoipa::openapi::{PathItem, RefOr, path::Operation};
 
     /// The operation a documented path carries for `method`.
     fn operation<'a>(item: &'a PathItem, method: &str) -> Option<&'a Operation> {
@@ -70,14 +70,13 @@ mod tests {
     /// export is a hand edit that a later export will silently drop. Asserting
     /// byte identity here is what makes "regenerate, do not edit" enforceable
     /// rather than a convention.
-
     /// The callback is a query-bearing redirect endpoint: `server_id` is the
     /// only required path parameter and the authorization response values are
     /// optional query parameters. Byte parity alone cannot prove this.
     #[test]
     fn mcp_oauth_callback_parameters_are_optional_query_parameters() {
         use utoipa::openapi::Required;
-        use utoipa::openapi::path::ParameterIn;
+        use utoipa::openapi::path::{Parameter, ParameterIn};
 
         let document = admin_api_doc();
         let item = document
@@ -90,6 +89,16 @@ mod tests {
             .parameters
             .as_ref()
             .expect("the callback documents its parameters");
+
+        let parameters: Vec<&Parameter> = parameters
+            .iter()
+            .map(|parameter| match parameter {
+                RefOr::T(parameter) => parameter,
+                RefOr::Ref(_) => panic!(
+                    "expected an inline parameter, found a $ref; the exporter fixture must not emit references"
+                ),
+            })
+            .collect();
 
         let server_id = parameters
             .iter()
@@ -149,5 +158,98 @@ mod tests {
         assert!(paths.contains_key("/api/v1/admin/nodes"));
         assert!(!paths.contains_key("/api/v1/admin/workers"));
         assert!(!paths.keys().any(|path| path.starts_with("/api/v1/relay/")));
+    }
+
+    /// Assert one serialized response object carries the OAS-required
+    /// non-empty `description`. A `$ref` is resolved through
+    /// `components.responses`; an unresolved or external reference fails with
+    /// the reference instead of being skipped.
+    fn assert_response_description(
+        document: &serde_json::Value,
+        location: &str,
+        response: &serde_json::Value,
+    ) {
+        if let Some(reference) = response.get("$ref") {
+            let reference = reference
+                .as_str()
+                .unwrap_or_else(|| panic!("{location}: response $ref must be a string"));
+            let name = reference
+                .strip_prefix("#/components/responses/")
+                .unwrap_or_else(|| {
+                    panic!("{location}: unsupported response reference {reference}")
+                });
+            let resolved = document
+                .get("components")
+                .and_then(|components| components.get("responses"))
+                .and_then(|responses| responses.get(name))
+                .unwrap_or_else(|| panic!("{location}: unresolved response reference {reference}"));
+            assert_response_description(document, location, resolved);
+            return;
+        }
+        let description = response
+            .get("description")
+            .unwrap_or_else(|| panic!("{location}: response object has no description"));
+        let description = description
+            .as_str()
+            .unwrap_or_else(|| panic!("{location}: response description is not a string"));
+        assert!(
+            !description.trim().is_empty(),
+            "{location}: response description must not be empty"
+        );
+    }
+
+    /// OAS 3.1 requires every Response Object to carry a description, and
+    /// utoipa 6 omits an empty one at serialization time. Assert the serialized
+    /// document so a future regression is caught even if the typed field
+    /// exists.
+    #[test]
+    fn every_serialized_response_object_carries_a_non_empty_description() {
+        let document = admin_api_doc();
+        let value = serde_json::to_value(&document).expect("the admin document serializes to JSON");
+
+        let paths = value
+            .get("paths")
+            .and_then(|paths| paths.as_object())
+            .expect("the serialized document has a paths object");
+        for (path, item) in paths {
+            let methods = item
+                .as_object()
+                .unwrap_or_else(|| panic!("{path}: path item is not an object"));
+            for (method, operation) in methods {
+                if !matches!(
+                    method.as_str(),
+                    "get" | "put" | "post" | "delete" | "options" | "head" | "patch" | "trace"
+                ) {
+                    continue;
+                }
+                let responses = operation
+                    .get("responses")
+                    .and_then(|responses| responses.as_object())
+                    .unwrap_or_else(|| {
+                        panic!("{method} {path}: operation has no responses object")
+                    });
+                for (status, response) in responses {
+                    assert_response_description(
+                        &value,
+                        &format!("{method} {path} {status}"),
+                        response,
+                    );
+                }
+            }
+        }
+
+        if let Some(responses) = value
+            .get("components")
+            .and_then(|components| components.get("responses"))
+            .and_then(|responses| responses.as_object())
+        {
+            for (name, response) in responses {
+                assert_response_description(
+                    &value,
+                    &format!("components.responses.{name}"),
+                    response,
+                );
+            }
+        }
     }
 }

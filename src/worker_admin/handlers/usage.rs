@@ -6,6 +6,12 @@ use super::usage_support::{
 };
 use super::*;
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/bridge/status",
+    responses((status = 200, body = BridgeStatus, description = "Bridge status")),
+    tag = "bridge"
+)]
 pub(super) async fn bridge_status(State(state): State<AdminState>, headers: HeaderMap) -> Response {
     if let Err(response) = current_user(&state, &headers).await {
         return response.into_response();
@@ -28,6 +34,14 @@ pub(super) async fn bridge_status(State(state): State<AdminState>, headers: Head
     .into_response()
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/request-records/summary",
+    operation_id = "request_record_summary",
+    params(RequestRecordSummaryQuery),
+    responses((status = 200, body = db::RequestRecordSummary, description = "Request record summary")),
+    tag = "request-records"
+)]
 pub(super) async fn usage_summary(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -48,6 +62,14 @@ pub(super) async fn usage_summary(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/request-records/overview",
+    operation_id = "request_record_overview",
+    params(RequestRecordOverviewQuery),
+    responses((status = 200, body = db::RequestRecordOverviewResponse, description = "Request record overview")),
+    tag = "request-records"
+)]
 pub(super) async fn usage_overview(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -86,6 +108,14 @@ pub(super) async fn usage_overview(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/request-records",
+    operation_id = "list_request_records",
+    params(RequestRecordsQuery),
+    responses((status = 200, body = db::RequestRecordPage, description = "Request record page")),
+    tag = "request-records"
+)]
 pub(super) async fn usage_events(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -126,6 +156,14 @@ pub(super) async fn usage_events(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/request-records/facets",
+    operation_id = "request_record_facets",
+    params(crate::worker_admin_types::RequestRecordFacetsQuery),
+    responses((status = 200, body = db::RequestRecordFacets, description = "Request record facets")),
+    tag = "request-records"
+)]
 pub(super) async fn usage_facets(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -162,6 +200,14 @@ pub(super) async fn usage_facets(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/request-records/{record_id}",
+    operation_id = "request_record_detail",
+    params(("record_id" = i64, Path, description = "Request record ID")),
+    responses((status = 200, body = db::RequestRecordDetail, description = "Request record detail")),
+    tag = "request-records"
+)]
 pub(super) async fn usage_event_detail(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -187,6 +233,14 @@ pub(super) async fn usage_event_detail(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/request-records/{record_id}/request-full",
+    operation_id = "request_record_full",
+    params(RequestRecordFullQuery, ("record_id" = i64, Path, description = "Request record ID")),
+    responses((status = 200, body = RequestRecordFullResponse, description = "Full stored request record payload")),
+    tag = "request-records"
+)]
 pub(super) async fn usage_request_full(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -204,6 +258,14 @@ pub(super) async fn usage_request_full(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/request-records/series",
+    operation_id = "request_record_series",
+    params(RequestRecordSeriesQuery),
+    responses((status = 200, body = [db::RequestRecordBucket], description = "Request record series")),
+    tag = "request-records"
+)]
 pub(super) async fn usage_series(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -234,6 +296,14 @@ pub(super) async fn usage_series(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/request-records/clear",
+    operation_id = "clear_request_records",
+    request_body = RequestRecordsClearRequest,
+    responses((status = 200, body = RequestRecordsClearResponse, description = "Request record clear result")),
+    tag = "request-records"
+)]
 pub(super) async fn clear_usage_events(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -258,6 +328,13 @@ pub(super) async fn clear_usage_events(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/request-records/prune",
+    operation_id = "prune_request_records",
+    responses((status = 200, body = RequestRecordPruneResponse, description = "Request record prune result")),
+    tag = "request-records"
+)]
 pub(super) async fn prune_usage_events(
     State(state): State<AdminState>,
     headers: HeaderMap,

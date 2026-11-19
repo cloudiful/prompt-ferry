@@ -133,20 +133,20 @@ pub(crate) async fn run_peer_dialer(
         // outside that deadline and is closed by the cooperative stop of the
         // node, so a healthy link is never dropped by a timeout.
         let outcome = if target.secure {
-            establish_and_run_peer(
+            Box::pin(establish_and_run_peer(
                 &context,
                 establish_peer_secure(&context, &target, tls.as_ref()),
                 DIAL_ATTEMPT_TIMEOUT,
                 &mut shutdown,
-            )
+            ))
             .await
         } else {
-            establish_and_run_peer(
+            Box::pin(establish_and_run_peer(
                 &context,
                 establish_peer_plain(&context, &target),
                 DIAL_ATTEMPT_TIMEOUT,
                 &mut shutdown,
-            )
+            ))
             .await
         };
         match outcome {

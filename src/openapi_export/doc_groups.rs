@@ -1,68 +1,11 @@
 use utoipa::OpenApi;
 
-use super::{
-    auth::{__path_auth_login, __path_auth_logout, __path_auth_me},
-    bridge::__path_bridge_status,
-    config_audit::__path_list_config_audit,
-    config_export::{__path_config_export_metadata, __path_export_config},
-    config_import::{__path_import_config, __path_preview_config_import},
-    endpoints::{
-        __path_create_endpoint, __path_delete_endpoint, __path_endpoint_models,
-        __path_list_endpoints, __path_oauth_browser_complete, __path_oauth_browser_start,
-        __path_oauth_clear, __path_oauth_device_poll, __path_oauth_device_start,
-        __path_oauth_refresh, __path_oauth_status, __path_organization_usage,
-        __path_quota_inference, __path_quota_key_observation_history,
-        __path_quota_key_observation_trend, __path_test_endpoint, __path_token_plan_usage,
-        __path_update_endpoint,
-    },
-    init::{__path_setup_initialize, __path_setup_status},
-    mcp::{
-        __path_create_mcp_server, __path_delete_mcp_server, __path_disconnect_mcp_oauth,
-        __path_get_mcp_catalog, __path_get_mcp_oauth_status, __path_list_mcp_providers,
-        __path_list_mcp_servers, __path_mcp_oauth_callback, __path_refresh_mcp_oauth,
-        __path_start_mcp_oauth, __path_test_mcp_server, __path_update_mcp_server,
-    },
-    me::{
-        __path_me_create_client_key, __path_me_delete_client_key, __path_me_list_client_keys,
-        __path_me_list_models, __path_me_update_client_key,
-    },
-    model_routes::{
-        __path_create_model_route, __path_delete_model_route, __path_list_model_routes,
-        __path_test_model_route, __path_update_model_route,
-    },
-    node::__path_node_status,
-    nodes::__path_list_nodes,
-    schemas::*,
-    settings::{
-        __path_get_cache_alert_setting, __path_get_endpoint_setting,
-        __path_get_model_route_whitelist, __path_get_redaction_setting,
-        __path_get_relay_ip_whitelist, __path_get_request_content_logging,
-        __path_get_shared_valkey, __path_get_stream_delta_batching, __path_get_usage_retention,
-        __path_list_redaction_custom_strings, __path_preview_redaction,
-        __path_set_cache_alert_setting, __path_set_endpoint_setting,
-        __path_set_model_route_whitelist, __path_set_redaction_setting,
-        __path_set_relay_ip_whitelist, __path_set_request_content_logging,
-        __path_set_shared_valkey, __path_set_stream_delta_batching, __path_set_usage_retention,
-    },
-    usage::{
-        __path_clear_request_records, __path_delete_conversation_endpoint_override,
-        __path_get_conversation_endpoint_override, __path_list_request_records,
-        __path_prune_request_records, __path_request_record_detail, __path_request_record_facets,
-        __path_request_record_full, __path_request_record_overview,
-        __path_request_record_reset_session_affinity, __path_request_record_series,
-        __path_request_record_session_route_options, __path_request_record_summary,
-        __path_set_conversation_endpoint_override,
-    },
-    users::{
-        __path_create_client_key, __path_create_user, __path_delete_client_key, __path_delete_user,
-        __path_list_client_keys, __path_list_user_options, __path_list_users,
-        __path_reset_password, __path_update_client_key, __path_update_user,
-    },
-};
+use super::schemas::*;
 use crate::db::config_repository::{
     ConfigAuditAction, ConfigAuditDomainCount, ConfigAuditEntry, ConfigAuditPage,
     ConfigImportApplied, ConfigImportDomainDiff, ConfigImportDomainSummary, ConfigImportPreview,
 };
+use crate::worker_admin::openapi_paths::*;
 use crate::{
     db,
     protocol::RelayIpPolicy,

@@ -1,14 +1,10 @@
 //! Standalone request lease lifecycle.
 //!
 //! This sibling module keeps the standalone acquire/heartbeat/drop/release
-//! loop and the stale lease reconciler separate from the existing
-//! PostgreSQL/Valkey heartbeat logic in `lifecycle.rs`. The standalone path
-//! only writes to `standalone_request_leases`; it must never touch
-//! PostgreSQL or Valkey request-record state.
-//!
-//! The reconcile task only deletes expired lease rows because standalone
-//! request records do not exist yet; it must not be presented as aborting
-//! a durable request.
+//! loop separate from the existing PostgreSQL/Valkey heartbeat logic in
+//! `lifecycle.rs`. The standalone path only writes to
+//! `standalone_request_leases`; it must never touch PostgreSQL or Valkey
+//! request-record state.
 
 use std::time::Duration;
 
@@ -164,60 +160,4 @@ impl Drop for StandaloneRequestLeaseGuard {
             }
         });
     }
-}
-
-/// Sweep standalone request leases whose `lease_expires_at` has passed.
-/// The reconciler only deletes expired lease rows; standalone request
-/// records do not exist yet, so this must never be presented as aborting
-/// a durable request. Returns `None` when no standalone state is
-/// available.
-pub(super) fn spawn_standalone_stale_lease_reconciler(
-    state: Option<StandaloneRuntimeState>,
-    control: RuntimeControl,
-    sweep_interval: Duration,
-) -> Option<JoinHandle<()>> {
-    let state = state?;
-    let store = StandaloneRequestLeaseStore::new(state.store_pool());
-    let sweep_interval = if sweep_interval.is_zero() {
-        Duration::from_secs(1)
-    } else {
-        sweep_interval
-    };
-    Some(tokio::spawn(async move {
-        // Mirror the PostgreSQL reconciler delay before the first sweep
-        // so a fresh restart does not immediately delete expired leases
-        // owned by an earlier process before they have a chance to be
-        // refreshed through the new heartbeat task.
-        tokio::select! {
-            _ = control.wait_for_shutdown() => return,
-            _ = time::sleep(sweep_interval) => {}
-        }
-        let mut interval = time::interval(sweep_interval);
-        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-        loop {
-            tokio::select! {
-                _ = control.wait_for_shutdown() => break,
-                _ = interval.tick() => {
-                    match store.abort_stale().await {
-                        Ok(count) if count > 0 => {
-                            let remaining = store.list_active().await.map(|rows| rows.len()).unwrap_or(0);
-                            warn!(
-                                count,
-                                remaining,
-                                "pruned expired standalone request lease rows"
-                            );
-                        }
-                        Ok(_) => {}
-                        Err(error) => {
-                            warn!(
-                                error = %error,
-                                "failed to prune expired standalone request lease rows"
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }))
 }

@@ -495,7 +495,13 @@ impl NodeDbRuntime {
             let dial_context = peer_context.clone();
             let dial_shutdown = peer_shutdown_rx.clone();
             peer_tasks.push(tokio::spawn(async move {
-                run_peer_dialer(dial_context, target, peer_tls, dial_shutdown).await;
+                Box::pin(run_peer_dialer(
+                    dial_context,
+                    target,
+                    peer_tls,
+                    dial_shutdown,
+                ))
+                .await;
             }));
         }
 
@@ -703,7 +709,6 @@ type RegistryTasks = (
 );
 
 /// Start the registry heartbeat and the lease watchdog of the node.
-#[allow(clippy::too_many_arguments)]
 fn spawn_registry_tasks(
     admin_state: &AdminState,
     worker_config: &WorkerConfig,
@@ -719,8 +724,7 @@ fn spawn_registry_tasks(
         admin_state.pool.clone(),
         worker_config,
         control,
-        coordination.revision,
-        coordination.mode,
+        coordination,
         admitted_at,
         tracker,
         stop_rx,
@@ -963,7 +967,7 @@ pub async fn run_node(config: NodeConfig, stop_old_ack: bool) -> anyhow::Result<
     if config.database_url.trim().is_empty() {
         return peer::run_edge_node(config, node_id).await;
     }
-    serve_node(config, node_id.as_uuid(), stop_old_ack).await
+    Box::pin(serve_node(config, node_id.as_uuid(), stop_old_ack)).await
 }
 
 /// Serve a database node until it is asked to stop.

@@ -11,9 +11,9 @@ prompt-ferry-redact = { version = "0.1.0", path = "../prompt-ferry-redact" }
 prompt-ferry-runtime-env = { version = "0.1.0", path = "../prompt-ferry-runtime-env" }
 redactor = { package = "cloudiful-redactor", version = "0.5.1", git = "https://github.com/cloudiful/redactor.git", tag = "v0.5.1" }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+serde_json = "1.0.154"
 tracing = "0.1.44"
 
 [dev-dependencies]
 base64 = "0.23.1"
-proptest = "1.11.0"
+proptest = "1.12.0"

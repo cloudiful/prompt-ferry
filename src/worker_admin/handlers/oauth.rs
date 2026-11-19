@@ -14,6 +14,7 @@ use super::oauth_session::{
     remove_device_flow, store_browser_flow, store_device_flow, token_expired,
 };
 use super::*;
+use crate::openapi_export::schemas::ErrorEnvelope;
 
 pub use super::oauth_client::{
     ChatgptOAuthError, DeviceAuthorization, DevicePollOutcome, OAuthTokenResponse, PkceCodes,
@@ -57,6 +58,16 @@ pub fn routes() -> Router<AdminState> {
         )
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/oauth",
+    params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
+    responses(
+        (status = 200, body = EndpointOAuthStatusResponse, description = "Stored ChatGPT OAuth login state"),
+        (status = 404, body = ErrorEnvelope, description = "Endpoint not found")
+    ),
+    tag = "endpoints"
+)]
 pub(super) async fn oauth_status(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -68,6 +79,17 @@ pub(super) async fn oauth_status(
     oauth_status_response(&state, endpoint_id).await
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/oauth/device",
+    params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
+    responses(
+        (status = 200, body = OAuthDeviceStartResponse, description = "Device-code login started"),
+        (status = 400, body = ErrorEnvelope, description = "Endpoint is not eligible for ChatGPT OAuth"),
+        (status = 404, body = ErrorEnvelope, description = "Endpoint not found")
+    ),
+    tag = "endpoints"
+)]
 pub(super) async fn oauth_device_start(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -77,11 +99,11 @@ pub(super) async fn oauth_device_start(
         return response.into_response();
     }
     if let Err(response) = ensure_login_endpoint(&state, endpoint_id).await {
-        return response;
+        return response.into_response();
     }
     let client = match oauth_client(&state, endpoint_id).await {
         Ok(client) => client,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let issuer = chatgpt_oauth_issuer();
     let device = match request_device_authorization(&client, &issuer).await {
@@ -110,6 +132,19 @@ pub(super) async fn oauth_device_start(
     .into_response()
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/oauth/device/poll",
+    params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
+    request_body = OAuthFlowRequest,
+    responses(
+        (status = 200, body = OAuthLoginResponse, description = "Device-code login poll result"),
+        (status = 400, body = ErrorEnvelope, description = "OAuth authorization denied"),
+        (status = 404, body = ErrorEnvelope, description = "Endpoint or pending device login not found"),
+        (status = 410, body = ErrorEnvelope, description = "OAuth flow expired")
+    ),
+    tag = "endpoints"
+)]
 pub(super) async fn oauth_device_poll(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -131,11 +166,11 @@ pub(super) async fn oauth_device_poll(
     // token must never land on a provider that cannot carry it.
     if let Err(response) = ensure_login_endpoint(&state, endpoint_id).await {
         remove_device_flow(body.flow_id);
-        return response;
+        return response.into_response();
     }
     let client = match oauth_client(&state, endpoint_id).await {
         Ok(client) => client,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let issuer = chatgpt_oauth_issuer();
     let device = DeviceAuthorization {
@@ -184,6 +219,17 @@ pub(super) async fn oauth_device_poll(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/oauth/browser",
+    params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
+    responses(
+        (status = 200, body = OAuthBrowserStartResponse, description = "Browser login started"),
+        (status = 400, body = ErrorEnvelope, description = "Endpoint is not eligible for ChatGPT OAuth"),
+        (status = 404, body = ErrorEnvelope, description = "Endpoint not found")
+    ),
+    tag = "endpoints"
+)]
 pub(super) async fn oauth_browser_start(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -193,7 +239,7 @@ pub(super) async fn oauth_browser_start(
         return response.into_response();
     }
     if let Err(response) = ensure_login_endpoint(&state, endpoint_id).await {
-        return response;
+        return response.into_response();
     }
     let pkce = generate_pkce();
     let oauth_state = random_state();
@@ -218,6 +264,19 @@ pub(super) async fn oauth_browser_start(
     .into_response()
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/oauth/browser/complete",
+    params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
+    request_body = OAuthBrowserCompleteRequest,
+    responses(
+        (status = 200, body = OAuthLoginResponse, description = "Browser login completed from the pasted redirect"),
+        (status = 400, body = ErrorEnvelope, description = "Invalid authorization callback or missing refresh token"),
+        (status = 404, body = ErrorEnvelope, description = "Endpoint or pending browser login not found"),
+        (status = 410, body = ErrorEnvelope, description = "OAuth flow expired")
+    ),
+    tag = "endpoints"
+)]
 pub(super) async fn oauth_browser_complete(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -238,7 +297,7 @@ pub(super) async fn oauth_browser_complete(
     // `oauth_device_poll`); a provider move inside the TTL drops the flow.
     if let Err(response) = ensure_login_endpoint(&state, endpoint_id).await {
         remove_browser_flow(body.flow_id);
-        return response;
+        return response.into_response();
     }
     let code = match parse_redirect_url(&body.redirect_url, &flow.oauth_state) {
         Ok(code) => code,
@@ -251,7 +310,7 @@ pub(super) async fn oauth_browser_complete(
     };
     let client = match oauth_client(&state, endpoint_id).await {
         Ok(client) => client,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let exchange = exchange_authorization_code(
         &client,
@@ -275,6 +334,17 @@ pub(super) async fn oauth_browser_complete(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/oauth/refresh",
+    params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
+    responses(
+        (status = 200, body = EndpointOAuthStatusResponse, description = "ChatGPT OAuth login state after refresh"),
+        (status = 400, body = ErrorEnvelope, description = "No stored ChatGPT OAuth token or refresh rejected"),
+        (status = 404, body = ErrorEnvelope, description = "Endpoint not found")
+    ),
+    tag = "endpoints"
+)]
 pub(super) async fn oauth_refresh(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -284,7 +354,7 @@ pub(super) async fn oauth_refresh(
         return response.into_response();
     }
     if let Err(response) = ensure_login_endpoint(&state, endpoint_id).await {
-        return response;
+        return response.into_response();
     }
     let token = match state
         .config_repository
@@ -307,7 +377,7 @@ pub(super) async fn oauth_refresh(
     }
     let client = match oauth_client(&state, endpoint_id).await {
         Ok(client) => client,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     match refresh_chatgpt_tokens(&client, &chatgpt_oauth_issuer(), &token.refresh_token).await {
         Ok(tokens) => {
@@ -324,7 +394,7 @@ pub(super) async fn oauth_refresh(
             .await
             {
                 Ok(()) => oauth_status_response(&state, endpoint_id).await,
-                Err(response) => response,
+                Err(response) => response.into_response(),
             }
         }
         Err(error @ ChatgptOAuthError::InvalidGrant(_)) => {
@@ -344,6 +414,16 @@ pub(super) async fn oauth_refresh(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/oauth",
+    params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
+    responses(
+        (status = 204, description = "Stored ChatGPT OAuth token cleared"),
+        (status = 404, body = ErrorEnvelope, description = "Endpoint not found")
+    ),
+    tag = "endpoints"
+)]
 pub(super) async fn oauth_clear(
     State(state): State<AdminState>,
     headers: HeaderMap,

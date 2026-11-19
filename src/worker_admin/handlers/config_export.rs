@@ -23,6 +23,22 @@ use crate::db::config_repository::{
 /// Code recorded when the snapshot could not be read at all.
 const SNAPSHOT_FAILED_CODE: &str = "config_export_snapshot_failed";
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/config-export",
+    request_body = ConfigExportRequest,
+    responses(
+        (
+            status = 200,
+            description = "Passphrase-sealed configuration archive (`application/octet-stream`). The response carries the snapshot fingerprint, backend kind, and format version as non-secret headers; the passphrase is never echoed.",
+            content_type = "application/octet-stream",
+            body = Vec<u8>
+        ),
+        (status = 400, description = "Passphrase rejected (too short or too long)"),
+        (status = 403, description = "Administrator session required")
+    ),
+    tag = "config"
+)]
 pub(super) async fn export_config(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -96,9 +112,18 @@ pub(super) async fn export_config(
         .unwrap_or_else(|err| internal(&state, anyhow::anyhow!(err)))
 }
 
-/// Non-secret manifest summary: backend, format version, payload fingerprint,
-/// and per-domain record/unrecoverable counts. The archive bytes themselves
-/// are not produced or returned, and no passphrase is needed (or accepted).
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/config-export/metadata",
+    responses(
+        (status = 200, body = ConfigExportMetadata, description = "Non-secret export manifest summary for the audit trail"),
+        (status = 403, description = "Administrator session required")
+    ),
+    tag = "config"
+)]
+// Non-secret manifest summary: backend, format version, payload fingerprint,
+// and per-domain record/unrecoverable counts. The archive bytes themselves
+// are not produced or returned, and no passphrase is needed (or accepted).
 pub(super) async fn config_export_metadata(
     State(state): State<AdminState>,
     headers: HeaderMap,

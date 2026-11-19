@@ -1,5 +1,17 @@
 use super::*;
+use crate::openapi_export::schemas::ErrorEnvelope;
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/node",
+    responses(
+        (status = 200, body = NodeStatusResponse, description = "Processing node and authenticated peers"),
+        (status = 401, body = ErrorEnvelope, description = "Unauthorized"),
+        (status = 403, body = ErrorEnvelope, description = "Administrator required"),
+        (status = 503, body = ErrorEnvelope, description = "Node status unavailable")
+    ),
+    tag = "node"
+)]
 pub(super) async fn node_status(State(state): State<AdminState>, headers: HeaderMap) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response.into_response();

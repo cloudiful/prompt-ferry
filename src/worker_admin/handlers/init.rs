@@ -1,4 +1,5 @@
 use super::*;
+use crate::openapi_export::schemas::ErrorEnvelope;
 
 fn origin_allowed(headers: &HeaderMap) -> bool {
     let mut origins = headers.get_all(header::ORIGIN).iter();
@@ -33,6 +34,15 @@ fn valid(body: &SetupRequest) -> bool {
             .is_none_or(|v| !v.trim().is_empty() && v.len() <= 256)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/auth/setup",
+    responses(
+        (status = 200, body = SetupStatus, description = "Setup status"),
+        (status = 503, body = ErrorEnvelope, description = "Setup unavailable")
+    ),
+    tag = "auth"
+)]
 pub(super) async fn setup_status(State(state): State<AdminState>) -> Response {
     if state.node_setup.is_none() {
         return Json(SetupStatus {
@@ -55,6 +65,19 @@ pub(super) async fn setup_status(State(state): State<AdminState>) -> Response {
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/setup",
+    request_body = SetupRequest,
+    responses(
+        (status = 201, body = SetupStatus, description = "Administrator initialized"),
+        (status = 400, body = ErrorEnvelope, description = "Invalid request"),
+        (status = 401, body = ErrorEnvelope, description = "Invalid proof"),
+        (status = 409, body = ErrorEnvelope, description = "Already initialized"),
+        (status = 503, body = ErrorEnvelope, description = "Setup unavailable")
+    ),
+    tag = "auth"
+)]
 pub(super) async fn setup_initialize(
     State(state): State<AdminState>,
     headers: HeaderMap,

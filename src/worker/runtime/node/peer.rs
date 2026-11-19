@@ -199,7 +199,7 @@ impl PeerLinkContext {
     /// The group of a star is the identity of its database node: the
     /// database node is the group itself, and an edge node belongs to the
     /// group of the database node it is pinned to.
-    #[allow(dead_code)] // The group attribution of a later phase consumes it.
+    #[cfg(test)]
     pub(crate) async fn group_id(&self) -> Option<NodeId> {
         match &self.role {
             PeerRoleContext::Database(_) => Some(self.identity.node_id),

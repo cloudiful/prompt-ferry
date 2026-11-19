@@ -28,10 +28,6 @@ pub(super) struct OwnedPeerWriter<W> {
 }
 
 impl<W: PeerWriter + Send> PeerWriter for OwnedPeerWriter<W> {
-    async fn send_text(&mut self, text: String) -> Result<()> {
-        self.writer.send_text(text).await
-    }
-
     async fn send_binary(&mut self, bytes: Vec<u8>) -> Result<()> {
         let mut message = crate::bridge_wire::decode_message(&bytes)?;
         let mut ownership = self.ownership.lock().await;
@@ -284,9 +280,6 @@ mod tests {
     async fn failed_terminal_send_keeps_owner_for_disconnect_cleanup() {
         struct Failed;
         impl PeerWriter for Failed {
-            async fn send_text(&mut self, _: String) -> Result<()> {
-                Ok(())
-            }
             async fn send_binary(&mut self, _: Vec<u8>) -> Result<()> {
                 bail!("sink failure")
             }

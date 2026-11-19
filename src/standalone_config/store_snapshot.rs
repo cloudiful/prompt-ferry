@@ -121,7 +121,7 @@ impl StandaloneConfigStore {
         transaction: &mut sqlx::Transaction<'_, Sqlite>,
         manager: &RelaySecretManager,
     ) -> Result<Vec<ModelRouteConfig>> {
-        let connection = SqliteNativeConnection::new(&mut **transaction);
+        let connection = SqliteNativeConnection::new(transaction);
         let route_models = standalone_model_routes::Entity::find()
             .order_by_asc(standalone_model_routes::Column::ModelPattern)
             .order_by_asc(standalone_model_routes::Column::RuleId)

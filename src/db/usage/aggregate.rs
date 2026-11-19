@@ -79,7 +79,6 @@ pub async fn refresh_usage_aggregate(pool: &PgPool, range: Option<AffectedRange>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
     fn at(text: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(text)

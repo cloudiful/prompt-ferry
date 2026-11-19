@@ -122,7 +122,7 @@ impl EncryptedConfig {
 
 pub(crate) async fn delete_all(transaction: &mut sqlx::Transaction<'_, Sqlite>) -> Result<()> {
     {
-        let connection = SqliteNativeConnection::new(&mut **transaction);
+        let connection = SqliteNativeConnection::new(transaction);
         delete_route_targets(&connection, None).await?;
         RouteEntity::delete_many()
             .exec(&connection)
@@ -256,7 +256,7 @@ pub(crate) async fn insert_route<C: ConnectionTrait>(
             )?,
         ));
     }
-    insert_route_rows(connection, &route, &targets).await
+    insert_route_rows(connection, route, &targets).await
 }
 
 /// Inserts or replaces one route and its already encrypted targets on the
@@ -265,7 +265,7 @@ pub(crate) async fn insert_encrypted_route(
     transaction: &mut sqlx::Transaction<'_, Sqlite>,
     encrypted: &EncryptedRoute,
 ) -> Result<()> {
-    let connection = SqliteNativeConnection::new(&mut **transaction);
+    let connection = SqliteNativeConnection::new(transaction);
     let targets = encrypted
         .targets
         .iter()

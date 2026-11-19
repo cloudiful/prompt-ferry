@@ -425,7 +425,7 @@ pub async fn list_client_keys_page(
 
 pub async fn get_client_key_label_by_hash(pool: &PgPool, key_hash: &str) -> Result<Option<String>> {
     let db = postgres_connection(pool);
-    Ok(client_keys::Entity::find()
+    client_keys::Entity::find()
         .select_only()
         .column(client_keys::Column::Label)
         .filter(client_keys::Column::KeyHash.eq(key_hash))
@@ -433,7 +433,7 @@ pub async fn get_client_key_label_by_hash(pool: &PgPool, key_hash: &str) -> Resu
         .into_tuple::<String>()
         .one(&db)
         .await
-        .map_err(native_error)?)
+        .map_err(native_error)
 }
 
 pub async fn get_client_key_identity_by_hash(

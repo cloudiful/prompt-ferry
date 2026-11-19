@@ -1,5 +1,17 @@
 use super::*;
+use crate::openapi_export::schemas::ErrorEnvelope;
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/login",
+    operation_id = "auth_login",
+    request_body = LoginRequest,
+    responses(
+        (status = 204, description = "Login successful"),
+        (status = 401, body = ErrorEnvelope, description = "Unauthorized")
+    ),
+    tag = "auth"
+)]
 pub(super) async fn login(
     State(state): State<AdminState>,
     Json(body): Json<LoginRequest>,
@@ -44,6 +56,13 @@ pub(super) async fn login(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/logout",
+    operation_id = "auth_logout",
+    responses((status = 204, description = "Logged out")),
+    tag = "auth"
+)]
 pub(super) async fn logout(State(state): State<AdminState>, headers: HeaderMap) -> Response {
     if let Some(session_id) = session_id(&headers)
         && let Err(err) = state.replay_cache.delete_session(session_id).await
@@ -65,6 +84,16 @@ pub(super) async fn logout(State(state): State<AdminState>, headers: HeaderMap) 
         .into_response()
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/auth/me",
+    operation_id = "auth_me",
+    responses(
+        (status = 200, body = MeResponse, description = "Current user"),
+        (status = 401, body = ErrorEnvelope, description = "Unauthorized")
+    ),
+    tag = "auth"
+)]
 pub(super) async fn me(State(state): State<AdminState>, headers: HeaderMap) -> Response {
     match current_user(&state, &headers).await {
         Ok(user) => Json(MeResponse {

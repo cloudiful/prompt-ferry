@@ -11,7 +11,7 @@ use crate::{
     worker_usage::{StandaloneUsageSummary, UsageLog},
 };
 
-use super::{DEFAULT_USAGE_CAPACITY, StandaloneUsageBuffer};
+use super::StandaloneUsageBuffer;
 
 #[derive(Clone)]
 pub(crate) struct StandaloneRuntimeState {
@@ -30,40 +30,8 @@ pub(crate) struct ClientKeyIdentity {
 }
 
 impl StandaloneRuntimeState {
-    pub(crate) fn with_mcp_runtime(mut self, mcp_runtime: crate::mcp::McpRuntimeState) -> Self {
-        self.mcp_runtime = Some(mcp_runtime);
-        self
-    }
-
     pub(crate) fn mcp_runtime(&self) -> Option<crate::mcp::McpRuntimeState> {
         self.mcp_runtime.clone()
-    }
-
-    pub(crate) fn new(
-        store: Arc<StandaloneConfigStore>,
-        manager: RelaySecretManager,
-        snapshot: StandaloneConfig,
-    ) -> Self {
-        let redaction_enabled = Arc::new(AtomicBool::new(false));
-        apply_redaction_settings(&snapshot, &redaction_enabled);
-        Self {
-            store: store.clone(),
-            manager,
-            snapshot: Arc::new(RwLock::new(snapshot)),
-            redaction_enabled,
-            recent_usage: Arc::new(StandaloneUsageBuffer::with_persistence(
-                DEFAULT_USAGE_CAPACITY,
-                store,
-            )),
-            mcp_runtime: None,
-        }
-    }
-
-    /// Restore the in-memory usage cache from the durable SQLite ledger so
-    /// reopening the same database returns the recent bounded summaries.
-    /// Persistence errors degrade gracefully to an empty cache.
-    pub(crate) async fn hydrate_usage(&self) {
-        self.recent_usage.hydrate_from_store().await;
     }
 
     /// Expose the underlying SQLite pool so the runtime's request-lease
@@ -111,26 +79,4 @@ impl StandaloneRuntimeState {
                 label: key.label.clone(),
             })
     }
-}
-
-pub(crate) fn apply_redaction_settings(snapshot: &StandaloneConfig, enabled: &AtomicBool) {
-    let config = snapshot
-        .settings
-        .iter()
-        .find(|setting| setting.key == "redaction_config")
-        .and_then(|setting| {
-            serde_json::from_value::<crate::redact::RedactionConfig>(setting.value.clone()).ok()
-        });
-    let applied = config
-        .as_ref()
-        .filter(|config| config.validate().is_ok())
-        .and_then(|config| crate::redact::apply_config(config).ok())
-        .is_some();
-    if !applied {
-        let _ = crate::redact::apply_config(&crate::redact::RedactionConfig::default());
-    }
-    enabled.store(
-        applied && config.is_some_and(|config| config.enabled),
-        Ordering::SeqCst,
-    );
 }

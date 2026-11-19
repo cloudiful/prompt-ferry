@@ -2,8 +2,17 @@ use super::usage_support::{
     build_session_route_options_response, request_record_not_found, session_affinity_user_ids,
 };
 use super::*;
+use crate::openapi_export::schemas::ErrorEnvelope;
 use crate::response_affinity::ResponseAffinityStore;
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/request-records/{record_id}/session-route-options",
+    operation_id = "request_record_session_route_options",
+    params(("record_id" = i64, Path, description = "Request record ID")),
+    responses((status = 200, body = SessionRouteOptionsResponse, description = "Session route options for request record")),
+    tag = "request-records"
+)]
 pub(super) async fn usage_event_session_route_options(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -22,6 +31,20 @@ pub(super) async fn usage_event_session_route_options(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/request-records/{record_id}/reset-session-affinity",
+    operation_id = "request_record_reset_session_affinity",
+    params(("record_id" = i64, Path, description = "Request record ID")),
+    responses(
+        (status = 200, body = SessionAffinityResetResponse, description = "Session affinity reset result"),
+        (status = 400, body = ErrorEnvelope, description = "Request record has no conversation"),
+        (status = 403, body = ErrorEnvelope, description = "Administrator access required"),
+        (status = 404, body = ErrorEnvelope, description = "Request record not found"),
+        (status = 503, body = ErrorEnvelope, description = "Response affinity backend unavailable")
+    ),
+    tag = "request-records"
+)]
 pub(super) async fn usage_event_session_affinity_reset(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -102,6 +125,16 @@ pub(super) async fn usage_event_session_affinity_reset(
     .into_response()
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/conversations/{conversation_id}/endpoint-override",
+    params(("conversation_id" = uuid::Uuid, Path, description = "Conversation ID")),
+    responses(
+        (status = 200, body = db::ConversationEndpointOverride, description = "Conversation endpoint override"),
+        (status = 404, body = ErrorEnvelope, description = "Conversation endpoint override not found")
+    ),
+    tag = "request-records"
+)]
 pub(super) async fn get_conversation_endpoint_override(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -121,6 +154,17 @@ pub(super) async fn get_conversation_endpoint_override(
     }
 }
 
+#[utoipa::path(
+    put,
+    path = "/api/v1/admin/conversations/{conversation_id}/endpoint-override",
+    params(("conversation_id" = uuid::Uuid, Path, description = "Conversation ID")),
+    request_body = ConversationEndpointOverrideRequest,
+    responses(
+        (status = 200, body = db::ConversationEndpointOverride, description = "Updated conversation endpoint override"),
+        (status = 400, body = ErrorEnvelope, description = "Invalid endpoint key or endpoint selection")
+    ),
+    tag = "request-records"
+)]
 pub(super) async fn set_conversation_endpoint_override(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -171,6 +215,16 @@ pub(super) async fn set_conversation_endpoint_override(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/admin/conversations/{conversation_id}/endpoint-override",
+    params(("conversation_id" = uuid::Uuid, Path, description = "Conversation ID")),
+    responses(
+        (status = 204, description = "Deleted conversation endpoint override"),
+        (status = 404, body = ErrorEnvelope, description = "Conversation endpoint override not found")
+    ),
+    tag = "request-records"
+)]
 pub(super) async fn delete_conversation_endpoint_override(
     State(state): State<AdminState>,
     headers: HeaderMap,

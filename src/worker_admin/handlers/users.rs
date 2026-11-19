@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::db::config_repository::client_keys::parse_client_key_identifier;
+use crate::openapi_export::schemas::ErrorEnvelope;
 
 impl From<db::UnifiedClientKey> for ClientKey {
     fn from(key: db::UnifiedClientKey) -> Self {
@@ -31,6 +32,17 @@ impl From<db::UnifiedClientKeyCreated> for CreateClientKeyResponse {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/users",
+    params(TablePageQuery),
+    responses(
+        (status = 200, body = UserPageResponse, description = "Users"),
+        (status = 401, body = ErrorEnvelope, description = "Not authenticated"),
+        (status = 403, body = ErrorEnvelope, description = "Administrator access required")
+    ),
+    tag = "users"
+)]
 pub(super) async fn list_users(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -53,6 +65,16 @@ pub(super) async fn list_users(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/users/options",
+    responses(
+        (status = 200, body = UserOptionsResponse, description = "User options"),
+        (status = 401, body = ErrorEnvelope, description = "Not authenticated"),
+        (status = 403, body = ErrorEnvelope, description = "Administrator access required")
+    ),
+    tag = "users"
+)]
 pub(super) async fn list_user_options(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -66,6 +88,18 @@ pub(super) async fn list_user_options(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/users",
+    request_body = CreateUserRequest,
+    responses(
+        (status = 200, body = db::User, description = "Created user"),
+        (status = 400, body = ErrorEnvelope, description = "Invalid user request"),
+        (status = 401, body = ErrorEnvelope, description = "Not authenticated"),
+        (status = 403, body = ErrorEnvelope, description = "Administrator access required")
+    ),
+    tag = "users"
+)]
 pub(super) async fn create_user(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -102,6 +136,17 @@ pub(super) async fn create_user(
     }
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/admin/users/{user_id}",
+    params(("user_id" = i64, Path, description = "User ID")),
+    request_body = db::UserUpdate,
+    responses(
+        (status = 200, body = db::User, description = "Updated user"),
+        (status = 404, body = ErrorEnvelope, description = "User not found")
+    ),
+    tag = "users"
+)]
 pub(super) async fn update_user(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -118,6 +163,17 @@ pub(super) async fn update_user(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/users/{user_id}/reset-password",
+    params(("user_id" = i64, Path, description = "User ID")),
+    request_body = ResetPasswordRequest,
+    responses(
+        (status = 204, description = "Password reset"),
+        (status = 404, body = ErrorEnvelope, description = "User not found")
+    ),
+    tag = "users"
+)]
 pub(super) async fn reset_password(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -145,6 +201,16 @@ pub(super) async fn reset_password(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/admin/users/{user_id}",
+    params(("user_id" = i64, Path, description = "User ID")),
+    responses(
+        (status = 204, description = "Deleted user"),
+        (status = 404, body = ErrorEnvelope, description = "User not found")
+    ),
+    tag = "users"
+)]
 pub(super) async fn delete_user(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -160,6 +226,16 @@ pub(super) async fn delete_user(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/users/{user_id}/client-keys",
+    params(("user_id" = i64, Path, description = "User ID"), TablePageQuery),
+    responses(
+        (status = 200, body = ClientKeyPageResponse, description = "Client keys"),
+        (status = 404, body = ErrorEnvelope, description = "User not found")
+    ),
+    tag = "users"
+)]
 pub(super) async fn list_client_keys(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -187,6 +263,17 @@ pub(super) async fn list_client_keys(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/users/{user_id}/client-keys",
+    params(("user_id" = i64, Path, description = "User ID")),
+    request_body = CreateClientKeyRequest,
+    responses(
+        (status = 200, body = CreateClientKeyResponse, description = "Created client key"),
+        (status = 404, body = ErrorEnvelope, description = "User not found")
+    ),
+    tag = "users"
+)]
 pub(super) async fn create_client_key(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -210,6 +297,20 @@ pub(super) async fn create_client_key(
     }
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/admin/users/{user_id}/client-keys/{key_id}",
+    params(
+        ("user_id" = i64, Path, description = "User ID"),
+        ("key_id" = String, Path, description = "Client key UUID; legacy numeric identifiers are also accepted")
+    ),
+    request_body = UpdateClientKeyRequest,
+    responses(
+        (status = 200, body = ClientKey, description = "Updated client key"),
+        (status = 404, body = ErrorEnvelope, description = "User or client key not found")
+    ),
+    tag = "users"
+)]
 pub(super) async fn update_client_key(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -246,6 +347,19 @@ pub(super) async fn update_client_key(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/admin/users/{user_id}/client-keys/{key_id}",
+    params(
+        ("user_id" = i64, Path, description = "User ID"),
+        ("key_id" = String, Path, description = "Client key UUID; legacy numeric identifiers are also accepted")
+    ),
+    responses(
+        (status = 204, description = "Deleted client key"),
+        (status = 404, body = ErrorEnvelope, description = "User or client key not found")
+    ),
+    tag = "users"
+)]
 pub(super) async fn delete_client_key(
     State(state): State<AdminState>,
     headers: HeaderMap,

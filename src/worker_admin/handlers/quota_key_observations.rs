@@ -1,4 +1,5 @@
 use super::*;
+use crate::openapi_export::schemas::ErrorEnvelope;
 
 #[cfg(test)]
 mod tests;
@@ -9,6 +10,22 @@ const HISTORY_PAGE_MAX: u16 = 200;
 /// trend display cap so a selected key is never silently dropped.
 const KEY_FILTER_MAX: usize = 24;
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/quota-observations",
+    params(
+        ("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID"),
+        QuotaKeyObservationHistoryQuery
+    ),
+    responses(
+        (status = 200, body = QuotaKeyObservationHistoryResponse, description = "Per-key quota observation history"),
+        (status = 400, body = ErrorEnvelope, description = "Invalid key, kind, limit, or cursor filter"),
+        (status = 404, body = ErrorEnvelope, description = "Endpoint not found"),
+        (status = 500, body = ErrorEnvelope, description = "Quota observation storage unavailable"),
+        (status = 503, body = ErrorEnvelope, description = "Quota observation storage unavailable")
+    ),
+    tag = "endpoints"
+)]
 pub(super) async fn quota_key_observation_history(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -217,9 +234,25 @@ fn parse_trend_kinds(
     Ok(Some(parsed))
 }
 
-/// Bounded, fixed-range trend for the per-key quota observation history. The
-/// range and bucket grid are server-owned; only the optional key and kind
-/// filters and the named range cross the boundary.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/quota-observations/trend",
+    params(
+        ("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID"),
+        QuotaKeyObservationTrendQuery
+    ),
+    responses(
+        (status = 200, body = QuotaKeyObservationTrendResponse, description = "Bounded per-key quota observation trend"),
+        (status = 400, body = ErrorEnvelope, description = "Invalid key, kind, or range filter"),
+        (status = 404, body = ErrorEnvelope, description = "Endpoint not found"),
+        (status = 500, body = ErrorEnvelope, description = "Quota observation storage unavailable"),
+        (status = 503, body = ErrorEnvelope, description = "Quota observation storage unavailable")
+    ),
+    tag = "endpoints"
+)]
+// Bounded, fixed-range trend for the per-key quota observation history. The
+// range and bucket grid are server-owned; only the optional key and kind
+// filters and the named range cross the boundary.
 pub(super) async fn quota_key_observation_trend(
     State(state): State<AdminState>,
     headers: HeaderMap,

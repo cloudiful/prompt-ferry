@@ -66,7 +66,7 @@ pub(super) fn spawn(
                 control.wait_for_shutdown().await;
             }
         };
-        run_owned_worker(request_wakes, periodic).await;
+        Box::pin(run_owned_worker(request_wakes, periodic)).await;
     })
 }
 

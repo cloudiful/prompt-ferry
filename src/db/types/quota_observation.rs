@@ -121,22 +121,40 @@ pub struct QuotaObservation {
     pub created_at: DateTime<Utc>,
 }
 
+/// Ingestion inputs of one quota observation. Every field is validated by
+/// [`QuotaObservationCreate::new`] before the first write.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuotaObservationInput {
+    pub endpoint_id: Uuid,
+    pub key_id: Uuid,
+    pub provider: QuotaObservationProvider,
+    pub key_label: String,
+    pub source: QuotaObservationSource,
+    pub observed_at: DateTime<Utc>,
+    pub ok: bool,
+    pub status: Option<String>,
+    pub error_code: Option<String>,
+    pub plan_type: Option<String>,
+    pub limit_reached: Option<bool>,
+    pub windows: Vec<CanonicalQuotaWindow>,
+}
+
 impl QuotaObservationCreate {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        endpoint_id: Uuid,
-        key_id: Uuid,
-        provider: QuotaObservationProvider,
-        key_label: String,
-        source: QuotaObservationSource,
-        observed_at: DateTime<Utc>,
-        ok: bool,
-        status: Option<String>,
-        error_code: Option<String>,
-        plan_type: Option<String>,
-        limit_reached: Option<bool>,
-        windows: Vec<CanonicalQuotaWindow>,
-    ) -> Result<Self> {
+    pub fn new(input: QuotaObservationInput) -> Result<Self> {
+        let QuotaObservationInput {
+            endpoint_id,
+            key_id,
+            provider,
+            key_label,
+            source,
+            observed_at,
+            ok,
+            status,
+            error_code,
+            plan_type,
+            limit_reached,
+            windows,
+        } = input;
         let create = Self {
             endpoint_id,
             key_id,

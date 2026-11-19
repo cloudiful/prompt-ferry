@@ -10,15 +10,10 @@ mod worker_proxy;
 
 pub use state::{RelayHandle, RemoteAddr};
 
-#[allow(unused_imports)] // P3b node integration entrypoint.
-pub(crate) use router::{merge_node_router, node_apps, node_edge_apps};
+pub(crate) use router::{node_apps, node_edge_apps};
 #[cfg(test)]
 pub(crate) use state::test_state;
-#[allow(unused_imports)] // P3b node integration entrypoints.
 pub(crate) use state::{AppState, WorkerSender};
-#[allow(unused_imports)] // P3c peer integration entrypoints.
 pub(crate) use state::{MAX_NODE_PEERS, node_peer_cap_reached};
-#[allow(unused_imports)] // P3b node integration entrypoint.
 pub(crate) use worker_bridge::attach_in_memory_worker;
-#[allow(unused_imports)] // P3c peer integration entrypoints.
 pub(crate) use worker_bridge::{cleanup_worker, dispatch_worker_bridge_message, register_worker};

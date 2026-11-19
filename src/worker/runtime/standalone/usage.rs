@@ -12,8 +12,6 @@ use crate::standalone_config::{
 };
 use crate::worker_usage::{StandaloneUsageSummary, UsageLog};
 
-pub(crate) const DEFAULT_USAGE_CAPACITY: usize = 256;
-
 pub(crate) struct StandaloneUsageBuffer {
     capacity: usize,
     entries: Mutex<VecDeque<StandaloneUsageSummary>>,
@@ -39,23 +37,6 @@ impl StandaloneUsageBuffer {
             capacity,
             entries: Mutex::new(VecDeque::with_capacity(capacity)),
             persistence: None,
-        }
-    }
-
-    /// Construct a buffer that mirrors every record into the standalone
-    /// SQLite usage ledger through the provided store. Persistence is
-    /// awaited explicitly via `persist`; nothing is ever dispatched via
-    /// untracked `tokio::spawn`.
-    pub(crate) fn with_persistence(capacity: usize, store: Arc<StandaloneConfigStore>) -> Self {
-        let capacity = capacity.max(1);
-        let prune_max_rows = i64::try_from(capacity).unwrap_or(i64::MAX);
-        Self {
-            capacity,
-            entries: Mutex::new(VecDeque::with_capacity(capacity)),
-            persistence: Some(UsagePersistence {
-                store,
-                prune_max_rows,
-            }),
         }
     }
 
@@ -209,46 +190,6 @@ impl StandaloneUsageBuffer {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .len()
-    }
-
-    /// Replace the in-memory cache with the most recent persisted summaries
-    /// so reopening the same SQLite file restores prior state. Newer rows
-    /// are appended; older rows already present in memory are dropped to
-    /// keep the cache bounded. A single malformed row skips with a warning
-    /// instead of failing the entire read.
-    pub(crate) async fn hydrate_from_store(&self) {
-        let Some(persistence) = self.persistence.as_ref() else {
-            return;
-        };
-        let records = match persistence
-            .store
-            .list_usage_summaries(self.capacity as i64)
-            .await
-        {
-            Ok(records) => records,
-            Err(error) => {
-                warn!(
-                    error = %error,
-                    "failed to hydrate standalone usage ledger from SQLite; keeping empty in-memory cache"
-                );
-                return;
-            }
-        };
-        let summaries = records
-            .iter()
-            .map(StandaloneUsageSummary::from)
-            .collect::<Vec<_>>();
-        let mut entries = self
-            .entries
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        entries.clear();
-        for summary in summaries {
-            if entries.len() == self.capacity {
-                entries.pop_front();
-            }
-            entries.push_back(summary);
-        }
     }
 }
 

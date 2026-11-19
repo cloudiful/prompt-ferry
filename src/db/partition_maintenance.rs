@@ -173,12 +173,12 @@ async fn run_partition_maintenance_locked(
     let mut metadata_chunks = 0u64;
 
     for parent in METADATA_FAMILY_PARENTS {
-        let dropped = drop_parent_chunks(&mut **conn, parent, metadata_cutoff).await?;
+        let dropped = drop_parent_chunks(conn, parent, metadata_cutoff).await?;
         metadata_chunks += dropped;
         report.chunks_dropped += dropped;
     }
     for parent in CONTENT_FAMILY_PARENTS {
-        report.chunks_dropped += drop_parent_chunks(&mut **conn, parent, content_cutoff).await?;
+        report.chunks_dropped += drop_parent_chunks(conn, parent, content_cutoff).await?;
     }
     report.affected_metadata =
         (metadata_chunks > 0).then(|| AffectedRange::unbounded_before(metadata_cutoff));
@@ -195,7 +195,7 @@ async fn drop_before_today_locked(conn: &mut PoolConnection<Postgres>) -> Result
         .copied()
         .chain(std::iter::once(RAW_PAYLOAD_PARENT))
     {
-        dropped += drop_parent_chunks(&mut **conn, parent, cutoff).await?;
+        dropped += drop_parent_chunks(conn, parent, cutoff).await?;
     }
     Ok(dropped)
 }

@@ -1,4 +1,6 @@
-use std::{fmt, future::Future, pin::Pin, sync::Arc, time::Duration};
+#[cfg(test)]
+use std::time::Duration;
+use std::{fmt, future::Future, pin::Pin, sync::Arc};
 
 use crate::protocol::{BridgeMessage, McpResponseChunk, ResponseChunk};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
@@ -15,8 +17,10 @@ type WireSize = dyn for<'a> Fn(
 pub(crate) struct BridgeSender {
     data_tx: mpsc::Sender<BridgeData>,
     control_tx: mpsc::UnboundedSender<BridgeMessage>,
-    flush_tx: mpsc::UnboundedSender<oneshot::Sender<()>>,
+    /// Keeps the flush receiver open until every sender clone drops.
+    _flush_tx: mpsc::UnboundedSender<oneshot::Sender<()>>,
     flush_rx: Arc<std::sync::Mutex<Option<mpsc::UnboundedReceiver<oneshot::Sender<()>>>>>,
+
     queued_bytes: Arc<Semaphore>,
     wire_size: Option<Arc<WireSize>>,
 }
@@ -89,7 +93,7 @@ impl BridgeSender {
             Self {
                 data_tx,
                 control_tx,
-                flush_tx,
+                _flush_tx: flush_tx,
                 flush_rx: Arc::new(std::sync::Mutex::new(Some(flush_rx))),
                 queued_bytes: Arc::new(Semaphore::new(byte_budget)),
                 wire_size: None,
@@ -123,9 +127,10 @@ impl BridgeSender {
     /// Returns `false` when the writer is gone, the socket write fails, or the
     /// bounded allowance expires; a closed or failing socket never reports a
     /// successful flush.
+    #[cfg(test)]
     pub(crate) async fn flush(&self, allowance: Duration) -> bool {
         let (ack_tx, ack_rx) = oneshot::channel();
-        if self.flush_tx.send(ack_tx).is_err() {
+        if self._flush_tx.send(ack_tx).is_err() {
             return false;
         }
         matches!(tokio::time::timeout(allowance, ack_rx).await, Ok(Ok(())))

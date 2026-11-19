@@ -1,6 +1,16 @@
 use super::*;
+use crate::openapi_export::schemas::ErrorEnvelope;
 use crate::session_affinity::{apply_opencode_headers, opencode_headers_apply};
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/endpoints",
+    params(TablePageQuery),
+    responses(
+        (status = 200, body = EndpointPageResponse, description = "Endpoint page")
+    ),
+    tag = "endpoints"
+)]
 pub(super) async fn list_endpoints(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -19,6 +29,16 @@ pub(super) async fn list_endpoints(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/endpoints",
+    request_body = EndpointRequest,
+    responses(
+        (status = 200, body = db::ProviderEndpoint, description = "Created endpoint"),
+        (status = 400, body = ErrorEnvelope, description = "Invalid endpoint request")
+    ),
+    tag = "endpoints"
+)]
 pub(super) async fn create_endpoint(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -73,6 +93,17 @@ pub(super) async fn create_endpoint(
     }
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/admin/endpoints/{endpoint_id}",
+    params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
+    request_body = EndpointRequest,
+    responses(
+        (status = 200, body = db::ProviderEndpoint, description = "Updated endpoint"),
+        (status = 404, body = ErrorEnvelope, description = "Endpoint not found")
+    ),
+    tag = "endpoints"
+)]
 pub(super) async fn update_endpoint(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -255,6 +286,16 @@ async fn refresh_managed_minimax_mcp(state: &AdminState, endpoint_id: Uuid) {
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/admin/endpoints/{endpoint_id}",
+    params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
+    responses(
+        (status = 204, description = "Deleted endpoint"),
+        (status = 404, body = ErrorEnvelope, description = "Endpoint not found")
+    ),
+    tag = "endpoints"
+)]
 pub(super) async fn delete_endpoint(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -289,12 +330,28 @@ pub(super) async fn delete_endpoint(
     }
 }
 
-/// Issue #993 P1: the model identifiers one endpoint advertises.
-///
-/// The listing is an upstream discovery read, so it follows the endpoint's
-/// own base URL, proxy, and protocol auth instead of a provider allowlist.
-/// The response carries sorted, de-duplicated identifiers; a failure is a
-/// bounded admin error that never echoes the credential or the upstream body.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/models",
+    operation_id = "endpoint_models",
+    params(
+        ("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID"),
+        ModelCatalogQuery
+    ),
+    responses(
+        (status = 200, body = EndpointModelsResponse, description = "Upstream model identifiers; a ChatGPT subscription endpoint answers from the Codex model table"),
+        (status = 400, body = ErrorEnvelope, description = "Missing endpoint API key or invalid endpoint proxy configuration"),
+        (status = 404, body = ErrorEnvelope, description = "Endpoint not found"),
+        (status = 502, body = ErrorEnvelope, description = "Upstream model discovery failed")
+    ),
+    tag = "endpoints"
+)]
+// Issue #993 P1: the model identifiers one endpoint advertises.
+//
+// The listing is an upstream discovery read, so it follows the endpoint's
+// own base URL, proxy, and protocol auth instead of a provider allowlist.
+// The response carries sorted, de-duplicated identifiers; a failure is a
+// bounded admin error that never echoes the credential or the upstream body.
 pub(super) async fn list_endpoint_models(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -434,6 +491,17 @@ fn discovery_failed() -> Response {
     )
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/test",
+    params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
+    responses(
+        (status = 200, body = EndpointTestResponse, description = "Endpoint test result"),
+        (status = 400, body = ErrorEnvelope, description = "Missing endpoint API key"),
+        (status = 404, body = ErrorEnvelope, description = "Endpoint not found")
+    ),
+    tag = "endpoints"
+)]
 pub(super) async fn test_endpoint(
     State(state): State<AdminState>,
     headers: HeaderMap,

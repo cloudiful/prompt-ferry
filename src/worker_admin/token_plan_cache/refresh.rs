@@ -119,13 +119,15 @@ impl TokenPlanQuotaCache {
                     }
                     crate::worker_admin::quota_observation_service::persist_response(
                         pool,
-                        endpoint_id,
-                        response.provider,
+                        crate::worker_admin::quota_observation_service::QuotaObservationContext {
+                            endpoint_id,
+                            provider: response.provider,
+                            source,
+                            observed_at,
+                            plan_type: None,
+                            limit_reached: None,
+                        },
                         &response,
-                        source,
-                        observed_at,
-                        None,
-                        None,
                     )
                     .await;
                     Ok(Some(response))

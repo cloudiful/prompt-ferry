@@ -216,7 +216,7 @@ impl PeerDirectory {
     }
 
     /// The generation of the current link to a peer, if any.
-    #[allow(dead_code)] // Used by the topology tests.
+    #[cfg(test)]
     pub async fn generation(&self, remote_id: NodeId) -> Option<u64> {
         let state = self.inner.lock().await;
         state.entries.get(&remote_id).map(|slot| slot.generation)
@@ -229,7 +229,7 @@ impl PeerDirectory {
     }
 
     /// Whether this node serves no peer at all.
-    #[allow(dead_code)] // Used by the topology tests.
+    #[cfg(test)]
     pub async fn is_empty(&self) -> bool {
         self.len().await == 0
     }

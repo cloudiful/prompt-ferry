@@ -26,6 +26,7 @@ mod nodes;
 pub mod oauth;
 mod oauth_client;
 mod oauth_session;
+pub(crate) mod openapi_paths;
 mod quota_inference;
 mod quota_key_observations;
 mod server;
