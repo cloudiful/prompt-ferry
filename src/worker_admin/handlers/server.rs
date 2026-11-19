@@ -5,14 +5,12 @@ use axum::{
     extract::Request,
     middleware::{self, Next},
 };
-use std::path::PathBuf;
 #[cfg(test)]
 use std::time::Duration;
 use tower_http::compression::{
     CompressionLayer,
     predicate::{DefaultPredicate, NotForContentType, Predicate},
 };
-use tower_http::services::{ServeDir, ServeFile};
 
 use crate::worker_admin::state::AdminExecutionTracker;
 
@@ -22,34 +20,15 @@ use crate::worker_admin::state::AdminExecutionTracker;
 /// readiness routes can never be swallowed by the SPA fallback.
 ///
 /// The frontend itself is resolved by [`crate::web_assets_server::frontend`]:
-/// the assets embedded in the binary by default, or the deliberate filesystem
-/// override when [`crate::web_assets::FRONTEND_DIST_ENV`] points at a built
-/// `dist` directory (frontend development without a Rust rebuild).
+/// embedded assets by default, or a filesystem directory selected by
+/// [`crate::web_assets_server::FRONTEND_DIST_ENV`] or the runtime defaults.
 pub fn router(state: AdminState) -> Router {
-    match crate::web_assets_server::frontend() {
-        crate::web_assets_server::Frontend::Embedded => Router::new()
-            .nest("/api/v1", api_router(state.clone()))
-            .with_state(state)
-            .route_service(
-                "/assets/{*rest}",
-                get(|Path(asset_path): Path<String>| async move {
-                    crate::web_assets_server::serve_embedded_file(&format!("assets/{asset_path}"))
-                        .await
-                }),
-            )
-            .route_service(
-                "/favicon.svg",
-                get(|| async {
-                    crate::web_assets_server::serve_embedded_file("favicon.svg").await
-                }),
-            )
-            .fallback(get(crate::web_assets_server::serve_embedded_index))
-            .layer(CorsLayer::permissive())
-            .layer(response_compression_layer()),
-        crate::web_assets_server::Frontend::Filesystem(dist) => {
-            router_with_frontend_dist(state, dist)
-        }
-    }
+    Router::new()
+        .nest("/api/v1", api_router(state.clone()))
+        .with_state(state)
+        .merge(crate::web_assets_server::frontend_routes())
+        .layer(CorsLayer::permissive())
+        .layer(response_compression_layer())
 }
 
 fn response_compression_layer() -> CompressionLayer<impl Predicate + Send + 'static> {
@@ -81,9 +60,6 @@ fn skip_websocket_upgrade(
     true
 }
 
-/// The filesystem-serving router, kept for the deliberate frontend-override
-/// development seam and its adjacent tests. Production serves from the
-/// embedded assets through [`router`].
 /// The API surface, kept separate so the SPA fallback cannot shadow it.
 ///
 /// Returned with [`AdminState`] still unresolved; each caller converts once
@@ -314,24 +290,6 @@ fn api_router(state: AdminState) -> Router<AdminState> {
             track_admin_execution,
         ))
         .fallback(admin_api_fallback)
-}
-
-/// The filesystem-serving router, kept for the deliberate frontend-override
-/// development seam and its adjacent tests. Production serves from the
-/// embedded assets through [`router`].
-fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Router {
-    let frontend_assets = ServeDir::new(frontend_dist.join("assets"));
-    let frontend_index = ServeFile::new(frontend_dist.join("index.html"));
-    let frontend_favicon = ServeFile::new(frontend_dist.join("favicon.svg"));
-
-    Router::new()
-        .nest("/api/v1", api_router(state.clone()))
-        .with_state(state)
-        .nest_service("/assets", frontend_assets)
-        .route_service("/favicon.svg", frontend_favicon)
-        .fallback_service(frontend_index)
-        .layer(CorsLayer::permissive())
-        .layer(response_compression_layer())
 }
 
 /// Routes for the administrator configuration import.

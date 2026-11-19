@@ -6,9 +6,16 @@
 //! when absent; `web_assets::embedded_index` then serves its deliberate
 //! fallback page instead of a UI that was never built.
 
+#[cfg(feature = "embedded-frontend")]
 use std::path::Path;
 
 fn main() {
+    #[cfg(feature = "embedded-frontend")]
+    ensure_dist();
+}
+
+#[cfg(feature = "embedded-frontend")]
+fn ensure_dist() {
     let dist = Path::new(&std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
         .join("frontend/dist");
     if dist.is_dir() {

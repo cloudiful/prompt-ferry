@@ -18,7 +18,7 @@ use include_dir::{Dir, include_dir};
 /// The override is deliberate and developer-facing: an explicitly configured
 /// directory is honoured even when the embedded assets exist, so frontend work
 /// can skip the Rust rebuild.
-pub const FRONTEND_DIST_ENV: &str = "PROMPT_FERRY_FRONTEND_DIST";
+pub use crate::web_assets_server::FRONTEND_DIST_ENV;
 
 /// The SPA build output captured at compile time.
 ///
