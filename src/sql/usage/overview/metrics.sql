@@ -1,61 +1,15 @@
-WITH normalized AS (
-    -- Project only the columns the response needs. `rr.*` also materialized
-    -- the JSONB request payloads, which forced wide heap reads and made the
-    -- `idx_request_records_usage_covering` Index Only Scan impossible.
-    SELECT rr.ok,
-           rr.request_state,
-           rr.duration_ms,
-           rr.ttft_ms,
-           rr.input_tokens,
-           rr.output_tokens,
-           rr.total_tokens,
-           rr.cached_tokens,
-           rr.cache_read_tokens,
-           rr.cache_write_tokens,
-           rr.request_category,
-           rr.mcp_protocol_method,
-           -- Post-0072 rows already store the ordinary (non-cache) input; rows
-           -- still in the folded shape keep the cache inside `input_tokens`, so
-           -- expand them to the ordinary miss `input - cache_read - cache_write`
-           -- (floored at 0) using the same guard as the full-input denominator.
-           -- Closed loop: ordinary + cache_read + cache_write + output == total.
-           CASE
-               WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0
-                   AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)
-                   AND COALESCE(rr.input_tokens, 0)
-                       >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)
-               THEN GREATEST(
-                   COALESCE(rr.input_tokens, 0)
-                       - GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                       - GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
-                   0
-               )
-               ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)
-           END::BIGINT AS normalized_input_tokens,
-           COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)::BIGINT AS normalized_cache_read_tokens,
-           COALESCE(rr.cache_write_tokens, 0)::BIGINT AS normalized_cache_write_tokens,
-            -- P2 (issue #205): full-input denominator `ordinary+read+write`,
-            -- 真 0.49 (e.g. 9728/18144) vs old `max` 1.0 which dropped the
-            -- ordinary part. Still-folded rows (0072/0073 guard:
-            -- cache>0 AND total>=output AND input>=total-output, input already
-            -- holds the cache) fall back to `max(input, read+write)` to avoid
-            -- the ≈1.9x double-count; total keeps closed-loop
-            -- ordinary+read+write+output.
-            CASE
-                WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0
-                    AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)
-                    AND COALESCE(rr.input_tokens, 0)
-                        >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)
-                THEN GREATEST(
-                    COALESCE(rr.input_tokens, 0),
-                    GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                        + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
-                    0
-                )
-                ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)
-                    + GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                    + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)
-            END::BIGINT AS normalized_full_input_tokens
+WITH rows AS (
+    SELECT usage.*
+    FROM public.request_usage_window($1::BIGINT, $2::TEXT, $3::TIMESTAMPTZ, $4::TIMESTAMPTZ, $6::TEXT) usage
+    WHERE ($5::TEXT IS NULL OR COALESCE(
+        (SELECT u.login_name FROM users u WHERE u.user_id = usage.user_id),
+        CASE WHEN usage.user_id IS NULL THEN '-' ELSE '#' || usage.user_id::TEXT END
+    ) = $5)
+), p95 AS (
+    SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY rr.duration_ms)
+               FILTER (WHERE rr.duration_ms IS NOT NULL) AS p95_total_ms,
+           percentile_cont(0.95) WITHIN GROUP (ORDER BY rr.ttft_ms)
+               FILTER (WHERE rr.ttft_ms IS NOT NULL) AS p95_first_token_ms
     FROM request_records rr
     LEFT JOIN users u ON u.user_id = rr.user_id
     WHERE rr.event_kind = 'request'
@@ -77,46 +31,35 @@ WITH normalized AS (
               AND rr.mcp_server_id IS NULL
           )
       )
+), agg AS (
+    SELECT COALESCE(SUM(request_count), 0)::BIGINT AS request_count,
+           COALESCE(SUM(success_by_ok), 0)::BIGINT AS success_count,
+           COALESCE(SUM(error_by_ok), 0)::BIGINT AS error_count,
+           COALESCE(SUM(cache_hit_count), 0)::BIGINT AS cache_hit_count,
+           COUNT(DISTINCT mcp_protocol_method)
+               FILTER (WHERE mcp_protocol_method IS NOT NULL)::BIGINT AS method_count,
+           COALESCE(SUM(input_tokens), 0)::BIGINT AS input_tokens,
+           COALESCE(SUM(cache_read_tokens), 0)::BIGINT AS cache_read_tokens,
+           COALESCE(SUM(cache_write_tokens), 0)::BIGINT AS cache_write_tokens,
+           COALESCE(SUM(output_tokens), 0)::BIGINT AS output_tokens,
+           COALESCE(SUM(total_tokens), 0)::BIGINT AS total_tokens,
+           COALESCE(SUM(full_input_tokens), 0)::BIGINT AS full_input_tokens,
+           SUM(tps_sum)::DOUBLE PRECISION / NULLIF(SUM(tps_count), 0) AS avg_output_tokens_per_second
+    FROM rows
 )
-SELECT COUNT(*)::BIGINT AS "request_count!",
-       COUNT(*) FILTER (WHERE ok IS TRUE)::BIGINT AS "success_count!",
-       COUNT(*) FILTER (
-           WHERE ok IS FALSE OR request_state IN ('failed', 'aborted')
-       )::BIGINT AS "error_count!",
-       COUNT(*) FILTER (
-           WHERE normalized_cache_read_tokens > 0
-       )::BIGINT AS "cache_hit_count!",
-       COUNT(DISTINCT mcp_protocol_method)
-           FILTER (WHERE mcp_protocol_method IS NOT NULL)::BIGINT AS "method_count!",
-       COALESCE(SUM(normalized_input_tokens), 0)::BIGINT AS "input_tokens!",
-       COALESCE(SUM(normalized_cache_read_tokens), 0)::BIGINT AS "cache_read_tokens!",
-       COALESCE(SUM(normalized_cache_write_tokens), 0)::BIGINT AS "cache_write_tokens!",
-       COALESCE(SUM(output_tokens), 0)::BIGINT AS "output_tokens!",
-        -- Issue #342: overview `total_tokens` must reconcile with the
-        -- persisted closed-loop value used by `usage_summary.sql` and the
-        -- bucket queries (`SUM(GREATEST(COALESCE(total_tokens, 0), 0))`).
-        -- Re-adding the cache meters per row double-counts still-folded
-        -- history, so use the provider fact directly; `full_input_tokens`
-        -- remains the fold-aware `cache_rate` denominator only.
-        COALESCE(SUM(GREATEST(COALESCE(total_tokens, 0), 0)), 0)::BIGINT AS "total_tokens!",
-        -- P1 (issue #226): the aggregated `cache_rate` denominator must be
-        -- SUM(normalized_full_input_tokens) — computed row-by-row in the CTE
-        -- so still-folded rows use the `max` fallback — not the raw
-        -- `input_tokens` SUM, which double-counts the cache (49% vs 98.58%).
-        COALESCE(SUM(normalized_full_input_tokens), 0)::BIGINT AS "full_input_tokens!",
-       AVG(
-           CASE
-               WHEN request_category = 'ai'
-                   AND request_state = 'completed'
-                   AND output_tokens IS NOT NULL
-                   AND output_tokens > 0
-                   AND duration_ms > 0
-               THEN output_tokens::NUMERIC / duration_ms::NUMERIC * 1000.0
-               ELSE NULL
-           END
-       )::DOUBLE PRECISION AS avg_output_tokens_per_second,
-       percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms)
-           FILTER (WHERE duration_ms IS NOT NULL) AS p95_total_ms,
-       percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms)
-           FILTER (WHERE ttft_ms IS NOT NULL) AS p95_first_token_ms
-FROM normalized
+SELECT agg.request_count::BIGINT AS "request_count!",
+       agg.success_count::BIGINT AS "success_count!",
+       agg.error_count::BIGINT AS "error_count!",
+       agg.cache_hit_count::BIGINT AS "cache_hit_count!",
+       agg.method_count::BIGINT AS "method_count!",
+       agg.input_tokens::BIGINT AS "input_tokens!",
+       agg.cache_read_tokens::BIGINT AS "cache_read_tokens!",
+       agg.cache_write_tokens::BIGINT AS "cache_write_tokens!",
+       agg.output_tokens::BIGINT AS "output_tokens!",
+       agg.total_tokens::BIGINT AS "total_tokens!",
+       agg.full_input_tokens::BIGINT AS "full_input_tokens!",
+       agg.avg_output_tokens_per_second,
+       p95.p95_total_ms,
+       p95.p95_first_token_ms
+FROM agg
+CROSS JOIN p95

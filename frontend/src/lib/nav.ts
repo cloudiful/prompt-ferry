@@ -6,7 +6,6 @@ import {
   Database,
   KeyRound,
   Plug,
-  Receipt,
   Server,
   Settings,
   ShieldCheck,
@@ -158,19 +157,6 @@ export const navSections: NavSection[] = [
         id: 'R-USAGE-MCP',
         path: '/request-records/mcp',
         titleKey: 'mcpCalls',
-        adminOnly: false,
-      },
-    ],
-  },
-  {
-    id: 'billing',
-    labelKey: 'billing',
-    icon: Receipt,
-    routes: [
-      {
-        id: 'R-BILLING',
-        path: '/billing',
-        titleKey: 'billing',
         adminOnly: false,
       },
     ],

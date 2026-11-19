@@ -437,7 +437,8 @@ mod tests {
             (Some(4), Some(0), Some(4)),
             "an absent total falls back to the actual input, not input+completion"
         );
-        // An output/completion-only shape carries no billable embedding meter.
+        // An output/completion-only shape reports no usable embedding token
+        // counts.
         let output_only = embedding_usage(r#"{"completion_tokens":3,"output_tokens":3}"#);
         assert_eq!(
             (
@@ -448,9 +449,8 @@ mod tests {
             (None, None, None),
             "no input and no reported total stays unknown"
         );
-        assert!(crate::db::NormalizedBillingUsage::from_usage(&output_only).is_none());
         // An explicit total without input stays factual metadata, with no
-        // positive output meter.
+        // positive output count.
         let total_only = embedding_usage(r#"{"total_tokens":9}"#);
         assert_eq!(
             (
@@ -459,11 +459,6 @@ mod tests {
                 total_only.total_tokens
             ),
             (None, None, Some(9))
-        );
-        assert_eq!(
-            crate::db::NormalizedBillingUsage::from_usage(&total_only)
-                .map(|usage| usage.output_tokens),
-            Some(0)
         );
     }
 

@@ -80,6 +80,16 @@ impl super::ConfigRepository {
     }
 }
 
+/// Whether a settings row belongs to the running deployment instead of the
+/// portable configuration.
+///
+/// The coordination rows are excluded: the snapshot version counter and the
+/// shared Valkey row belong to the deployment that runs the worker, so they
+/// never travel in an archive and an import never resets them.
+pub(super) fn is_internal_coordination_setting(key: &str) -> bool {
+    crate::db::INTERNAL_COORDINATION_SETTING_KEYS.contains(&key)
+}
+
 /// Every row of `worker_settings`, used by the encrypted configuration export.
 /// Settings are configuration, never runtime history.
 ///
@@ -98,9 +108,7 @@ pub(super) async fn list_all_settings_postgres(
         .map_err(crate::db::seaorm::native_error)?;
     Ok(rows
         .into_iter()
-        .filter(|row| {
-            !crate::db::INTERNAL_COORDINATION_SETTING_KEYS.contains(&row.setting_key.as_str())
-        })
+        .filter(|row| !is_internal_coordination_setting(&row.setting_key))
         .map(|row| SettingSnapshot {
             key: row.setting_key,
             // `worker_settings` has no per-row version; the standalone
@@ -222,5 +230,24 @@ impl SqliteConfigRepository {
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_internal_coordination_setting;
+
+    #[test]
+    fn the_coordination_rows_never_travel_in_an_archive() {
+        assert!(is_internal_coordination_setting(
+            crate::db::SHARED_VALKEY_SETTINGS_KEY
+        ));
+        assert!(is_internal_coordination_setting(
+            crate::db::RELAY_SNAPSHOT_VERSION_SETTINGS_KEY
+        ));
+        assert!(!is_internal_coordination_setting(
+            crate::db::config_repository::snapshot::legacy::LEGACY_RAW_OBJECT_STORE_SETTINGS_KEY
+        ));
+        assert!(!is_internal_coordination_setting("redaction_enabled"));
     }
 }

@@ -17,7 +17,6 @@ pub use prompt_ferry_runtime_env::naming;
 pub mod notify;
 pub mod openai_compat;
 pub mod openapi_export;
-pub mod raw_payload_store;
 pub mod realtime;
 #[cfg(test)]
 mod redaction_budget_tests;

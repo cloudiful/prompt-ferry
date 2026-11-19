@@ -194,14 +194,6 @@ pub fn rekey_shared_valkey_value(
     rekey_fields(value, &["url"], old, new)
 }
 
-pub fn rekey_raw_object_store_value(
-    value: &mut Value,
-    old: &RelaySecretManager,
-    new: &RelaySecretManager,
-) -> Result<usize> {
-    rekey_fields(value, &["s3_access_key", "s3_secret_key"], old, new)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,23 +231,6 @@ mod tests {
             decide_rekey(false, true, true, Some(0)).unwrap(),
             RekeyDecision::Apply
         );
-    }
-
-    #[test]
-    fn raw_store_preserves_unrelated_values() {
-        let old = RelaySecretManager::from_key_bytes([1; 32]);
-        let new = RelaySecretManager::from_key_bytes([2; 32]);
-        let envelope = serde_json::to_value(old.encrypt("access").unwrap()).unwrap();
-        let mut value =
-            json!({"s3_access_key": envelope, "s3_secret_key": null, "future": {"keep": 7}});
-        assert_eq!(
-            rekey_raw_object_store_value(&mut value, &old, &new).unwrap(),
-            1
-        );
-        assert_eq!(value["future"]["keep"], 7);
-        assert!(value["s3_secret_key"].is_null());
-        let decoded = serde_json::from_value(value["s3_access_key"].clone()).unwrap();
-        assert_eq!(new.decrypt(&decoded).unwrap(), "access");
     }
 
     #[test]

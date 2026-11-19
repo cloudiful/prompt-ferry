@@ -12,6 +12,8 @@ use uuid::Uuid;
 use super::entities::postgres::upgrade_gate as entity;
 use super::seaorm::PostgresNativeConnection;
 
+mod schema;
+
 pub const UPGRADE_CLAIM_KEY: i64 = 8_675_309_066;
 pub const SESSION_BARRIER_KEY: i64 = 8_675_309_067;
 pub const NODE_PROTOCOL_VERSION: u32 = 1;
@@ -402,6 +404,40 @@ async fn legacy_safety(connection: &mut PgConnection, acknowledged: bool) -> Res
     }
 }
 
+/// Fencing for an offline maintenance export.
+///
+/// The export takes the same upgrade claim and the exclusive session barrier a
+/// database migration takes, on one owned control session, and holds both for
+/// the whole export. A running or upgrading node therefore blocks the export
+/// instead of competing with it, and no new runtime session can be admitted
+/// while the export reads the source. The locks are advisory session locks: the
+/// source database is neither written nor migrated.
+pub struct ExportFence {
+    session: UpgradeSession,
+}
+
+impl ExportFence {
+    /// Claim the upgrade lock and the exclusive barrier, bounded by `wait`.
+    pub async fn acquire(database_url: &str, wait: Duration) -> Result<Self> {
+        let deadline = Instant::now().checked_add(wait).ok_or_else(failure)?;
+        let mut session = UpgradeSession::acquire(database_url, deadline)
+            .await
+            .map_err(|error| anyhow!("export fencing unavailable: {error}"))?;
+        session
+            .wait_lock(include_str!("../sql/node_gate/try_exclusive.sql"), deadline)
+            .await
+            .map_err(|error| {
+                anyhow!("export fencing unavailable: another session holds the exclusive barrier ({error})")
+            })?;
+        Ok(Self { session })
+    }
+
+    /// Close the control session, releasing both advisory locks.
+    pub async fn release(self) {
+        let _ = self.session.connection.close().await;
+    }
+}
+
 pub struct NodeGate;
 
 impl NodeGate {
@@ -428,12 +464,18 @@ impl NodeGate {
         if let Some(row) = existing {
             let current = snapshot(&row)?;
             match decide_admission(identity, current) {
-                AdmissionDecision::Join => return Ok(current),
+                AdmissionDecision::Join => {
+                    schema::guard(&mut session.connection, schema::GuardMode::Join, true).await?;
+                    return Ok(current);
+                }
                 AdmissionDecision::Block => {
                     bail!("node gate is not ready; operator intervention required")
                 }
                 AdmissionDecision::Reject => bail!("node gate rejects runtime identity"),
-                AdmissionDecision::Upgrade => {}
+                AdmissionDecision::Upgrade => {
+                    schema::guard(&mut session.connection, schema::GuardMode::Upgrade, true)
+                        .await?;
+                }
             }
             let protocol = i32::try_from(identity.protocol).map_err(|_| failure())?;
             let native = PostgresNativeConnection::new(&mut session.connection);
@@ -464,6 +506,7 @@ impl NodeGate {
                 .transition(owner, identity, "draining", "migrating", false)
                 .await?;
         } else {
+            schema::guard(&mut session.connection, schema::GuardMode::Bootstrap, false).await?;
             session
                 .wait_lock(include_str!("../sql/node_gate/try_exclusive.sql"), deadline)
                 .await?;

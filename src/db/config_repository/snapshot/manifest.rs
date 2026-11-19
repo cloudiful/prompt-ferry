@@ -13,8 +13,9 @@ use super::domains::{SecretRecovery, SnapshotDomains};
 
 /// Version of the snapshot/manifest payload shape. Bumped whenever a domain
 /// record gains an incompatible meaning so old archives are rejected instead
-/// of being misread.
-pub const SNAPSHOT_FORMAT_VERSION: u16 = 2;
+/// of being misread. Format 3 carries the ten portable domains; a
+/// format-2 archive is normalized by the bounded legacy reader.
+pub const SNAPSHOT_FORMAT_VERSION: u16 = 3;
 
 /// Storage backend a snapshot was read from. Import only accepts a matching
 /// backend so backend-specific secret wrapping is never silently destroyed.
@@ -57,6 +58,31 @@ pub struct SnapshotManifest {
     /// domains. Identifies the package contents without exposing them.
     pub payload_fingerprint: String,
     pub domains: Vec<SnapshotDomainSummary>,
+    /// Set only when a verified format-2 archive was normalized to format 3.
+    /// A native export leaves it absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<SnapshotProvenance>,
+}
+
+/// Non-secret record of where a normalized archive came from.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotProvenance {
+    pub source_format_version: u16,
+    pub source_payload_fingerprint: String,
+    /// Portable domains the source format did not declare and the
+    /// normalization therefore left empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_domains: Vec<String>,
+    /// Deployment-only data the normalization discarded, with record counts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discarded: Vec<SnapshotDiscarded>,
+}
+
+/// One count-only note about discarded legacy data. Never carries a value.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotDiscarded {
+    pub name: String,
+    pub records: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,6 +109,7 @@ impl ConfigSnapshot {
                 exported_at: Utc::now(),
                 payload_fingerprint: String::new(),
                 domains: Vec::new(),
+                provenance: None,
             },
             domains,
         }
@@ -164,8 +191,13 @@ impl ConfigSnapshot {
                 unrecoverable_secrets: 0,
             },
             SnapshotDomainSummary {
-                name: "raw_object_store".to_string(),
-                records: usize::from(self.domains.raw_object_store.is_some()),
+                name: "mcp_oauth".to_string(),
+                records: self.domains.mcp_oauth.len(),
+                unrecoverable_secrets: 0,
+            },
+            SnapshotDomainSummary {
+                name: "user_endpoint_settings".to_string(),
+                records: self.domains.user_endpoint_settings.len(),
                 unrecoverable_secrets: 0,
             },
         ]
@@ -191,8 +223,15 @@ impl ConfigSnapshot {
 /// Canonical-JSON fingerprint of the snapshot domain records, shared by the
 /// manifest builder and the archive decoder so the value is reproducible.
 pub fn payload_fingerprint(domains: &SnapshotDomains) -> Result<String> {
+    fingerprint_of(domains)
+}
+
+/// Fingerprint a serializable record set with the same canonical-JSON rule.
+/// The bounded legacy reader uses it to verify a format-2 payload's original
+/// hash before anything is discarded.
+pub(super) fn fingerprint_of<T: Serialize>(value: &T) -> Result<String> {
     use sha2::{Digest, Sha256};
-    let bytes = serde_json::to_vec(domains)?;
+    let bytes = serde_json::to_vec(value)?;
     Ok(hex_lower(&Sha256::digest(&bytes)))
 }
 

@@ -11,6 +11,7 @@ use crate::db::types::{
     RequestRecordQuery, RequestRecordState, RequestRecordSummary, UsageClearScope,
 };
 
+mod aggregate;
 mod artifacts;
 mod buckets;
 mod cache_alert;
@@ -22,21 +23,19 @@ mod metadata_maintenance;
 mod overview;
 mod prompt_blocks;
 mod query;
-mod raw_partitions;
 mod redaction_sessions;
 mod replay_snapshots;
 mod route_locator;
 mod runtime;
 
+pub(crate) use aggregate::refresh_usage_aggregate;
 pub use artifacts::{get_usage_assistant_artifacts, upsert_usage_assistant_artifact};
 pub use buckets::usage_buckets;
 pub use cache_alert::{
     CACHE_ALERT_SETTINGS_KEY, LowCacheConversation, find_low_cache_conversations,
     get_cache_alert_settings, last_cache_alert_at, record_cache_alert, set_cache_alert_settings,
 };
-pub(crate) use cleanup::run_raw_payload_maintenance_with_store;
 pub use cleanup::{RawPayloadMaintenanceReport, run_raw_payload_maintenance};
-pub(crate) use detail::get_visible_usage_event_detail_with_raw_store;
 pub use detail::{
     get_replayable_usage_event_by_provider_conversation_key,
     get_replayable_usage_event_locator_by_provider_conversation_key,
@@ -52,12 +51,12 @@ pub use detail::{
 pub use endpoint_usage::endpoint_today_tokens;
 pub use insert::{
     RequestRecordStateInput, record_request_first_output, record_request_record,
-    record_request_record_with_raw_store, record_request_state,
+    record_request_state,
 };
 pub use metadata_maintenance::{
-    RequestRecordClearReport, RequestRecordPruneReport, cleanup_orphan_request_record_leases,
-    cleanup_orphan_usage_prompt_blocks, cleanup_stale_conversation_redaction_sessions,
-    clear_usage_events, prune_usage_events,
+    RequestRecordClearReport, RequestRecordPruneReport,
+    cleanup_orphan_conversation_redaction_sessions, cleanup_orphan_request_record_leases,
+    cleanup_stale_conversation_redaction_sessions, clear_usage_events, prune_usage_events,
 };
 pub use overview::{OverviewBucket, OverviewWindow, request_records_overview};
 pub use prompt_blocks::{

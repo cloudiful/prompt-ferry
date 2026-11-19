@@ -1,5 +1,4 @@
 import { authMessages } from './modules/auth'
-import { billingMessages } from './modules/billing'
 import { coreMessages } from './modules/core'
 import { endpointMessages } from './modules/endpoints'
 import { endpointOpenAiMessages } from './modules/endpoints.openai'
@@ -28,7 +27,6 @@ const modules = [
   redactionMessages,
   settingsMessages,
   usageMessages,
-  billingMessages,
 ] as const
 
 function mergeLocale(locale: Locale) {

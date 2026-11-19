@@ -3,7 +3,6 @@ use super::background_job::{
 };
 use super::lifecycle::RuntimeControl;
 use crate::db;
-use crate::raw_payload_store::RawPayloadStore;
 use crate::worker_admin_types::UsageRetentionSettings;
 use rand::RngExt;
 use scheduler::{
@@ -18,13 +17,12 @@ use tracing::{info, warn};
 const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const MAINTENANCE_INITIAL_DELAY_MIN: Duration = Duration::from_secs(5 * 60);
 const MAINTENANCE_INITIAL_DELAY_MAX: Duration = Duration::from_secs(15 * 60);
-const MAINTENANCE_SCHEDULER_JOB_ID: &str = "prompt-ferry:partition-maintenance";
+const MAINTENANCE_SCHEDULER_JOB_ID: &str = "prompt-ferry:request-family-maintenance";
 
 #[derive(Clone)]
 struct MaintenanceDependencies {
     pool: PgPool,
     retention: Arc<RwLock<UsageRetentionSettings>>,
-    raw_store: Arc<RwLock<Option<Arc<RawPayloadStore>>>>,
     postgres_coordination: bool,
 }
 
@@ -34,7 +32,6 @@ pub(super) fn spawn(
     shared_valkey: &crate::db::SharedValkeyConfig,
     pool: PgPool,
     retention: Arc<RwLock<UsageRetentionSettings>>,
-    raw_store: Arc<RwLock<Option<Arc<RawPayloadStore>>>>,
     control: RuntimeControl,
     coordinated_store: Option<ValkeyCoordinatedStateStore>,
 ) -> JoinHandle<()> {
@@ -43,7 +40,6 @@ pub(super) fn spawn(
         let dependencies = Arc::new(MaintenanceDependencies {
             pool,
             retention,
-            raw_store,
             postgres_coordination: valkey_url.is_empty(),
         });
 
@@ -52,7 +48,7 @@ pub(super) fn spawn(
                 return;
             }
             if let Err(error) = run_once(&dependencies).await {
-                warn!(error = %error, "initial partition maintenance failed");
+                warn!(error = %error, "initial request-family maintenance failed");
             }
             run_local_scheduler(dependencies, control).await;
             return;
@@ -76,7 +72,7 @@ pub(super) fn spawn(
         }
 
         if let Err(error) = run_once(&dependencies).await {
-            warn!(error = %error, "initial partition maintenance failed");
+            warn!(error = %error, "initial request-family maintenance failed");
         }
 
         let scheduler = coordinated_scheduler(store);
@@ -151,27 +147,22 @@ async fn run_once(dependencies: &MaintenanceDependencies) -> anyhow::Result<()> 
     };
     match db::run_partition_maintenance(&dependencies.pool, horizons).await {
         Ok(Some(report)) => info!(
-            partitions_created = report.partitions_created,
-            partitions_dropped = report.partitions_dropped,
+            chunks_dropped = report.chunks_dropped,
             metadata_retention_days = retention.metadata_retention_days,
             content_retention_days = retention.content_retention_days,
-            "partition maintenance completed"
+            "chunk maintenance completed"
         ),
         Ok(None) => {}
-        Err(error) => warn!(error = %error, "partition maintenance failed"),
+        Err(error) => warn!(error = %error, "chunk maintenance failed"),
     }
-    // Raw payloads live in the managed object store; expired per-event
-    // objects must be removed from the store before their metadata
-    // partitions disappear.
-    let raw_store = dependencies.raw_store.read().await.clone();
-    match db::run_raw_payload_maintenance_with_store(
+    match db::run_raw_payload_maintenance(
         &dependencies.pool,
         i64::from(retention.raw_retention_days),
-        raw_store.as_deref(),
     )
     .await
     {
         Ok(Some(report)) => info!(
+            chunks_dropped = report.chunks_dropped,
             raw_rows_deleted = report.raw_rows_deleted,
             retention_days = retention.raw_retention_days,
             "raw payload maintenance completed"
@@ -181,8 +172,8 @@ async fn run_once(dependencies: &MaintenanceDependencies) -> anyhow::Result<()> 
             warn!(error = %error, "raw payload maintenance failed");
         }
     }
-    // Plain tables outside the partition lifecycle still need bounded
-    // cleanups: partition drops can orphan leases and redaction sessions.
+    // Plain tables outside the chunk lifecycle still need bounded cleanups:
+    // chunk drops can orphan leases and redaction sessions.
     match db::cleanup_orphan_request_record_leases(&dependencies.pool).await {
         Ok(deleted) => info!(
             orphan_leases_deleted = deleted,
@@ -240,7 +231,7 @@ mod tests {
         let task_executions = executions.clone();
         let task_execution_started = execution_started.clone();
         let job = Job::new(
-            "partition-maintenance-test",
+            "request-family-maintenance-test",
             Schedule::Interval(Duration::from_millis(1)),
             Arc::<()>::new(()),
             Task::from_async(move |_: TaskContext<()>| {

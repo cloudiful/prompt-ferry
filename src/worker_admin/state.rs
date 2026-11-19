@@ -28,7 +28,6 @@ use crate::{
     mcp::{McpCatalogCache, McpCatalogService},
     naming::SESSION_COOKIE_NAME,
     protocol::BridgeMessage,
-    raw_payload_store::RawPayloadStore,
     redact,
     relay_secrets::RelaySecretManager,
     replay_cache::ReplayCache,
@@ -192,7 +191,6 @@ pub struct AdminState {
     pub request_content_logging: Arc<RwLock<RequestContentLoggingResponse>>,
     pub usage_retention: Arc<RwLock<UsageRetentionSettings>>,
     pub cache_alert: Arc<RwLock<CacheAlertSettings>>,
-    pub raw_payload_store: Arc<RwLock<Option<Arc<RawPayloadStore>>>>,
     pub stream_delta_batching: Arc<RwLock<StreamDeltaBatchingSettings>>,
     pub mcp_catalog_cache: McpCatalogCache,
     pub mcp_catalog_service: McpCatalogService,
@@ -442,7 +440,6 @@ pub struct AdminStateInit {
     pub model_route_whitelist_enabled: bool,
     pub request_content_logging: RequestContentLoggingResponse,
     pub usage_retention: UsageRetentionSettings,
-    pub raw_payload_store: Option<Arc<RawPayloadStore>>,
     pub stream_delta_batching: StreamDeltaBatchingSettings,
     pub mcp_catalog_cache: McpCatalogCache,
     pub mcp_catalog_service: McpCatalogService,
@@ -480,7 +477,6 @@ impl AdminState {
             request_content_logging: Arc::new(RwLock::new(init.request_content_logging)),
             usage_retention: Arc::new(RwLock::new(init.usage_retention)),
             cache_alert: Arc::new(RwLock::new(CacheAlertSettings::default())),
-            raw_payload_store: Arc::new(RwLock::new(init.raw_payload_store)),
             stream_delta_batching: Arc::new(RwLock::new(init.stream_delta_batching)),
             mcp_catalog_cache: init.mcp_catalog_cache,
             mcp_catalog_service: init.mcp_catalog_service,
@@ -493,14 +489,6 @@ impl AdminState {
             chatgpt_quota_service: None,
             mcp_oauth: None,
         }
-    }
-
-    pub async fn raw_payload_store(&self) -> Option<Arc<RawPayloadStore>> {
-        self.raw_payload_store.read().await.clone()
-    }
-
-    pub async fn set_raw_payload_store(&self, store: Option<Arc<RawPayloadStore>>) {
-        *self.raw_payload_store.write().await = store;
     }
 
     pub fn relay_secret_manager(&self) -> anyhow::Result<&RelaySecretManager> {

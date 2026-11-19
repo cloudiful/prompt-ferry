@@ -1,7 +1,7 @@
 //! Native SeaORM entity for the PostgreSQL `mcp_credentials` table.
 
 use sea_orm::entity::prelude::*;
-use sea_orm::sea_query::{Expr, ExprTrait, Index, IndexCreateStatement, TableCreateStatement};
+use sea_orm::sea_query::{Index, IndexCreateStatement, TableCreateStatement};
 use sea_orm::{DbBackend, Schema};
 
 /// Unique index name of the applied `mcp_credentials(server_id, position)` constraint.
@@ -28,14 +28,6 @@ pub struct Model {
     pub enabled: bool,
     #[sea_orm(column_type = "Text")]
     pub provider_kind: Option<String>,
-    #[sea_orm(column_type = "Double", default_expr = "Expr::cust(\"1\")")]
-    pub default_cost: f64,
-    #[sea_orm(column_type = "Boolean", default_expr = "Expr::cust(\"FALSE\")")]
-    pub strict_mode: bool,
-    #[sea_orm(column_type = "TimestampWithTimeZone")]
-    pub billing_period_start: Option<DateTimeUtc>,
-    #[sea_orm(column_type = "TimestampWithTimeZone")]
-    pub billing_period_end: Option<DateTimeUtc>,
     #[sea_orm(column_type = "Double")]
     pub provider_remaining: Option<f64>,
     #[sea_orm(column_type = "TimestampWithTimeZone")]
@@ -71,19 +63,7 @@ impl ActiveModelBehavior for ActiveModel {}
 /// natively; the applied foreign key to `mcp_servers` stays owned by the
 /// migration contract, so no `Relation` is declared here.
 pub fn create_table_statement() -> TableCreateStatement {
-    let mut statement = Schema::new(DbBackend::Postgres).create_table_from_entity(Entity);
-    statement.check((
-        "ck_mcp_credentials_default_cost",
-        Expr::col(Column::DefaultCost).gte(0f64),
-    ));
-    statement.check((
-        "ck_mcp_credentials_period",
-        Expr::col(Column::BillingPeriodEnd)
-            .is_null()
-            .or(Expr::col(Column::BillingPeriodStart).is_null())
-            .or(Expr::col(Column::BillingPeriodEnd).gt(Expr::col(Column::BillingPeriodStart))),
-    ));
-    statement
+    Schema::new(DbBackend::Postgres).create_table_from_entity(Entity)
 }
 
 /// Native index declarations for `mcp_credentials`.

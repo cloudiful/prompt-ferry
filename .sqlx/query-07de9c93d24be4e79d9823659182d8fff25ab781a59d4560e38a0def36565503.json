@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Refresh the fixed one-minute rollup outside any metadata mutation\n-- transaction. `force => true` also removes materialized buckets whose raw\n-- rows were deleted or dropped by retention.\nCALL public.refresh_continuous_aggregate(\n    'public.request_usage_1minute',\n    $1::TIMESTAMPTZ,\n    $2::TIMESTAMPTZ,\n    force => true\n);\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "07de9c93d24be4e79d9823659182d8fff25ab781a59d4560e38a0def36565503"
+}

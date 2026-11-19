@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Metadata chunk paired with one raw chunk by exact UTC day range.\n--\n-- Metadata retention may be shorter than raw retention, so an absent row is\n-- a legitimate raw-only cleanup. A present row is locked by the caller before\n-- its compression state is re-read and before the continuation metadata is\n-- cleared.\n--\n--   $1  chunk range start\n--   $2  chunk range end\nSELECT\n    ch.chunk_schema AS \"chunk_schema!\",\n    ch.chunk_name AS \"chunk_name!\",\n    format(\n        'LOCK TABLE %I.%I IN ACCESS EXCLUSIVE MODE',\n        ch.chunk_schema,\n        ch.chunk_name\n    ) AS \"lock_sql!\"\nFROM timescaledb_information.chunks ch\nWHERE ch.hypertable_schema = 'public'\n  AND ch.hypertable_name = 'request_records'\n  AND ch.range_start = $1\n  AND ch.range_end = $2\nORDER BY ch.chunk_schema, ch.chunk_name;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chunk_schema!",
+        "type_info": "Name",
+        "origin": {
+          "Table": {
+            "table": "timescaledb_information.chunks",
+            "name": "chunk_schema"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "chunk_name!",
+        "type_info": "Name",
+        "origin": {
+          "Table": {
+            "table": "timescaledb_information.chunks",
+            "name": "chunk_name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "lock_sql!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "1296187317ef539ceebf91893df0ebfc1fcb7513ff3fb3b649d73c4b3afb9b73"
+}

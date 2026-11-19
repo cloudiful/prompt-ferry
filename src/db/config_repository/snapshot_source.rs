@@ -75,6 +75,7 @@ pub fn empty_domains() -> SnapshotDomains {
         mcp_credentials: Vec::new(),
         settings: Vec::new(),
         user_redaction_configs: Vec::new(),
-        raw_object_store: None,
+        mcp_oauth: Vec::new(),
+        user_endpoint_settings: Vec::new(),
     }
 }

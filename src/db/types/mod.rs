@@ -1,5 +1,4 @@
 mod analytics;
-mod billing;
 mod endpoints;
 mod mcp;
 mod mcp_credentials;
@@ -11,7 +10,6 @@ mod usage;
 mod users;
 
 pub use analytics::*;
-pub use billing::*;
 pub use endpoints::*;
 pub use mcp::*;
 pub use mcp_credentials::*;

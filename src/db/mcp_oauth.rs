@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
 use crate::relay_secrets::{EncryptedSecretEnvelope, RelaySecretManager};
@@ -234,26 +234,52 @@ pub async fn install_grant(
     config_fingerprint: &str,
     grant: &McpOAuthGrant,
 ) -> Result<McpOAuthCredential> {
+    let mut tx = pool.begin().await?;
+    let credential = install_grant_in_transaction(
+        &mut tx,
+        manager,
+        server_id,
+        owner_user_id,
+        config_fingerprint,
+        grant,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(credential)
+}
+
+/// Install a grant on a connection the caller already owns.
+///
+/// The caller keeps the transaction: the configuration import uses this inside
+/// its own replace transaction, so a failed grant never leaves a half-written
+/// configuration behind and no nested independent commit can land.
+pub async fn install_grant_in_transaction(
+    conn: &mut PgConnection,
+    manager: &RelaySecretManager,
+    server_id: Uuid,
+    owner_user_id: i64,
+    config_fingerprint: &str,
+    grant: &McpOAuthGrant,
+) -> Result<McpOAuthCredential> {
     let registration = seal(manager, &grant.registration)?;
     let credentials = seal(manager, &grant.credentials)?;
     let connection_id = Uuid::new_v4();
     let generation = crate::db::MCP_OAUTH_INITIAL_GENERATION;
     let scopes = join_scopes(&grant.credentials.scopes);
 
-    let mut tx = pool.begin().await?;
     sqlx::query_file!(
         "src/sql/mcp_oauth/delete_states_for_owner.sql",
         server_id,
         owner_user_id,
     )
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await?;
     sqlx::query_file!(
         "src/sql/mcp_oauth/delete_leases_for_owner.sql",
         server_id,
         owner_user_id,
     )
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await?;
     let row = sqlx::query_file_as!(
         CredentialRow,
@@ -273,9 +299,8 @@ pub async fn install_grant(
         grant.credentials.expires_at,
         grant.credentials.issuer,
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *conn)
     .await?;
-    tx.commit().await?;
     Ok(row.status())
 }
 

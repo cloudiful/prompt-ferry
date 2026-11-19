@@ -52,10 +52,12 @@ pub(super) async fn read(
         mcp_servers: mcp_servers.into_iter().map(convert_mcp_server).collect(),
         mcp_credentials,
         settings: snapshot.settings.iter().map(convert_setting).collect(),
-        // Per-user redaction rules and the raw object store are
-        // PostgreSQL-only configuration domains.
+        // Per-user redaction rules are a PostgreSQL-only configuration domain.
         user_redaction_configs: Vec::new(),
-        raw_object_store: None,
+        // Personal MCP OAuth grants live in PostgreSQL only.
+        mcp_oauth: Vec::new(),
+        // Explicit per-user endpoint selections live in PostgreSQL only.
+        user_endpoint_settings: Vec::new(),
     })
 }
 
@@ -232,10 +234,6 @@ async fn read_mcp_credentials(repository: &ConfigRepository) -> Result<Vec<McpCr
             position: credential.position,
             enabled: credential.enabled,
             provider_kind: credential.provider_kind,
-            default_cost: credential.default_cost,
-            strict_mode: credential.strict_mode,
-            billing_period_start: credential.billing_period_start,
-            billing_period_end: credential.billing_period_end,
             created_at: credential.created_at,
             updated_at: credential.updated_at,
         });

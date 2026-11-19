@@ -4,7 +4,7 @@ default-members = [".", "tools/db-init", "crates/prompt-ferry-upstream-presets",
 
 [package]
 name = "prompt-ferry"
-version = "1.43.0"
+version = "1.44.0"
 edition = "2024"
 license = "Apache-2.0"
 readme = "README.md"
@@ -52,7 +52,6 @@ rcgen = "0.14.10"
 redactor = { package = "cloudiful-redactor", version = "0.5.1", git = "https://github.com/cloudiful/redactor.git", tag = "v0.5.1" }
 redis = { version = "1.7.0", features = ["tokio-comp", "connection-manager"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["charset", "gzip", "http2", "json", "rustls", "socks", "stream", "system-proxy"] }
-object_store = { version = "0.14.1", default-features = false, features = ["aws", "fs"] }
 prompt-ferry-redact = { version = "0.1.0", path = "crates/prompt-ferry-redact" }
 prompt-ferry-redact-upstream = { version = "0.1.0", path = "crates/prompt-ferry-redact-upstream" }
 prompt-ferry-runtime-env = { version = "0.1.0", path = "crates/prompt-ferry-runtime-env" }
@@ -63,13 +62,12 @@ scheduler = { package = "cloudiful-scheduler", version = "0.4.12", git = "https:
 rustls = { version = "0.23.44", features = ["aws-lc-rs"] }
 rustls-native-certs = "0.8.4"
 rustls-pki-types = "1.15.1"
-rust_decimal = { version = "1.43.0", features = ["serde"] }
 sea-orm = { version = "=2.0.4", default-features = false, features = [ "macros", "sqlx-postgres", "sqlx-sqlite", "runtime-tokio", "with-json", "with-chrono", "with-uuid", "postgres-use-serial-pk" ] }
 sea-query-sqlx = { version = "0.9.1", features = [ "sqlx-postgres", "sqlx-sqlite", "postgres-array", "with-chrono", "with-json", "with-uuid" ] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
-sqlx = { version = "0.9.0", features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "postgres", "sqlite", "chrono", "uuid", "json", "macros", "migrate", "sqlx-toml", "rust_decimal"] }
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "postgres", "sqlite", "chrono", "uuid", "json", "macros", "migrate", "sqlx-toml"] }
 tokio = { version = "1.53.1", features = ["io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-rustls = "0.26.5"
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }

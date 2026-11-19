@@ -111,15 +111,20 @@ pub struct RequestRecordSeriesQuery {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct RequestRecordPruneResponse {
-    pub deleted: u64,
-    pub protected_by_billing: u64,
+    /// Whole expired chunks removed by this prune. Their rows are not counted
+    /// as row deletes.
+    pub chunks_dropped: u64,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct RequestRecordsClearResponse {
+    /// Bounded rows deleted by the scoped statement; rows carried away by
+    /// dropped chunks are excluded and reported in `chunks_dropped`.
     pub deleted: u64,
     pub deleted_prompt_blocks: u64,
-    pub protected_by_billing: u64,
+    /// Whole history chunks dropped before the current UTC day. Only a
+    /// full-history clear drops chunks.
+    pub chunks_dropped: u64,
 }
 
 #[derive(Debug, Deserialize, IntoParams)]

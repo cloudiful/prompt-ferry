@@ -3,10 +3,9 @@ use crate::{
     protocol::RelayIpPolicy,
     worker_admin_types::{
         CacheAlertSettingsRequest, CacheAlertSettingsResponse, EndpointSettingRequest,
-        ModelRouteWhitelistRequest, ModelRouteWhitelistResponse, RawObjectStoreSettingsRequest,
-        RawObjectStoreSettingsResponse, RelayIpPolicyResponse, RequestContentLoggingRequest,
-        RequestContentLoggingResponse, SharedValkeySettingsRequest, SharedValkeySettingsResponse,
-        UsageRetentionSettings,
+        ModelRouteWhitelistRequest, ModelRouteWhitelistResponse, RelayIpPolicyResponse,
+        RequestContentLoggingRequest, RequestContentLoggingResponse, SharedValkeySettingsRequest,
+        SharedValkeySettingsResponse, UsageRetentionSettings,
     },
 };
 
@@ -191,23 +190,6 @@ pub(super) fn get_relay_ip_whitelist() {}
     tag = "settings"
 )]
 pub(super) fn set_relay_ip_whitelist() {}
-
-#[utoipa::path(
-    get,
-    path = "/api/v1/settings/raw-object-store",
-    responses((status = 200, body = RawObjectStoreSettingsResponse, description = "Raw object store settings")),
-    tag = "settings"
-)]
-pub(super) fn get_raw_object_store() {}
-
-#[utoipa::path(
-    patch,
-    path = "/api/v1/settings/raw-object-store",
-    request_body = RawObjectStoreSettingsRequest,
-    responses((status = 200, body = RawObjectStoreSettingsResponse, description = "Updated raw object store settings")),
-    tag = "settings"
-)]
-pub(super) fn set_raw_object_store() {}
 
 #[utoipa::path(
     get,

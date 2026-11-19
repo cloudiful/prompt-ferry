@@ -66,16 +66,6 @@ pub struct NodeConfig {
     /// Public HTTPS base URL used to build the personal MCP OAuth callback.
     /// Empty disables personal OAuth only.
     pub mcp_oauth_redirect_base: String,
-    pub raw_object_store_endpoint: String,
-    pub raw_object_store_bucket: String,
-    pub raw_object_store_region: String,
-    pub raw_object_store_access_key: String,
-    pub raw_object_store_secret_key: String,
-    pub raw_object_store_prefix: String,
-    pub raw_object_store_allow_http: bool,
-    #[serde(default = "default_raw_object_store_path_style")]
-    pub raw_object_store_path_style: bool,
-    pub raw_object_store_local_dir: String,
 }
 
 impl Default for NodeConfig {
@@ -110,15 +100,6 @@ impl Default for NodeConfig {
             mcp_warmup: McpWarmupMode::All,
             mcp_allowed_origins: Vec::new(),
             mcp_oauth_redirect_base: String::new(),
-            raw_object_store_endpoint: String::new(),
-            raw_object_store_bucket: String::new(),
-            raw_object_store_region: "auto".to_string(),
-            raw_object_store_access_key: String::new(),
-            raw_object_store_secret_key: String::new(),
-            raw_object_store_prefix: "prompt-ferry/raw".to_string(),
-            raw_object_store_allow_http: false,
-            raw_object_store_path_style: true,
-            raw_object_store_local_dir: String::new(),
         }
     }
 }
@@ -182,15 +163,6 @@ impl NodeConfig {
             max_raw_response_capture_bytes: self.max_raw_response_capture_bytes.max(1),
             max_response_text_capture_bytes: self.max_response_text_capture_bytes.max(1),
             endpoint_model_cache_ttl_seconds: self.endpoint_model_cache_ttl_seconds.max(1),
-            raw_object_store_endpoint: self.raw_object_store_endpoint.clone(),
-            raw_object_store_bucket: self.raw_object_store_bucket.clone(),
-            raw_object_store_region: self.raw_object_store_region.clone(),
-            raw_object_store_access_key: self.raw_object_store_access_key.clone(),
-            raw_object_store_secret_key: self.raw_object_store_secret_key.clone(),
-            raw_object_store_prefix: self.raw_object_store_prefix.clone(),
-            raw_object_store_allow_http: self.raw_object_store_allow_http,
-            raw_object_store_path_style: self.raw_object_store_path_style,
-            raw_object_store_local_dir: self.raw_object_store_local_dir.clone(),
             mcp_allowed_origins: self.mcp_allowed_origins.clone(),
             mcp_oauth_redirect_base: self.mcp_oauth_redirect_base.clone(),
             ..WorkerConfig::default()
@@ -298,33 +270,6 @@ impl fmt::Debug for NodeConfig {
             .field(
                 "mcp_oauth_redirect_base",
                 &RedactedValue(&self.mcp_oauth_redirect_base),
-            )
-            .field(
-                "raw_object_store_endpoint",
-                &RedactedValue(&self.raw_object_store_endpoint),
-            )
-            .field("raw_object_store_bucket", &self.raw_object_store_bucket)
-            .field("raw_object_store_region", &self.raw_object_store_region)
-            .field(
-                "raw_object_store_access_key",
-                &RedactedValue(&self.raw_object_store_access_key),
-            )
-            .field(
-                "raw_object_store_secret_key",
-                &RedactedValue(&self.raw_object_store_secret_key),
-            )
-            .field("raw_object_store_prefix", &self.raw_object_store_prefix)
-            .field(
-                "raw_object_store_allow_http",
-                &self.raw_object_store_allow_http,
-            )
-            .field(
-                "raw_object_store_path_style",
-                &self.raw_object_store_path_style,
-            )
-            .field(
-                "raw_object_store_local_dir",
-                &self.raw_object_store_local_dir,
             )
             .finish()
     }
@@ -483,10 +428,6 @@ pub fn validate_peer_client_material(cert: &str, key: &str) -> Result<(), NodeCo
     Err(NodeConfigError::IncompletePeerClientMaterial)
 }
 
-fn default_raw_object_store_path_style() -> bool {
-    true
-}
-
 fn is_postgres_url(value: &str) -> bool {
     match reqwest::Url::parse(value.trim()) {
         Ok(parsed) => {
@@ -600,9 +541,6 @@ mod tests {
         assert_eq!(config.response_stream_buffer, 256);
         assert_eq!(config.response_stream_max_bytes, 16 * 1024 * 1024);
         assert_eq!(config.response_stream_backpressure_timeout_ms, 5_000);
-        assert_eq!(config.raw_object_store_region, "auto");
-        assert_eq!(config.raw_object_store_prefix, "prompt-ferry/raw");
-        assert!(config.raw_object_store_path_style);
         assert_eq!(config.upstream_base_url, "https://api.openai.com");
     }
 
@@ -629,15 +567,6 @@ mod tests {
             mcp_warmup: crate::config::McpWarmupMode::Lazy,
             mcp_allowed_origins: vec!["https://ui.example".to_string()],
             mcp_oauth_redirect_base: "https://api.example".to_string(),
-            raw_object_store_endpoint: "https://objects.example".to_string(),
-            raw_object_store_bucket: "bucket".to_string(),
-            raw_object_store_region: "region".to_string(),
-            raw_object_store_access_key: "access".to_string(),
-            raw_object_store_secret_key: "secret-key".to_string(),
-            raw_object_store_prefix: "prefix".to_string(),
-            raw_object_store_allow_http: true,
-            raw_object_store_path_style: false,
-            raw_object_store_local_dir: "/tmp/raw".to_string(),
             ..NodeConfig::default()
         };
         let worker = config.worker_config("1").expect("worker adapter");
@@ -655,15 +584,6 @@ mod tests {
         assert_eq!(worker.mcp_warmup, crate::config::McpWarmupMode::Lazy);
         assert_eq!(worker.mcp_allowed_origins, vec!["https://ui.example"]);
         assert_eq!(worker.mcp_oauth_redirect_base, "https://api.example");
-        assert_eq!(worker.raw_object_store_endpoint, "https://objects.example");
-        assert_eq!(worker.raw_object_store_bucket, "bucket");
-        assert_eq!(worker.raw_object_store_region, "region");
-        assert_eq!(worker.raw_object_store_access_key, "access");
-        assert_eq!(worker.raw_object_store_secret_key, "secret-key");
-        assert_eq!(worker.raw_object_store_prefix, "prefix");
-        assert!(worker.raw_object_store_allow_http);
-        assert!(!worker.raw_object_store_path_style);
-        assert_eq!(worker.raw_object_store_local_dir, "/tmp/raw");
 
         let relay = config.relay_config();
         assert_eq!(relay.request_timeout_seconds, 44);
@@ -682,9 +602,6 @@ mod tests {
             upstream_base_url: "https://upstream.example/private".to_string(),
             upstream_api_key: "upstream-key".to_string(),
             mcp_oauth_redirect_base: "https://api.example/private".to_string(),
-            raw_object_store_endpoint: "https://objects.example/private".to_string(),
-            raw_object_store_access_key: "access-key".to_string(),
-            raw_object_store_secret_key: "object-secret".to_string(),
             ..NodeConfig::default()
         };
         let debug = format!("{config:?}");
@@ -693,10 +610,7 @@ mod tests {
             "valkey-password",
             "upstream-key",
             "api.example/private",
-            "objects.example/private",
             "upstream.example/private",
-            "access-key",
-            "object-secret",
         ] {
             assert!(!debug.contains(secret), "debug leaked {secret}: {debug}");
         }

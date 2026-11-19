@@ -32,117 +32,6 @@ export type AvailableModelsResponse = {
     total: number;
 };
 
-export type BillingBreakdownResponse = {
-    cache_read_tokens: number;
-    cache_write_tokens: number;
-    customer_amount: string;
-    grouping_key: string;
-    input_tokens: number;
-    output_tokens: number;
-    request_count: number;
-};
-
-export type BillingChargeDetailResponse = {
-    charge: BillingChargeResponse;
-    lines: Array<BillingChargeLineResponse>;
-};
-
-export type BillingChargeLineResponse = {
-    amount: string;
-    line_id: number;
-    meter: string;
-    price_rule_id?: string | null;
-    token_count: number;
-    unit_rate: string;
-};
-
-export type BillingChargePageResponse = {
-    charges: Array<BillingChargeResponse>;
-    first: number;
-    rows: number;
-    total: number;
-};
-
-export type BillingChargeResponse = {
-    cache_read_tokens: number;
-    cache_write_tokens: number;
-    charge_id: number;
-    client_key_id?: number | null;
-    client_key_label?: string | null;
-    created_at: string;
-    currency: string;
-    customer_amount?: string | null;
-    endpoint_id?: string | null;
-    endpoint_key_id?: string | null;
-    endpoint_name?: string | null;
-    input_tokens: number;
-    output_tokens: number;
-    pricing_status: string;
-    request_id: string;
-    requested_model?: string | null;
-    updated_at: string;
-    upstream_model?: string | null;
-    usage_status: string;
-    user_id?: number | null;
-    user_login_name?: string | null;
-};
-
-export type BillingPriceRulePageResponse = {
-    first: number;
-    rows: number;
-    rules: Array<BillingPriceRuleResponse>;
-    total: number;
-};
-
-export type BillingPriceRulePatch = {
-    enabled: boolean;
-};
-
-export type BillingPriceRuleRequest = {
-    cache_read_rate: string;
-    cache_write_rate: string;
-    effective_from: string;
-    input_rate: string;
-    output_rate: string;
-    public_model: string;
-};
-
-export type BillingPriceRuleResponse = {
-    cache_read_rate: string;
-    cache_write_rate: string;
-    created_at: string;
-    created_by_user_id?: number | null;
-    currency: string;
-    effective_from: string;
-    effective_to?: string | null;
-    enabled: boolean;
-    input_rate: string;
-    output_rate: string;
-    price_rule_id: string;
-    public_model: string;
-    updated_at: string;
-};
-
-export type BillingRepriceRequest = {
-    limit?: number | null;
-};
-
-export type BillingRepriceResponse = {
-    repriced: number;
-};
-
-export type BillingSummaryResponse = {
-    by_client_key: Array<BillingBreakdownResponse>;
-    by_model: Array<BillingBreakdownResponse>;
-    currency: string;
-    customer_amount: string;
-    known_count: number;
-    priced_count: number;
-    request_count: number;
-    unknown_count: number;
-    unpriced_count: number;
-};
-
 export type BridgeStatus = {
     configured_relays: number;
     connected_relays: number;
@@ -1472,49 +1361,6 @@ export type QuotaKeyObservationTrendSeries = {
     unit: string;
 };
 
-/**
- * Raw object-store backend selected by the administrator.
- */
-export type RawObjectStoreBackend = 'local' | 's3' | 'disabled';
-
-export type RawObjectStoreSecretPatch = {
-    mode: 'keep';
-} | {
-    mode: 'clear';
-} | {
-    mode: 'replace';
-    value: string;
-};
-
-export type RawObjectStoreSettingsRequest = {
-    backend: RawObjectStoreBackend;
-    local_dir: string;
-    s3_access_key?: null | RawObjectStoreSecretPatch;
-    s3_allow_http: boolean;
-    s3_bucket: string;
-    s3_endpoint: string;
-    s3_path_style?: boolean;
-    s3_prefix: string;
-    s3_region: string;
-    s3_secret_key?: null | RawObjectStoreSecretPatch;
-};
-
-/**
- * Redacted API response for the admin settings surface.
- */
-export type RawObjectStoreSettingsResponse = {
-    backend: RawObjectStoreBackend;
-    has_s3_access_key: boolean;
-    has_s3_secret_key: boolean;
-    local_dir: string;
-    s3_allow_http: boolean;
-    s3_bucket: string;
-    s3_endpoint: string;
-    s3_path_style?: boolean;
-    s3_prefix: string;
-    s3_region: string;
-};
-
 export type RedactionConfigSchema = {
     custom_strings: Array<CustomStringRuleSchema>;
     enabled: boolean;
@@ -2034,8 +1880,11 @@ export type RequestRecordPage = {
 };
 
 export type RequestRecordPruneResponse = {
-    deleted: number;
-    protected_by_billing: number;
+    /**
+     * Whole expired chunks removed by this prune. Their rows are not counted
+     * as row deletes.
+     */
+    chunks_dropped: number;
 };
 
 export type RequestRecordRedactionSummary = {
@@ -2084,9 +1933,17 @@ export type RequestRecordsClearRequest = {
 };
 
 export type RequestRecordsClearResponse = {
+    /**
+     * Whole history chunks dropped before the current UTC day. Only a
+     * full-history clear drops chunks.
+     */
+    chunks_dropped: number;
+    /**
+     * Bounded rows deleted by the scoped statement; rows carried away by
+     * dropped chunks are excluded and reported in `chunks_dropped`.
+     */
     deleted: number;
     deleted_prompt_blocks: number;
-    protected_by_billing: number;
 };
 
 export type RequestToolCallStatus = 'emitted' | 'output_received' | 'failed' | 'skipped';
@@ -2369,238 +2226,6 @@ export type SetupRequestWritable = {
     master_secret: string;
     password: string;
 };
-
-export type ListBillingChargesData = {
-    body?: never;
-    path?: never;
-    query?: {
-        first?: number;
-        rows?: number;
-        user_id?: number;
-        client_key_id?: number;
-        requested_model?: string;
-        endpoint_id?: string;
-        usage_status?: string;
-        pricing_status?: string;
-        request_id?: string;
-        start_at?: string;
-        end_at?: string;
-    };
-    url: '/api/v1/admin/billing/charges';
-};
-
-export type ListBillingChargesResponses = {
-    /**
-     * Billing charges
-     */
-    200: BillingChargePageResponse;
-};
-
-export type ListBillingChargesResponse = ListBillingChargesResponses[keyof ListBillingChargesResponses];
-
-export type BillingChargeDetailData = {
-    body?: never;
-    path: {
-        /**
-         * Charge ID
-         */
-        charge_id: number;
-    };
-    query?: never;
-    url: '/api/v1/admin/billing/charges/{charge_id}';
-};
-
-export type BillingChargeDetailResponses = {
-    /**
-     * Billing charge detail
-     */
-    200: BillingChargeDetailResponse;
-};
-
-export type BillingChargeDetailResponse2 = BillingChargeDetailResponses[keyof BillingChargeDetailResponses];
-
-export type ExportBillingData = {
-    body?: never;
-    path?: never;
-    query?: {
-        kind?: string;
-        user_id?: number;
-        client_key_id?: number;
-        requested_model?: string;
-        endpoint_id?: string;
-        usage_status?: string;
-        pricing_status?: string;
-        request_id?: string;
-        start_at?: string;
-        end_at?: string;
-    };
-    url: '/api/v1/admin/billing/export';
-};
-
-export type ExportBillingResponses = {
-    /**
-     * Billing CSV export
-     */
-    200: string;
-};
-
-export type ExportBillingResponse = ExportBillingResponses[keyof ExportBillingResponses];
-
-export type ListBillingPriceRulesData = {
-    body?: never;
-    path?: never;
-    query?: {
-        first?: number;
-        rows?: number;
-    };
-    url: '/api/v1/admin/billing/price-rules';
-};
-
-export type ListBillingPriceRulesResponses = {
-    /**
-     * Billing price rules
-     */
-    200: BillingPriceRulePageResponse;
-};
-
-export type ListBillingPriceRulesResponse = ListBillingPriceRulesResponses[keyof ListBillingPriceRulesResponses];
-
-export type CreateBillingPriceRuleData = {
-    body: BillingPriceRuleRequest;
-    path?: never;
-    query?: never;
-    url: '/api/v1/admin/billing/price-rules';
-};
-
-export type CreateBillingPriceRuleResponses = {
-    /**
-     * Created billing price rule
-     */
-    200: BillingPriceRuleResponse;
-};
-
-export type CreateBillingPriceRuleResponse = CreateBillingPriceRuleResponses[keyof CreateBillingPriceRuleResponses];
-
-export type DeleteBillingPriceRuleData = {
-    body?: never;
-    path: {
-        /**
-         * Price rule ID
-         */
-        price_rule_id: string;
-    };
-    query?: never;
-    url: '/api/v1/admin/billing/price-rules/{price_rule_id}';
-};
-
-export type DeleteBillingPriceRuleErrors = {
-    /**
-     * Price rule not found
-     */
-    404: unknown;
-};
-
-export type DeleteBillingPriceRuleResponses = {
-    /**
-     * Deleted billing price rule
-     */
-    204: void;
-};
-
-export type DeleteBillingPriceRuleResponse = DeleteBillingPriceRuleResponses[keyof DeleteBillingPriceRuleResponses];
-
-export type PatchBillingPriceRuleData = {
-    body: BillingPriceRulePatch;
-    path: {
-        /**
-         * Price rule ID
-         */
-        price_rule_id: string;
-    };
-    query?: never;
-    url: '/api/v1/admin/billing/price-rules/{price_rule_id}';
-};
-
-export type PatchBillingPriceRuleResponses = {
-    /**
-     * Updated price rule status
-     */
-    200: BillingPriceRuleResponse;
-};
-
-export type PatchBillingPriceRuleResponse = PatchBillingPriceRuleResponses[keyof PatchBillingPriceRuleResponses];
-
-export type UpdateBillingPriceRuleData = {
-    body: BillingPriceRuleRequest;
-    path: {
-        /**
-         * Price rule ID
-         */
-        price_rule_id: string;
-    };
-    query?: never;
-    url: '/api/v1/admin/billing/price-rules/{price_rule_id}';
-};
-
-export type UpdateBillingPriceRuleErrors = {
-    /**
-     * Price rule not found
-     */
-    404: ErrorEnvelope;
-};
-
-export type UpdateBillingPriceRuleError = UpdateBillingPriceRuleErrors[keyof UpdateBillingPriceRuleErrors];
-
-export type UpdateBillingPriceRuleResponses = {
-    /**
-     * Updated billing price rule
-     */
-    200: BillingPriceRuleResponse;
-};
-
-export type UpdateBillingPriceRuleResponse = UpdateBillingPriceRuleResponses[keyof UpdateBillingPriceRuleResponses];
-
-export type RepriceBillingData = {
-    body: BillingRepriceRequest;
-    path?: never;
-    query?: never;
-    url: '/api/v1/admin/billing/reprice-unpriced';
-};
-
-export type RepriceBillingResponses = {
-    /**
-     * Repricing result
-     */
-    200: BillingRepriceResponse;
-};
-
-export type RepriceBillingResponse = RepriceBillingResponses[keyof RepriceBillingResponses];
-
-export type BillingSummaryData = {
-    body?: never;
-    path?: never;
-    query?: {
-        user_id?: number;
-        client_key_id?: number;
-        requested_model?: string;
-        endpoint_id?: string;
-        usage_status?: string;
-        pricing_status?: string;
-        request_id?: string;
-        start_at?: string;
-        end_at?: string;
-    };
-    url: '/api/v1/admin/billing/summary';
-};
-
-export type BillingSummaryResponses = {
-    /**
-     * Billing summary
-     */
-    200: BillingSummaryResponse;
-};
-
-export type BillingSummaryResponse2 = BillingSummaryResponses[keyof BillingSummaryResponses];
 
 export type ListConfigAuditData = {
     body?: never;
@@ -4713,38 +4338,6 @@ export type SetModelRouteWhitelistResponses = {
 };
 
 export type SetModelRouteWhitelistResponse = SetModelRouteWhitelistResponses[keyof SetModelRouteWhitelistResponses];
-
-export type GetRawObjectStoreData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v1/settings/raw-object-store';
-};
-
-export type GetRawObjectStoreResponses = {
-    /**
-     * Raw object store settings
-     */
-    200: RawObjectStoreSettingsResponse;
-};
-
-export type GetRawObjectStoreResponse = GetRawObjectStoreResponses[keyof GetRawObjectStoreResponses];
-
-export type SetRawObjectStoreData = {
-    body: RawObjectStoreSettingsRequest;
-    path?: never;
-    query?: never;
-    url: '/api/v1/settings/raw-object-store';
-};
-
-export type SetRawObjectStoreResponses = {
-    /**
-     * Updated raw object store settings
-     */
-    200: RawObjectStoreSettingsResponse;
-};
-
-export type SetRawObjectStoreResponse = SetRawObjectStoreResponses[keyof SetRawObjectStoreResponses];
 
 export type GetRedactionSettingData = {
     body?: never;

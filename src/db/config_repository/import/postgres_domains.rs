@@ -8,12 +8,13 @@ use anyhow::{Context, Result};
 use sea_orm::{EntityTrait, Set};
 use sqlx::{PgConnection, QueryBuilder};
 
-use super::super::snapshot::{McpCredentialSnapshot, McpServerSnapshot, SnapshotDomains};
+use super::super::snapshot::legacy::LEGACY_RAW_OBJECT_STORE_SETTINGS_KEY;
+use super::super::snapshot::{
+    McpCredentialSnapshot, McpServerSnapshot, SettingSnapshot, SnapshotDomains,
+};
 use super::postgres::run;
 use crate::db::entities::postgres::model_route_targets;
 use crate::db::seaorm::PostgresNativeConnection;
-use crate::db::settings::RAW_OBJECT_STORE_SETTINGS_KEY;
-use crate::raw_payload_store::{RawObjectStoreConfig, RawObjectStorePersisted};
 use crate::relay_secrets::RelaySecretManager;
 
 pub(super) async fn insert_route_targets(
@@ -143,10 +144,12 @@ pub(super) async fn insert_mcp_credentials(
     if domains.mcp_credentials.is_empty() {
         return Ok(());
     }
+    // The four retired money columns still exist on this table until the
+    // storage cutover, so they are left to their database defaults: the
+    // importer neither reads nor writes any archived financial value.
     let mut query = QueryBuilder::new(
         "INSERT INTO mcp_credentials (credential_id, server_id, credential_label, secret, \
-         position, enabled, provider_kind, default_cost, strict_mode, billing_period_start, \
-         billing_period_end, created_at, updated_at) ",
+         position, enabled, provider_kind, created_at, updated_at) ",
     );
     query.push_values(&domains.mcp_credentials, |mut row, credential| {
         row.push_bind(credential.credential_id)
@@ -156,61 +159,78 @@ pub(super) async fn insert_mcp_credentials(
             .push_bind(credential.position)
             .push_bind(credential.enabled)
             .push_bind(credential.provider_kind.clone())
-            .push_bind(credential.default_cost)
-            .push_bind(credential.strict_mode)
-            .push_bind(credential.billing_period_start)
-            .push_bind(credential.billing_period_end)
             .push_bind(credential.created_at)
             .push_bind(credential.updated_at);
     });
     run(conn, query).await
 }
 
-pub(super) async fn insert_settings(
+/// Install the personal MCP OAuth grants of the archive.
+///
+/// The grants arrive decrypted and are sealed again with the destination
+/// secret manager inside the caller's transaction, so the source ciphertext,
+/// nonce and key version never travel and never survive the restore. The
+/// helper installs a fresh connection epoch and the initial generation, and
+/// deliberately restores no pending authorization state and no refresh lease.
+pub(super) async fn insert_mcp_oauth_grants(
     conn: &mut PgConnection,
     manager: &RelaySecretManager,
     domains: &SnapshotDomains,
 ) -> Result<()> {
-    let settings: Vec<&crate::db::config_repository::SettingSnapshot> = domains
+    for grant in &domains.mcp_oauth {
+        let payload = crate::db::McpOAuthGrant {
+            registration: grant.registration.clone(),
+            credentials: grant.credentials.clone(),
+        };
+        crate::db::mcp_oauth::install_grant_in_transaction(
+            conn,
+            manager,
+            grant.server_id,
+            grant.owner_user_id,
+            &grant.config_fingerprint,
+            &payload,
+        )
+        .await
+        .context("failed to restore a personal MCP OAuth grant")?;
+    }
+    Ok(())
+}
+
+/// The settings rows an import restores.
+///
+/// The raw object-store configuration is deployment state and is never
+/// imported, the shared Valkey coordination row belongs to the destination
+/// deployment and keeps its own seed, and the internal coordination rows are
+/// never restored.
+pub(super) fn restorable_settings(domains: &SnapshotDomains) -> Vec<&SettingSnapshot> {
+    domains
         .settings
         .iter()
-        .filter(|setting| setting.key != RAW_OBJECT_STORE_SETTINGS_KEY)
-        // The shared Valkey settings carry their own revision and are written
-        // with the concurrency protocol of the settings patch.
+        .filter(|setting| setting.key != LEGACY_RAW_OBJECT_STORE_SETTINGS_KEY)
         .filter(|setting| setting.key != crate::db::SHARED_VALKEY_SETTINGS_KEY)
-        // The internal coordination rows are never restored from an archive.
         .filter(|setting| {
             !crate::db::INTERNAL_COORDINATION_SETTING_KEYS.contains(&setting.key.as_str())
         })
-        .collect();
-    if !settings.is_empty() {
-        let mut query = QueryBuilder::new(
-            "INSERT INTO worker_settings (setting_key, setting_value, updated_at) ",
-        );
-        query.push_values(settings, |mut row, setting| {
-            row.push_bind(setting.key.clone())
-                .push_bind(setting.value.clone())
-                .push_bind(setting.updated_at.unwrap_or_else(chrono::Utc::now));
-        });
-        run(conn, query).await?;
+        .collect()
+}
+
+pub(super) async fn insert_settings(
+    conn: &mut PgConnection,
+    _manager: &RelaySecretManager,
+    domains: &SnapshotDomains,
+) -> Result<()> {
+    let settings = restorable_settings(domains);
+    if settings.is_empty() {
+        return Ok(());
     }
-    if let Some(raw) = &domains.raw_object_store {
-        let config: RawObjectStoreConfig = serde_json::from_value(raw.clone())
-            .context("raw object store configuration is unreadable")?;
-        let persisted = RawObjectStorePersisted::from_config(&config, manager)
-            .context("failed to re-encrypt the raw object store configuration")?;
-        let mut query =
-            QueryBuilder::new("INSERT INTO worker_settings (setting_key, setting_value) ");
-        query.push_values(
-            [(RAW_OBJECT_STORE_SETTINGS_KEY, persisted)],
-            |mut row, (key, value)| {
-                row.push_bind(key)
-                    .push_bind(serde_json::to_value(value).unwrap_or_default());
-            },
-        );
-        run(conn, query).await?;
-    }
-    Ok(())
+    let mut query =
+        QueryBuilder::new("INSERT INTO worker_settings (setting_key, setting_value, updated_at) ");
+    query.push_values(settings, |mut row, setting| {
+        row.push_bind(setting.key.clone())
+            .push_bind(setting.value.clone())
+            .push_bind(setting.updated_at.unwrap_or_else(chrono::Utc::now));
+    });
+    run(conn, query).await
 }
 
 pub(super) async fn insert_user_redaction_configs(
@@ -230,45 +250,56 @@ pub(super) async fn insert_user_redaction_configs(
     run(conn, query).await
 }
 
-/// Restore the shared Valkey settings with a fresh revision.
-///
-/// The archived revision is never replayed: an archive that predates a
-/// running worker must not make an applied revision look current again. An
-/// archive without the shared Valkey settings disables the coordination with
-/// a new revision instead of erasing the lineage.
-pub(super) async fn insert_shared_valkey(
+/// Restore explicit per-user endpoint selections after their users and
+/// endpoints exist. A NULL endpoint means "use the routing default" and is
+/// inserted as NULL, distinct from the absence of the row.
+pub(super) async fn insert_user_endpoint_settings(
     conn: &mut PgConnection,
     domains: &SnapshotDomains,
-    current_revision: Option<i64>,
 ) -> Result<()> {
-    let archived = domains
-        .settings
-        .iter()
-        .find(|setting| setting.key == crate::db::SHARED_VALKEY_SETTINGS_KEY);
-    let mut persisted = match archived {
-        Some(setting) => {
-            let archived: crate::db::SharedValkeyPersisted =
-                serde_json::from_value(setting.value.clone())
-                    .context("archived shared Valkey settings are unreadable")?;
-            archived
-        }
-        None => crate::db::SharedValkeyPersisted {
-            revision: 0,
-            ttl_seconds: crate::db::DEFAULT_SHARED_VALKEY_TTL_SECONDS,
-            url: None,
-        },
-    };
-    persisted.revision = crate::db::next_shared_valkey_revision(current_revision);
-    if crate::db::validate_shared_valkey_ttl(persisted.ttl_seconds).is_err() {
-        persisted.ttl_seconds = crate::db::DEFAULT_SHARED_VALKEY_TTL_SECONDS;
+    if domains.user_endpoint_settings.is_empty() {
+        return Ok(());
     }
-    let mut query = QueryBuilder::new("INSERT INTO worker_settings (setting_key, setting_value) ");
-    query.push_values(
-        [(crate::db::SHARED_VALKEY_SETTINGS_KEY, persisted)],
-        |mut row, (key, value)| {
-            row.push_bind(key)
-                .push_bind(serde_json::to_value(value).unwrap_or_default());
-        },
-    );
+    let mut query =
+        QueryBuilder::new("INSERT INTO user_endpoint_settings (user_id, endpoint_id, updated_at) ");
+    query.push_values(&domains.user_endpoint_settings, |mut row, setting| {
+        row.push_bind(setting.user_id)
+            .push_bind(setting.endpoint_id)
+            .push_bind(chrono::Utc::now());
+    });
     run(conn, query).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::restorable_settings;
+    use crate::db::config_repository::snapshot::{SettingSnapshot, SnapshotDomains};
+
+    fn setting(key: &str) -> SettingSnapshot {
+        SettingSnapshot {
+            key: key.to_string(),
+            version: 1,
+            value: serde_json::Value::Null,
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn the_shared_valkey_row_is_never_restored() {
+        let domains = SnapshotDomains {
+            settings: vec![
+                setting("redaction_enabled"),
+                setting(crate::db::SHARED_VALKEY_SETTINGS_KEY),
+                setting(crate::db::RELAY_SNAPSHOT_VERSION_SETTINGS_KEY),
+                setting(crate::db::config_repository::snapshot::legacy::LEGACY_RAW_OBJECT_STORE_SETTINGS_KEY),
+            ],
+            ..crate::db::config_repository::snapshot_source::empty_domains()
+        };
+        let restorable = restorable_settings(&domains);
+        let keys: Vec<&str> = restorable
+            .iter()
+            .map(|setting| setting.key.as_str())
+            .collect();
+        assert_eq!(keys, vec!["redaction_enabled"]);
+    }
 }

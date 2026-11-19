@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #69 Phase P7b: bounded raw-body prune for one boundary chunk.\n--\n-- `$1` is the exact `now - raw_retention_days` cutoff, `$3`/`$4` are the\n-- listed chunk range. There is deliberately no lower bound beyond the chunk\n-- range and no DEFAULT-partition branch: the whole raw parent is a\n-- TimescaleDB hypertable and the row prune must cover the boundary chunk the\n-- whole-chunk drop deliberately retained. `FOR UPDATE SKIP LOCKED` keeps\n-- concurrent body writes from blocking the prune.\nWITH expired AS (\n    SELECT created_at, event_id\n    FROM request_record_raw_payloads raw\n    WHERE raw.created_at < $1\n      AND raw.created_at >= $3\n      AND raw.created_at < $4\n    ORDER BY created_at, event_id\n    LIMIT $2\n    FOR UPDATE SKIP LOCKED\n), deleted AS (\n    DELETE FROM request_record_raw_payloads raw\n    USING expired\n    WHERE raw.created_at = expired.created_at\n      AND raw.event_id = expired.event_id\n    RETURNING raw.event_id\n), cleared AS (\n    UPDATE request_records rr\n    SET\n    request_has_previous_response_id = FALSE,\n    request_previous_response_id = NULL,\n    request_previous_response_parent_found = NULL,\n    request_conversation_key = NULL,\n    request_conversation_parent_found = NULL\n    WHERE rr.event_id = ANY (ARRAY(SELECT event_id FROM deleted))\n      AND rr.created_at >= $3\n      AND rr.created_at < $4\n    RETURNING rr.event_id\n)\nSELECT\n    COALESCE((SELECT COUNT(*) FROM deleted), 0)::BIGINT AS deleted_count,\n    COALESCE((SELECT COUNT(*) FROM cleared), 0)::BIGINT AS cleared_count;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "deleted_count",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "cleared_count",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "c35a2efbbb833cb2460672a3feeef961fd3804050cda4da2ce377055656a1d4b"
+}

@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -46,6 +46,31 @@ pub struct NodeArgs {
 #[derive(Debug, Subcommand)]
 pub enum MaintenanceCommand {
     Rekey(RekeyArgs),
+    /// Export the complete configuration of a stopped source deployment.
+    ExportConfig(ExportConfigArgs),
+}
+
+/// Read-only configuration export of a stopped source deployment.
+///
+/// The database URL and the master secret come from the node configuration or
+/// the environment; the passphrase never appears on the command line.
+#[derive(Debug, Args, Clone)]
+#[command(group(
+    ArgGroup::new("passphrase_source")
+        .required(true)
+        .multiple(false)
+        .args(["passphrase_file", "passphrase_stdin"])
+))]
+pub struct ExportConfigArgs {
+    /// Destination path of the encrypted archive; an existing file is never overwritten.
+    #[arg(long)]
+    pub out: std::path::PathBuf,
+    /// File holding the archive passphrase (one trailing line ending is stripped).
+    #[arg(long)]
+    pub passphrase_file: Option<std::path::PathBuf>,
+    /// Read the archive passphrase from standard input.
+    #[arg(long)]
+    pub passphrase_stdin: bool,
 }
 
 #[derive(Debug, Args, Clone, Default)]
@@ -116,6 +141,96 @@ mod tests {
         assert_eq!(
             args.legacy_key_file.as_deref(),
             Some(std::path::Path::new("keyfile"))
+        );
+    }
+
+    #[test]
+    fn export_config_requires_exactly_one_passphrase_source() {
+        assert!(
+            Cli::try_parse_from(["prompt-ferry", "maintenance", "export-config", "--out", "a"])
+                .is_err(),
+            "a passphrase source is required"
+        );
+        assert!(
+            Cli::try_parse_from([
+                "prompt-ferry",
+                "maintenance",
+                "export-config",
+                "--out",
+                "a",
+                "--passphrase-file",
+                "p",
+                "--passphrase-stdin",
+            ])
+            .is_err(),
+            "the passphrase sources are mutually exclusive"
+        );
+        let cli = Cli::parse_from([
+            "prompt-ferry",
+            "maintenance",
+            "export-config",
+            "--out",
+            "a",
+            "--passphrase-file",
+            "p",
+        ]);
+        let Some(Command::Maintenance(MaintenanceCommand::ExportConfig(args))) = cli.command else {
+            panic!("expected export-config command")
+        };
+        assert_eq!(args.out, std::path::Path::new("a"));
+        assert_eq!(
+            args.passphrase_file.as_deref(),
+            Some(std::path::Path::new("p"))
+        );
+        assert!(!args.passphrase_stdin);
+
+        let cli = Cli::parse_from([
+            "prompt-ferry",
+            "maintenance",
+            "export-config",
+            "--out",
+            "a",
+            "--passphrase-stdin",
+        ]);
+        let Some(Command::Maintenance(MaintenanceCommand::ExportConfig(args))) = cli.command else {
+            panic!("expected export-config command")
+        };
+        assert!(args.passphrase_stdin && args.passphrase_file.is_none());
+    }
+
+    #[test]
+    fn export_config_rejects_secret_and_url_flags() {
+        for flag in [
+            "--passphrase",
+            "--database-url",
+            "--master-secret",
+            "--url",
+            "--password",
+        ] {
+            assert!(
+                Cli::try_parse_from([
+                    "prompt-ferry",
+                    "maintenance",
+                    "export-config",
+                    "--out",
+                    "a",
+                    "--passphrase-stdin",
+                    flag,
+                    "secret",
+                ])
+                .is_err(),
+                "{flag} must not be accepted"
+            );
+        }
+        assert!(
+            Cli::try_parse_from([
+                "prompt-ferry",
+                "maintenance",
+                "export-config",
+                "--passphrase-stdin",
+            ])
+            .is_err(),
+            "the output path is required"
         );
     }
 

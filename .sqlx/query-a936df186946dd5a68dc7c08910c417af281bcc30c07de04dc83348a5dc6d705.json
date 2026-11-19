@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Acquire the same transaction-scoped advisory key the chunk maintenance path\n-- uses, before any decompression or row DML. Transaction scope means a failed\n-- clear releases the key on rollback and a successful clear holds it until\n-- commit.\nSELECT pg_try_advisory_xact_lock($1) AS \"acquired!\";\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "acquired!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a936df186946dd5a68dc7c08910c417af281bcc30c07de04dc83348a5dc6d705"
+}

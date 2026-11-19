@@ -62,18 +62,6 @@ pub struct WorkerConfig {
     pub max_raw_response_capture_bytes: usize,
     pub max_response_text_capture_bytes: usize,
     pub endpoint_model_cache_ttl_seconds: u64,
-    pub raw_object_store_endpoint: String,
-    pub raw_object_store_bucket: String,
-    pub raw_object_store_region: String,
-    pub raw_object_store_access_key: String,
-    pub raw_object_store_secret_key: String,
-    pub raw_object_store_prefix: String,
-    pub raw_object_store_allow_http: bool,
-    #[serde(default = "default_raw_object_store_path_style")]
-    pub raw_object_store_path_style: bool,
-    /// Local filesystem directory used when no object-store bucket is
-    /// configured. Empty resolves to `<data root>/prompt-ferry/raw-objects`.
-    pub raw_object_store_local_dir: String,
     /// Browser origins allowed to call the MCP proxy. When non-empty, requests
     /// carrying an `Origin` header must match one of these entries (RFC 6454);
     /// missing `Origin` always passes. Empty keeps Origin validation disabled.
@@ -115,15 +103,6 @@ impl Default for WorkerConfig {
             max_raw_response_capture_bytes: 4 * 1024 * 1024,
             max_response_text_capture_bytes: 1024 * 1024,
             endpoint_model_cache_ttl_seconds: 300,
-            raw_object_store_endpoint: String::new(),
-            raw_object_store_bucket: String::new(),
-            raw_object_store_region: "auto".to_string(),
-            raw_object_store_access_key: String::new(),
-            raw_object_store_secret_key: String::new(),
-            raw_object_store_prefix: "prompt-ferry/raw".to_string(),
-            raw_object_store_allow_http: false,
-            raw_object_store_path_style: true,
-            raw_object_store_local_dir: String::new(),
             mcp_allowed_origins: Vec::new(),
             mcp_oauth_redirect_base: String::new(),
         }
@@ -173,10 +152,6 @@ impl WorkerConfig {
 
 pub fn normalize_relay_url(value: &str) -> String {
     value.trim().trim_end_matches('/').to_string()
-}
-
-fn default_raw_object_store_path_style() -> bool {
-    true
 }
 
 /// Resolve the registry identity from an explicit name or the host plus admin

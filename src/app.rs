@@ -83,6 +83,9 @@ async fn run_component(command: Command) -> anyhow::Result<()> {
             crate::cli::MaintenanceCommand::Rekey(args) => {
                 crate::maintenance::rekey::run_rekey(args).await
             }
+            crate::cli::MaintenanceCommand::ExportConfig(args) => {
+                crate::maintenance::export_config::run_export_config(args).await
+            }
         },
     }
 }

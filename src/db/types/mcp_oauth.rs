@@ -50,6 +50,36 @@ pub struct McpOAuthStoredCredentials {
     pub issuer: Option<String>,
 }
 
+/// The portable shape of one personal MCP OAuth grant.
+///
+/// The configuration archive carries the decrypted registration and credential
+/// material, so a target deployment can seal it again with its own master
+/// secret instead of inheriting the source ciphertext. The connection epoch
+/// and the generation are deliberately absent: the target installs a fresh
+/// epoch when it restores the grant, and pending authorization states and
+/// refresh leases never travel with it.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct McpOAuthGrantSnapshot {
+    pub server_id: Uuid,
+    pub owner_user_id: i64,
+    pub config_fingerprint: String,
+    pub registration: McpOAuthRegistration,
+    pub credentials: McpOAuthStoredCredentials,
+}
+
+impl std::fmt::Debug for McpOAuthGrantSnapshot {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("McpOAuthGrantSnapshot")
+            .field("server_id", &self.server_id)
+            .field("owner_user_id", &self.owner_user_id)
+            .field("config_fingerprint", &self.config_fingerprint)
+            .field("registration", &"<redacted>")
+            .field("credentials", &"<redacted>")
+            .finish()
+    }
+}
+
 /// Pending authorization material encrypted at rest inside a state row.
 ///
 /// `snapshot` is the complete serialized rmcp `StoredAuthorizationState`; the

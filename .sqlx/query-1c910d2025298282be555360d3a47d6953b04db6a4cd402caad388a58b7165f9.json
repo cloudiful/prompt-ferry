@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #69 Phase P4b: drop the expired chunks of one request-family parent.\n--\n-- The parent is always one of the eight compile-time names in\n-- `partition_maintenance`, bound as text and resolved through `regclass`.\n-- The cutoff is a whole UTC day at or before yesterday's midnight, so the\n-- current day chunk is never selected. The count is the number of whole\n-- chunks TimescaleDB actually dropped.\nSELECT COUNT(*)::BIGINT AS \"dropped!\"\nFROM drop_chunks($1::text::regclass, older_than => $2::timestamptz);\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "dropped!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1c910d2025298282be555360d3a47d6953b04db6a4cd402caad388a58b7165f9"
+}

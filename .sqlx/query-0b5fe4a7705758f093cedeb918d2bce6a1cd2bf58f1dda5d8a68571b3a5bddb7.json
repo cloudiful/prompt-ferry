@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #69 Phase P4b: delete only redaction sessions orphaned by a clear.\n--\n-- Unlike the tick's stale-session cleanup, this deliberately ignores the\n-- seven-day idle predicate: a live session that merely looks old belongs to a\n-- user who is still working, while a session whose last request row is gone\n-- can never be resumed.\nDELETE FROM conversation_redaction_sessions sessions\nWHERE sessions.last_event_id IS NOT NULL\n  AND NOT EXISTS (\n      SELECT 1\n      FROM request_records rr\n      WHERE rr.event_id = sessions.last_event_id\n  );\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "0b5fe4a7705758f093cedeb918d2bce6a1cd2bf58f1dda5d8a68571b3a5bddb7"
+}

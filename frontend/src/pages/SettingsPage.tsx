@@ -5,7 +5,6 @@ import { SettingsGeneralTab } from '@/components/settings/SettingsGeneralTab'
 import { SettingsNetworkTab } from '@/components/settings/SettingsNetworkTab'
 import { SettingsRequestsTab } from '@/components/settings/SettingsRequestsTab'
 import { SettingsSharedValkeyCard } from '@/components/settings/SettingsSharedValkeyCard'
-import { SettingsStorageTab } from '@/components/settings/SettingsStorageTab'
 import { useLocale } from '@/lib/i18n'
 import { usePageTitle } from '@/lib/router'
 import { useSessionStore } from '@/lib/session'
@@ -19,7 +18,7 @@ function currentSettingsTab(pathname: string): string | null {
 /**
  * The mounted settings route.
  *
- * The general tab and all five admin tabs (requests, network, storage,
+ * The general tab and all five admin tabs (requests, network, shared Valkey,
  * cache alert, config archive) are ported; a path that names any other tab
  * renders nothing rather than a stub.
  * The resolver is applied on every path, so an unauthenticated or non-admin
@@ -81,7 +80,6 @@ export function SettingsPage() {
         data-foundation-route-id="R-SETTINGS-STORAGE"
         data-settings-tab={tab}
       >
-        <SettingsStorageTab />
         <SettingsSharedValkeyCard />
       </section>
     )

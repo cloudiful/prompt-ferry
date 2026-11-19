@@ -13,7 +13,6 @@ pub enum Capability {
     ClientKeys,
     Settings,
     RequestRecords,
-    Billing,
     EndpointSetting,
     McpServers,
     McpCredentials,
@@ -21,7 +20,6 @@ pub enum Capability {
     ConversationEndpointOverride,
     AvailableModels,
     SnapshotPublication,
-    RawObjectStore,
     SharedValkey,
     ConfigExport,
     ConfigImport,
@@ -38,7 +36,6 @@ impl Capability {
             Self::ClientKeys => "sqlite_client_keys_unavailable",
             Self::Settings => "sqlite_settings_unavailable",
             Self::RequestRecords => "sqlite_request_records_unavailable",
-            Self::Billing => "sqlite_billing_unavailable",
             Self::EndpointSetting => "sqlite_endpoint_setting_unavailable",
             Self::McpServers => "sqlite_mcp_servers_unavailable",
             Self::McpCredentials => "sqlite_mcp_credentials_unavailable",
@@ -48,7 +45,6 @@ impl Capability {
             }
             Self::AvailableModels => "sqlite_available_models_unavailable",
             Self::SnapshotPublication => "sqlite_snapshot_publication_unavailable",
-            Self::RawObjectStore => "sqlite_raw_object_store_unavailable",
             Self::SharedValkey => "sqlite_shared_valkey_unavailable",
             Self::ConfigExport => "sqlite_config_export_unavailable",
             Self::ConfigImport => "sqlite_config_import_unavailable",
@@ -67,7 +63,6 @@ impl Capability {
             Self::RequestRecords => {
                 "durable request records and usage history are not available on SQLite"
             }
-            Self::Billing => "billing persistence is not available on SQLite",
             Self::EndpointSetting => "user endpoint setting is available on SQLite",
             Self::McpServers => "MCP server configuration is available on SQLite",
             Self::McpCredentials => "MCP credential configuration is available on SQLite",
@@ -77,7 +72,6 @@ impl Capability {
             }
             Self::AvailableModels => "available model discovery is not yet available on SQLite",
             Self::SnapshotPublication => "snapshot publication is available on SQLite",
-            Self::RawObjectStore => "raw object store configuration is not available on SQLite",
             Self::SharedValkey => "shared Valkey configuration is not available on SQLite",
             Self::ConfigExport => "encrypted configuration export is available on SQLite",
             Self::ConfigImport => "encrypted configuration import is available on SQLite",
@@ -88,8 +82,8 @@ impl Capability {
 
     pub fn sqlite_supported(self) -> bool {
         // Core configuration and supported MCP domains use the unified
-        // repository. Durable usage, billing, and quota ledgers
-        // remain PostgreSQL-only until their SQLite retention semantics exist.
+        // repository. Durable usage and quota ledgers remain PostgreSQL-only
+        // until their SQLite retention semantics exist.
         matches!(
             self,
             Self::Endpoints
@@ -155,7 +149,6 @@ impl Capability {
             | "/settings/stream-delta-batching"
             | "/settings/model-route-whitelist"
             | "/settings/relay-ip-whitelist" => return Some(Self::Settings),
-            "/settings/raw-object-store" => return Some(Self::RawObjectStore),
             "/settings/shared-valkey" => return Some(Self::SharedValkey),
             _ => {}
         }
@@ -164,9 +157,6 @@ impl Capability {
         }
         if path == "/admin/request-records" || path.starts_with("/admin/request-records/") {
             return Some(Self::RequestRecords);
-        }
-        if path == "/admin/billing" || path.starts_with("/admin/billing/") {
-            return Some(Self::Billing);
         }
         if path == "/admin/mcp-servers" {
             return Some(Self::McpServers);
@@ -242,10 +232,6 @@ mod tests {
             Some(Capability::Settings)
         );
         assert_eq!(
-            Capability::for_path("/settings/raw-object-store"),
-            Some(Capability::RawObjectStore)
-        );
-        assert_eq!(
             Capability::for_path("/settings/shared-valkey"),
             Some(Capability::SharedValkey)
         );
@@ -304,10 +290,6 @@ mod tests {
             Capability::for_path("/admin/request-records/summary"),
             Some(Capability::RequestRecords)
         );
-        assert_eq!(
-            Capability::for_path("/admin/billing/summary"),
-            Some(Capability::Billing)
-        );
         assert_eq!(Capability::for_path("/auth/me"), None);
     }
 
@@ -324,11 +306,9 @@ mod tests {
         assert!(Capability::McpCatalog.sqlite_supported());
         assert!(!Capability::RequestRecords.sqlite_supported());
         assert!(!Capability::Workers.sqlite_supported());
-        assert!(!Capability::Billing.sqlite_supported());
         assert!(!Capability::ConversationEndpointOverride.sqlite_supported());
         assert!(!Capability::AvailableModels.sqlite_supported());
         assert!(!Capability::ModelRouteTest.sqlite_supported());
-        assert!(!Capability::RawObjectStore.sqlite_supported());
         assert!(!Capability::SharedValkey.sqlite_supported());
         // The encrypted configuration export reads the active backend, so it
         // must stay reachable on both PostgreSQL and SQLite.

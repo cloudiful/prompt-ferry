@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Inclusive created_at envelope of the clear candidates.\n--\n-- The predicate is exactly the candidate predicate of clear_family_rows.sql\n-- (range plus scope, without the redundant envelope quals). An empty result\n-- means the clear has nothing to touch: no chunk decompression, no family\n-- delete and no orphan sweep are run.\n--\n--   $1  target_user_id (TargetUser scope; NULL otherwise)\n--   $2  visible_user_id (CurrentUser scope; NULL otherwise)\n--   $3  start_at (NULL = unbounded)\n--   $4  end_at (NULL = unbounded, inclusive)\n--   $5  scope code: 0 = all users, 1 = current user, 2 = target user\nSELECT\n    MIN(rr.created_at) AS min_created_at,\n    MAX(rr.created_at) AS max_created_at\nFROM request_records rr\nWHERE ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3)\n  AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at <= $4)\n  AND (\n      $5::INT = 0\n      OR ($5::INT = 1 AND rr.user_id = $2::BIGINT)\n      OR ($5::INT = 2 AND rr.user_id = $1::BIGINT)\n  );\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "min_created_at",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "max_created_at",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Timestamptz",
+        "Timestamptz",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "d1b1d37c3941c8435bcab65397cba044930c5bc0dc01f250ae88192f874bf8a8"
+}

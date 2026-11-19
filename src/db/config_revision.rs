@@ -298,13 +298,9 @@ mod tests {
                 "position",
                 "enabled",
                 "provider_kind",
-                "default_cost",
-                "strict_mode",
             ],
             ignored: &[
                 "credential_id",
-                "billing_period_start",
-                "billing_period_end",
                 "provider_remaining",
                 "provider_synced_at",
                 "provider_reset_at",
@@ -352,8 +348,6 @@ mod tests {
                 "cooldown_until",
                 "last_error",
                 "last_error_at",
-                "billing_period_start",
-                "billing_period_end",
             ],
         ),
     ];
@@ -551,7 +545,10 @@ mod tests {
             TRIGGER_TABLES.len() * 2,
             "every configuration table needs one write and one update trigger"
         );
-        for table in TRIGGER_TABLES {
+        for table in TRIGGER_TABLES
+            .iter()
+            .filter(|table| table.table != "mcp_credentials")
+        {
             let update = format!(
                 "after update of {} on public.{}",
                 table.config.join(", "),
@@ -587,6 +584,52 @@ mod tests {
                 table.table
             );
         }
+
+        // The decision trigger for the retired MCP credential fields is replaced
+        // by the fresh Timescale migration; the historical file stays untouched.
+        let credentials = TRIGGER_TABLES
+            .iter()
+            .find(|table| table.table == "mcp_credentials")
+            .expect("mcp_credentials declaration");
+        assert!(sql.contains(
+            "after update of server_id, credential_label, secret, position, enabled, provider_kind, default_cost, strict_mode on public.mcp_credentials"
+        ));
+        let replacement =
+            include_str!("../../migrations/20261118133636_request_family_timescale.up.sql")
+                .to_lowercase();
+        assert!(replacement.contains(
+            "drop trigger if exists trg_cfg_rev_mcp_credentials_update on public.mcp_credentials"
+        ));
+        let update = format!(
+            "after update of {} on public.mcp_credentials",
+            credentials.config.join(", ")
+        );
+        let start = replacement
+            .find(&update)
+            .unwrap_or_else(|| panic!("missing replacement update trigger for mcp_credentials"));
+        let block = &replacement[start + update.len()..];
+        let when = &block[..block
+            .find("execute function")
+            .unwrap_or_else(|| panic!("unterminated replacement update trigger"))];
+        for column in credentials.config {
+            let comparison = format!("old.{column} is distinct from new.{column}");
+            assert!(
+                when.contains(&comparison),
+                "mcp_credentials replacement update trigger omits {column}"
+            );
+        }
+        for retired in [
+            "default_cost",
+            "strict_mode",
+            "billing_period_start",
+            "billing_period_end",
+        ] {
+            assert!(
+                !when.contains(retired),
+                "replacement trigger compares {retired}"
+            );
+        }
+
         for excluded in [
             "request_records",
             "usage_charges",

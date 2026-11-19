@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Serialize identity writers with the configuration replace.\n--\n-- SHARE ROW EXCLUSIVE conflicts with the INSERT/UPDATE/DELETE of ordinary\n-- user/client-key writers but not with SELECT, so the importer can read and\n-- restart both sequences without a concurrent default nextval() racing it.\n-- Every import takes the same fixed table order.\nLOCK TABLE public.users, public.client_keys IN SHARE ROW EXCLUSIVE MODE;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "2aac65667672ce8cf7c99feae001d68c1e4e2f0d629f3c6cded4d64d0e212974"
+}

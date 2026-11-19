@@ -1,7 +1,11 @@
 # Fresh stack only. Existing installations must follow MIGRATING.md first.
 services:
   postgres:
-    image: postgres:18-bookworm
+    # TimescaleDB 2.32.0 on PostgreSQL 18 (multi-arch index digest). The image is
+    # the deployment precondition for the columnstore; if its entrypoint does not
+    # create the extension in the application database, run
+    # `CREATE EXTENSION IF NOT EXISTS timescaledb` once as a superuser.
+    image: timescale/timescaledb:2.32.0-pg18@sha256:83952d54cfc74d9aebe4aba6ecf2af829c2bcf1f30058dded4c18ab3720a247a
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
@@ -31,24 +35,6 @@ services:
     ports:
       - "127.0.0.1:${PROMPT_FERRY_VALKEY_PORT:-6379}:6379"
 
-  rustfs:
-    image: rustfs/rustfs:1.0.1
-    restart: unless-stopped
-    environment:
-      RUSTFS_ACCESS_KEY: ${PROMPT_FERRY__RAW_OBJECT_STORE_ACCESS_KEY:?set object store access key}
-      RUSTFS_SECRET_KEY: ${PROMPT_FERRY__RAW_OBJECT_STORE_SECRET_KEY:?set object store secret key}
-      RUSTFS_CONSOLE_ENABLE: "true"
-    volumes:
-      - rustfs-data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/health/ready || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-    ports:
-      - "127.0.0.1:${PROMPT_FERRY_RUSTFS_PORT:-9000}:9000"
-      - "127.0.0.1:${PROMPT_FERRY_RUSTFS_CONSOLE_PORT:-9001}:9001"
-
   prompt-ferry:
     image: ${PROMPT_FERRY_IMAGE:?set PROMPT_FERRY_IMAGE}
     restart: unless-stopped
@@ -59,8 +45,6 @@ services:
       postgres:
         condition: service_healthy
       valkey:
-        condition: service_healthy
-      rustfs:
         condition: service_healthy
     environment:
       PROMPT_FERRY__BIND: 0.0.0.0:8787
@@ -73,14 +57,6 @@ services:
       PROMPT_FERRY__MCP_WARMUP: ${PROMPT_FERRY__MCP_WARMUP:-all}
       PROMPT_FERRY__MCP_OAUTH_REDIRECT_BASE: ${PROMPT_FERRY__MCP_OAUTH_REDIRECT_BASE:-}
       PROMPT_FERRY__UPSTREAM_API_KEY: ${PROMPT_FERRY__UPSTREAM_API_KEY:-}
-      PROMPT_FERRY__RAW_OBJECT_STORE_ENDPOINT: http://rustfs:9000
-      PROMPT_FERRY__RAW_OBJECT_STORE_BUCKET: ${PROMPT_FERRY__RAW_OBJECT_STORE_BUCKET:-prompt-ferry-raw}
-      PROMPT_FERRY__RAW_OBJECT_STORE_REGION: ${PROMPT_FERRY__RAW_OBJECT_STORE_REGION:-auto}
-      PROMPT_FERRY__RAW_OBJECT_STORE_ACCESS_KEY: ${PROMPT_FERRY__RAW_OBJECT_STORE_ACCESS_KEY:?set object store access key}
-      PROMPT_FERRY__RAW_OBJECT_STORE_SECRET_KEY: ${PROMPT_FERRY__RAW_OBJECT_STORE_SECRET_KEY:?set object store secret key}
-      PROMPT_FERRY__RAW_OBJECT_STORE_PREFIX: ${PROMPT_FERRY__RAW_OBJECT_STORE_PREFIX:-prompt-ferry/raw}
-      PROMPT_FERRY__RAW_OBJECT_STORE_ALLOW_HTTP: ${PROMPT_FERRY__RAW_OBJECT_STORE_ALLOW_HTTP:-true}
-      PROMPT_FERRY__RAW_OBJECT_STORE_PATH_STYLE: ${PROMPT_FERRY__RAW_OBJECT_STORE_PATH_STYLE:-true}
       XDG_DATA_HOME: /var/lib/prompt-ferry
       XDG_CONFIG_HOME: /etc/prompt-ferry
     volumes:
@@ -110,7 +86,6 @@ services:
 volumes:
   postgres18-data:
   valkey-data:
-  rustfs-data:
   prompt-ferry-data:
   prompt-ferry-config:
   prompt-ferry-uv-cache:
