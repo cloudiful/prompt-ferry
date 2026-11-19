@@ -254,15 +254,20 @@ fn resolve_redaction_scope(
     query: RedactionSettingQuery,
     action: UserAction,
 ) -> Result<(RedactionScope, Option<i64>), ApiError> {
-    let can_control = crate::authz::authorize_control(
+    let can_control = crate::authz::check(
         &state.authorizer,
         user.user_id,
         user.is_admin,
-        ControlAction::Settings,
+        crate::authz::Operation::Control(ControlAction::Settings),
     )
     .is_allowed();
-    if !crate::authz::authorize_user(&state.authorizer, user.user_id, user.is_admin, action)
-        .is_allowed()
+    if !crate::authz::check(
+        &state.authorizer,
+        user.user_id,
+        user.is_admin,
+        crate::authz::Operation::User(action),
+    )
+    .is_allowed()
     {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,

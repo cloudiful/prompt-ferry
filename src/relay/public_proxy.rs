@@ -714,8 +714,15 @@ async fn authorize_client_with_format(
         match routes.get(&key_hash).cloned() {
             Some(route) => {
                 let allowed = state.authorizer.as_ref().is_some_and(|authorizer| {
-                    crate::authz::authorize_inference(authorizer, route.user_id, &route.route_id)
-                        .is_allowed()
+                    crate::authz::check(
+                        authorizer,
+                        route.user_id,
+                        false,
+                        crate::authz::Operation::Inference {
+                            route_id: &route.route_id,
+                        },
+                    )
+                    .is_allowed()
                 });
                 if allowed {
                     Ok(Some(route))

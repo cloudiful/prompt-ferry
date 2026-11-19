@@ -22,7 +22,7 @@ use super::openai_org_usage_cache::OpenAiOrgUsageCache;
 use super::quota_inference_cache::QuotaInferenceCache;
 use super::token_plan_cache::TokenPlanQuotaCache;
 use crate::{
-    authz::{Authorizer, ControlAction, UserAction},
+    authz::{Authorizer, ControlAction, Operation, UserAction},
     db::{ConfigRepository, SharedValkeyConfig, StreamDeltaBatchingSettings, UserStore},
     endpoint_models::EndpointModelCache,
     keys::generate_client_key,
@@ -626,8 +626,13 @@ pub async fn ensure_admin(
     action: ControlAction,
 ) -> Result<SessionUser, ApiError> {
     let user = current_user(state, headers).await?;
-    if crate::authz::authorize_control(&state.authorizer, user.user_id, user.is_admin, action)
-        .is_allowed()
+    if crate::authz::check(
+        &state.authorizer,
+        user.user_id,
+        user.is_admin,
+        Operation::Control(action),
+    )
+    .is_allowed()
     {
         Ok(user)
     } else {
@@ -649,8 +654,13 @@ pub async fn ensure_user(
     action: UserAction,
 ) -> Result<SessionUser, ApiError> {
     let user = current_user(state, headers).await?;
-    if crate::authz::authorize_user(&state.authorizer, user.user_id, user.is_admin, action)
-        .is_allowed()
+    if crate::authz::check(
+        &state.authorizer,
+        user.user_id,
+        user.is_admin,
+        Operation::User(action),
+    )
+    .is_allowed()
     {
         Ok(user)
     } else {
