@@ -73,21 +73,23 @@ jobs:
             ${{ runner.os }}-bun-${{ matrix.target }}-
             ${{ runner.os }}-bun-
 
-      - name: Build frontend
-        working-directory: frontend
-        shell: bash
-        run: |
-          bun install --no-save
-          bun run openapi-ts
-          git diff --exit-code -- src/generated/admin-api
-          bun run build
-          test -f dist/index.html
-
       - name: Set up MSVC environment
         if: matrix.msvc_arch != ''
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: ${{ matrix.msvc_arch }}
+
+      - name: Export standard OpenAPI
+        shell: bash
+        run: cargo run --release --no-default-features --bin export-openapi -- frontend/openapi.json
+
+      - name: Build frontend
+        working-directory: frontend
+        shell: bash
+        run: |
+          bun install --no-save
+          bun run build
+          test -f dist/index.html
 
       - name: Build binary
         run: cargo build --release --bin prompt-ferry --target "${{ matrix.target }}"

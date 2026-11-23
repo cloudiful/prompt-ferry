@@ -9,7 +9,7 @@
     "generate:api": "bun run openapi-ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "build": "bun run typecheck && vite build",
+    "build": "bun run openapi-ts && git -C .. diff --exit-code -- openapi/admin-api.yaml && git diff --exit-code -- src/generated/admin-api && bun run typecheck && vite build",
     "typecheck": "tsc --noEmit -p tsconfig.app.json"
   },
   "dependencies": {

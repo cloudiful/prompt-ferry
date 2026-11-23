@@ -1,5 +1,6 @@
 use std::{
-    fs,
+    fs::{self, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -26,11 +27,47 @@ fn admin_api_doc() -> utoipa::openapi::OpenApi {
     api
 }
 
+fn write_yaml(document: &utoipa::openapi::OpenApi, out: &Path) -> Result<()> {
+    let parent = out
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let parent = fs::canonicalize(parent)
+        .with_context(|| format!("failed to resolve {}", parent.display()))?;
+    let destination = parent.join(out.file_name().context("missing YAML output filename")?);
+    let yaml = document
+        .to_yaml()
+        .context("failed to serialize OpenAPI document to yaml")?;
+    let temp = parent.join(format!(".openapi-{}.tmp", uuid::Uuid::new_v4()));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .with_context(|| format!("failed to create {}", temp.display()))?;
+    let result = (|| -> Result<()> {
+        file.write_all(format!("{GENERATED_HEADER}{yaml}").as_bytes())?;
+        drop(file);
+        fs::rename(&temp, &destination)?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        return match fs::remove_file(&temp) {
+            Ok(()) => Err(error.context(format!("failed to write {}", destination.display()))),
+            Err(cleanup) => Err(error.context(format!(
+                "failed to write {}; cleanup of {} failed: {cleanup}",
+                destination.display(),
+                temp.display()
+            ))),
+        };
+    }
+    Ok(())
+}
+
 pub fn export_admin_api(out: &str) -> Result<()> {
     let out_path = PathBuf::from(out);
     let parent = out_path
         .parent()
-        .filter(|path| !path.as_os_str().is_empty())
+        .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).with_context(|| {
         format!(
@@ -38,13 +75,27 @@ pub fn export_admin_api(out: &str) -> Result<()> {
             parent.display()
         )
     })?;
+    write_yaml(&admin_api_doc(), &out_path)
+}
 
-    let yaml = admin_api_doc()
-        .to_yaml()
-        .context("failed to serialize OpenAPI document to yaml")?;
-    fs::write(&out_path, format!("{GENERATED_HEADER}{yaml}"))
-        .with_context(|| format!("failed to write {}", out_path.display()))?;
-    Ok(())
+pub fn export_standard_openapi(output: &Path) -> Result<()> {
+    let root = fs::canonicalize(".").context("failed to resolve workspace root")?;
+    let yaml_parent =
+        fs::canonicalize(root.join("openapi")).context("failed to resolve OpenAPI directory")?;
+    anyhow::ensure!(
+        yaml_parent.starts_with(&root),
+        "OpenAPI directory is outside workspace"
+    );
+    let document = admin_api_doc();
+    let json = serde_json::to_string_pretty(&document)
+        .context("failed to serialize OpenAPI document to JSON")?;
+    let parent = output
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
+    fs::write(output, json).with_context(|| format!("failed to write {}", output.display()))?;
+    write_yaml(&document, &yaml_parent.join("admin-api.yaml"))
 }
 
 #[cfg(test)]

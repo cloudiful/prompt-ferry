@@ -51,6 +51,7 @@ equivalent compile gate.
 Frontend checks:
 
 ```bash
+cargo run --no-default-features --bin export-openapi -- frontend/openapi.json
 cd frontend
 bun install --no-save
 bun run format:check
@@ -74,10 +75,12 @@ in the development environment with `cargo run --bin db_init`; do not use the
 The backend is the source of truth for the admin OpenAPI document:
 
 ```bash
-cargo run -- openapi export
+cargo run --no-default-features --bin export-openapi -- frontend/openapi.json
 cd frontend
 bun run openapi-ts
 ```
+
+The exporter writes the frontend JSON and the tracked `openapi/admin-api.yaml` from the same document. The legacy `cargo run -- openapi export` command remains available for YAML export.
 
 The frontend command installs its exact-pinned generator and TypeScript 6.0.3
 under `frontend/tools/codegen/` with the same seven-day release-age gate, then
