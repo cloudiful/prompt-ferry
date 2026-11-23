@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO usage_prompt_blocks(created_at, block_hash, role, content_json, preview_text)\nSELECT $1::timestamptz AS created_at, block_hash, role, content_json->'value', preview_text\nFROM jsonb_to_recordset($2::jsonb) AS blocks(block_hash text, role text, content_json jsonb, preview_text text)\nORDER BY block_hash, created_at\nON CONFLICT (block_hash, created_at) DO NOTHING\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5a94427910c6006d4eb2f9bf0fe13e6babbff70f1d57c516efea31de13e1d46d"
+}
