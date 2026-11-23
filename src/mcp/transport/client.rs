@@ -375,25 +375,30 @@ async fn remember_lifecycle(
         .peer_info()
         .map(|info| info.protocol_version.clone())
         .unwrap_or(ProtocolVersion::V_2025_11_25);
-    record_lifecycle(cache_key, mode, Some(protocol_version.clone()));
+    let observation = record_lifecycle(cache_key, mode, Some(protocol_version.clone()));
 
     let Some(storage) = storage else {
+        return;
+    };
+    let Some(observation) = observation else {
         return;
     };
     let mode = match mode {
         UpstreamLifecycle::Auto => "modern_discover",
         UpstreamLifecycle::LegacyInitialize => "legacy_initialize",
     };
-    if let Err(err) = storage
+    match storage
         .repository()
         .mark_mcp_lifecycle_learned(server, mode, protocol_version.as_str())
         .await
     {
-        tracing::warn!(
+        Ok(true) => lock_lifecycle_cache().confirm_lifecycle(cache_key, &observation),
+        Ok(false) => {}
+        Err(err) => tracing::warn!(
             server_id = %server.server_id,
             error = %err,
             "failed to persist MCP lifecycle compatibility"
-        );
+        ),
     }
 }
 
@@ -435,6 +440,14 @@ struct LifecycleCacheEntry {
     learned_at: Instant,
     lifecycle: UpstreamLifecycle,
     protocol_version: Option<ProtocolVersion>,
+    generation: u64,
+    confirmed: bool,
+}
+
+struct LifecycleObservation {
+    generation: u64,
+    lifecycle: UpstreamLifecycle,
+    protocol_version: Option<ProtocolVersion>,
 }
 
 /// Keyed by `(server_id, updated_at)`: editing the server config invalidates
@@ -444,6 +457,7 @@ type LifecycleCacheKey = (Uuid, DateTime<Utc>);
 #[derive(Default)]
 struct LifecycleCacheStore {
     entries: HashMap<LifecycleCacheKey, LifecycleCacheEntry>,
+    generation: u64,
 }
 
 impl LifecycleCacheStore {
@@ -468,13 +482,28 @@ impl LifecycleCacheStore {
         key: LifecycleCacheKey,
         lifecycle: UpstreamLifecycle,
         protocol_version: Option<ProtocolVersion>,
-    ) {
+    ) -> Option<LifecycleObservation> {
+        if let Some(entry) = self.entries.get_mut(&key)
+            && entry.learned_at.elapsed() < LIFECYCLE_CACHE_TTL
+            && entry.lifecycle == lifecycle
+            && entry.protocol_version == protocol_version
+        {
+            entry.learned_at = Instant::now();
+            return (!entry.confirmed).then(|| LifecycleObservation {
+                generation: entry.generation,
+                lifecycle,
+                protocol_version,
+            });
+        }
+        let generation = self.next_generation();
         self.entries.insert(
             key,
             LifecycleCacheEntry {
                 learned_at: Instant::now(),
                 lifecycle,
-                protocol_version,
+                protocol_version: protocol_version.clone(),
+                generation,
+                confirmed: false,
             },
         );
         if self.entries.len() > LIFECYCLE_CACHE_MAX_ENTRIES {
@@ -483,6 +512,35 @@ impl LifecycleCacheStore {
             by_age.sort_by_key(|(_, entry)| entry.learned_at);
             by_age.truncate(LIFECYCLE_CACHE_MAX_ENTRIES / 2);
             self.entries.extend(by_age);
+        }
+        Some(LifecycleObservation {
+            generation,
+            lifecycle,
+            protocol_version,
+        })
+    }
+
+    fn next_generation(&mut self) -> u64 {
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .expect("lifecycle generation exhausted");
+        self.generation
+    }
+
+    fn confirm_lifecycle(&mut self, key: LifecycleCacheKey, observation: &LifecycleObservation) {
+        let Some(entry) = self.entries.get(&key) else {
+            return;
+        };
+        if entry.lifecycle != observation.lifecycle
+            || entry.protocol_version != observation.protocol_version
+        {
+            let generation = self.next_generation();
+            let entry = self.entries.get_mut(&key).unwrap();
+            entry.generation = generation;
+            entry.confirmed = false;
+        } else if entry.generation == observation.generation {
+            self.entries.get_mut(&key).unwrap().confirmed = true;
         }
     }
 
@@ -502,8 +560,8 @@ fn record_lifecycle(
     key: LifecycleCacheKey,
     lifecycle: UpstreamLifecycle,
     protocol_version: Option<ProtocolVersion>,
-) {
-    lock_lifecycle_cache().record_lifecycle(key, lifecycle, protocol_version);
+) -> Option<LifecycleObservation> {
+    lock_lifecycle_cache().record_lifecycle(key, lifecycle, protocol_version)
 }
 
 fn clear_lifecycle(key: LifecycleCacheKey) {
@@ -1441,6 +1499,75 @@ mod tests {
         assert_eq!(
             cache.cached_lifecycle(key).map(|c| c.lifecycle),
             Some(UpstreamLifecycle::LegacyInitialize)
+        );
+    }
+
+    #[test]
+    fn lifecycle_persistence_confirmation_handles_overlap_and_invalidation() {
+        let mut cache = LifecycleCacheStore::default();
+        let key = (Uuid::new_v4(), Utc::now());
+        let other_key = (key.0, key.1 + chrono::Duration::seconds(1));
+        let a = |cache: &mut LifecycleCacheStore| {
+            cache.record_lifecycle(
+                key,
+                UpstreamLifecycle::Auto,
+                Some(ProtocolVersion::V_2025_06_18),
+            )
+        };
+        let b = |cache: &mut LifecycleCacheStore| {
+            cache.record_lifecycle(
+                key,
+                UpstreamLifecycle::LegacyInitialize,
+                Some(ProtocolVersion::V_2025_06_18),
+            )
+        };
+
+        let first = a(&mut cache).unwrap();
+        let overlapping = a(&mut cache).unwrap();
+        assert_eq!(first.generation, overlapping.generation);
+        // A failed or false repository result leaves the observation unconfirmed.
+        assert!(a(&mut cache).is_some());
+        cache.confirm_lifecycle(key, &first);
+        assert!(a(&mut cache).is_none());
+        assert!(
+            cache
+                .record_lifecycle(
+                    other_key,
+                    UpstreamLifecycle::Auto,
+                    Some(ProtocolVersion::V_2025_06_18)
+                )
+                .is_some()
+        );
+
+        let old_b = b(&mut cache).unwrap();
+        let new_a = a(&mut cache).unwrap();
+        cache.confirm_lifecycle(key, &first);
+        assert!(a(&mut cache).is_some());
+        cache.confirm_lifecycle(key, &new_a);
+        assert!(a(&mut cache).is_none());
+        cache.confirm_lifecycle(key, &old_b);
+        assert!(a(&mut cache).is_some());
+        // An in-flight new-tuple completion cannot undo the invalidation.
+        cache.confirm_lifecycle(key, &new_a);
+        assert!(a(&mut cache).is_some());
+        let repair = a(&mut cache).unwrap();
+        cache.confirm_lifecycle(key, &repair);
+        assert!(a(&mut cache).is_none());
+
+        cache.clear_lifecycle(key);
+        let after_clear = a(&mut cache).unwrap();
+        cache.confirm_lifecycle(key, &repair);
+        assert!(a(&mut cache).is_some());
+        cache.confirm_lifecycle(key, &after_clear);
+        assert!(a(&mut cache).is_none());
+        assert!(
+            cache
+                .record_lifecycle(
+                    key,
+                    UpstreamLifecycle::Auto,
+                    Some(ProtocolVersion::V_2025_11_25)
+                )
+                .is_some()
         );
     }
 

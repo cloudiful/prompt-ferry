@@ -7,7 +7,7 @@ use crate::{
     redact_upstream::UpstreamRedactionSession,
     usage_prompt::{
         PromptMessageRef, REQUEST_CHAIN_DEPTH_LIMIT, REQUEST_FULL_BYTES_LIMIT, append_delta,
-        normalize_prompt_request, prompt_block_hash, prompt_message_refs,
+        normalize_prompt_request, prompt_message_refs,
     },
     worker_admin::AdminState,
     worker_admin_types::RequestContentLoggingResponse,
@@ -298,20 +298,10 @@ pub(super) async fn prepare_request_prompt_log(
         return Ok(log);
     }
 
-    let mut prompt_block_nul_count = 0_i32;
-    for item in &normalized.items {
-        let stats = db::upsert_usage_prompt_block(
-            &state.pool,
-            created_at,
-            &prompt_block_hash(&item.role, &item.content_json),
-            &item.role,
-            &item.content_json,
-            &item.preview_text,
-        )
-        .await?;
-        prompt_block_nul_count = prompt_block_nul_count
-            .saturating_add(i32::try_from(stats.nul_count).unwrap_or(i32::MAX));
-    }
+    let stats =
+        db::upsert_usage_prompt_block(&state.pool, created_at, &normalized.items, &current_refs)
+            .await?;
+    let prompt_block_nul_count = i32::try_from(stats.nul_count).unwrap_or(i32::MAX);
     log.storage_sanitized = prompt_block_nul_count > 0;
     log.storage_sanitized_nul_count = prompt_block_nul_count;
     log.request_full_json = Some(serde_json::to_value(&current_refs)?);
