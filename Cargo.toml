@@ -21,6 +21,10 @@ name = "prompt_ferry"
 name = "prompt-ferry"
 path = "src/main.rs"
 
+[[bin]]
+name = "export-openapi"
+path = "src/bin/export-openapi.rs"
+
 [features]
 default = ["embedded-frontend"]
 embedded-frontend = ["dep:include_dir"]

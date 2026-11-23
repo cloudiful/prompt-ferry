@@ -4,7 +4,7 @@ import { defineConfig } from '@hey-api/openapi-ts'
 const codegenDir = import.meta.dirname
 
 export default defineConfig({
-  input: path.resolve(codegenDir, '../../../openapi/admin-api.yaml'),
+  input: path.resolve(codegenDir, '../../openapi.json'),
   output: path.resolve(codegenDir, '../../src/generated/admin-api'),
   plugins: [
     '@hey-api/typescript',
