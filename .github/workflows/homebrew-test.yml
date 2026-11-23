@@ -25,7 +25,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.4.0
+        with:
+          python-version: "3.15"
+
       - name: Run offline generator tests
         run: >-
-          python3 -m unittest discover
+          uv run --no-project python -m unittest discover
           -s .github/scripts/homebrew -p 'test_*.py' -v
