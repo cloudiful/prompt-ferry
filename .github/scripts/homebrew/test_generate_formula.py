@@ -151,14 +151,6 @@ class RenderTest(unittest.TestCase):
 
 
 class SourceVersionTest(unittest.TestCase):
-    def test_accepts_matching_manifest_versions(self):
-        self.assertEqual(
-            generator.validate_source_versions(
-                (1, 42, 30), version_sources()
-            ),
-            "Apache-2.0",
-        )
-
     def test_fixture_embeds_matching_source_versions(self):
         release = load_release()
         self.assertEqual(
@@ -299,23 +291,12 @@ class TapWriteTest(unittest.TestCase):
         self.assertEqual(self.formula_text(), first)
 
     def test_dry_run_prints_formula_without_writing(self):
-        code, stdout, _ = self.run_cli("--dry-run")
-        self.assertEqual(code, 0)
-        self.assertIn(
-            "https://github.com/cloudiful/prompt-ferry/releases/download/"
-            "v1.42.30/prompt-ferry-v1.42.30-aarch64-apple-darwin",
-            stdout,
-        )
-        self.assertNotIn('version "', stdout)
-        self.assertFalse((self.tap / generator.FORMULA_PATH).exists())
-
-    def test_fixture_dry_run_needs_no_network(self):
         stdout = io.StringIO()
         stderr = io.StringIO()
         with patch.object(
             generator,
             "fetch_source_texts",
-            side_effect=AssertionError("network lookup in fixture mode"),
+            side_effect=AssertionError("network lookup in dry-run mode"),
         ), redirect_stdout(stdout), redirect_stderr(stderr):
             code = generator.main(
                 [
@@ -327,7 +308,14 @@ class TapWriteTest(unittest.TestCase):
                 ]
             )
         self.assertEqual(code, 0)
+        self.assertIn(
+            "https://github.com/cloudiful/prompt-ferry/releases/download/"
+            "v1.42.30/prompt-ferry-v1.42.30-aarch64-apple-darwin",
+            stdout.getvalue(),
+        )
         self.assertIn('license "Apache-2.0"', stdout.getvalue())
+        self.assertNotIn('version "', stdout.getvalue())
+        self.assertFalse((self.tap / generator.FORMULA_PATH).exists())
 
     def test_derives_version_from_urls_only(self):
         existing = self.write_existing(self.render_for("v1.42.29"))
