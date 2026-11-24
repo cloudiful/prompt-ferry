@@ -234,7 +234,14 @@ async fn abort_response(
     let Some(entry) = entry else { return };
     let response_started = entry.response_started;
     release_worker(state, entry.worker_id).await;
-    send_request_cancel(worker, request_id, reason, response_started);
+    send_request_cancel(
+        state,
+        worker_id,
+        worker,
+        request_id,
+        reason,
+        response_started,
+    );
     if reason != "downstream_closed" {
         send_response_error(
             entry.start_tx,
@@ -267,7 +274,14 @@ async fn abort_mcp_response(
     let Some(entry) = entry else { return };
     let response_started = entry.response_started;
     release_worker(state, entry.worker_id).await;
-    send_mcp_request_cancel(worker, request_id, reason, response_started);
+    send_mcp_request_cancel(
+        state,
+        worker_id,
+        worker,
+        request_id,
+        reason,
+        response_started,
+    );
     if reason != "downstream_closed" {
         send_mcp_response_error(
             entry.start_tx,
@@ -305,7 +319,14 @@ async fn abort_realtime_response(
     let Some(entry) = entry else { return };
     let response_started = entry.response_started;
     release_worker(state, entry.worker_id).await;
-    send_realtime_close(worker, request_id, reason, response_started);
+    send_realtime_close(
+        state,
+        worker_id,
+        worker,
+        request_id,
+        reason,
+        response_started,
+    );
     if reason != "downstream_closed" {
         let _ = entry.event_tx.try_send(Err(backpressure_error(request_id)));
     }

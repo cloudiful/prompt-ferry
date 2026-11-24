@@ -1,34 +1,38 @@
-//! The two sides of an authenticated star link.
+//! The two sides of an authenticated peer link.
 //!
 //! The database side of a link runs a dedicated executor over the shared
-//! admin state and answers the edge node; the edge side registers the remote
-//! database node as the executor of its relay state and forwards the
-//! business traffic of its own clients to it.
+//! admin state and answers the peer; the database-less side of a link
+//! forwards the traffic of its own clients and of its peers over the single
+//! route it selected.
 //!
-//! Both sides speak the same typed bridge messages as a relay and a remote
-//! worker do, so the request path of a star is the request path of the
-//! existing deployment.
+//! Both sides speak the peer envelope of the peer wire codec, so the request
+//! path of a star is the request path of the existing deployment and the
+//! route controls travel next to the business traffic.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tokio::sync::watch;
+use tracing::{debug, warn};
 
-use crate::bridge::link::{BRIDGE_LINK_BUFFER, LinkEvent, LinkReceiver};
+use crate::bridge::link::{LinkEvent, LinkReceiver};
 use crate::bridge_wire;
 use crate::config::WorkerConfig;
-use crate::protocol::BridgeMessage;
-use crate::relay::{
-    AppState, WorkerSender, cleanup_worker, dispatch_worker_bridge_message, register_worker,
-};
+use crate::protocol::{BridgeMessage, ConfigSnapshot, ResponseError};
 use crate::worker::runtime::inbound::cancel_link_requests;
 use crate::worker::runtime::{BridgeSender, ExecutorPump, WorkerRuntimeState};
 use crate::worker_admin::{self, AdminState};
 
+use super::admission::AdmissionToken;
+use super::forwarding::{
+    EnvelopeReceiver, EnvelopeSender, PEER_SEND_TIMEOUT, QueuedEnvelope, RouteHub,
+    envelope_channel, write_envelopes_to_peer,
+};
 use super::ownership::{OwnedPeerWriter, Ownership, owned_sender};
+use super::route::RouteState;
 use super::transport::{PeerFrame, PeerReader, PeerWriter};
+use super::wire::{PeerEnvelope, PeerEnvelopeKind, PeerPath};
 use crate::worker::runtime::node::identity::NodeId;
 
 /// How often a peer link proves that it is alive.
@@ -66,7 +70,7 @@ pub(crate) async fn run_db_peer_session<R: PeerReader + Send, W: PeerWriter + Se
     writer: W,
     context: Arc<DbPeerContext>,
     peer_node_id: NodeId,
-    generation: u64,
+    _generation: u64,
     mut stop: tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
     let ownership = Arc::new(tokio::sync::Mutex::new(Ownership::default()));
@@ -80,8 +84,11 @@ pub(crate) async fn run_db_peer_session<R: PeerReader + Send, W: PeerWriter + Se
         writer,
         ownership: ownership.clone(),
     };
+    // The route controls of the link travel next to the business traffic,
+    // but they never wait behind it.
+    let (route_tx, route_rx) = envelope_channel();
     let mut writer_task =
-        tokio::spawn(async move { write_link_to_peer(writer, link_receiver).await });
+        tokio::spawn(async move { write_link_to_peer(writer, link_receiver, route_rx).await });
 
     let pump = ExecutorPump::new(
         context.config.clone(),
@@ -99,19 +106,20 @@ pub(crate) async fn run_db_peer_session<R: PeerReader + Send, W: PeerWriter + Se
     // The configuration snapshot of this link is published immediately, so
     // the edge can authenticate managed client keys without waiting for the
     // next refresh.
-    let (admin_tx, mut admin_rx) = mpsc::unbounded_channel::<BridgeMessage>();
-    let admin_out_tx = out_tx.clone();
-    let admin_forward_task = tokio::spawn(async move {
-        while let Some(message) = admin_rx.recv().await {
-            if admin_out_tx.send(message).await.is_err() {
-                break;
-            }
-        }
-    });
-    // The key carries the generation, so the cleanup of a replaced link can
-    // never remove the snapshot target of the link that replaced it.
-    let snapshot_key = format!("peer-{peer_node_id}#{generation}");
-    worker_admin::set_bridge_sender(&context.admin_state, &snapshot_key, Some(admin_tx)).await;
+    //
+    // The snapshot source is the single latest-value watch of the admin
+    // state: a slow link never accumulates a per-link queue of publications,
+    // it always forwards the newest snapshot that exists when it is ready.
+    // The path of the route of the database node is the database node
+    // itself: it is the end of every path.
+    let terminal_path = PeerPath::new(vec![context.node_id])
+        .map_err(|err| anyhow!("the path of the database node is invalid: {err}"))?;
+    let snapshots = context.admin_state.subscribe_peer_snapshot();
+    let mut snapshot_task = tokio::spawn(forward_peer_snapshots(
+        snapshots,
+        route_tx.clone(),
+        terminal_path,
+    ));
     let mut writer_finished = false;
     let result = tokio::select! {
         biased;
@@ -120,16 +128,31 @@ pub(crate) async fn run_db_peer_session<R: PeerReader + Send, W: PeerWriter + Se
             writer_finished = true;
             result.unwrap_or_else(|err| Err(anyhow!("peer writer task failed: {err}")))
         },
+        result = &mut snapshot_task => match result {
+            Ok(Ok(())) => Err(anyhow!("the peer snapshot forwarder stopped")),
+            Ok(Err(err)) => Err(err),
+            Err(err) => Err(anyhow!("peer snapshot forwarder task failed: {err}")),
+        },
         result = async {
     if let Err(err) = worker_admin::publish_snapshot(&context.admin_state).await {
         warn!(error = %err, "failed to publish the configuration snapshot to a peer");
     }
-    run_db_frame_loop(&mut reader, &pump, &out_tx, &ownership, context.heartbeat_timeout).await
+    run_db_frame_loop(
+        &mut reader,
+        &pump,
+        &out_tx,
+        &ownership,
+        context.heartbeat_timeout,
+        context.node_id,
+        peer_node_id,
+        &route_tx,
+    ).await
         } => result,
     };
-    worker_admin::set_bridge_sender(&context.admin_state, &snapshot_key, None).await;
-    admin_forward_task.abort();
-    let _ = admin_forward_task.await;
+    // The forwarder is supervised: it is stopped and joined on every exit so
+    // that no snapshot task outlives its link.
+    snapshot_task.abort();
+    let _ = snapshot_task.await;
     if !writer_finished {
         writer_task.abort();
         let _ = writer_task.await;
@@ -145,15 +168,78 @@ pub(crate) async fn run_db_peer_session<R: PeerReader + Send, W: PeerWriter + Se
     result
 }
 
+/// Forward the newest published configuration snapshot to one link.
+///
+/// The task is the only publisher of the route updates of this link. It
+/// forwards the snapshot that is already retained and then the latest one of
+/// every later publication, so the edge can authenticate managed client keys
+/// immediately. A send that times out or a route that closed is returned as
+/// an error: the session treats it as a failure instead of silently serving a
+/// stale snapshot.
+async fn forward_peer_snapshots(
+    mut snapshots: watch::Receiver<Option<Arc<ConfigSnapshot>>>,
+    route_tx: EnvelopeSender,
+    terminal_path: PeerPath,
+) -> anyhow::Result<()> {
+    // The advertisement counter belongs to the link, so it starts over when
+    // the link is replaced.
+    let mut generation = 0_u64;
+    // A snapshot may have been published before this link subscribed. It is
+    // still the current snapshot until a newer one replaces it.
+    let retained = snapshots.borrow_and_update().clone();
+    if let Some(snapshot) = retained {
+        send_route_update(&route_tx, &terminal_path, &mut generation, &snapshot).await?;
+    }
+    loop {
+        snapshots
+            .changed()
+            .await
+            .map_err(|_| anyhow!("the peer snapshot source was closed"))?;
+        // Only the newest snapshot matters. `borrow_and_update` coalesces the
+        // publications that arrived while the previous send was in flight.
+        let Some(snapshot) = snapshots.borrow_and_update().clone() else {
+            continue;
+        };
+        send_route_update(&route_tx, &terminal_path, &mut generation, &snapshot).await?;
+    }
+}
+
+/// Queue one snapshot as a route update of the link.
+async fn send_route_update(
+    route_tx: &EnvelopeSender,
+    terminal_path: &PeerPath,
+    generation: &mut u64,
+    snapshot: &ConfigSnapshot,
+) -> anyhow::Result<()> {
+    *generation += 1;
+    let envelope = PeerEnvelope::route_update(terminal_path.clone(), *generation, snapshot);
+    match tokio::time::timeout(PEER_SEND_TIMEOUT, route_tx.send(envelope)).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(_)) => Err(anyhow!(
+            "the peer route closed before the snapshot was sent"
+        )),
+        Err(_) => Err(anyhow!(
+            "the peer snapshot could not be forwarded within the send timeout"
+        )),
+    }
+}
+
+/// Read the frames of a database link.
 async fn run_db_frame_loop<R: PeerReader>(
     reader: &mut R,
     pump: &ExecutorPump,
     out_tx: &BridgeSender,
     ownership: &tokio::sync::Mutex<Ownership>,
     timeout: Duration,
+    local: NodeId,
+    peer_node_id: NodeId,
+    route_tx: &EnvelopeSender,
 ) -> anyhow::Result<()> {
     let mut heartbeat = tokio::time::interval(heartbeat_interval(timeout));
     let mut deadline = tokio::time::Instant::now() + timeout;
+    // The database node is the end of every path, so it only checks the
+    // position of itself in the path of a request.
+    let route = RouteState::new(local);
     loop {
         let frame = tokio::select! {
             biased;
@@ -176,7 +262,32 @@ async fn run_db_frame_loop<R: PeerReader>(
         let PeerFrame::Binary(bytes) = frame else {
             break;
         };
-        let mut message = bridge_wire::decode_message(&bytes)?;
+        let envelope = PeerEnvelope::decode(&bytes)?;
+        let mut message = match envelope.kind {
+            PeerEnvelopeKind::RouteUpdate | PeerEnvelopeKind::RouteWithdraw => {
+                // The database node is the end of every path, so a peer never
+                // advertises a route to it.
+                debug!("the peer sent a route control frame to the database node");
+                continue;
+            }
+            PeerEnvelopeKind::RequestStart => {
+                let path = envelope
+                    .path
+                    .ok_or_else(|| anyhow!("a request start must carry a path"))?;
+                let message = envelope
+                    .message
+                    .ok_or_else(|| anyhow!("a request start must carry a message"))?;
+                if let Err(err) = route.accept_terminal_path(&path, peer_node_id) {
+                    warn!(error = %err, "the path of a request start was refused");
+                    refuse_start(route_tx, &message).await;
+                    continue;
+                }
+                message
+            }
+            PeerEnvelopeKind::Bridge => envelope
+                .message
+                .ok_or_else(|| anyhow!("a bridge envelope must carry a message"))?,
+        };
         let admitted = match tokio::time::timeout_at(deadline, ownership.lock()).await {
             Ok(mut ownership) => ownership.inbound(&mut message)?,
             Err(_) => break,
@@ -187,6 +298,7 @@ async fn run_db_frame_loop<R: PeerReader>(
         let cancelled = match &message {
             BridgeMessage::RequestCancel(cancel) => Some(cancel.request_id.clone()),
             BridgeMessage::McpRequestCancel(cancel) => Some(cancel.request_id.clone()),
+            BridgeMessage::RealtimeSessionClose(close) => Some(close.request_id.clone()),
             _ => None,
         };
         if tokio::time::timeout_at(deadline, pump.handle(message))
@@ -205,40 +317,55 @@ async fn run_db_frame_loop<R: PeerReader>(
     Ok(())
 }
 
-/// The edge side of a star link.
+/// Tell the peer that a request start was refused.
+async fn refuse_start(route_tx: &EnvelopeSender, message: &BridgeMessage) {
+    let request_id = match message {
+        BridgeMessage::RequestStart(start) => start.request_id.clone(),
+        BridgeMessage::McpRequestStart(start) => start.request_id.clone(),
+        BridgeMessage::RealtimeSessionStart(start) => start.request_id.clone(),
+        _ => return,
+    };
+    let error = ResponseError {
+        request_id,
+        status: 400,
+        code: "peer_path_refused".to_string(),
+        message: "the path of the request was refused".to_string(),
+    };
+    let envelope = PeerEnvelope::bridge(BridgeMessage::ResponseError(error));
+    let _ = tokio::time::timeout(PEER_SEND_TIMEOUT, route_tx.send(envelope)).await;
+}
+
+/// The database-less side of a peer link.
 ///
-/// The remote database node is registered as the executor of the local relay
-/// state, so the business traffic of the local clients travels the ordinary
-/// relay path and reaches the database node unchanged.
-pub(crate) async fn run_edge_peer_session<R: PeerReader + Send, W: PeerWriter + Send + 'static>(
+/// The link either carries the traffic of the local clients towards the
+/// selected route or the traffic of a peer that uses this node as its next
+/// hop. The route controls of the link are handled by the hub of the node.
+///
+/// The token is the authority of the link: every action of the session
+/// carries it, so a callback of a link that is no longer admitted is
+/// refused. The session invalidates the token before it cleans up, so a
+/// frame that is still queued cannot act after the link ended.
+pub(crate) async fn run_node_peer_session<R: PeerReader + Send, W: PeerWriter + Send + 'static>(
     mut reader: R,
     writer: W,
-    relay_state: AppState,
-    worker_id: usize,
+    hub: Arc<RouteHub>,
+    token: AdmissionToken,
     heartbeat_timeout: Duration,
     mut stop: tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
-    let (request_tx, request_rx) = mpsc::channel::<BridgeMessage>(BRIDGE_LINK_BUFFER);
-    let request_tx: WorkerSender = request_tx;
-    if !register_worker(&relay_state, worker_id, request_tx).await {
-        return Err(anyhow!(
-            "the remote database node was refused as a relay worker"
-        ));
+    let (out_tx, out_rx) = envelope_channel();
+    let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+    if !hub.register_link(&token, out_tx.clone(), shutdown_tx).await {
+        return Ok(());
     }
-    info!(
-        worker_id,
-        "the remote database node is registered as the executor"
-    );
-    // The control channel carries the answers of the link itself, so the
-    // heartbeat of the peer never travels through the relay state.
-    let (control_tx, control_rx) = mpsc::channel::<BridgeMessage>(8);
     let mut writer_task =
-        tokio::spawn(async move { write_requests_to_peer(writer, request_rx, control_rx).await });
+        tokio::spawn(async move { write_envelopes_to_peer(writer, out_rx).await });
 
     let mut writer_finished = false;
     let result = tokio::select! {
         biased;
         _ = &mut stop => Ok(()),
+        _ = shutdown_rx.changed() => Ok(()),
         result = &mut writer_task => {
             writer_finished = true;
             result.unwrap_or_else(|err| Err(anyhow!("peer writer task failed: {err}")))
@@ -260,7 +387,13 @@ pub(crate) async fn run_edge_peer_session<R: PeerReader + Send, W: PeerWriter + 
                 }
             }
             _ = heartbeat.tick() => {
-                if !matches!(tokio::time::timeout_at(deadline, control_tx.send(BridgeMessage::Ping)).await, Ok(Ok(()))) {
+                if !matches!(
+                    tokio::time::timeout_at(
+                        deadline,
+                        out_tx.send(PeerEnvelope::bridge(BridgeMessage::Ping))
+                    ).await,
+                    Ok(Ok(()))
+                ) {
                     break;
                 }
                 continue;
@@ -270,16 +403,65 @@ pub(crate) async fn run_edge_peer_session<R: PeerReader + Send, W: PeerWriter + 
         let PeerFrame::Binary(bytes) = frame else {
             break;
         };
-        let message = bridge_wire::decode_message(&bytes)?;
+        let envelope = PeerEnvelope::decode(&bytes)?;
         let handled = async {
-            match message {
-                BridgeMessage::Ping => {
-                    let _ = control_tx.send(BridgeMessage::Pong).await;
+            match envelope.kind {
+                PeerEnvelopeKind::RouteUpdate => {
+                    // The encoded frame is the unit of the control budget of
+                    // the actor, so the advertisement is passed on as it
+                    // arrived: the actor decodes it authoritatively when it
+                    // applies it.
+                    if let Err(err) = hub.apply_update_bytes(&token, bytes).await {
+                        debug!(error = %err, "a route advertisement of a peer was refused");
+                    }
                 }
-                message => dispatch_worker_bridge_message(&relay_state, message).await,
+                PeerEnvelopeKind::RouteWithdraw => {
+                    if let Err(err) = hub.apply_withdraw(&token, envelope.generation).await {
+                        debug!(error = %err, "a route withdrawal of a peer was refused");
+                    }
+                }
+                PeerEnvelopeKind::RequestStart => {
+                    let Some(path) = envelope.path.clone() else {
+                        return true;
+                    };
+                    let Some(message) = envelope.message.clone() else {
+                        return true;
+                    };
+                    if let Err(err) = hub
+                        .forward_start(&token, path, message.clone())
+                        .await
+                    {
+                        warn!(error = %err, "the start of a peer request was refused");
+                        refuse_start(&out_tx, &message).await;
+                    }
+                }
+                PeerEnvelopeKind::Bridge => {
+                    let Some(message) = envelope.message.clone() else {
+                        return true;
+                    };
+                    match message {
+                        BridgeMessage::Ping => {
+                            let _ = out_tx.send(PeerEnvelope::bridge(BridgeMessage::Pong)).await;
+                        }
+                        BridgeMessage::Pong => {}
+                        message => {
+                            if !hub.handle_peer_message(&token, message).await {
+                                // The ingress of the node refused the frame:
+                                // the peer floods the node, so its link ends
+                                // and its generation cleanup runs.
+                                let _ = hub.invalidate_link(token.peer(), token.generation()).await;
+                                return false;
+                            }
+                        }
+                    }
+                }
             }
+            true
         };
-        if tokio::time::timeout_at(deadline, handled).await.is_err() {
+        let keep = tokio::time::timeout_at(deadline, handled)
+            .await
+            .unwrap_or(false);
+        if !keep {
             break;
         }
     }
@@ -291,7 +473,14 @@ pub(crate) async fn run_edge_peer_session<R: PeerReader + Send, W: PeerWriter + 
         writer_task.abort();
         let _ = writer_task.await;
     }
-    cleanup_worker(&relay_state, worker_id).await;
+    // The session ends: its link loses the authority before the cleanup
+    // runs, so a frame that is still queued cannot act on the state of the
+    // node. The invalidation is exclusive, so a publication of this link
+    // that is already admitted finishes before the link dies. The cleanup
+    // itself belongs to the generation of this link, so it never touches the
+    // link that replaced it.
+    token.invalidate_exclusive().await;
+    hub.release_link(token.peer(), token.generation()).await;
     result
 }
 
@@ -304,85 +493,67 @@ pub(crate) async fn run_edge_peer_session<R: PeerReader + Send, W: PeerWriter + 
 async fn write_link_to_peer<W: PeerWriter + Send + 'static>(
     mut writer: W,
     mut receiver: LinkReceiver,
+    mut routes: EnvelopeReceiver,
 ) -> anyhow::Result<()> {
     loop {
-        let Some(event) = receiver.next().await else {
-            break;
+        let outbound = tokio::select! {
+            biased;
+            envelope = routes.recv() => Outbound::Route(envelope),
+            event = receiver.next() => Outbound::Link(event),
         };
-        match event {
-            LinkEvent::Data(item) => {
-                let (message, permit) = item.into_parts();
-                let payload = bridge_wire::encode_message(&message)?;
-                writer.send_binary(payload).await?;
+        match outbound {
+            Outbound::Route(None) => break,
+            Outbound::Route(Some(envelope)) => {
+                let (bytes, permit) = envelope.into_parts();
+                writer.send_binary(bytes).await?;
                 drop(permit);
             }
-            LinkEvent::Control(message) => {
-                let payload = bridge_wire::encode_message(&message)?;
-                writer.send_binary(payload).await?;
-            }
-            LinkEvent::Flush(ack) => {
-                let mut acknowledgements = vec![ack];
-                while let Some(event) = receiver.try_next() {
-                    match event {
-                        LinkEvent::Data(item) => {
-                            let (message, permit) = item.into_parts();
-                            let payload = bridge_wire::encode_message(&message)?;
-                            writer.send_binary(payload).await?;
-                            drop(permit);
+            Outbound::Link(None) => break,
+            Outbound::Link(Some(event)) => match event {
+                LinkEvent::Data(item) => {
+                    let (message, permit) = item.into_parts();
+                    let payload = bridge_wire::encode_message(&message)?;
+                    writer.send_binary(payload).await?;
+                    drop(permit);
+                }
+                LinkEvent::Control(message) => {
+                    let payload = bridge_wire::encode_message(&message)?;
+                    writer.send_binary(payload).await?;
+                }
+                LinkEvent::Flush(ack) => {
+                    let mut acknowledgements = vec![ack];
+                    while let Some(event) = receiver.try_next() {
+                        match event {
+                            LinkEvent::Data(item) => {
+                                let (message, permit) = item.into_parts();
+                                let payload = bridge_wire::encode_message(&message)?;
+                                writer.send_binary(payload).await?;
+                                drop(permit);
+                            }
+                            LinkEvent::Control(message) => {
+                                let payload = bridge_wire::encode_message(&message)?;
+                                writer.send_binary(payload).await?;
+                            }
+                            LinkEvent::Flush(ack) => acknowledgements.push(ack),
                         }
-                        LinkEvent::Control(message) => {
-                            let payload = bridge_wire::encode_message(&message)?;
-                            writer.send_binary(payload).await?;
-                        }
-                        LinkEvent::Flush(ack) => acknowledgements.push(ack),
+                    }
+                    writer.flush().await?;
+                    for ack in acknowledgements {
+                        let _ = ack.send(());
                     }
                 }
-                writer.flush().await?;
-                for ack in acknowledgements {
-                    let _ = ack.send(());
-                }
-            }
+            },
         }
     }
     Ok(())
 }
 
-/// Write the business requests of the local relay to the peer.
-///
-/// The writer also carries the heartbeat of the link and the answers of the
-/// link itself, so a control message never waits behind the business
-/// traffic.
-async fn write_requests_to_peer<W: PeerWriter + Send + 'static>(
-    mut writer: W,
-    mut requests: mpsc::Receiver<BridgeMessage>,
-    mut control: mpsc::Receiver<BridgeMessage>,
-) -> anyhow::Result<()> {
-    let mut requests_open = true;
-    loop {
-        tokio::select! {
-            message = requests.recv(), if requests_open => {
-                match message {
-                    Some(message) => {
-                        let payload = bridge_wire::encode_message(&message)?;
-                        writer.send_binary(payload).await?;
-                    }
-                    None => {
-                        // The relay closed its side of the link, but the
-                        // peer link itself stays alive.
-                        requests_open = false;
-                    }
-                }
-            }
-            message = control.recv() => {
-                let Some(message) = message else {
-                    break;
-                };
-                let payload = bridge_wire::encode_message(&message)?;
-                writer.send_binary(payload).await?;
-            }
-        }
-    }
-    Ok(())
+/// What the writer of a database link writes next.
+enum Outbound {
+    /// A bridge message of the link.
+    Link(Option<LinkEvent>),
+    /// A route control of the link.
+    Route(Option<QueuedEnvelope>),
 }
 
 #[cfg(test)]
@@ -391,17 +562,17 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use tokio::sync::Semaphore;
+    use tokio::sync::{Semaphore, watch};
 
     use crate::bridge::link::LinkReceiver;
-    use crate::protocol::{BridgeMessage, ResponseEnd};
+    use crate::protocol::{BridgeMessage, ConfigSnapshot, ResponseEnd};
     use crate::relay_secrets::RelaySecretManager;
     use crate::worker::runtime::inbound::cancel_link_requests;
     use crate::worker::runtime::{BridgeSender, WorkerRuntimeState};
 
     use super::super::handshake::Hello;
     use super::super::transport::{MemoryPeer, PeerFrame, PeerReader, PeerWriter};
-    use super::{run_edge_peer_session, write_link_to_peer};
+    use super::{forward_peer_snapshots, run_node_peer_session, write_link_to_peer};
 
     /// A sink that records the frames and can hold a frame back.
     struct GatedSink {
@@ -466,6 +637,81 @@ mod tests {
         RelaySecretManager::from_key_bytes([byte; 32])
     }
 
+    fn snapshot(version: i64) -> ConfigSnapshot {
+        ConfigSnapshot {
+            version,
+            keys: Vec::new(),
+            relay_ip_policy: Default::default(),
+        }
+    }
+
+    fn terminal_path() -> super::super::wire::PeerPath {
+        super::super::wire::PeerPath::new(vec![
+            crate::worker::runtime::node::identity::NodeId::from_uuid(uuid::Uuid::from_u128(1)),
+        ])
+        .expect("a bounded terminal path")
+    }
+
+    async fn next_route_update(
+        receiver: &mut super::super::forwarding::EnvelopeReceiver,
+    ) -> (u64, i64) {
+        let queued = tokio::time::timeout(Duration::from_secs(1), receiver.recv())
+            .await
+            .expect("a route update arrives")
+            .expect("the route queue is open");
+        let (bytes, _permit) = queued.into_parts();
+        let envelope =
+            super::super::wire::PeerEnvelope::decode(&bytes).expect("a valid peer envelope");
+        let snapshot = envelope.snapshot().expect("a snapshot route update");
+        (envelope.generation, snapshot.version)
+    }
+
+    #[tokio::test]
+    async fn a_new_link_forwards_only_the_newest_retained_snapshot_then_the_latest_change() {
+        let (watch_tx, watch_rx) = watch::channel(None);
+        // Publications that happen before the link subscribes are retained,
+        // and only the newest one survives the coalescing of the watch.
+        watch_tx.send_replace(Some(Arc::new(snapshot(1))));
+        watch_tx.send_replace(Some(Arc::new(snapshot(2))));
+        watch_tx.send_replace(Some(Arc::new(snapshot(3))));
+        let (route_tx, mut route_rx) = super::super::forwarding::envelope_channel();
+        let task = tokio::spawn(forward_peer_snapshots(watch_rx, route_tx, terminal_path()));
+
+        assert_eq!(
+            next_route_update(&mut route_rx).await,
+            (1, 3),
+            "the link sends the newest retained snapshot first"
+        );
+        watch_tx.send_replace(Some(Arc::new(snapshot(4))));
+        assert_eq!(
+            next_route_update(&mut route_rx).await,
+            (2, 4),
+            "the next publication advances the counter of the link"
+        );
+
+        task.abort();
+        let _ = task.await;
+    }
+
+    #[tokio::test]
+    async fn a_closed_route_fails_the_snapshot_forwarder_instead_of_stopping_silently() {
+        let (_watch_tx, watch_rx) = watch::channel(Some(Arc::new(snapshot(5))));
+        let (route_tx, route_rx) = super::super::forwarding::envelope_channel();
+        drop(route_rx);
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            forward_peer_snapshots(watch_rx, route_tx, terminal_path()),
+        )
+        .await
+        .expect("the forwarder returns instead of waiting forever");
+
+        assert!(
+            result.is_err(),
+            "a closed route is a supervised forward failure"
+        );
+    }
+
     #[tokio::test]
     async fn either_side_may_start_a_link_and_both_sides_authenticate() {
         use super::super::auth;
@@ -526,7 +772,14 @@ mod tests {
             .expect("the flush receiver is available");
         let receiver = LinkReceiver::new(control_rx, data_rx, flush_rx);
         let (sink, _frames, gate, _flushes) = GatedSink::new();
-        let writer = tokio::spawn(async move { write_link_to_peer(sink, receiver).await });
+        let writer = tokio::spawn(async move {
+            write_link_to_peer(
+                sink,
+                receiver,
+                super::super::forwarding::envelope_channel().1,
+            )
+            .await
+        });
 
         let message = BridgeMessage::ResponseEnd(ResponseEnd {
             request_id: "one".to_string(),
@@ -609,13 +862,14 @@ mod tests {
                 .await
                 .outbound(&mut mapped)
                 .expect("owned frame");
-            let wire = crate::bridge_wire::encode_message(&mapped).unwrap();
+            let wire = super::super::wire::PeerEnvelope::bridge(mapped)
+                .encode()
+                .unwrap();
             let budget = original.len().max(wire.len());
             let (sender, _control, mut data_rx) = BridgeSender::channel_with_byte_budget(budget);
             let sender = owned_sender(sender, ownership.clone());
             sender.send(chunk).await.expect("queue chunk");
             let (message, permit) = data_rx.recv().await.unwrap().into_parts();
-            assert_eq!(permit.num_permits(), budget);
             let (sink, frames, gate, _) = GatedSink::new();
             let mut writer = OwnedPeerWriter {
                 writer: sink,
@@ -640,7 +894,18 @@ mod tests {
             gate.add_permits(1);
             let mut writer = in_flight.await.unwrap();
             let sent = frames.lock().unwrap().first().cloned().unwrap();
-            assert_eq!(sent, PeerFrame::Binary(wire));
+            let PeerFrame::Binary(bytes) = sent else {
+                panic!("the sink received a binary frame");
+            };
+            let envelope = super::super::wire::PeerEnvelope::decode(&bytes)
+                .expect("the peer envelope decodes");
+            assert_eq!(
+                envelope.message,
+                super::super::wire::PeerEnvelope::decode(&wire)
+                    .expect("the expected envelope decodes")
+                    .message,
+                "the envelope carries the owned frame"
+            );
             let terminal = BridgeMessage::ResponseEnd(ResponseEnd {
                 request_id: request.request_id,
             });
@@ -740,7 +1005,14 @@ mod tests {
             .expect("the flush receiver is available");
         let receiver = LinkReceiver::new(control_rx, data_rx, flush_rx);
         let (sink, _frames, _gate, flushes) = GatedSink::new();
-        let writer = tokio::spawn(async move { write_link_to_peer(sink, receiver).await });
+        let writer = tokio::spawn(async move {
+            write_link_to_peer(
+                sink,
+                receiver,
+                super::super::forwarding::envelope_channel().1,
+            )
+            .await
+        });
 
         assert!(
             sender.flush(Duration::from_secs(5)).await,
@@ -761,12 +1033,19 @@ mod tests {
         let (mut peer_reader, _peer_writer) = left.into_halves();
         let (reader, writer) = right.into_halves();
         let state = crate::relay::test_state();
+        let hub = super::super::forwarding::RouteHub::new(
+            crate::worker::runtime::node::identity::NodeId::from_uuid(uuid::Uuid::from_u128(1)),
+            state.clone(),
+        );
         let (_stop_tx, stop_rx) = tokio::sync::oneshot::channel();
-        let session = tokio::spawn(run_edge_peer_session(
+        let session = tokio::spawn(run_node_peer_session(
             reader,
             writer,
-            state.clone(),
-            7,
+            hub,
+            super::super::admission::mint_for_test(
+                crate::worker::runtime::node::identity::NodeId::from_uuid(uuid::Uuid::from_u128(2)),
+                1,
+            ),
             Duration::from_millis(150),
             stop_rx,
         ));
@@ -774,10 +1053,8 @@ mod tests {
             let mut pings = 0;
             while let Ok(Some(frame)) = peer_reader.recv().await {
                 if let PeerFrame::Binary(bytes) = frame
-                    && matches!(
-                        crate::bridge_wire::decode_message(&bytes),
-                        Ok(BridgeMessage::Ping)
-                    )
+                    && let Ok(envelope) = super::super::wire::PeerEnvelope::decode(&bytes)
+                    && matches!(envelope.message, Some(BridgeMessage::Ping))
                 {
                     pings += 1;
                 }
@@ -793,7 +1070,6 @@ mod tests {
             .expect("session joins")
             .expect("session closes cleanly");
         assert!(pings >= 2, "the session sent repeated heartbeats");
-        assert!(state.inner.workers.lock().await.is_empty());
     }
 
     struct FailedReader;
@@ -816,24 +1092,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn edge_session_cleans_up_on_read_decode_and_sink_failure() {
+    async fn node_session_cleans_up_on_read_decode_and_sink_failure() {
         let state = crate::relay::test_state();
+        let local_id =
+            crate::worker::runtime::node::identity::NodeId::from_uuid(uuid::Uuid::from_u128(1));
+        let remote =
+            crate::worker::runtime::node::identity::NodeId::from_uuid(uuid::Uuid::from_u128(2));
         let (_stop, stop_rx) = tokio::sync::oneshot::channel();
         let (_peer, local) = MemoryPeer::pair(4);
         let (_, writer) = local.into_halves();
         assert!(
-            run_edge_peer_session(
+            run_node_peer_session(
                 FailedReader,
                 writer,
-                state.clone(),
-                1,
+                super::super::forwarding::RouteHub::new(local_id, state.clone()),
+                super::super::admission::mint_for_test(remote, 1),
                 Duration::from_secs(1),
                 stop_rx
             )
             .await
             .is_err()
         );
-        assert!(state.inner.workers.lock().await.is_empty());
 
         let (peer, local) = MemoryPeer::pair(4);
         let (_, mut peer_writer) = peer.into_halves();
@@ -844,35 +1123,33 @@ mod tests {
             .expect("send malformed");
         let (_stop, stop_rx) = tokio::sync::oneshot::channel();
         assert!(
-            run_edge_peer_session(
+            run_node_peer_session(
                 reader,
                 writer,
-                state.clone(),
-                2,
+                super::super::forwarding::RouteHub::new(local_id, state.clone()),
+                super::super::admission::mint_for_test(remote, 2),
                 Duration::from_secs(1),
                 stop_rx
             )
             .await
             .is_err()
         );
-        assert!(state.inner.workers.lock().await.is_empty());
 
         let (_peer, local) = MemoryPeer::pair(4);
         let (reader, _) = local.into_halves();
         let (_stop, stop_rx) = tokio::sync::oneshot::channel();
         assert!(
-            run_edge_peer_session(
+            run_node_peer_session(
                 reader,
                 FailedWriter,
-                state.clone(),
-                3,
+                super::super::forwarding::RouteHub::new(local_id, state.clone()),
+                super::super::admission::mint_for_test(remote, 3),
                 Duration::from_secs(1),
                 stop_rx
             )
             .await
             .is_err()
         );
-        assert!(state.inner.workers.lock().await.is_empty());
     }
 
     #[tokio::test]
@@ -891,12 +1168,20 @@ mod tests {
         let (peer, local) = MemoryPeer::pair(8);
         let (_peer_reader, mut peer_writer) = peer.into_halves();
         let (mut reader, _local_writer) = local.into_halves();
+        let local_id =
+            crate::worker::runtime::node::identity::NodeId::from_uuid(uuid::Uuid::from_u128(1));
+        let peer_id =
+            crate::worker::runtime::node::identity::NodeId::from_uuid(uuid::Uuid::from_u128(2));
+        let (route_tx, _route_rx) = super::super::forwarding::envelope_channel();
         run_db_frame_loop(
             &mut reader,
             &pump,
             &sender,
             &ownership,
             Duration::from_millis(150),
+            local_id,
+            peer_id,
+            &route_tx,
         )
         .await
         .unwrap();
@@ -914,7 +1199,10 @@ mod tests {
                 &pump,
                 &sender,
                 &ownership,
-                Duration::from_secs(1)
+                Duration::from_secs(1),
+                local_id,
+                peer_id,
+                &route_tx,
             )
             .await
             .is_err()
@@ -925,7 +1213,10 @@ mod tests {
                 &pump,
                 &sender,
                 &ownership,
-                Duration::from_secs(1)
+                Duration::from_secs(1),
+                local_id,
+                peer_id,
+                &route_tx,
             )
             .await
             .is_err()
@@ -940,6 +1231,10 @@ mod tests {
         let mut writers = Vec::new();
         let mut tasks = Vec::new();
         let mut owners = Vec::new();
+        let local_id =
+            crate::worker::runtime::node::identity::NodeId::from_uuid(uuid::Uuid::from_u128(1));
+        let peer_id =
+            crate::worker::runtime::node::identity::NodeId::from_uuid(uuid::Uuid::from_u128(2));
         for _ in 0..2 {
             let (peer, local) = MemoryPeer::pair(16);
             let (_peer_reader, peer_writer) = peer.into_halves();
@@ -956,9 +1251,20 @@ mod tests {
                 state,
                 None,
             );
+            let (route_tx, _route_rx) = super::super::forwarding::envelope_channel();
             tasks.push(tokio::spawn(async move {
                 let _keep_receivers = (control, data, _writer);
-                run_db_frame_loop(&mut reader, &pump, &sender, &own, Duration::from_secs(5)).await
+                run_db_frame_loop(
+                    &mut reader,
+                    &pump,
+                    &sender,
+                    &own,
+                    Duration::from_secs(5),
+                    local_id,
+                    peer_id,
+                    &route_tx,
+                )
+                .await
             }));
             owners.push(ownership);
             writers.push(peer_writer);
@@ -967,9 +1273,14 @@ mod tests {
             "type":"request_start", "request_id":"collision", "method":"POST", "path":"/v1/chat"
         }))
         .unwrap();
+        // The start of a request travels in an envelope with the path of the
+        // request, so the database node knows the position of itself in it.
+        let path =
+            super::super::wire::PeerPath::new(vec![peer_id, local_id]).expect("a bounded path");
+        let start_envelope = super::super::wire::PeerEnvelope::request_start(path, start);
         for writer in &mut writers {
             writer
-                .send_binary(crate::bridge_wire::encode_message(&start).unwrap())
+                .send_binary(start_envelope.encode().unwrap())
                 .await
                 .unwrap();
         }
@@ -1002,7 +1313,11 @@ mod tests {
         }))
         .unwrap();
         writers[0]
-            .send_binary(crate::bridge_wire::encode_message(&cancel).unwrap())
+            .send_binary(
+                super::super::wire::PeerEnvelope::bridge(cancel)
+                    .encode()
+                    .unwrap(),
+            )
             .await
             .unwrap();
         tokio::time::timeout(Duration::from_secs(2), async {

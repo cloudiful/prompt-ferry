@@ -781,12 +781,12 @@ mod tests {
             }
         });
         tokio::time::timeout(Duration::from_secs(5), async {
-            while state.inner.workers.lock().await.is_empty() {
+            while context.directory.len().await == 0 {
                 tokio::task::yield_now().await;
             }
         })
         .await
-        .expect("the peer registered as the executor");
+        .expect("the peer link is admitted");
 
         // The deadline of the establishment is long over, but the admitted
         // link is still alive: the deadline does not reach the session.
@@ -797,7 +797,10 @@ mod tests {
             "the admitted link outlived the establishment deadline"
         );
         assert_eq!(context.directory.len().await, 1);
-        assert_eq!(state.inner.workers.lock().await.len(), 1);
+        assert!(
+            state.inner.workers.lock().await.is_empty(),
+            "a node without a route serves no worker"
+        );
 
         // The cooperative shutdown closes the link and releases the counter,
         // the directory slot and the worker of the link.

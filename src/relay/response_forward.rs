@@ -76,6 +76,8 @@ pub(crate) async fn handle_response_chunk(state: &AppState, chunk: ResponseChunk
         match result {
             EnqueueResult::Closed => {
                 send_request_cancel(
+                    state,
+                    entry.worker_id,
                     &entry.worker,
                     &request_id,
                     "downstream_closed",
@@ -85,6 +87,8 @@ pub(crate) async fn handle_response_chunk(state: &AppState, chunk: ResponseChunk
             EnqueueResult::BytesLimit => {
                 let err = backpressure_error(&request_id);
                 send_request_cancel(
+                    state,
+                    entry.worker_id,
                     &entry.worker,
                     &request_id,
                     "bridge_backpressure_bytes_limit",
@@ -95,6 +99,8 @@ pub(crate) async fn handle_response_chunk(state: &AppState, chunk: ResponseChunk
             EnqueueResult::Full => {
                 let err = backpressure_error(&request_id);
                 send_request_cancel(
+                    state,
+                    entry.worker_id,
                     &entry.worker,
                     &request_id,
                     "bridge_backpressure_full",
@@ -204,6 +210,8 @@ pub(crate) async fn handle_mcp_response_chunk(state: &AppState, chunk: McpRespon
         match result {
             EnqueueResult::Closed => {
                 send_mcp_request_cancel(
+                    state,
+                    entry.worker_id,
                     &entry.worker,
                     &request_id,
                     "downstream_closed",
@@ -213,6 +221,8 @@ pub(crate) async fn handle_mcp_response_chunk(state: &AppState, chunk: McpRespon
             EnqueueResult::BytesLimit => {
                 let err = backpressure_error(&request_id);
                 send_mcp_request_cancel(
+                    state,
+                    entry.worker_id,
                     &entry.worker,
                     &request_id,
                     "bridge_backpressure_bytes_limit",
@@ -223,6 +233,8 @@ pub(crate) async fn handle_mcp_response_chunk(state: &AppState, chunk: McpRespon
             EnqueueResult::Full => {
                 let err = backpressure_error(&request_id);
                 send_mcp_request_cancel(
+                    state,
+                    entry.worker_id,
                     &entry.worker,
                     &request_id,
                     "bridge_backpressure_full",
@@ -329,6 +341,8 @@ pub(crate) async fn handle_realtime_server_event(
         match result {
             EnqueueResult::Closed => {
                 send_realtime_close(
+                    state,
+                    entry.worker_id,
                     &entry.worker,
                     &request_id,
                     "downstream_closed",
@@ -338,6 +352,8 @@ pub(crate) async fn handle_realtime_server_event(
             EnqueueResult::BytesLimit => {
                 let err = backpressure_error(&request_id);
                 send_realtime_close(
+                    state,
+                    entry.worker_id,
                     &entry.worker,
                     &request_id,
                     "bridge_backpressure_bytes_limit",
@@ -348,6 +364,8 @@ pub(crate) async fn handle_realtime_server_event(
             EnqueueResult::Full => {
                 let err = backpressure_error(&request_id);
                 send_realtime_close(
+                    state,
+                    entry.worker_id,
                     &entry.worker,
                     &request_id,
                     "bridge_backpressure_full",
@@ -411,6 +429,8 @@ pub(crate) async fn remove_pending(state: &AppState, request_id: &str) {
     if let Some(entry) = entry {
         release_worker(state, entry.worker_id).await;
         send_request_cancel(
+            state,
+            entry.worker_id,
             &entry.worker,
             request_id,
             "downstream_closed",
@@ -430,6 +450,8 @@ pub(crate) async fn remove_mcp_pending(state: &AppState, request_id: &str) {
         );
         release_worker(state, entry.worker_id).await;
         send_mcp_request_cancel(
+            state,
+            entry.worker_id,
             &entry.worker,
             request_id,
             "downstream_closed",
@@ -448,6 +470,8 @@ pub(crate) async fn remove_realtime_pending(state: &AppState, request_id: &str) 
     if let Some(entry) = entry {
         release_worker(state, entry.worker_id).await;
         send_realtime_close(
+            state,
+            entry.worker_id,
             &entry.worker,
             request_id,
             "downstream_closed",
@@ -615,44 +639,68 @@ pub(crate) fn send_mcp_response_error(
     }
 }
 
+/// Cancel a request on the worker that owns it.
+///
+/// The cancellation is one attempt on the bounded queue of the worker. A
+/// worker that cannot take it is a worker that lost its traffic, so the
+/// failure of a worker that opted in is signalled to its producer. The
+/// signal is a single latest event: it is never retried and never sent
+/// through the same full queue.
 pub(crate) fn send_request_cancel(
+    state: &AppState,
+    worker_id: usize,
     worker: &WorkerSender,
     request_id: &str,
     reason: &str,
     response_started: bool,
 ) {
-    let _ = worker.try_send(BridgeMessage::RequestCancel(BridgeRequestCancel {
+    let message = BridgeMessage::RequestCancel(BridgeRequestCancel {
         request_id: request_id.to_string(),
         reason: reason.to_string(),
         response_started,
-    }));
+    });
+    if worker.try_send(message).is_err() {
+        state.inner.signal_worker_failure(worker_id);
+    }
 }
 
+/// Cancel an MCP request on the worker that owns it.
 pub(crate) fn send_mcp_request_cancel(
+    state: &AppState,
+    worker_id: usize,
     worker: &WorkerSender,
     request_id: &str,
     reason: &str,
     response_started: bool,
 ) {
-    let _ = worker.try_send(BridgeMessage::McpRequestCancel(McpRequestCancel {
+    let message = BridgeMessage::McpRequestCancel(McpRequestCancel {
         request_id: request_id.to_string(),
         reason: reason.to_string(),
         response_started,
-    }));
+    });
+    if worker.try_send(message).is_err() {
+        state.inner.signal_worker_failure(worker_id);
+    }
 }
 
+/// Close a realtime session on the worker that owns it.
 pub(crate) fn send_realtime_close(
+    state: &AppState,
+    worker_id: usize,
     worker: &WorkerSender,
     request_id: &str,
     reason: &str,
     response_started: bool,
 ) {
-    let _ = worker.try_send(BridgeMessage::RealtimeSessionClose(RealtimeSessionClose {
+    let message = BridgeMessage::RealtimeSessionClose(RealtimeSessionClose {
         request_id: request_id.to_string(),
         code: None,
         reason: Some(reason.to_string()),
         response_started,
-    }));
+    });
+    if worker.try_send(message).is_err() {
+        state.inner.signal_worker_failure(worker_id);
+    }
 }
 
 pub(crate) fn backpressure_error(request_id: &str) -> ResponseError {
@@ -742,11 +790,18 @@ impl Drop for PendingCleanup {
 
 #[cfg(test)]
 mod tests {
-    use super::{handle_response_chunk, remove_mcp_pending};
+    use super::{
+        handle_response_chunk, remove_mcp_pending, remove_pending, remove_realtime_pending,
+        send_mcp_request_cancel, send_realtime_close, send_request_cancel,
+    };
     use crate::{
         protocol::{BridgeMessage, ResponseChunk},
-        relay::state::{PendingMcpRequest, PendingRequest, test_state},
+        relay::{
+            cleanup_worker,
+            state::{PendingMcpRequest, PendingRealtimeSession, PendingRequest, test_state},
+        },
     };
+    use std::time::Duration;
     use tokio::sync::{mpsc, oneshot};
 
     #[tokio::test]
@@ -929,6 +984,160 @@ mod tests {
                     response_started: false,
                 }
             ))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_full_worker_queue_signals_the_failure_of_the_worker_that_opted_in() {
+        let state = test_state();
+        let mut failure = state.inner.install_worker_failure(7);
+        let (worker, mut worker_rx) = mpsc::channel(1);
+        worker
+            .try_send(BridgeMessage::Ping)
+            .expect("the queue of the worker holds one message");
+
+        // The cancellation cannot be enqueued, so the failure of the worker
+        // is signalled to the producer that opted in.
+        send_request_cancel(&state, 7, &worker, "request-1", "downstream_closed", false);
+        assert!(
+            failure.changed().await.is_ok(),
+            "the failure of the worker is signalled"
+        );
+        assert_eq!(
+            worker_rx.try_recv(),
+            Ok(BridgeMessage::Ping),
+            "the cancellation is never queued behind the full queue"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_closed_worker_queue_signals_the_failure_of_the_worker_that_opted_in() {
+        let state = test_state();
+        let mut failure = state.inner.install_worker_failure(9);
+        let (worker, worker_rx) = mpsc::channel::<BridgeMessage>(1);
+        drop(worker_rx);
+
+        // The worker is gone, so the cancellation cannot be enqueued.
+        send_realtime_close(&state, 9, &worker, "session-1", "downstream_closed", false);
+        assert!(
+            failure.changed().await.is_ok(),
+            "the failure of the worker is signalled"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_worker_without_a_failure_watch_never_signals_another_worker() {
+        let state = test_state();
+        let mut failure = state.inner.install_worker_failure(7);
+        let (worker, _worker_rx) = mpsc::channel(1);
+        worker
+            .try_send(BridgeMessage::Ping)
+            .expect("the queue of the worker holds one message");
+
+        // The worker without a watch keeps the previous behaviour: the
+        // cancellation is dropped and no other worker is signalled.
+        send_mcp_request_cancel(&state, 8, &worker, "request-1", "downstream_closed", false);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), failure.changed())
+                .await
+                .is_err(),
+            "the failure of another worker is never signalled"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_cleanup_of_a_worker_removes_its_failure_watch() {
+        let state = test_state();
+        let mut failure = state.inner.install_worker_failure(7);
+
+        cleanup_worker(&state, 7).await;
+
+        // The watch of the worker is gone, so a later signal is ignored.
+        state.inner.signal_worker_failure(7);
+        assert!(
+            failure.changed().await.is_err(),
+            "the watch of the cleaned up worker is closed"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_pending_paths_signal_the_failure_of_their_own_worker() {
+        let state = test_state();
+        let mut http_failure = state.inner.install_worker_failure(7);
+        let mut mcp_failure = state.inner.install_worker_failure(8);
+        let mut realtime_failure = state.inner.install_worker_failure(9);
+
+        let (http_worker, _http_rx) = mpsc::channel(1);
+        http_worker
+            .try_send(BridgeMessage::Ping)
+            .expect("the queue of the worker holds one message");
+        let (start_tx, _start_rx) = oneshot::channel();
+        let (chunk_tx, _chunk_rx) = mpsc::channel(1);
+        let (forward_tx, _forward_rx) = mpsc::unbounded_channel();
+        state.inner.pending.lock().await.insert(
+            "request-1".to_string(),
+            PendingRequest {
+                start_tx: Some(start_tx),
+                chunk_tx,
+                forward_tx,
+                worker_id: 7,
+                worker: http_worker,
+                queued_bytes: 0,
+                response_started: false,
+            },
+        );
+        remove_pending(&state, "request-1").await;
+        assert!(
+            http_failure.changed().await.is_ok(),
+            "the failure of the HTTP worker is signalled"
+        );
+
+        let (mcp_worker, _mcp_rx) = mpsc::channel(1);
+        mcp_worker
+            .try_send(BridgeMessage::Ping)
+            .expect("the queue of the worker holds one message");
+        let (start_tx, _start_rx) = oneshot::channel();
+        let (chunk_tx, _chunk_rx) = mpsc::channel(1);
+        let (forward_tx, _forward_rx) = mpsc::unbounded_channel();
+        state.inner.pending_mcp.lock().await.insert(
+            "request-2".to_string(),
+            PendingMcpRequest {
+                start_tx: Some(start_tx),
+                chunk_tx,
+                forward_tx,
+                worker_id: 8,
+                worker: mcp_worker,
+                queued_bytes: 0,
+                response_started: false,
+            },
+        );
+        remove_mcp_pending(&state, "request-2").await;
+        assert!(
+            mcp_failure.changed().await.is_ok(),
+            "the failure of the MCP worker is signalled"
+        );
+
+        let (realtime_worker, _realtime_rx) = mpsc::channel(1);
+        realtime_worker
+            .try_send(BridgeMessage::Ping)
+            .expect("the queue of the worker holds one message");
+        let (event_tx, _event_rx) = mpsc::channel(1);
+        let (forward_tx, _forward_rx) = mpsc::unbounded_channel();
+        state.inner.pending_realtime_sessions.lock().await.insert(
+            "session-1".to_string(),
+            PendingRealtimeSession {
+                event_tx,
+                forward_tx,
+                worker_id: 9,
+                worker: realtime_worker,
+                queued_bytes: 0,
+                response_started: false,
+            },
+        );
+        remove_realtime_pending(&state, "session-1").await;
+        assert!(
+            realtime_failure.changed().await.is_ok(),
+            "the failure of the realtime worker is signalled"
         );
     }
 }

@@ -391,8 +391,10 @@ fn check_ticket_times(ticket: &Ticket, now: i64) -> anyhow::Result<()> {
 
 /// Check that a hello of a peer is compatible with the hello of this node.
 ///
-/// The two nodes run the same version, speak the same peer protocol and have
-/// different roles: only a database node and an edge node form a star.
+/// The two nodes run the same version and speak the same peer protocol. Two
+/// database nodes never form a star, but two database-less nodes may be
+/// linked: such a link carries the traffic of a node that has no route of
+/// its own.
 fn check_hello(remote: &Hello, local: &Hello) -> anyhow::Result<()> {
     if remote.node_id == local.node_id {
         anyhow::bail!("the peer claims the identity of this node");
@@ -412,10 +414,9 @@ fn check_hello(remote: &Hello, local: &Hello) -> anyhow::Result<()> {
             local.protocol_version
         );
     }
-    if remote.has_database == local.has_database {
+    if remote.has_database && local.has_database {
         anyhow::bail!(
-            "the peer cannot be linked to this node: only a database node and an edge node form a \
-             star"
+            "the peer cannot be linked to this node: two database nodes cannot form a star"
         );
     }
     Ok(())

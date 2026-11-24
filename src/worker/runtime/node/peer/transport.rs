@@ -57,9 +57,22 @@ pub(crate) fn axum_peer_transport(socket: WebSocket) -> (AxumPeerReader, AxumPee
 /// the bridge, so a legitimate frame is never refused by a smaller default.
 pub(crate) fn peer_socket_config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
     let mut config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
-    config.max_frame_size = Some(crate::bridge::wire::BRIDGE_WS_MAX_FRAME_BYTES);
-    config.max_message_size = Some(crate::bridge::wire::BRIDGE_WS_MAX_MESSAGE_BYTES);
+    config.max_frame_size = Some(peer_max_frame_bytes());
+    config.max_message_size = Some(peer_max_message_bytes());
     config
+}
+
+/// The biggest frame of a peer link.
+///
+/// The frame of a peer link is a peer envelope around a bridge frame, so the
+/// limit of the bridge grows by the biggest header of an envelope.
+pub(crate) fn peer_max_frame_bytes() -> usize {
+    crate::bridge::wire::BRIDGE_WS_MAX_FRAME_BYTES + super::wire::PEER_ENVELOPE_MAX_HEADER_BYTES
+}
+
+/// The biggest message of a peer link.
+pub(crate) fn peer_max_message_bytes() -> usize {
+    crate::bridge::wire::BRIDGE_WS_MAX_MESSAGE_BYTES + super::wire::PEER_ENVELOPE_MAX_HEADER_BYTES
 }
 
 impl PeerReader for AxumPeerReader {
@@ -243,13 +256,17 @@ impl PeerWriter for MemoryPeerWriter {
 
 #[cfg(test)]
 mod tests {
-    use super::peer_socket_config;
-    use crate::bridge::wire::{BRIDGE_WS_MAX_FRAME_BYTES, BRIDGE_WS_MAX_MESSAGE_BYTES};
+    use super::{peer_max_frame_bytes, peer_max_message_bytes, peer_socket_config};
+    use crate::bridge::wire::BRIDGE_WS_MAX_FRAME_BYTES;
 
     #[test]
     fn the_peer_link_uses_the_limits_of_the_bridge_contract() {
         let config = peer_socket_config();
-        assert_eq!(config.max_frame_size, Some(BRIDGE_WS_MAX_FRAME_BYTES));
-        assert_eq!(config.max_message_size, Some(BRIDGE_WS_MAX_MESSAGE_BYTES));
+        assert_eq!(
+            config.max_frame_size,
+            Some(BRIDGE_WS_MAX_FRAME_BYTES + super::super::wire::PEER_ENVELOPE_MAX_HEADER_BYTES)
+        );
+        assert_eq!(config.max_message_size, Some(peer_max_message_bytes()));
+        assert!(peer_max_frame_bytes() > BRIDGE_WS_MAX_FRAME_BYTES);
     }
 }

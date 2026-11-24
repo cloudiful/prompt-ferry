@@ -146,6 +146,7 @@ async fn proxy_mcp_request(
         chunk_tx_for_pump,
         Duration::from_millis(state.config.response_stream_backpressure_timeout_ms),
     );
+    let worker_id = selection.worker_id;
     let worker = selection.sender;
     let request_headers = forwardable_mcp_headers(&headers);
     let client_key_hash = route.as_ref().map(|route| route.key_hash.clone());
@@ -161,7 +162,7 @@ async fn proxy_mcp_request(
         http_request_compressed: compression.compressed,
         http_request_compressed_bytes: compression.compressed_bytes,
     };
-    if let Err(err) = stream_mcp_body(&worker, start, compression, body).await {
+    if let Err(err) = stream_mcp_body(&state, worker_id, &worker, start, compression, body).await {
         remove_mcp_pending(&state, &request_id).await;
         return err.into_response();
     }
@@ -305,6 +306,8 @@ async fn proxy_mcp_request(
 }
 
 async fn stream_mcp_body(
+    state: &AppState,
+    worker_id: usize,
     worker: &WorkerSender,
     start: McpRequestStart,
     compression: HttpRequestCompressionContext,
@@ -337,7 +340,14 @@ async fn stream_mcp_body(
             decompressed_bytes.saturating_add(i64::try_from(chunk.len()).unwrap_or(i64::MAX));
         if new_decompressed_bytes > crate::mcp::MAX_MCP_REQUEST_BODY_BYTES as i64 {
             if started {
-                send_mcp_request_cancel(worker, &request_id, "request_body_too_large", false);
+                send_mcp_request_cancel(
+                    state,
+                    worker_id,
+                    worker,
+                    &request_id,
+                    "request_body_too_large",
+                    false,
+                );
             }
             return Err(ApiError::new(
                 StatusCode::PAYLOAD_TOO_LARGE,

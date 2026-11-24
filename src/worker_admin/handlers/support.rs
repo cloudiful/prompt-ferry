@@ -109,6 +109,10 @@ async fn send_snapshot(
         keys: snapshot.keys.clone(),
         relay_ip_policy: snapshot.relay_ip_policy,
     };
+    // The database-side peer links read this single latest-value watch, so the
+    // newest snapshot is retained for the next link even while none is
+    // subscribed. The local relay senders below are unaffected.
+    state.publish_peer_snapshot(config_snapshot.clone());
     let mut relay_senders = state.relay_senders.lock().await;
     let relay_urls = relay_senders.keys().cloned().collect::<Vec<_>>();
     let mut disconnected = Vec::new();

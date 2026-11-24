@@ -16,7 +16,7 @@ use std::{
 };
 use tokio::{
     net::TcpListener,
-    sync::{Mutex, mpsc, oneshot},
+    sync::{Mutex, mpsc, oneshot, watch},
 };
 
 pub(crate) type WorkerSender = mpsc::Sender<BridgeMessage>;
@@ -142,6 +142,56 @@ impl RelayState {
         let routes_empty = self.routes.lock().await.is_empty();
         !workers_empty && !routes_empty
     }
+
+    /// Install the failure watch of a worker.
+    ///
+    /// Only a worker that opts in owns a watch, so the map holds at most one
+    /// entry per live worker. The watch of a live worker is never replaced:
+    /// a second install of the same worker joins the watch that is already
+    /// live, so a signal of the first install is never lost.
+    pub(crate) fn install_worker_failure(&self, worker_id: usize) -> watch::Receiver<()> {
+        let mut failures = self
+            .worker_failures
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        match failures.get(&worker_id) {
+            Some(sender) => sender.subscribe(),
+            None => {
+                let (sender, receiver) = watch::channel(());
+                failures.insert(worker_id, sender);
+                receiver
+            }
+        }
+    }
+
+    /// Signal the failure of a worker.
+    ///
+    /// A worker without a watch keeps the previous best-effort behaviour, so
+    /// the signal of an unknown worker is ignored.
+    pub(crate) fn signal_worker_failure(&self, worker_id: usize) {
+        let sender = {
+            let failures = self
+                .worker_failures
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            failures.get(&worker_id).cloned()
+        };
+        if let Some(sender) = sender {
+            let _ = sender.send(());
+        }
+    }
+
+    /// Remove the failure watch of a worker.
+    ///
+    /// The removal is exact, so the watch of another worker is never
+    /// removed, and a signal that arrives after the removal is ignored.
+    pub(crate) fn remove_worker_failure(&self, worker_id: usize) {
+        let mut failures = self
+            .worker_failures
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        failures.remove(&worker_id);
+    }
 }
 
 pub(crate) struct RelayState {
@@ -154,6 +204,12 @@ pub(crate) struct RelayState {
     pub(crate) relay_ip_policy: Mutex<CompiledRelayIpPolicy>,
     pub(crate) config_version: Mutex<Option<i64>>,
     pub(crate) next_worker_id: AtomicUsize,
+    /// The failure watch of every worker that opted in.
+    ///
+    /// The watch is a short synchronous map, so the cancellation helpers can
+    /// signal a failure without awaiting and without holding a lock over an
+    /// await. A worker without a watch keeps the previous behaviour.
+    pub(crate) worker_failures: std::sync::Mutex<HashMap<usize, watch::Sender<()>>>,
 }
 
 pub(crate) struct PendingRequest {
@@ -198,6 +254,7 @@ pub(crate) fn test_state() -> AppState {
             routes: Mutex::new(HashMap::new()),
             relay_ip_policy: Mutex::new(CompiledRelayIpPolicy::default()),
             config_version: Mutex::new(None),
+            worker_failures: std::sync::Mutex::new(HashMap::new()),
             next_worker_id: AtomicUsize::new(1),
         }),
         authorizer: None,
