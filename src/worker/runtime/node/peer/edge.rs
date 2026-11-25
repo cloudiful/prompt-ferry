@@ -13,7 +13,7 @@ use anyhow::anyhow;
 use axum::routing::get;
 use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::config::NodeConfig;
 use crate::relay::node_edge_apps;
@@ -25,18 +25,20 @@ use super::topology::NodeRole;
 use super::{NodeIdentity, PeerLinkContext, PeerRoleContext, peer_challenge, peer_upgrade};
 use crate::worker::runtime::node::identity::NodeId;
 
-/// Serve an edge node until it is asked to stop.
+/// Serve a database-less node until it is asked to stop.
 ///
-/// The edge may pin one database node for the life of the process: a peer URL
-/// in the configuration names it. With no peer URL the listener still starts
-/// and waits for a database node to dial it, so a database-less node never
-/// fails just because its peer has not been configured yet.
+/// The node may dial every peer URL of its configuration: a node that has no
+/// route of its own reaches the database node over one of them, and a node
+/// that has one uses the others for the traffic of its own peers. With no
+/// peer URL the listener still starts and waits for a peer to dial it, so a
+/// database-less node never fails just because its peer has not been
+/// configured yet.
 pub(crate) async fn run_edge_node(config: NodeConfig, node_id: NodeId) -> anyhow::Result<()> {
-    let target = config
+    let targets = config
         .peer_urls
-        .first()
+        .iter()
         .map(|peer_url| PeerTarget::parse(peer_url))
-        .transpose()?;
+        .collect::<anyhow::Result<Vec<_>>>()?;
     let manager = config.secret_manager()?;
     let identity = NodeIdentity {
         node_id,
@@ -53,6 +55,13 @@ pub(crate) async fn run_edge_node(config: NodeConfig, node_id: NodeId) -> anyhow
         PeerRoleContext::Edge(Arc::new(relay_state)),
         heartbeat_timeout,
     );
+    // The actor of the forwarding hub is started here, so it exists before
+    // the first peer connects and it is stopped with the node.
+    if let Some(hub) = context.hub() {
+        if let Err(err) = hub.start().await {
+            warn!(error = %err, "the forwarding hub of the edge node did not start");
+        }
+    }
 
     // The peer endpoint is part of the single listener of the edge: the
     // database node may dial the edge as well.
@@ -92,15 +101,15 @@ pub(crate) async fn run_edge_node(config: NodeConfig, node_id: NodeId) -> anyhow
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let (peer_shutdown_tx, peer_shutdown_rx) = watch::channel(false);
-    let mut dial_task = None;
-    if let Some(target) = target {
+    let mut dial_tasks = Vec::new();
+    for target in targets {
         let peer_tls = match target.secure {
             true => Some(tls::node_client_config(&config)?),
             false => None,
         };
         let dial_context = context.clone();
         let dial_shutdown = peer_shutdown_rx.clone();
-        dial_task = Some(tokio::spawn(async move {
+        dial_tasks.push(tokio::spawn(async move {
             Box::pin(run_peer_dialer(
                 dial_context,
                 target,
@@ -155,7 +164,7 @@ pub(crate) async fn run_edge_node(config: NodeConfig, node_id: NodeId) -> anyhow
     // The accepted peer sessions are closed before the dialers, so no link
     // is still running when the node stops.
     context.stop_sessions().await;
-    if let Some(dial_task) = dial_task {
+    for dial_task in dial_tasks {
         dial_task.abort();
         let _ = dial_task.await;
     }

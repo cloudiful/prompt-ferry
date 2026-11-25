@@ -15,7 +15,7 @@ use axum::{
 };
 use rmcp::transport::streamable_http_server::session::SessionStore;
 use sqlx::PgPool;
-use tokio::sync::{Mutex, RwLock, mpsc};
+use tokio::sync::{Mutex, RwLock, mpsc, watch};
 
 use super::chatgpt_quota_service::ChatGptQuotaService;
 use super::openai_org_usage_cache::OpenAiOrgUsageCache;
@@ -28,7 +28,7 @@ use crate::{
     keys::generate_client_key,
     mcp::{McpCatalogCache, McpCatalogService},
     naming::SESSION_COOKIE_NAME,
-    protocol::BridgeMessage,
+    protocol::{BridgeMessage, ConfigSnapshot},
     redact,
     relay_secrets::RelaySecretManager,
     replay_cache::ReplayCache,
@@ -130,6 +130,53 @@ mod node_setup_tests {
     }
 }
 
+#[cfg(test)]
+mod peer_snapshot_tests {
+    use super::{peer_snapshot_watch, store_peer_snapshot};
+    use crate::protocol::ConfigSnapshot;
+
+    fn snapshot(version: i64) -> ConfigSnapshot {
+        ConfigSnapshot {
+            version,
+            keys: Vec::new(),
+            relay_ip_policy: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_snapshot_published_without_receivers_is_retained_for_the_next_subscriber() {
+        let watch = peer_snapshot_watch();
+        store_peer_snapshot(&watch, snapshot(7));
+        let receiver = watch.subscribe();
+        assert_eq!(
+            receiver.borrow().as_ref().map(|snapshot| snapshot.version),
+            Some(7),
+            "a later subscriber sees the newest snapshot that was already published"
+        );
+    }
+
+    #[test]
+    fn only_the_newest_snapshot_remains_for_a_subscriber_that_did_not_consume_the_older_ones() {
+        let watch = peer_snapshot_watch();
+        let mut receiver = watch.subscribe();
+        store_peer_snapshot(&watch, snapshot(1));
+        store_peer_snapshot(&watch, snapshot(2));
+        store_peer_snapshot(&watch, snapshot(3));
+        assert_eq!(
+            receiver
+                .borrow_and_update()
+                .as_ref()
+                .map(|snapshot| snapshot.version),
+            Some(3),
+            "the subscriber consumes only the newest snapshot"
+        );
+        assert!(
+            !receiver.has_changed().expect("the watch is open"),
+            "the older publications were coalesced away"
+        );
+    }
+}
+
 pub(crate) struct NodeStatusState {
     pub(crate) own: crate::worker_admin_types::NodeStatusResponse,
     pub(crate) peers: HashMap<uuid::Uuid, (u64, crate::worker_admin_types::NodePeerSummary)>,
@@ -154,6 +201,26 @@ impl NodeStatusState {
     }
 }
 
+/// The single latest-value snapshot source of the database-side peer links.
+pub(crate) type PeerSnapshotWatch = watch::Sender<Option<Arc<ConfigSnapshot>>>;
+
+/// A subscription to the single latest-value peer snapshot source.
+pub(crate) type PeerSnapshotReceiver = watch::Receiver<Option<Arc<ConfigSnapshot>>>;
+
+fn peer_snapshot_watch() -> PeerSnapshotWatch {
+    watch::channel(None).0
+}
+
+fn store_peer_snapshot(watch: &PeerSnapshotWatch, snapshot: ConfigSnapshot) {
+    // A latest-value watch keeps the newest snapshot even while no peer link
+    // is subscribed, so a link that arrives later sees the current snapshot
+    // instead of waiting for the next publication. `send_replace` never fails
+    // for the absence of receivers and replaces the value atomically, so a
+    // subscriber reads either the previous or the new snapshot, never a
+    // partially updated one.
+    watch.send_replace(Some(Arc::new(snapshot)));
+}
+
 #[derive(Clone)]
 pub struct AdminState {
     pub(crate) node_setup: Option<Arc<NodeSetupAuth>>,
@@ -169,6 +236,14 @@ pub struct AdminState {
     /// database revision means the process is stale until it restarts.
     pub shared_valkey: SharedValkeyConfig,
     pub relay_senders: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<BridgeMessage>>>>,
+    /// The newest configuration snapshot published for the peer links.
+    ///
+    /// Every database-side peer link reads this single latest-value watch
+    /// instead of holding its own publication target, so a slow link can
+    /// never accumulate a per-link queue of snapshots. The newest value is
+    /// retained even while no link is subscribed, and the next link publishes
+    /// it immediately.
+    peer_snapshot: PeerSnapshotWatch,
     pub configured_relays: Arc<Vec<String>>,
     pub managed_mode: bool,
     pub relay_secret_manager: Option<RelaySecretManager>,
@@ -468,6 +543,7 @@ impl AdminState {
             replay_cache: init.replay_cache,
             shared_valkey: init.shared_valkey,
             relay_senders: Arc::new(Mutex::new(HashMap::new())),
+            peer_snapshot: peer_snapshot_watch(),
             configured_relays: Arc::new(init.configured_relays),
             managed_mode: init.managed_mode,
             relay_secret_manager: init.relay_secret_manager,
@@ -558,6 +634,20 @@ impl AdminState {
     pub fn with_cache_alert(mut self, settings: CacheAlertSettings) -> Self {
         self.cache_alert = Arc::new(RwLock::new(settings));
         self
+    }
+
+    /// Subscribe to the newest peer configuration snapshot.
+    ///
+    /// The returned receiver sees the snapshot that is already retained and
+    /// every newer publication. It never queues the publications it did not
+    /// consume: it only ever exposes the latest one.
+    pub(crate) fn subscribe_peer_snapshot(&self) -> PeerSnapshotReceiver {
+        self.peer_snapshot.subscribe()
+    }
+
+    /// Publish a snapshot for every current and future peer link.
+    pub(crate) fn publish_peer_snapshot(&self, snapshot: ConfigSnapshot) {
+        store_peer_snapshot(&self.peer_snapshot, snapshot);
     }
 }
 

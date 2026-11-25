@@ -86,6 +86,7 @@ fn relay_state() -> Arc<RelayState> {
         relay_ip_policy: Mutex::new(CompiledRelayIpPolicy::default()),
         config_version: Mutex::new(None),
         next_worker_id: AtomicUsize::new(1),
+        worker_failures: std::sync::Mutex::new(HashMap::new()),
     })
 }
 

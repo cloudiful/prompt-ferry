@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::transport::PeerWriter;
+use super::wire::PeerEnvelope;
 use crate::protocol::BridgeMessage;
 use crate::worker::runtime::{BridgeSender, bridge::BridgeSendError};
 use anyhow::{Result, bail};
@@ -15,7 +16,10 @@ pub(super) fn owned_sender(sender: BridgeSender, ownership: Arc<Mutex<Ownership>
             if ownership.lock().await.outbound(&mut mapped).is_none() {
                 return Ok(0);
             }
-            crate::bridge_wire::encode_message(&mapped)
+            // Reserve the whole peer envelope, so the wrapper overhead is
+            // part of the byte budget of the link as well.
+            PeerEnvelope::bridge(mapped)
+                .encode()
                 .map(|bytes| bytes.len())
                 .map_err(|error| BridgeSendError::Encoding(error.to_string()))
         })
@@ -30,14 +34,19 @@ pub(super) struct OwnedPeerWriter<W> {
 impl<W: PeerWriter + Send> PeerWriter for OwnedPeerWriter<W> {
     async fn send_binary(&mut self, bytes: Vec<u8>) -> Result<()> {
         let mut message = crate::bridge_wire::decode_message(&bytes)?;
-        let mut ownership = self.ownership.lock().await;
-        let Some(terminal) = ownership.outbound(&mut message) else {
+        let terminal = {
+            // The ownership lock is released before the sink is awaited, so a
+            // slow link never blocks the owners of the other requests.
+            let ownership = self.ownership.lock().await;
+            ownership.outbound(&mut message)
+        };
+        let Some(terminal) = terminal else {
             return Ok(());
         };
-        let bytes = crate::bridge_wire::encode_message(&message)?;
-        self.writer.send_binary(bytes).await?;
+        let envelope = PeerEnvelope::bridge(message);
+        self.writer.send_binary(envelope.encode()?).await?;
         if let Some(internal) = terminal {
-            ownership.finish(&internal);
+            self.ownership.lock().await.finish(&internal);
         }
         Ok(())
     }
@@ -338,9 +347,11 @@ mod tests {
             let Some(PeerFrame::Binary(bytes)) = peer_reader.recv().await.unwrap() else {
                 panic!("missing response")
             };
-            match crate::bridge_wire::decode_message(&bytes).unwrap() {
-                BridgeMessage::ResponseEnd(v) => assert_eq!(v.request_id, wire_id),
-                BridgeMessage::McpResponseEnd(v) => assert_eq!(v.request_id, wire_id),
+            let envelope = crate::worker::runtime::node::peer::wire::PeerEnvelope::decode(&bytes)
+                .expect("the peer envelope decodes");
+            match envelope.message {
+                Some(BridgeMessage::ResponseEnd(v)) => assert_eq!(v.request_id, wire_id),
+                Some(BridgeMessage::McpResponseEnd(v)) => assert_eq!(v.request_id, wire_id),
                 _ => panic!("wrong response"),
             }
             let active = ownership.lock().await.active();

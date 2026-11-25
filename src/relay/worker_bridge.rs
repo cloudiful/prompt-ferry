@@ -78,6 +78,10 @@ pub(crate) async fn attach_in_memory_worker(
 /// This is shared by the socket adapter and the local in-memory link so a
 /// disconnect has exactly the same route reset and pending failure behaviour.
 pub(crate) async fn cleanup_worker(state: &AppState, worker_id: usize) {
+    // The failure watch of the worker ends with the worker, so a signal that
+    // arrives after the cleanup is ignored. A worker without a watch keeps
+    // its previous lifecycle.
+    state.inner.remove_worker_failure(worker_id);
     // The observation of the last worker and the reset of the snapshot stay
     // in one critical section of the worker registration: a new worker that
     // registers between the observation and the reset would publish its own

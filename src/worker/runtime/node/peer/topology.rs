@@ -1,8 +1,11 @@
 //! The topology of a star and the deduplication of its links.
 //!
 //! A star is one database node and the edge nodes that belong to it. Two
-//! database nodes or two edge nodes never form a star, and a node never
-//! links to itself. When both sides dial at the same time, the link that the
+//! database nodes never form a star, and a node never links to itself. Two
+//! database-less nodes may be linked: such a link carries the traffic of a
+//! node that has no route of its own towards the database node.
+//!
+//! When both sides dial at the same time, the link that the
 //! lexicographically smaller node id initiated wins, so the star converges on
 //! one connection per peer.
 
@@ -46,8 +49,6 @@ pub enum PeerError {
     PeerCapReached,
     /// Another link to the same peer is the preferred one.
     DuplicateConnection,
-    /// The edge is pinned to another database node.
-    DifferentDatabaseNode,
 }
 
 impl std::fmt::Display for PeerError {
@@ -55,8 +56,8 @@ impl std::fmt::Display for PeerError {
         match self {
             Self::SelfConnection => f.write_str("a node cannot link to itself"),
             Self::IncompatibleRole => f.write_str(
-                "only a database node and an edge node form a star; two nodes of the same role \
-                 cannot be linked",
+                "two database nodes cannot be linked; a database-less node may be linked to any \
+                 other node",
             ),
             Self::PeerCapReached => {
                 write!(
@@ -67,16 +68,17 @@ impl std::fmt::Display for PeerError {
             Self::DuplicateConnection => {
                 f.write_str("another link to this peer is the preferred one")
             }
-            Self::DifferentDatabaseNode => {
-                f.write_str("this edge is pinned to another database node; restart it to rebind")
-            }
         }
     }
 }
 
 impl std::error::Error for PeerError {}
 
-/// Check that two nodes may form a star.
+/// Check that two nodes may be linked.
+///
+/// Two database nodes never form a star, and a node never links to itself.
+/// Two database-less nodes may be linked: the link carries the traffic of a
+/// node that has no route of its own.
 pub fn check_pairing(
     local_role: NodeRole,
     local_id: NodeId,
@@ -86,7 +88,7 @@ pub fn check_pairing(
     if local_id == remote_id {
         return Err(PeerError::SelfConnection);
     }
-    if local_role == remote_role {
+    if local_role == NodeRole::Database && remote_role == NodeRole::Database {
         return Err(PeerError::IncompatibleRole);
     }
     Ok(())
@@ -100,14 +102,6 @@ pub fn check_pairing(
 pub fn prefer_new_connection(local_id: NodeId, remote_id: NodeId, new_is_outbound: bool) -> bool {
     let local_initiates = local_id < remote_id;
     new_is_outbound == local_initiates
-}
-
-/// Check that an edge keeps talking to the database node it is pinned to.
-pub fn check_pinned_database(pinned: Option<NodeId>, remote: NodeId) -> Result<(), PeerError> {
-    match pinned {
-        Some(pinned) if pinned != remote => Err(PeerError::DifferentDatabaseNode),
-        _ => Ok(()),
-    }
 }
 
 /// One registered peer link.
@@ -240,8 +234,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        Admission, NodeRole, PeerDirectory, PeerError, check_pairing, check_pinned_database,
-        prefer_new_connection,
+        Admission, NodeRole, PeerDirectory, PeerError, check_pairing, prefer_new_connection,
     };
     use crate::worker::runtime::node::identity::NodeId;
 
@@ -257,9 +250,9 @@ mod tests {
             check_pairing(NodeRole::Database, id(1), NodeRole::Database, id(2)),
             Err(PeerError::IncompatibleRole)
         );
-        assert_eq!(
-            check_pairing(NodeRole::Edge, id(1), NodeRole::Edge, id(2)),
-            Err(PeerError::IncompatibleRole)
+        assert!(
+            check_pairing(NodeRole::Edge, id(1), NodeRole::Edge, id(2)).is_ok(),
+            "two database-less nodes may be linked"
         );
     }
 
@@ -342,16 +335,6 @@ mod tests {
         assert_eq!(
             directory.admit(id(1), id(9999), false).await,
             Err(PeerError::PeerCapReached)
-        );
-    }
-
-    #[test]
-    fn an_edge_stays_pinned_to_its_database_node() {
-        assert!(check_pinned_database(None, id(1)).is_ok());
-        assert!(check_pinned_database(Some(id(1)), id(1)).is_ok());
-        assert_eq!(
-            check_pinned_database(Some(id(1)), id(2)),
-            Err(PeerError::DifferentDatabaseNode)
         );
     }
 }

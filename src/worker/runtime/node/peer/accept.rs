@@ -17,7 +17,7 @@ use super::auth;
 use super::topology::{NodeRole, check_pairing};
 use super::transport::axum_peer_transport;
 use super::{PeerLinkContext, run_link};
-use crate::bridge::wire::{BRIDGE_WS_MAX_FRAME_BYTES, BRIDGE_WS_MAX_MESSAGE_BYTES};
+use crate::bridge::wire::BRIDGE_WS_MAX_FRAME_BYTES;
 use crate::worker::runtime::node::identity::NodeId;
 
 /// Hand out the challenge of this node.
@@ -190,8 +190,8 @@ pub(crate) async fn peer_upgrade(
         }
     };
     let response = upgrade
-        .max_frame_size(BRIDGE_WS_MAX_FRAME_BYTES)
-        .max_message_size(BRIDGE_WS_MAX_MESSAGE_BYTES)
+        .max_frame_size(BRIDGE_WS_MAX_FRAME_BYTES + super::wire::PEER_ENVELOPE_MAX_HEADER_BYTES)
+        .max_message_size(super::transport::peer_max_message_bytes())
         .on_upgrade(move |socket| async move {
             let (reader, writer) = axum_peer_transport(socket);
             // The session is owned by the node, so the shutdown path can close
@@ -306,7 +306,12 @@ mod tests {
 
         // The client answers the challenge with a proof, and the node opens
         // the link with it.
-        let client = Hello::new(uuid::Uuid::from_u128(1), true, env!("CARGO_PKG_VERSION"), 1);
+        let client = Hello::new(
+            uuid::Uuid::from_u128(1),
+            true,
+            env!("CARGO_PKG_VERSION"),
+            crate::worker::runtime::node::peer::wire::PEER_PROTOCOL_VERSION,
+        );
         let (proof, _server) = auth::build_proof(
             &context.identity.manager,
             &client,
@@ -382,13 +387,13 @@ mod tests {
             uuid::Uuid::from_u128(1000),
             true,
             env!("CARGO_PKG_VERSION"),
-            1,
+            crate::worker::runtime::node::peer::wire::PEER_PROTOCOL_VERSION,
         );
         let dialer = Hello::new(
             uuid::Uuid::from_u128(1),
             false,
             env!("CARGO_PKG_VERSION"),
-            1,
+            crate::worker::runtime::node::peer::wire::PEER_PROTOCOL_VERSION,
         );
         let epoch = auth::startup_epoch();
         let challenge = auth::issue_challenge(
@@ -445,14 +450,25 @@ mod tests {
         let mut connected = Vec::new();
         let mut sessions = Vec::new();
         let mut states = Vec::new();
+        let mut contexts = Vec::new();
         for id in 0..(PREAUTH_CONCURRENCY + 1) {
             let permit = slots.clone().try_acquire_owned().expect("slot available");
             let (left, right) = MemoryPeer::pair(8);
             let (left_reader, left_writer) = left.into_halves();
             let (right_reader, right_writer) = right.into_halves();
             let manager = RelaySecretManager::from_key_bytes([7; 32]);
-            let server = Hello::new(uuid::Uuid::from_u128(1000), true, "1", 1);
-            let client = Hello::new(uuid::Uuid::from_u128(id as u128 + 1), false, "1", 1);
+            let server = Hello::new(
+                uuid::Uuid::from_u128(1000),
+                true,
+                "1",
+                crate::worker::runtime::node::peer::wire::PEER_PROTOCOL_VERSION,
+            );
+            let client = Hello::new(
+                uuid::Uuid::from_u128(id as u128 + 1),
+                false,
+                "1",
+                crate::worker::runtime::node::peer::wire::PEER_PROTOCOL_VERSION,
+            );
             // The peer proves itself before the link starts: the challenge of
             // the node and the proof of the peer replace the frames of the
             // old handshake.
@@ -485,6 +501,7 @@ mod tests {
                 PeerRoleContext::Edge(Arc::new(state)),
                 std::time::Duration::from_secs(90),
             );
+            contexts.push(context.clone());
             sessions.push(tokio::spawn(async move {
                 run_link(
                     &context,
@@ -505,14 +522,14 @@ mod tests {
             .expect("admission releases permit");
         }
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            for state in &states {
-                while state.inner.workers.lock().await.is_empty() {
+            for context in &contexts {
+                while context.directory.len().await == 0 {
                     tokio::task::yield_now().await;
                 }
             }
         })
         .await
-        .expect("all authenticated sessions register");
+        .expect("all authenticated sessions are admitted");
         assert_eq!(slots.available_permits(), PREAUTH_CONCURRENCY);
         drop(connected);
         for session in sessions {
