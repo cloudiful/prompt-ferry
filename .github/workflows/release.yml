@@ -80,7 +80,6 @@ jobs:
           arch: ${{ matrix.msvc_arch }}
 
       - name: Export standard OpenAPI
-        shell: bash
         run: cargo run --release --no-default-features --bin export-openapi -- frontend/openapi.json
 
       - name: Build frontend
