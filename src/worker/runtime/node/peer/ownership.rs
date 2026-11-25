@@ -31,6 +31,17 @@ pub(super) struct OwnedPeerWriter<W> {
     pub(super) ownership: Arc<Mutex<Ownership>>,
 }
 
+impl<W: PeerWriter> OwnedPeerWriter<W> {
+    /// Write an already encoded peer envelope to the raw sink.
+    ///
+    /// Route controls are peer envelopes rather than bridge frames: they
+    /// travel exactly as they were queued, without bridge decoding and
+    /// without mutating the ownership map.
+    pub(super) async fn send_envelope(&mut self, bytes: Vec<u8>) -> Result<()> {
+        self.writer.send_binary(bytes).await
+    }
+}
+
 impl<W: PeerWriter + Send> PeerWriter for OwnedPeerWriter<W> {
     async fn send_binary(&mut self, bytes: Vec<u8>) -> Result<()> {
         let mut message = crate::bridge_wire::decode_message(&bytes)?;
