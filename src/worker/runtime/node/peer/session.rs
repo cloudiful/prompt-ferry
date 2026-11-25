@@ -491,7 +491,7 @@ pub(crate) async fn run_node_peer_session<R: PeerReader + Send, W: PeerWriter + 
 /// queue, and a flush is acknowledged only after the queued frames reached
 /// the sink and the sink was flushed.
 async fn write_link_to_peer<W: PeerWriter + Send + 'static>(
-    mut writer: W,
+    mut writer: OwnedPeerWriter<W>,
     mut receiver: LinkReceiver,
     mut routes: EnvelopeReceiver,
 ) -> anyhow::Result<()> {
@@ -505,7 +505,7 @@ async fn write_link_to_peer<W: PeerWriter + Send + 'static>(
             Outbound::Route(None) => break,
             Outbound::Route(Some(envelope)) => {
                 let (bytes, permit) = envelope.into_parts();
-                writer.send_binary(bytes).await?;
+                writer.send_envelope(bytes).await?;
                 drop(permit);
             }
             Outbound::Link(None) => break,
@@ -765,6 +765,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn queued_route_envelopes_reach_the_raw_sink_without_bridge_decoding() {
+        use super::super::ownership::{OwnedPeerWriter, Ownership};
+
+        let (sender, control_rx, data_rx) = BridgeSender::channel();
+        let flush_rx = sender
+            .take_flush_receiver()
+            .expect("the flush receiver is available");
+        let receiver = LinkReceiver::new(control_rx, data_rx, flush_rx);
+        let (sink, frames, gate, _flushes) = GatedSink::new();
+        let ownership = Arc::new(tokio::sync::Mutex::new(Ownership::default()));
+        // A live business request proves that a route control neither decodes
+        // nor mutates the ownership map.
+        let mut request: BridgeMessage = serde_json::from_value(serde_json::json!({
+            "type":"request_start", "request_id":"live", "method":"POST", "path":"/v1/chat"
+        }))
+        .unwrap();
+        ownership.lock().await.inbound(&mut request).unwrap();
+        let live = ownership.lock().await.active().0;
+        assert_eq!(live.len(), 1);
+
+        let writer = OwnedPeerWriter {
+            writer: sink,
+            ownership: ownership.clone(),
+        };
+        let (route_tx, route_rx) = super::super::forwarding::envelope_channel();
+        let task =
+            tokio::spawn(async move { write_link_to_peer(writer, receiver, route_rx).await });
+
+        let envelope =
+            super::super::wire::PeerEnvelope::route_update(terminal_path(), 7, &snapshot(11));
+        let expected = envelope.encode().expect("the route envelope encodes");
+        route_tx.send(envelope).await.expect("the route is queued");
+        gate.add_permits(1);
+        drop(route_tx);
+
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("the writer stops after the route queue closes")
+            .expect("the route write does not fail")
+            .expect("the route write succeeds");
+        let frames = frames.lock().unwrap();
+        let Some(PeerFrame::Binary(bytes)) = frames.first() else {
+            panic!("the raw sink received the route frame")
+        };
+        assert_eq!(
+            bytes, &expected,
+            "the already encoded route envelope reaches the raw sink unchanged"
+        );
+        let decoded =
+            super::super::wire::PeerEnvelope::decode(bytes).expect("the route envelope decodes");
+        assert_eq!(decoded.kind, super::PeerEnvelopeKind::RouteUpdate);
+        assert_eq!(
+            ownership.lock().await.active().0,
+            live,
+            "the route transmission leaves live request ownership untouched"
+        );
+    }
+
+    #[tokio::test]
     async fn the_byte_permit_is_held_until_the_sink_accepted_the_frame() {
         let (sender, control_rx, data_rx) = BridgeSender::channel_with_byte_budget(32);
         let flush_rx = sender
@@ -772,9 +831,25 @@ mod tests {
             .expect("the flush receiver is available");
         let receiver = LinkReceiver::new(control_rx, data_rx, flush_rx);
         let (sink, _frames, gate, _flushes) = GatedSink::new();
+        let ownership = Arc::new(tokio::sync::Mutex::new(
+            super::super::ownership::Ownership::default(),
+        ));
+        // The frame must belong to a live request, so the ownership-aware
+        // wrapper writes it to the sink instead of dropping an unknown reply.
+        let mut start: BridgeMessage = serde_json::from_value(serde_json::json!({
+            "type":"request_start", "request_id":"one", "method":"POST", "path":"/v1/chat"
+        }))
+        .unwrap();
+        ownership.lock().await.inbound(&mut start).unwrap();
+        let BridgeMessage::RequestStart(start) = start else {
+            panic!("request start")
+        };
         let writer = tokio::spawn(async move {
             write_link_to_peer(
-                sink,
+                super::super::ownership::OwnedPeerWriter {
+                    writer: sink,
+                    ownership,
+                },
                 receiver,
                 super::super::forwarding::envelope_channel().1,
             )
@@ -782,7 +857,7 @@ mod tests {
         });
 
         let message = BridgeMessage::ResponseEnd(ResponseEnd {
-            request_id: "one".to_string(),
+            request_id: start.request_id,
         });
         sender
             .send_data_message(message.clone(), 32)
@@ -1005,9 +1080,15 @@ mod tests {
             .expect("the flush receiver is available");
         let receiver = LinkReceiver::new(control_rx, data_rx, flush_rx);
         let (sink, _frames, _gate, flushes) = GatedSink::new();
+        let ownership = Arc::new(tokio::sync::Mutex::new(
+            super::super::ownership::Ownership::default(),
+        ));
         let writer = tokio::spawn(async move {
             write_link_to_peer(
-                sink,
+                super::super::ownership::OwnedPeerWriter {
+                    writer: sink,
+                    ownership,
+                },
                 receiver,
                 super::super::forwarding::envelope_channel().1,
             )
