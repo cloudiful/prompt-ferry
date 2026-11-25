@@ -90,10 +90,11 @@ pub(crate) async fn cleanup_worker(state: &AppState, worker_id: usize) {
     // The lock order is workers, then the configuration version, then the
     // routes. A snapshot is applied under the configuration version alone, so
     // this order cannot deadlock.
-    let last_worker_gone = {
+    let previous = {
         let mut workers = state.inner.workers.lock().await;
         workers.remove(&worker_id);
         let last_worker_gone = workers.is_empty();
+        let mut previous = None;
         if last_worker_gone {
             // The relay is no longer serviceable. Drop the stale snapshot so
             // `/ready` flips red immediately and a managed key is never
@@ -101,16 +102,23 @@ pub(crate) async fn cleanup_worker(state: &AppState, worker_id: usize) {
             // lock is held across the reset, so the reset cannot interleave
             // with a snapshot that is applied at the same time.
             let mut applied_version = state.inner.config_version.lock().await;
+            let route_count = state.inner.routes.lock().await.len();
             state.inner.routes.lock().await.clear();
+            previous = Some((*applied_version, route_count));
             *state.inner.relay_ip_policy.lock().await = ip_acl::CompiledRelayIpPolicy::default();
             *applied_version = None;
         }
-        last_worker_gone
+        previous
     };
     state.inner.worker_loads.lock().await.remove(&worker_id);
-    if last_worker_gone {
-        debug!(
+    if let Some((previous_version, previous_route_count)) = previous {
+        info!(
             worker_id,
+            remaining_workers = 0,
+            previous_config_version = ?previous_version,
+            previous_route_count,
+            routes_cleared = true,
+            reason = "last_worker_left",
             "the last worker left; the relay configuration snapshot was reset"
         );
     }
