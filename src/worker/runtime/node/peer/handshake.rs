@@ -15,6 +15,9 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::wire::PEER_ENVELOPE_VERSION;
+use crate::bridge::wire::BRIDGE_WIRE_VERSION;
+
 /// How many unauthenticated handshakes a node accepts at the same time.
 pub const PREAUTH_CONCURRENCY: usize = 32;
 
@@ -42,6 +45,12 @@ pub struct Hello {
     pub runtime_version: String,
     /// The peer protocol version of the node.
     pub protocol_version: u32,
+    /// The peer envelope format version.
+    #[serde(default)]
+    pub envelope_version: u8,
+    /// The bridge payload format version.
+    #[serde(default)]
+    pub bridge_wire_version: u8,
     /// The fresh random challenge of this handshake, base64 encoded.
     pub challenge: String,
 }
@@ -61,6 +70,8 @@ impl Hello {
             has_database,
             runtime_version: runtime_version.into(),
             protocol_version,
+            envelope_version: PEER_ENVELOPE_VERSION,
+            bridge_wire_version: BRIDGE_WIRE_VERSION,
             challenge: STANDARD.encode(challenge),
         }
     }
@@ -88,6 +99,14 @@ pub fn canonical_transcript(sender: &Hello, receiver: &Hello) -> String {
         "sender_protocol_version={}\n",
         sender.protocol_version
     ));
+    transcript.push_str(&format!(
+        "sender_envelope_version={}\n",
+        sender.envelope_version
+    ));
+    transcript.push_str(&format!(
+        "sender_bridge_wire_version={}\n",
+        sender.bridge_wire_version
+    ));
     transcript.push_str(&format!("sender_challenge={}\n", sender.challenge));
     transcript.push_str(&format!("receiver={}\n", receiver.node_id));
     transcript.push_str(&format!(
@@ -101,6 +120,14 @@ pub fn canonical_transcript(sender: &Hello, receiver: &Hello) -> String {
     transcript.push_str(&format!(
         "receiver_protocol_version={}\n",
         receiver.protocol_version
+    ));
+    transcript.push_str(&format!(
+        "receiver_envelope_version={}\n",
+        receiver.envelope_version
+    ));
+    transcript.push_str(&format!(
+        "receiver_bridge_wire_version={}\n",
+        receiver.bridge_wire_version
     ));
     transcript.push_str(&format!("receiver_challenge={}\n", receiver.challenge));
     transcript
@@ -128,6 +155,14 @@ pub fn canonical_confirmation(dialer: &Hello, server: &Hello) -> String {
         "dialer_protocol_version={}\n",
         dialer.protocol_version
     ));
+    transcript.push_str(&format!(
+        "dialer_envelope_version={}\n",
+        dialer.envelope_version
+    ));
+    transcript.push_str(&format!(
+        "dialer_bridge_wire_version={}\n",
+        dialer.bridge_wire_version
+    ));
     transcript.push_str(&format!("dialer_challenge={}\n", dialer.challenge));
     transcript.push_str(&format!("server={}\n", server.node_id));
     transcript.push_str(&format!(
@@ -141,6 +176,14 @@ pub fn canonical_confirmation(dialer: &Hello, server: &Hello) -> String {
     transcript.push_str(&format!(
         "server_protocol_version={}\n",
         server.protocol_version
+    ));
+    transcript.push_str(&format!(
+        "server_envelope_version={}\n",
+        server.envelope_version
+    ));
+    transcript.push_str(&format!(
+        "server_bridge_wire_version={}\n",
+        server.bridge_wire_version
     ));
     transcript.push_str(&format!("server_challenge={}\n", server.challenge));
     transcript
@@ -180,6 +223,32 @@ mod tests {
             canonical_confirmation(&server, &dialer),
             "the confirmation is directional"
         );
+    }
+
+    #[test]
+    fn both_format_versions_are_bound_for_both_peers_in_both_transcripts() {
+        let first = hello(1, false);
+        let second = hello(2, true);
+        for peer in 0..2 {
+            for field in 0..2 {
+                let mut a = first.clone();
+                let mut b = second.clone();
+                let changed = if peer == 0 { &mut a } else { &mut b };
+                if field == 0 {
+                    changed.envelope_version += 1;
+                } else {
+                    changed.bridge_wire_version += 1;
+                }
+                assert_ne!(
+                    canonical_transcript(&first, &second),
+                    canonical_transcript(&a, &b)
+                );
+                assert_ne!(
+                    canonical_confirmation(&first, &second),
+                    canonical_confirmation(&a, &b)
+                );
+            }
+        }
     }
 
     #[test]
