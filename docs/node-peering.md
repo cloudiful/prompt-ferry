@@ -85,6 +85,36 @@ never loops back into the network.
 - A node with no route serves no request: its local API answers with
   `503 no_worker` instead of waiting for a route.
 
+### The outbound queue of a peer link
+
+- A slot of the outbound queue of a link is one encoded frame, not one
+  request: a request may travel over a link as several frames. A link holds
+  256 pending frames, and the byte budget of the link stays at 16MiB + 64KiB
+  of encoded envelopes. The bound of 1024 requests a node forwards at the
+  same time is a separate bound and is unchanged.
+- The forwarding actor never waits for a peer. It queues a frame without
+  waiting and refuses it when the queue cannot take it. The queue is FIFO, so
+  the frames of a link keep their order.
+- A refusal of a full queue means that the link is saturated. The link loses
+  its authority, it is disconnected and the requests that travel on it fail.
+  A sustained overload still disconnects a link: the 256 frames are bounded
+  headroom for a burst, not immunity against a peer that never drains its
+  queue.
+- The diagnostics of a refusal name the distinct reason: `queue_full` for a
+  saturated link, `queue_closed` for a link that ended, `link_unavailable`
+  for a link that is gone, replaced or dead, and the byte budget and the
+  encoding failures for a frame that never fitted. A closed link is a
+  teardown observation, not a saturation of the link.
+- A cancelled request waits behind the data that is already queued on its
+  link. There is no bypass for a cancellation and no bypass for a control
+  frame.
+- The larger queue mitigates the bursts that the regression tests cover. It
+  does not prove the cause of every disconnect in the field, so an operator
+  has to read the new diagnostics after a release to tell the remaining
+  causes apart. Nothing here promises a lossless or downtime-free link, and
+  the five-second bound of a session is a bounded refusal, not a network
+  send timeout.
+
 ## Failure behaviour
 
 - The route disappears while the link to its next hop is down. The requests

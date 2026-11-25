@@ -663,8 +663,15 @@ async fn authorize_client_with_format(
             StaticTokenDecision::ManagedOnly => {
                 // The node runtime has no static client token at all: a
                 // managed `pfy_` key is the only accepted credential, and it
-                // needs the route snapshot that is not applied yet.
-                warn!("client auth failed: this deployment accepts managed client keys only");
+                // needs the route snapshot that is not applied yet. The
+                // refusal is a not-ready state of the relay, not a failed
+                // authentication, so it is reported as such.
+                warn!(
+                    mode = "not_ready",
+                    route_count = 0,
+                    reason = "route_snapshot_unavailable",
+                    "client auth deferred: the route snapshot of the relay is not available"
+                );
                 Err(not_ready_error(anthropic_format))
             }
             StaticTokenDecision::NotConfigured => {

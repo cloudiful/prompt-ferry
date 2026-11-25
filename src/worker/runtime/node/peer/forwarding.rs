@@ -19,7 +19,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
-use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch};
+use tokio::sync::{
+    Mutex, OwnedRwLockReadGuard, OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch,
+};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
@@ -35,8 +37,16 @@ use super::route::{RouteError, RouteOutcome, RouteState};
 use super::transport::PeerWriter;
 use super::wire::{MAX_PEER_ROUTE_NODES, PeerEnvelope, PeerEnvelopeKind, PeerPath};
 
-/// How many envelopes a peer link may hold before its sender waits.
-pub(crate) const PEER_ENVELOPE_BUFFER: usize = 64;
+/// How many encoded frames a peer link may hold before its sender is
+/// refused.
+///
+/// A slot is one encoded outbound peer envelope, not one request: a request
+/// may travel as several frames. The actor never waits for a peer, so the
+/// slots are the headroom a producer burst finds before the egress of the
+/// link drains it. The count is a bounded headroom and not a scheduling
+/// guarantee: a producer that outruns the egress of the link still finds a
+/// full queue and the link is evicted.
+pub(crate) const PEER_ENVELOPE_BUFFER: usize = 256;
 
 /// How many bytes of unaccepted envelopes a peer link may hold.
 ///
@@ -46,11 +56,13 @@ pub(crate) const PEER_ENVELOPE_BUFFER: usize = 64;
 /// frame.
 pub(crate) const PEER_ENVELOPE_BUDGET_BYTES: usize = 16 * 1024 * 1024 + 64 * 1024;
 
-/// How long a link may hold a frame before the peer queue is treated as
-/// broken.
+/// How long a session waits for the outbound queue of its link before it
+/// gives up.
 ///
-/// A transition or a forward never waits indefinitely on the queue of another
-/// link: a peer that stops draining its queue is disconnected instead.
+/// The wait is a bounded refusal and not a network timeout: it only caps how
+/// long a session blocks on a control frame of its own link. The queue of the
+/// peer is never held by this constant, and a peer that stops draining its
+/// queue is disconnected instead of being waited for.
 pub(crate) const PEER_SEND_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How many requests a node forwards at the same time.
@@ -283,6 +295,24 @@ struct Link {
     token: AdmissionToken,
 }
 
+impl Link {
+    /// The guard of the publication of the link, if the link may still carry
+    /// a frame.
+    ///
+    /// A link that is gone, replaced or dead cannot carry a frame, and such
+    /// a refusal is never a full queue.
+    fn try_admit(&self) -> Result<OwnedRwLockReadGuard<()>, EnqueueError> {
+        let Some(guard) = self.token.try_read_publication() else {
+            return Err(EnqueueError::LinkUnavailable);
+        };
+        if !self.token.is_live() {
+            drop(guard);
+            return Err(EnqueueError::LinkUnavailable);
+        }
+        Ok(guard)
+    }
+}
+
 /// One encoded envelope waiting for the sink of its link.
 pub(crate) struct QueuedEnvelope {
     /// The exact bytes the sink writes.
@@ -309,6 +339,50 @@ pub(crate) enum EnqueueError {
     BudgetExhausted,
     /// The queue of the link is full.
     QueueFull,
+    /// The queue of the link is closed.
+    ///
+    /// The receiving half of the link is gone, so the frame has nowhere to
+    /// go. A closed queue is not a full queue: the link cannot carry the
+    /// frame because it ended, not because it is saturated.
+    QueueClosed,
+    /// The link is no longer admitted.
+    ///
+    /// The link is gone, replaced or dead, so the frame is refused before the
+    /// queue of the link is touched. Such a refusal is never a full queue.
+    LinkUnavailable,
+}
+
+impl EnqueueError {
+    /// The stable name of the reason.
+    ///
+    /// The name is part of the diagnostic of a refusal, so it stays short
+    /// and free of any content of the frame.
+    pub(crate) fn reason(self) -> &'static str {
+        match self {
+            Self::EncodeFailed => "encode_failed",
+            Self::TooLarge => "too_large",
+            Self::BudgetExhausted => "byte_budget_exhausted",
+            Self::QueueFull => "queue_full",
+            Self::QueueClosed => "queue_closed",
+            Self::LinkUnavailable => "link_unavailable",
+        }
+    }
+}
+
+/// The safe counters of the outbound queue of a link.
+///
+/// The counters are a concurrent observation of the queue at the moment of
+/// the refusal, not the exact peak it reached.
+#[derive(Clone, Copy, Debug)]
+struct QueueState {
+    /// The frames that wait in the queue.
+    pending_frames: usize,
+    /// The frames the queue may hold.
+    frame_capacity: usize,
+    /// The bytes the queue may still accept.
+    available_bytes: usize,
+    /// The bytes the queue may hold.
+    byte_capacity: usize,
 }
 
 /// The bounded, byte-accounted outbound queue of one peer link.
@@ -375,7 +449,15 @@ impl EnvelopeSender {
     ///
     /// The actor never waits for a peer, so a link that does not accept the
     /// frame now is reported to the caller instead of being waited for.
+    ///
+    /// A closed queue is recognized before the frame is encoded and before
+    /// the byte budget is taken, so a link that ended is never reported as a
+    /// byte exhaustion. The frame is still matched against the result of the
+    /// send itself, because the queue may close while the frame is queued.
     pub(crate) fn try_send(&self, envelope: PeerEnvelope) -> Result<(), EnqueueError> {
+        if self.tx.is_closed() {
+            return Err(EnqueueError::QueueClosed);
+        }
         let bytes = envelope.encode().map_err(|_| EnqueueError::EncodeFailed)?;
         let size = bytes.len().max(1);
         if size > self.capacity {
@@ -386,9 +468,78 @@ impl EnvelopeSender {
             .clone()
             .try_acquire_many_owned(size as u32)
             .map_err(|_| EnqueueError::BudgetExhausted)?;
-        self.tx
-            .try_send(QueuedEnvelope { bytes, permit })
-            .map_err(|_| EnqueueError::QueueFull)
+        match self.tx.try_send(QueuedEnvelope { bytes, permit }) {
+            Ok(()) => Ok(()),
+            Err(mpsc::error::TrySendError::Full(_)) => Err(EnqueueError::QueueFull),
+            Err(mpsc::error::TrySendError::Closed(_)) => Err(EnqueueError::QueueClosed),
+        }
+    }
+
+    /// The safe counters of the queue.
+    fn queue_state(&self) -> QueueState {
+        QueueState {
+            pending_frames: self.tx.max_capacity() - self.tx.capacity(),
+            frame_capacity: self.tx.max_capacity(),
+            available_bytes: self.budget.available_permits(),
+            byte_capacity: self.capacity,
+        }
+    }
+}
+
+/// The link that may carry a frame of the given generation.
+///
+/// A frame of a generation that no longer has a link is refused, and such a
+/// refusal is never a full queue.
+fn admitted_link(
+    hub: &HubState,
+    peer: &NodeId,
+    link_generation: u64,
+) -> Result<Link, EnqueueError> {
+    hub.link_of(peer, link_generation)
+        .ok_or(EnqueueError::LinkUnavailable)
+}
+
+/// Report a frame that the queue of a peer link refused.
+///
+/// The report names the link, the kind of the frame, the distinct reason of
+/// the refusal and the safe counters of the queue. It never carries the
+/// content of the frame: no body, no message, no route, no key and no token
+/// ever reaches the log.
+fn report_enqueue_refusal(
+    peer: &NodeId,
+    link_generation: u64,
+    frame_kind: PeerEnvelopeKind,
+    error: EnqueueError,
+    state: QueueState,
+) {
+    let reason = error.reason();
+    match error {
+        // A closed queue is the ordinary end of a link, so it is a teardown
+        // observation and not a saturation of the link.
+        EnqueueError::QueueClosed => info!(
+            category = "peer_queue_diag",
+            peer = %peer,
+            link_generation,
+            frame_kind = ?frame_kind,
+            reason,
+            pending_frames = state.pending_frames,
+            frame_capacity = state.frame_capacity,
+            available_bytes = state.available_bytes,
+            byte_capacity = state.byte_capacity,
+            "the peer queue is closed"
+        ),
+        _ => warn!(
+            category = "peer_queue_diag",
+            peer = %peer,
+            link_generation,
+            frame_kind = ?frame_kind,
+            reason,
+            pending_frames = state.pending_frames,
+            frame_capacity = state.frame_capacity,
+            available_bytes = state.available_bytes,
+            byte_capacity = state.byte_capacity,
+            "the peer queue did not accept the frame"
+        ),
     }
 }
 
@@ -546,6 +697,17 @@ impl HubState {
         }
         counter.value += 1;
         counter.value
+    }
+
+    /// The link of a peer, if it is still the link of the given generation.
+    ///
+    /// A link that was replaced is not the link of the old generation any
+    /// more, so a frame of the old generation finds no link to travel on.
+    fn link_of(&self, peer: &NodeId, link_generation: u64) -> Option<Link> {
+        self.links
+            .get(peer)
+            .filter(|link| link.generation == link_generation)
+            .cloned()
     }
 
     /// Whether the peer of a link learned the route of the node.
@@ -2738,7 +2900,7 @@ impl Actor {
             debug!(
                 peer = %peer,
                 link_generation,
-                error = ?err,
+                reason = err.reason(),
                 "the frame did not reach the peer"
             );
         }
@@ -2755,30 +2917,20 @@ impl Actor {
         link_generation: u64,
         envelope: PeerEnvelope,
     ) -> Result<(), EnqueueError> {
-        let link = {
-            let hub = &self.inner;
-            match hub.links.get(&peer) {
-                Some(link) if link.generation == link_generation => link.clone(),
-                _ => return Err(EnqueueError::QueueFull),
-            }
-        };
+        let link = admitted_link(&self.inner, &peer, link_generation)?;
         // The egress is fenced by the admission of the destination: a frame
         // is only queued while the link is still admitted.
-        let Some(guard) = link.token.try_read_publication() else {
-            return Err(EnqueueError::QueueFull);
-        };
-        if !link.token.is_live() {
-            drop(guard);
-            return Err(EnqueueError::QueueFull);
-        }
+        let guard = link.try_admit()?;
+        let frame_kind = envelope.kind;
         let result = link.tx.try_send(envelope);
         drop(guard);
         if let Err(err) = result {
-            warn!(
-                peer = %peer,
+            report_enqueue_refusal(
+                &peer,
                 link_generation,
-                error = ?err,
-                "the peer queue did not accept the frame"
+                frame_kind,
+                err,
+                link.tx.queue_state(),
             );
             // The link cannot carry the frame, so it loses its authority and
             // its session is told to stop. The cleanup of its generation
@@ -2801,41 +2953,31 @@ impl Actor {
         envelope: PeerEnvelope,
         source: &AdmissionToken,
     ) -> Result<(), EnqueueError> {
-        let link = {
-            let hub = &self.inner;
-            match hub.links.get(&peer) {
-                Some(link) if link.generation == link_generation => link.clone(),
-                _ => return Err(EnqueueError::QueueFull),
-            }
-        };
-        let Some(destination) = link.token.try_read_publication() else {
-            return Err(EnqueueError::QueueFull);
-        };
-        if !link.token.is_live() {
-            drop(destination);
-            return Err(EnqueueError::QueueFull);
-        }
+        let link = admitted_link(&self.inner, &peer, link_generation)?;
+        let destination = link.try_admit()?;
         // The source of the route must still be admitted at the boundary of
         // the send, so a replaced upstream never refreshes the route of a
         // downstream peer.
         let Some(origin) = source.try_read_publication() else {
             drop(destination);
-            return Err(EnqueueError::QueueFull);
+            return Err(EnqueueError::LinkUnavailable);
         };
         if !source.is_live() {
             drop(origin);
             drop(destination);
-            return Err(EnqueueError::QueueFull);
+            return Err(EnqueueError::LinkUnavailable);
         }
+        let frame_kind = envelope.kind;
         let result = link.tx.try_send(envelope);
         drop(origin);
         drop(destination);
         if let Err(err) = result {
-            warn!(
-                peer = %peer,
+            report_enqueue_refusal(
+                &peer,
                 link_generation,
-                error = ?err,
-                "the peer queue did not accept the frame"
+                frame_kind,
+                err,
+                link.tx.queue_state(),
             );
             self.detach_link(peer, link_generation);
             return Err(err);
@@ -4791,6 +4933,196 @@ mod tests {
         drop(version);
         wait_until(|| async { hub.selected_path().await.is_some() }).await;
         wait_until(|| async { *state.inner.config_version.lock().await == Some(1) }).await;
+    }
+
+    /// A writer that keeps the frames it is given.
+    struct CollectingWriter {
+        /// The frames the writer received.
+        frames: Arc<Mutex<Vec<Vec<u8>>>>,
+    }
+
+    impl PeerWriter for CollectingWriter {
+        async fn send_binary(&mut self, bytes: Vec<u8>) -> anyhow::Result<()> {
+            self.frames.lock().expect("the frames lock").push(bytes);
+            Ok(())
+        }
+
+        async fn flush(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_burst_of_small_frames_fits_the_queue_of_a_peer_link() {
+        let (tx, rx) = super::envelope_channel();
+        let frames = Arc::new(Mutex::new(Vec::new()));
+        let writer = CollectingWriter {
+            frames: frames.clone(),
+        };
+
+        // The producer queues a burst of small frames that stays far below
+        // the byte budget of the link.
+        let mut expected = Vec::new();
+        for index in 0..160 {
+            let request_id = format!("burst-{index}");
+            let envelope =
+                PeerEnvelope::bridge(BridgeMessage::ResponseEnd(crate::protocol::ResponseEnd {
+                    request_id: request_id.clone(),
+                }));
+            tx.try_send(envelope)
+                .unwrap_or_else(|err| panic!("the queue accepts the burst: {err:?}"));
+            expected.push(request_id);
+        }
+
+        // The production egress of the link delivers the burst in order.
+        drop(tx);
+        super::write_envelopes_to_peer(writer, rx)
+            .await
+            .expect("the egress writes the burst");
+        let delivered = frames.lock().expect("the frames lock").clone();
+        assert_eq!(
+            delivered.len(),
+            expected.len(),
+            "the egress writes every frame of the burst"
+        );
+        let ids = delivered
+            .iter()
+            .map(|bytes| {
+                let envelope = PeerEnvelope::decode(bytes).expect("the envelope decodes");
+                match envelope.message {
+                    Some(BridgeMessage::ResponseEnd(end)) => end.request_id,
+                    _ => panic!("the envelope carries its response end"),
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(ids, expected, "the egress delivers the burst in order");
+    }
+
+    #[tokio::test]
+    async fn the_queue_of_a_peer_link_refuses_a_frame_over_its_capacity() {
+        let (tx, mut rx) = super::envelope_channel();
+        let filler = PeerEnvelope::bridge(BridgeMessage::Pong);
+        for _ in 0..super::PEER_ENVELOPE_BUFFER {
+            tx.try_send(filler.clone())
+                .expect("the queue accepts its frames");
+        }
+        assert_eq!(
+            tx.try_send(filler.clone()),
+            Err(super::EnqueueError::QueueFull),
+            "the queue refuses a frame over its capacity"
+        );
+
+        // A released slot accepts the next frame again.
+        let released = rx.recv().await.expect("the queue holds a frame");
+        drop(released);
+        assert!(
+            tx.try_send(filler).is_ok(),
+            "a released slot accepts the next frame"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_closed_queue_of_a_peer_link_is_not_reported_as_full() {
+        let (tx, rx) = super::envelope_channel();
+        drop(rx);
+        assert_eq!(
+            tx.try_send(PeerEnvelope::bridge(BridgeMessage::Pong)),
+            Err(super::EnqueueError::QueueClosed),
+            "a closed queue is not a full queue"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_link_that_is_no_longer_admitted_is_never_reported_as_a_full_queue() {
+        let peer = id(NAS);
+        let token = super::super::admission::mint_for_test(peer, 1);
+        let (tx, _rx) = super::envelope_channel();
+        let (shutdown, _shutdown_rx) = tokio::sync::watch::channel(false);
+        let link = super::Link {
+            peer,
+            generation: 1,
+            tx,
+            shutdown,
+            token: token.clone(),
+        };
+        let mut hub = super::HubState::new(id(LOCAL));
+        hub.links.insert(peer, link.clone());
+
+        // A frame of a replaced generation finds no link to travel on.
+        assert_eq!(
+            super::admitted_link(&hub, &peer, 2).err(),
+            Some(super::EnqueueError::LinkUnavailable),
+            "a replaced link carries no frame"
+        );
+        assert!(
+            super::admitted_link(&hub, &peer, 1).is_ok(),
+            "the link of its own generation carries the frame"
+        );
+
+        // A dead link is refused before its queue is touched.
+        token.mark_dead();
+        assert_eq!(
+            link.try_admit().err(),
+            Some(super::EnqueueError::LinkUnavailable),
+            "a dead link is not a full queue"
+        );
+        assert_ne!(
+            super::EnqueueError::LinkUnavailable,
+            super::EnqueueError::QueueFull,
+            "a refused admission keeps its own reason"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_burst_of_local_requests_survives_the_held_egress_of_a_peer_link() {
+        let (hub, state) = node(LOCAL);
+        let nas = super::super::admission::mint_for_test(id(NAS), 1);
+        let (nas_tx, mut nas_rx) = super::envelope_channel();
+        let (nas_shutdown, _nas_shutdown_rx) = tokio::sync::watch::channel(false);
+        assert!(hub.register_link(&nas, nas_tx.clone(), nas_shutdown).await);
+        let path = PeerPath::new(vec![id(NAS)]).expect("a bounded path");
+        hub.apply_update(&nas, 1, &path, snapshot(1))
+            .await
+            .expect("the route is applied");
+
+        // The egress of the link is held: the peer never reads its queue, so
+        // the burst piles up in the queue of the link.
+        let worker = {
+            let workers = state.inner.workers.lock().await;
+            workers
+                .values()
+                .next()
+                .cloned()
+                .expect("the virtual worker")
+        };
+        for index in 0..160 {
+            worker
+                .send(http_start(&format!("local-{index}")))
+                .await
+                .expect("the request reaches the worker");
+            let expected = index + 1;
+            wait_until(|| async { nas_tx.queue_state().pending_frames == expected }).await;
+        }
+
+        // The route and the owners of the burst survive the held egress.
+        assert_eq!(
+            hub.selected_path().await,
+            Some(vec![id(LOCAL), id(NAS)]),
+            "the route of the node survives the burst"
+        );
+        assert_eq!(
+            hub.owner_count().await,
+            160,
+            "the owners of the burst survive the held egress"
+        );
+
+        // The egress of the link delivers the burst in order.
+        for index in 0..160 {
+            let BridgeMessage::RequestStart(start) = next_bridge(&mut nas_rx).await else {
+                panic!("the peer receives the request of the burst");
+            };
+            assert_eq!(start.request_id, format!("local-{index}"));
+        }
     }
 
     #[tokio::test]
