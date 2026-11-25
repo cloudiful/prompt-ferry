@@ -23,7 +23,7 @@ use crate::worker::runtime::node::identity::NodeId;
 ///
 /// The peer protocol is independent of the protocol of the database gate,
 /// which keeps its own version.
-pub const PEER_PROTOCOL_VERSION: u32 = 2;
+pub const PEER_PROTOCOL_VERSION: u32 = 3;
 
 /// The version of the peer envelope.
 pub const PEER_ENVELOPE_VERSION: u8 = 2;

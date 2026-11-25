@@ -10,7 +10,7 @@
 //!   and the ticket seals that hello, the issue time, the expiry and the
 //!   startup epoch of the server under the master secret,
 //! * the client opens the ticket, checks that it is fresh and that it belongs
-//!   to a node of the same version, and answers with a proof that seals its
+//!   to a compatible node, and answers with a proof that seals its
 //!   own hello and the transcript of both hellos,
 //! * the server opens the proof, checks the transcript, the identity, the
 //!   version and the topology, and consumes the nonce of the ticket once,
@@ -391,7 +391,7 @@ fn check_ticket_times(ticket: &Ticket, now: i64) -> anyhow::Result<()> {
 
 /// Check that a hello of a peer is compatible with the hello of this node.
 ///
-/// The two nodes run the same version and speak the same peer protocol. Two
+/// The two nodes speak the same peer, envelope and bridge formats. Two
 /// database nodes never form a star, but two database-less nodes may be
 /// linked: such a link carries the traffic of a node that has no route of
 /// its own.
@@ -399,19 +399,25 @@ fn check_hello(remote: &Hello, local: &Hello) -> anyhow::Result<()> {
     if remote.node_id == local.node_id {
         anyhow::bail!("the peer claims the identity of this node");
     }
-    if remote.runtime_version != local.runtime_version {
-        anyhow::bail!(
-            "the peer runs runtime version {} while this node runs {}; both nodes must run the \
-             same version",
-            remote.runtime_version,
-            local.runtime_version
-        );
-    }
-    if remote.protocol_version != local.protocol_version {
+    if remote.protocol_version == 0 || remote.protocol_version != local.protocol_version {
         anyhow::bail!(
             "the peer speaks peer protocol version {} while this node speaks {}",
             remote.protocol_version,
             local.protocol_version
+        );
+    }
+    if remote.envelope_version == 0 || remote.envelope_version != local.envelope_version {
+        anyhow::bail!(
+            "the peer envelope version {} is incompatible with {}",
+            remote.envelope_version,
+            local.envelope_version
+        );
+    }
+    if remote.bridge_wire_version == 0 || remote.bridge_wire_version != local.bridge_wire_version {
+        anyhow::bail!(
+            "the peer bridge wire version {} is incompatible with {}",
+            remote.bridge_wire_version,
+            local.bridge_wire_version
         );
     }
     if remote.has_database && local.has_database {
@@ -673,18 +679,147 @@ mod tests {
     }
 
     #[test]
-    fn a_peer_with_another_version_is_refused() {
+    fn mixed_runtime_versions_complete_the_handshake_in_both_directions() {
+        for (server_db, client_db) in [(true, false), (false, true), (false, false)] {
+            let server = hello(1, server_db);
+            let mut client = hello(2, client_db);
+            client.runtime_version = "9.9.9".into();
+            let epoch = startup_epoch();
+            let challenge = issue_challenge(&manager(7), server.clone(), &epoch, now_ms()).unwrap();
+            let (proof, ticket) = build_proof(&manager(7), &client, &challenge, now_ms()).unwrap();
+            let verified = verify_peer(
+                &manager(7),
+                &server,
+                &epoch,
+                &challenge.ticket,
+                &proof,
+                now_ms(),
+                &ReplayCache::new(),
+            )
+            .unwrap();
+            let confirmation =
+                seal_confirmation(&manager(7), &verified.hello, &verified.ticket).unwrap();
+            verify_confirmation(&manager(7), &client, &ticket, &confirmation).unwrap();
+        }
+    }
+
+    #[test]
+    fn incompatible_or_missing_versions_are_refused_on_both_sides() {
         let server = hello(1, true);
-        let client = Hello::new(Uuid::from_u128(2), false, "9.9.9", 1);
+        let client = hello(2, false);
+        for field in [
+            "protocol_version",
+            "envelope_version",
+            "bridge_wire_version",
+        ] {
+            for missing in [false, true] {
+                let mut value = serde_json::to_value(&client).unwrap();
+                if missing {
+                    value.as_object_mut().unwrap().remove(field);
+                } else {
+                    value[field] = serde_json::json!(99);
+                }
+                // Protocol is required by serde; the added format fields default to zero.
+                let incompatible: Hello = match serde_json::from_value(value) {
+                    Ok(hello) => hello,
+                    Err(_) if field == "protocol_version" && missing => continue,
+                    Err(err) => panic!("unexpected deserialization failure: {err}"),
+                };
+                let epoch = startup_epoch();
+                let challenge =
+                    issue_challenge(&manager(7), incompatible.clone(), &epoch, now_ms()).unwrap();
+                let err = build_proof(&manager(7), &server, &challenge, now_ms()).unwrap_err();
+                assert!(err.to_string().contains(match field {
+                    "protocol_version" => "protocol",
+                    "envelope_version" => "envelope",
+                    _ => "bridge wire",
+                }));
+                let challenge =
+                    issue_challenge(&manager(7), server.clone(), &epoch, now_ms()).unwrap();
+                let proof = super::seal(
+                    &manager(7),
+                    &super::Proof {
+                        transcript: super::canonical_transcript(&incompatible, &server),
+                        hello: incompatible,
+                    },
+                )
+                .unwrap();
+                let err = verify_peer(
+                    &manager(7),
+                    &server,
+                    &epoch,
+                    &challenge.ticket,
+                    &proof,
+                    now_ms(),
+                    &ReplayCache::new(),
+                )
+                .unwrap_err();
+                assert!(err.to_string().contains(match field {
+                    "protocol_version" => "protocol",
+                    "envelope_version" => "envelope",
+                    _ => "bridge wire",
+                }));
+            }
+        }
+    }
+
+    #[test]
+    fn altered_format_versions_in_sealed_transcripts_are_refused() {
+        let server = hello(1, true);
+        let client = hello(2, false);
         let epoch = startup_epoch();
-        let challenge =
-            issue_challenge(&manager(7), server.clone(), &epoch, now_ms()).expect("challenge");
-        let replay = ReplayCache::new();
-        assert!(
-            build_proof(&manager(7), &client, &challenge, now_ms()).is_err(),
-            "a peer that runs another version cannot be linked"
-        );
-        let _ = replay;
+        let challenge = issue_challenge(&manager(7), server.clone(), &epoch, now_ms()).unwrap();
+        let (_, ticket) = build_proof(&manager(7), &client, &challenge, now_ms()).unwrap();
+        for peer in 0..2 {
+            for field in 0..2 {
+                let mut altered_client = client.clone();
+                let mut altered_server = server.clone();
+                let altered = if peer == 0 {
+                    &mut altered_client
+                } else {
+                    &mut altered_server
+                };
+                if field == 0 {
+                    altered.envelope_version += 1;
+                } else {
+                    altered.bridge_wire_version += 1;
+                }
+                let proof = super::seal(
+                    &manager(7),
+                    &super::Proof {
+                        hello: client.clone(),
+                        transcript: super::canonical_transcript(&altered_client, &altered_server),
+                    },
+                )
+                .unwrap();
+                let err = verify_peer(
+                    &manager(7),
+                    &server,
+                    &epoch,
+                    &challenge.ticket,
+                    &proof,
+                    now_ms(),
+                    &ReplayCache::new(),
+                )
+                .unwrap_err();
+                assert!(err.to_string().contains("proof does not match"));
+                let confirmation = super::seal(
+                    &manager(7),
+                    &super::Confirmation {
+                        domain: super::CONFIRMATION_DOMAIN.to_string(),
+                        dialer_hello: client.clone(),
+                        server_hello: server.clone(),
+                        nonce: ticket.nonce.clone(),
+                        epoch: ticket.epoch.clone(),
+                        transcript: super::canonical_confirmation(&altered_client, &altered_server),
+                    },
+                )
+                .unwrap();
+                let err =
+                    verify_confirmation(&manager(7), &client, &ticket, &confirmation).unwrap_err();
+                assert!(err.to_string().contains("confirmation does not match"));
+            }
+        }
     }
 
     #[test]

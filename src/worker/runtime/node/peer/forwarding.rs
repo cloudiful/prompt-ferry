@@ -3154,6 +3154,28 @@ mod tests {
 
     #[tokio::test]
     async fn a_request_of_a_peer_travels_over_the_route_to_the_database_node() {
+        use super::super::{auth, handshake::Hello, wire::PEER_PROTOCOL_VERSION};
+        let manager = crate::relay_secrets::RelaySecretManager::from_key_bytes([7; 32]);
+        let server = Hello::new(id(NAS).as_uuid(), true, "2.0.0", PEER_PROTOCOL_VERSION);
+        let dialer = Hello::new(id(MAC).as_uuid(), false, "1.0.0", PEER_PROTOCOL_VERSION);
+        let epoch = auth::startup_epoch();
+        let challenge =
+            auth::issue_challenge(&manager, server.clone(), &epoch, auth::now_ms()).unwrap();
+        let (proof, ticket) =
+            auth::build_proof(&manager, &dialer, &challenge, auth::now_ms()).unwrap();
+        let verified = auth::verify_peer(
+            &manager,
+            &server,
+            &epoch,
+            &challenge.ticket,
+            &proof,
+            auth::now_ms(),
+            &auth::ReplayCache::new(),
+        )
+        .unwrap();
+        let confirmation =
+            auth::seal_confirmation(&manager, &verified.hello, &verified.ticket).unwrap();
+        auth::verify_confirmation(&manager, &dialer, &ticket, &confirmation).unwrap();
         let (mac_hub, mac_state) = node(MAC);
         let (internal_hub, internal_state) = node(LOCAL);
         let seen: Seen = Arc::new(Mutex::new(Vec::new()));

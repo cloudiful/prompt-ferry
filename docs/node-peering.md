@@ -127,11 +127,24 @@ not cut an idle link earlier than that.
 The peer endpoint belongs on a private path of the network: keep
 `/_internal` off a public proxy and reach a peer over its private address.
 
-## Coordinated upgrade
+## Compatibility and upgrades
 
-The peer protocol of the node links is version 2. A node that speaks the
-previous peer protocol is refused during the authenticated handshake, so all
-nodes of an installation are upgraded together. The upgrade needs no
-database migration: the routes, the links and the forwarding state live in
-memory only. The protocol of the database gate and the wire format of the
-business API are unchanged.
+The authenticated handshake requires matching peer protocol, peer envelope and
+bridge wire versions (currently 3, 2 and 6). The application runtime version is
+authenticated diagnostic metadata, not an admission requirement. Incompatible
+changes to any of these formats must bump its corresponding format constant.
+Protocol 3 refuses protocol 2, so all participating nodes must be upgraded once
+for the initial rollout. After that, application releases may differ only while
+all three format versions match. The separate database migration and admission
+gate remains unchanged.
+
+A database-less ingress can remain pinned to a compatible published release while
+the database executor follows a newer release. Preserve the executor's data and
+persistent node identity across upgrades, because routes are pinned to that
+identity. With one executor, replacement still causes a route outage: requests
+fail fast with `503 no_worker` while no route is available, and interrupted
+requests are not replayed. A deployment may configure a 30-second executor drain
+budget; long requests may be cancelled. This is not an application default, and
+the database-less edge shutdown retains its existing 10-second cap. Routes,
+links and forwarding state live in memory; this peer protocol upgrade itself
+requires no database migration.
