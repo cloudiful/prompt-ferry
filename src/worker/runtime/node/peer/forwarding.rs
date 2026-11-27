@@ -76,7 +76,14 @@ pub(crate) const MAX_ID_BYTES: usize = 256;
 ///
 /// The count bounds the traffic that waits for the actor, so a peer that
 /// floods the node cannot make it queue without a limit.
-pub(crate) const PEER_INGRESS_BUFFER: usize = 64;
+pub(crate) const PEER_INGRESS_BUFFER: usize = 256;
+
+/// How many cooperative yields a full ingress gets before it refuses.
+///
+/// The yield is a best effort of the scheduler: it gives the consumer of the
+/// ingress a chance to run, but it never promises that it runs. The recovery
+/// is finite and it never waits for the consumer.
+const PEER_INGRESS_RECOVERY_YIELDS: usize = 4;
 
 /// The byte budget of the traffic that waits for the actor.
 ///
@@ -1306,6 +1313,104 @@ impl Command {
     }
 }
 
+/// The result of one attempt to admit a command into the ingress.
+enum Attempt {
+    /// The command entered the ingress.
+    Queued,
+    /// The ingress was full and the command was not admitted.
+    Full(Command),
+    /// The ingress is closed and the command was not admitted.
+    Closed(Command),
+}
+
+/// What may stop the admission of a command.
+enum AdmissionGuard<'a> {
+    /// The command of a peer: the token of its link decides.
+    Peer(&'a AdmissionToken),
+    /// The command of the relay state: the failure watch of its worker decides.
+    Local(&'a watch::Receiver<()>),
+}
+
+/// Why the guard of an admission stopped it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Stop {
+    /// The link of the peer is no longer admitted.
+    Stale,
+    /// The worker of the route failed.
+    Failed,
+    /// The failure watch of the worker ended.
+    Ended,
+}
+
+/// How the ingress of the node admitted a command.
+enum Admission {
+    /// The command entered the ingress.
+    Queued,
+    /// The ingress was full and the command was not admitted.
+    Full(Command),
+    /// The ingress is closed and the command was not admitted.
+    Closed(Command),
+    /// The guard of the admission stopped it.
+    Stopped(Command, Stop),
+}
+
+/// Admit a command into the ingress of the node.
+///
+/// The admission is bounded: one initial try and at most four further tries,
+/// each preceded by one cooperative yield. A full ingress keeps the original
+/// command and its permit, so a retry never rebuilds the message and never
+/// reserves the byte budget a second time. The yield is a best effort of the
+/// scheduler and never a promise that the consumer of the ingress runs.
+///
+/// The guard is checked before every attempt, so a command is never sent
+/// after its link ended or after its worker failed. The check of the failure
+/// watch reads its state without marking it as seen, so a failure that is
+/// pending is never lost, and the end of the watch is told apart from a
+/// failure notification.
+async fn admit_into_ingress<A>(
+    mut command: Command,
+    mut attempt: A,
+    guard: &AdmissionGuard<'_>,
+) -> Admission
+where
+    A: FnMut(Command) -> Attempt,
+{
+    for tries in 0..=PEER_INGRESS_RECOVERY_YIELDS {
+        match guard {
+            AdmissionGuard::Peer(token) => {
+                if !token.is_live() {
+                    return Admission::Stopped(command, Stop::Stale);
+                }
+            }
+            AdmissionGuard::Local(failure) => match failure.has_changed() {
+                Ok(true) => return Admission::Stopped(command, Stop::Failed),
+                Ok(false) => {}
+                Err(_) => {
+                    // The watch is closed. A failure that was notified but
+                    // never seen still counts, so it is never lost.
+                    return if failure.borrow().has_changed() {
+                        Admission::Stopped(command, Stop::Failed)
+                    } else {
+                        Admission::Stopped(command, Stop::Ended)
+                    };
+                }
+            },
+        }
+        match attempt(command) {
+            Attempt::Queued => return Admission::Queued,
+            Attempt::Full(unsent) => {
+                command = unsent;
+                if tries == PEER_INGRESS_RECOVERY_YIELDS {
+                    return Admission::Full(command);
+                }
+                tokio::task::yield_now().await;
+            }
+            Attempt::Closed(unsent) => return Admission::Closed(unsent),
+        }
+    }
+    Admission::Full(command)
+}
+
 /// The forwarding hub of a database-less node.
 pub(crate) struct RouteHub {
     /// The relay state of this node.
@@ -1692,9 +1797,27 @@ impl RouteHub {
             permit,
             reply,
         };
-        match handle.data.try_send(command) {
-            Ok(()) => {}
-            Err(mpsc::error::TrySendError::Full(_)) => {
+        let outcome = admit_into_ingress(
+            command,
+            |command| {
+                // The closed state of the ingress is checked before every
+                // attempt, so a closed ingress is never a pressure.
+                if handle.data.is_closed() {
+                    return Attempt::Closed(command);
+                }
+                match handle.data.try_send(command) {
+                    Ok(()) => Attempt::Queued,
+                    Err(mpsc::error::TrySendError::Full(unsent)) => Attempt::Full(unsent),
+                    Err(mpsc::error::TrySendError::Closed(unsent)) => Attempt::Closed(unsent),
+                }
+            },
+            &AdmissionGuard::Peer(token),
+        )
+        .await;
+        match outcome {
+            Admission::Queued => {}
+            Admission::Full(command) => {
+                drop(command);
                 report_ingress_refusal(IngressRefusalContext {
                     source: "peer",
                     reason: IngressRefusal::ChannelFull,
@@ -1708,7 +1831,8 @@ impl RouteHub {
                 });
                 return Err(anyhow!("the ingress of the node is full"));
             }
-            Err(mpsc::error::TrySendError::Closed(_)) => {
+            Admission::Closed(command) => {
+                drop(command);
                 report_ingress_refusal(IngressRefusalContext {
                     source: "peer",
                     reason: IngressRefusal::ChannelClosed,
@@ -1721,6 +1845,12 @@ impl RouteHub {
                     outcome: "request_refused",
                 });
                 return Err(anyhow!("the ingress of the node is closed"));
+            }
+            Admission::Stopped(command, _stop) => {
+                // The guard of a peer only stops on a link that ended, so the
+                // start is a stale no-op.
+                drop(command);
+                return Err(anyhow!("the link of the peer is no longer admitted"));
             }
         }
         wait.await
@@ -1783,27 +1913,49 @@ impl RouteHub {
             permit,
             reply,
         };
-        match handle.data.try_send(command) {
-            Ok(()) => {}
-            Err(mpsc::error::TrySendError::Full(command)) => {
-                let Some(message) = command.take_message() else {
-                    return false;
-                };
-                return self
-                    .refuse_peer_frame(&handle, token, message, IngressRefusal::ChannelFull)
-                    .await;
+        let outcome = admit_into_ingress(
+            command,
+            |command| {
+                // The closed state of the ingress is checked before every
+                // attempt, so a closed ingress is never a pressure.
+                if handle.data.is_closed() {
+                    return Attempt::Closed(command);
+                }
+                match handle.data.try_send(command) {
+                    Ok(()) => Attempt::Queued,
+                    Err(mpsc::error::TrySendError::Full(unsent)) => Attempt::Full(unsent),
+                    Err(mpsc::error::TrySendError::Closed(unsent)) => Attempt::Closed(unsent),
+                }
+            },
+            &AdmissionGuard::Peer(token),
+        )
+        .await;
+        match outcome {
+            Admission::Queued => {
+                let _ = wait.await;
+                true
             }
-            Err(mpsc::error::TrySendError::Closed(command)) => {
+            Admission::Full(command) => {
                 let Some(message) = command.take_message() else {
                     return false;
                 };
-                return self
-                    .refuse_peer_frame(&handle, token, message, IngressRefusal::ChannelClosed)
-                    .await;
+                self.refuse_peer_frame(&handle, token, message, IngressRefusal::ChannelFull)
+                    .await
+            }
+            Admission::Closed(command) => {
+                let Some(message) = command.take_message() else {
+                    return false;
+                };
+                self.refuse_peer_frame(&handle, token, message, IngressRefusal::ChannelClosed)
+                    .await
+            }
+            Admission::Stopped(command, _stop) => {
+                // The guard of a peer only stops on a link that ended, so the
+                // frame is a stale no-op like the normal dispatch.
+                drop(command);
+                true
             }
         }
-        let _ = wait.await;
-        true
     }
 
     /// Retire the request of a peer frame that the ingress of the node
@@ -3583,21 +3735,52 @@ impl Actor {
                     _ => None,
                 };
                 let refused = match permit {
-                    Some(permit) => match data_tx.try_send(Command::ForwardLocal {
-                        worker_id,
-                        epoch,
-                        message: message.clone(),
-                        fence: fence.clone(),
-                        permit,
-                    }) {
-                        Ok(()) => None,
-                        Err(mpsc::error::TrySendError::Full(_)) => {
-                            Some(IngressRefusal::ChannelFull)
+                    Some(permit) => {
+                        let command = Command::ForwardLocal {
+                            worker_id,
+                            epoch,
+                            message: message.clone(),
+                            fence: fence.clone(),
+                            permit,
+                        };
+                        match admit_into_ingress(
+                            command,
+                            |command| match data_tx.try_send(command) {
+                                Ok(()) => Attempt::Queued,
+                                Err(mpsc::error::TrySendError::Full(unsent)) => {
+                                    Attempt::Full(unsent)
+                                }
+                                Err(mpsc::error::TrySendError::Closed(unsent)) => {
+                                    Attempt::Closed(unsent)
+                                }
+                            },
+                            &AdmissionGuard::Local(&failure_rx),
+                        )
+                        .await
+                        {
+                            Admission::Queued => None,
+                            Admission::Full(command) => {
+                                drop(command);
+                                Some(IngressRefusal::ChannelFull)
+                            }
+                            Admission::Closed(command) => {
+                                drop(command);
+                                Some(IngressRefusal::ChannelClosed)
+                            }
+                            Admission::Stopped(command, stop) => {
+                                // The worker of the route failed while the
+                                // command waited, so the failure handling of
+                                // the worker takes over. The end of its
+                                // failure watch is a normal invalidation, so
+                                // it never stops the link of the route.
+                                drop(command);
+                                if matches!(stop, Stop::Failed) {
+                                    failed = true;
+                                }
+                                break;
+                            }
                         }
-                        Err(mpsc::error::TrySendError::Closed(_)) => {
-                            Some(IngressRefusal::ChannelClosed)
-                        }
-                    },
+                    }
                     None => {
                         if data_tx.is_closed() {
                             Some(IngressRefusal::ChannelClosed)
@@ -5802,6 +5985,7 @@ mod tests {
         // enters the queue of the actor.
         let handle = hub.ensure_actor().await.expect("the actor of the hub");
         let available_before = handle.data_budget.available_permits();
+        let pending_before = handle.data.capacity();
         let huge = BridgeMessage::ResponseChunk(crate::protocol::ResponseChunk {
             request_id: "huge".to_string(),
             data: vec![7; 4096],
@@ -5813,6 +5997,10 @@ mod tests {
         assert!(
             handle.data_budget.available_permits() >= available_before,
             "the frame over the budget never entered the ingress of the node"
+        );
+        assert!(
+            handle.data.capacity() >= pending_before,
+            "the frame over the budget was never admitted, so it was never retried"
         );
     }
 
@@ -8129,6 +8317,998 @@ mod tests {
             0,
             "the upstream work of the request is never cancelled"
         );
+    }
+
+    /// A command of the ingress with the byte permit of its frame.
+    fn local_command(handle: &super::ActorHandle, id: &str) -> super::Command {
+        let message = http_start(id);
+        let permit = handle
+            .data_budget
+            .clone()
+            .try_acquire_many_owned(super::ingress_bytes(&message) as u32)
+            .expect("the byte budget of the ingress");
+        super::Command::ForwardLocal {
+            worker_id: 0,
+            epoch: 0,
+            message,
+            fence: None,
+            permit,
+        }
+    }
+
+    /// A command of the ingress with a byte permit of another budget.
+    ///
+    /// The filler of a controlled channel holds a permit of its own, so the
+    /// byte budget of the ingress only carries the command of the test.
+    async fn filler_command(message: BridgeMessage) -> super::Command {
+        let budget = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = budget
+            .acquire_owned()
+            .await
+            .expect("the byte budget of the filler");
+        super::Command::ForwardLocal {
+            worker_id: 0,
+            epoch: 0,
+            message,
+            fence: None,
+            permit,
+        }
+    }
+
+    /// The request id of a command of the ingress.
+    fn command_request_id(command: &super::Command) -> String {
+        let message = match command {
+            super::Command::ForwardLocal { message, .. }
+            | super::Command::ForwardStart { message, .. }
+            | super::Command::HandlePeerMessage { message, .. } => message,
+            _ => return String::new(),
+        };
+        super::request_id_of(message)
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// The frame of a command of the ingress.
+    fn command_frame(command: &super::Command) -> super::FrameVariant {
+        let message = match command {
+            super::Command::ForwardLocal { message, .. }
+            | super::Command::ForwardStart { message, .. }
+            | super::Command::HandlePeerMessage { message, .. } => message,
+            _ => return super::FrameVariant::Control,
+        };
+        super::frame_variant(message)
+    }
+
+    #[tokio::test]
+    async fn a_full_ingress_recovers_the_command_it_refused() {
+        let (hub, _state, _nas_rx, _mac_rx) = routed_node().await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let (_failure, failure_rx) = tokio::sync::watch::channel(());
+
+        // A real bounded channel stands in for the ingress of the node, so
+        // the recovery runs against a real sender.
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<super::Command>(1);
+        let filler = filler_command(http_start("filler")).await;
+        tx.try_send(filler)
+            .expect("the channel accepts its first command");
+
+        let mut attempts = 0usize;
+        let mut ids = Vec::new();
+        let mut frames = Vec::new();
+        let mut budgets = Vec::new();
+        let available = handle.data_budget.available_permits();
+        let command = local_command(&handle, "recovered");
+        let size = super::ingress_bytes(&http_start("recovered")) as isize;
+        let outcome = super::admit_into_ingress(
+            command,
+            |command| {
+                attempts += 1;
+                ids.push(command_request_id(&command));
+                frames.push(command_frame(&command));
+                budgets.push(handle.data_budget.available_permits() as isize);
+                // The slot of the channel is released once, so a later
+                // attempt succeeds.
+                if attempts > 1 {
+                    let _ = rx.try_recv();
+                }
+                match tx.try_send(command) {
+                    Ok(()) => super::Attempt::Queued,
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(unsent)) => {
+                        super::Attempt::Full(unsent)
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(unsent)) => {
+                        super::Attempt::Closed(unsent)
+                    }
+                }
+            },
+            &super::AdmissionGuard::Local(&failure_rx),
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, super::Admission::Queued),
+            "the command entered the ingress after the recovery"
+        );
+        assert_eq!(attempts, 2, "the recovery retries the refused command once");
+        assert_eq!(
+            ids,
+            vec!["recovered".to_string(), "recovered".to_string()],
+            "the recovery keeps the original command"
+        );
+        assert_eq!(
+            frames[0], frames[1],
+            "the recovery keeps the original frame"
+        );
+        assert_eq!(
+            budgets,
+            vec![available as isize - size, available as isize - size],
+            "the recovery reserves the byte budget once"
+        );
+        assert_eq!(
+            handle.data_budget.available_permits() as isize,
+            available as isize - size,
+            "the admitted command holds its byte budget"
+        );
+
+        // The command that entered the ingress is the original one.
+        let queued = rx.try_recv().expect("the command waits in the channel");
+        assert_eq!(command_request_id(&queued), "recovered");
+    }
+
+    #[tokio::test]
+    async fn an_admitted_command_never_waits_for_the_ingress() {
+        let (hub, _state, _nas_rx, _mac_rx) = routed_node().await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let (_failure, failure_rx) = tokio::sync::watch::channel(());
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<super::Command>(1);
+
+        let mut attempts = 0usize;
+        let command = local_command(&handle, "immediate");
+        let outcome = super::admit_into_ingress(
+            command,
+            |command| {
+                attempts += 1;
+                match tx.try_send(command) {
+                    Ok(()) => super::Attempt::Queued,
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(unsent)) => {
+                        super::Attempt::Full(unsent)
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(unsent)) => {
+                        super::Attempt::Closed(unsent)
+                    }
+                }
+            },
+            &super::AdmissionGuard::Local(&failure_rx),
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, super::Admission::Queued),
+            "the command entered the ingress at once"
+        );
+        assert_eq!(attempts, 1, "an admitted command is never retried");
+        assert_eq!(
+            command_request_id(&rx.try_recv().expect("the command waits in the channel")),
+            "immediate"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_persistent_full_ingress_refuses_the_command_after_five_attempts() {
+        let (hub, _state, _nas_rx, _mac_rx) = routed_node().await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let (_failure, failure_rx) = tokio::sync::watch::channel(());
+
+        let mut attempts = 0usize;
+        let command = local_command(&handle, "persistent");
+        let outcome = super::admit_into_ingress(
+            command,
+            |command| {
+                attempts += 1;
+                super::Attempt::Full(command)
+            },
+            &super::AdmissionGuard::Local(&failure_rx),
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, super::Admission::Full(_)),
+            "the ingress refuses the command after the recovery"
+        );
+        assert_eq!(
+            attempts, 5,
+            "the recovery tries the command once and retries it four times"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_closed_ingress_stops_the_recovery() {
+        let (hub, _state, _nas_rx, _mac_rx) = routed_node().await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let (_failure, failure_rx) = tokio::sync::watch::channel(());
+        let available = handle.data_budget.available_permits();
+
+        // A closed ingress stops the recovery at once.
+        let mut attempts = 0usize;
+        let command = local_command(&handle, "closed");
+        let outcome = super::admit_into_ingress(
+            command,
+            |command| {
+                attempts += 1;
+                super::Attempt::Closed(command)
+            },
+            &super::AdmissionGuard::Local(&failure_rx),
+        )
+        .await;
+        assert!(
+            matches!(outcome, super::Admission::Closed(_)),
+            "a closed ingress stops the recovery"
+        );
+        assert_eq!(attempts, 1, "a closed ingress is never retried");
+        drop(outcome);
+        assert_eq!(
+            handle.data_budget.available_permits(),
+            available,
+            "the unsent command releases its byte budget"
+        );
+
+        // A closed ingress after a full one stops the recovery as well.
+        let mut attempts = 0usize;
+        let command = local_command(&handle, "closed-after-full");
+        let outcome = super::admit_into_ingress(
+            command,
+            |command| {
+                attempts += 1;
+                if attempts == 1 {
+                    super::Attempt::Full(command)
+                } else {
+                    super::Attempt::Closed(command)
+                }
+            },
+            &super::AdmissionGuard::Local(&failure_rx),
+        )
+        .await;
+        assert!(
+            matches!(outcome, super::Admission::Closed(_)),
+            "a closed ingress stops the recovery"
+        );
+        assert_eq!(attempts, 2, "the recovery stops at the closed ingress");
+        drop(outcome);
+        assert_eq!(
+            handle.data_budget.available_permits(),
+            available,
+            "the unsent command releases its byte budget"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_ready_failure_stops_the_admission_before_the_first_attempt() {
+        let (hub, _state, _nas_rx, _mac_rx) = routed_node().await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let (failure, failure_rx) = tokio::sync::watch::channel(());
+        let available = handle.data_budget.available_permits();
+
+        // The failure of the worker is already pending, so the command of the
+        // worker never enters the ingress.
+        let _ = failure.send(());
+
+        let mut attempts = 0usize;
+        let command = local_command(&handle, "ready-failure");
+        let outcome = super::admit_into_ingress(
+            command,
+            |_command| {
+                attempts += 1;
+                super::Attempt::Queued
+            },
+            &super::AdmissionGuard::Local(&failure_rx),
+        )
+        .await;
+
+        assert_eq!(
+            attempts, 0,
+            "a pending failure stops the admission before its first attempt"
+        );
+        assert!(
+            matches!(outcome, super::Admission::Stopped(_, super::Stop::Failed)),
+            "a pending failure stops the admission"
+        );
+        drop(outcome);
+        assert_eq!(
+            handle.data_budget.available_permits(),
+            available,
+            "the rejected command releases its byte budget"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_closed_failure_watch_stops_the_recovery_without_a_failure() {
+        let (hub, _state, _nas_rx, _mac_rx) = routed_node().await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let (failure, failure_rx) = tokio::sync::watch::channel(());
+        let mut failure = Some(failure);
+
+        let mut attempts = 0usize;
+        let command = local_command(&handle, "closed-watch");
+        let outcome = super::admit_into_ingress(
+            command,
+            |command| {
+                attempts += 1;
+                if attempts == 1 {
+                    // The failure watch of the worker ends while the command
+                    // waits for the ingress.
+                    failure.take();
+                    super::Attempt::Full(command)
+                } else {
+                    super::Attempt::Queued
+                }
+            },
+            &super::AdmissionGuard::Local(&failure_rx),
+        )
+        .await;
+
+        assert_eq!(
+            attempts, 1,
+            "the end of the failure watch stops the retry of the command"
+        );
+        assert!(
+            matches!(outcome, super::Admission::Stopped(_, super::Stop::Ended)),
+            "the end of the failure watch is not a failure of the worker"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unread_failure_wins_over_the_closure_of_its_watch() {
+        let (hub, _state, _nas_rx, _mac_rx) = routed_node().await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let (failure, failure_rx) = tokio::sync::watch::channel(());
+        let mut failure = Some(failure);
+
+        // The failure of the worker is notified and its watch ends right
+        // after it.
+        let _ = failure.as_ref().expect("the failure watch").send(());
+        failure.take();
+
+        let mut attempts = 0usize;
+        let command = local_command(&handle, "unread-failure");
+        let outcome = super::admit_into_ingress(
+            command,
+            |_command| {
+                attempts += 1;
+                super::Attempt::Queued
+            },
+            &super::AdmissionGuard::Local(&failure_rx),
+        )
+        .await;
+
+        assert_eq!(
+            attempts, 0,
+            "an unread failure stops the admission before its first attempt"
+        );
+        assert!(
+            matches!(outcome, super::Admission::Stopped(_, super::Stop::Failed)),
+            "an unread failure is never lost by the closure of its watch"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stale_token_stops_the_recovery_of_a_peer() {
+        let (hub, _state, _nas_rx, _mac_rx) = routed_node().await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let token = super::super::admission::mint_for_test(id(MAC), 2);
+
+        let mut attempts = 0usize;
+        let command = local_command(&handle, "stale");
+        let outcome = super::admit_into_ingress(
+            command,
+            |command| {
+                attempts += 1;
+                // The link of the peer ends while the command waits.
+                token.mark_dead();
+                super::Attempt::Full(command)
+            },
+            &super::AdmissionGuard::Peer(&token),
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, super::Admission::Stopped(_, _)),
+            "a stale token stops the recovery"
+        );
+        assert_eq!(attempts, 1, "a stale token is never retried");
+    }
+
+    #[tokio::test]
+    async fn a_failure_of_the_worker_stops_the_recovery() {
+        let (hub, _state, _nas_rx, _mac_rx) = routed_node().await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let (failure, failure_rx) = tokio::sync::watch::channel(());
+        let available = handle.data_budget.available_permits();
+
+        let mut attempts = 0usize;
+        let command = local_command(&handle, "failed");
+        let outcome = super::admit_into_ingress(
+            command,
+            |command| {
+                attempts += 1;
+                // The worker of the route fails while the command waits.
+                let _ = failure.send(());
+                super::Attempt::Full(command)
+            },
+            &super::AdmissionGuard::Local(&failure_rx),
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, super::Admission::Stopped(_, super::Stop::Failed)),
+            "a failure of the worker stops the recovery"
+        );
+        assert_eq!(attempts, 1, "a failed worker is never retried");
+        drop(outcome);
+        assert_eq!(
+            handle.data_budget.available_permits(),
+            available,
+            "the unsent command releases its byte budget"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failure_that_arrives_during_the_recovery_stops_the_next_attempt() {
+        let (hub, _state, _nas_rx, _mac_rx) = routed_node().await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let (failure, failure_rx) = tokio::sync::watch::channel(());
+        let available = handle.data_budget.available_permits();
+
+        let mut attempts = 0usize;
+        let command = local_command(&handle, "late-failure");
+        let outcome = super::admit_into_ingress(
+            command,
+            |command| {
+                attempts += 1;
+                // The worker of the route fails while the command waits for
+                // the ingress, so the failure is pending between the yield of
+                // the recovery and its next attempt.
+                let _ = failure.send(());
+                super::Attempt::Full(command)
+            },
+            &super::AdmissionGuard::Local(&failure_rx),
+        )
+        .await;
+
+        assert_eq!(
+            attempts, 1,
+            "a failure pending after the recovery yield stops the next attempt"
+        );
+        assert!(
+            matches!(outcome, super::Admission::Stopped(_, super::Stop::Failed)),
+            "a failure that arrives during the recovery stops it"
+        );
+        drop(outcome);
+        assert_eq!(
+            handle.data_budget.available_permits(),
+            available,
+            "the unsent command releases its byte budget"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_burst_of_local_commands_waits_in_the_ingress_of_the_node() {
+        let (hub, state, mut nas_rx, _mac_rx) = routed_node().await;
+        wait_until(|| async { !state.inner.workers.lock().await.is_empty() }).await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let worker = {
+            state
+                .inner
+                .workers
+                .lock()
+                .await
+                .values()
+                .next()
+                .cloned()
+                .expect("the virtual worker of the route")
+        };
+
+        // The actor blocks in the snapshot of the relay state, so the traffic
+        // of the data path piles up.
+        let (version, advertisement) = block_the_actor(&hub, &state, &handle, 2).await;
+
+        // A burst of small local commands waits in the ingress of the node.
+        // The burst is sent beside the test, so a full ingress never blocks
+        // the test itself.
+        let burst = tokio::spawn({
+            let worker = worker.clone();
+            async move {
+                for index in 0..160 {
+                    worker
+                        .send(http_start(&format!("burst-{index}")))
+                        .await
+                        .expect("the request reaches the worker");
+                }
+            }
+        });
+        wait_until(|| async {
+            handle.data.capacity() <= super::PEER_INGRESS_BUFFER.saturating_sub(160)
+        })
+        .await;
+        assert_eq!(
+            super::PEER_INGRESS_BUFFER - handle.data.capacity(),
+            160,
+            "the ingress of the node holds the whole burst"
+        );
+        burst.await.expect("the burst reaches the worker");
+
+        // The byte budget of the ingress is not exhausted by the burst.
+        assert!(
+            handle.data_budget.available_permits() > 0,
+            "the byte budget of the ingress is not exhausted"
+        );
+        assert!(
+            !state.inner.workers.lock().await.is_empty(),
+            "the worker of the route survives the burst"
+        );
+
+        drop(version);
+        let _ = advertisement.await;
+
+        // The route of the node survives the burst.
+        assert_eq!(
+            hub.selected_path().await,
+            Some(vec![id(LOCAL), id(NAS)]),
+            "the route of the node survives the burst"
+        );
+
+        // The egress of the node delivers every command of the burst in the
+        // order it waited in the ingress.
+        wait_until(|| async { hub.owner_count().await == 160 }).await;
+        let frames = drain(&mut nas_rx).await;
+        let delivered: Vec<String> = frames
+            .iter()
+            .filter_map(|envelope| match &envelope.message {
+                Some(BridgeMessage::RequestStart(start)) => Some(start.request_id.clone()),
+                _ => None,
+            })
+            .collect();
+        let expected: Vec<String> = (0..160).map(|index| format!("burst-{index}")).collect();
+        assert_eq!(
+            delivered, expected,
+            "the egress of the node delivers the burst in order"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_peer_start_never_reaches_the_route() {
+        let (hub, state, mut nas_rx, _mac_rx) = routed_node().await;
+        let mac = super::super::admission::mint_for_test(id(MAC), 2);
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+
+        // The actor blocks in the snapshot of the relay state and the data
+        // channel holds every slot, so the start of the peer cannot enter
+        // the ingress.
+        let (version, advertisement) = block_the_actor(&hub, &state, &handle, 2).await;
+        let queued = fill_data_channel(&handle, id(NAS), super::PEER_INGRESS_BUFFER);
+        assert_eq!(
+            queued,
+            super::PEER_INGRESS_BUFFER,
+            "the data channel of the node is full"
+        );
+
+        let error = hub
+            .forward_start(&mac, forwarded_path(), http_start("peer-start"))
+            .await
+            .expect_err("the start of the peer is refused");
+        assert!(
+            error.to_string().contains("full"),
+            "the start names the full ingress: {error}"
+        );
+
+        drop(version);
+        let _ = advertisement.await;
+
+        // The refused start of the peer creates no owner, and the route of
+        // the node and the egress of the node survive the refusal.
+        assert_eq!(
+            hub.owner_count().await,
+            0,
+            "the refused start of the peer creates no owner"
+        );
+        assert_eq!(
+            hub.selected_path().await,
+            Some(vec![id(LOCAL), id(NAS)]),
+            "the route of the node survives the refusal"
+        );
+        assert!(
+            drain(&mut nas_rx)
+                .await
+                .iter()
+                .all(|envelope| !matches!(envelope.message, Some(BridgeMessage::RequestStart(_)))),
+            "the refused start never reaches the executor"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_peer_response_retires_the_request_of_the_executor() {
+        let (hub, state, mut nas_rx, mut mac_rx) = routed_node().await;
+        let mac = super::super::admission::mint_for_test(id(MAC), 2);
+        let nas = super::super::admission::mint_for_test(id(NAS), 1);
+        hub.forward_start(&mac, forwarded_path(), http_start("peer-response"))
+            .await
+            .expect("the start of the peer is forwarded");
+        wait_until(|| async { hub.owner_count().await == 1 }).await;
+        let upstream_id = upstream_id_of(&mut nas_rx).await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+
+        // The response of the executor cannot enter the full ingress of the
+        // node, so the request of the peer is retired in its own scope.
+        assert!(
+            refuse_a_peer_frame_while_full(
+                &hub,
+                &state,
+                &handle,
+                nas,
+                BridgeMessage::ResponseChunk(crate::protocol::ResponseChunk {
+                    request_id: upstream_id.clone(),
+                    data: vec![7; 8],
+                }),
+                2,
+            )
+            .await,
+            "the link of the executor survives the refusal of a frame"
+        );
+
+        // The peer learns the overload of the ingress of the node.
+        let error = next_bridge(&mut mac_rx).await;
+        let BridgeMessage::ResponseError(error) = error else {
+            panic!("the peer learns the failure of its request");
+        };
+        assert_eq!(error.request_id, "peer-response");
+        assert_eq!(error.status, 503);
+        assert_eq!(error.code, "peer_overloaded");
+        assert_eq!(
+            hub.owner_count().await,
+            0,
+            "the request of the peer is retired"
+        );
+
+        // The upstream work of the retired request is cancelled once.
+        let frames = drain(&mut nas_rx).await;
+        assert_eq!(
+            frames
+                .iter()
+                .filter(|envelope| matches!(
+                    envelope.message,
+                    Some(BridgeMessage::RequestCancel(_))
+                ))
+                .count(),
+            1,
+            "the upstream work of the retired request is cancelled once"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_admitted_frame_keeps_its_byte_budget_until_the_actor_retires_it() {
+        let (hub, state, _nas_rx, _mac_rx) = routed_node().await;
+        let nas = super::super::admission::mint_for_test(id(NAS), 1);
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+
+        // The actor blocks in the snapshot of the relay state, so the frame
+        // waits in the ingress of the node.
+        let (version, advertisement) = block_the_actor(&hub, &state, &handle, 2).await;
+        let available = handle.data_budget.available_permits();
+        let message = BridgeMessage::ResponseEnd(crate::protocol::ResponseEnd {
+            request_id: "held".to_string(),
+        });
+        let size = super::ingress_bytes(&message);
+        let admitted = tokio::spawn({
+            let hub = hub.clone();
+            let nas = nas.clone();
+            async move { hub.handle_peer_message(&nas, message).await }
+        });
+        wait_until(|| async { handle.data.capacity() == super::PEER_INGRESS_BUFFER - 1 }).await;
+        assert_eq!(
+            handle.data_budget.available_permits(),
+            available - size,
+            "the admitted frame holds its byte budget while it waits"
+        );
+
+        // The sender of the queued frame is cancelled while the actor is
+        // gated, so the command waits in the ingress without a waiting
+        // sender. Its byte budget stays reserved until the actor retires the
+        // command.
+        admitted.abort();
+        assert!(
+            admitted
+                .await
+                .expect_err("the sender is cancelled")
+                .is_cancelled(),
+            "the sender of the queued frame is cancelled"
+        );
+        assert_eq!(
+            handle.data_budget.available_permits(),
+            available - size,
+            "the queued command keeps its byte budget after its sender was cancelled"
+        );
+
+        drop(version);
+        let _ = advertisement.await;
+        wait_until(|| async { handle.data_budget.available_permits() == available }).await;
+    }
+
+    #[tokio::test]
+    async fn an_unsent_frame_releases_its_byte_budget_at_the_refusal() {
+        let (hub, state, _nas_rx, _mac_rx) = routed_node().await;
+        let nas = super::super::admission::mint_for_test(id(NAS), 1);
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+
+        // The actor blocks in the snapshot of the relay state, so both paths
+        // of the node are full and the frame cannot be retired.
+        let (version, advertisement) = block_the_actor(&hub, &state, &handle, 2).await;
+        assert_eq!(
+            fill_control_channel(&handle),
+            super::PEER_CONTROL_BUFFER,
+            "the control path of the node is full"
+        );
+        let queued = fill_data_channel(&handle, id(NAS), super::PEER_INGRESS_BUFFER);
+        assert_eq!(
+            queued,
+            super::PEER_INGRESS_BUFFER,
+            "the data channel of the node is full"
+        );
+        let available = handle.data_budget.available_permits();
+        let message = BridgeMessage::ResponseEnd(crate::protocol::ResponseEnd {
+            request_id: "abandoned".to_string(),
+        });
+
+        // The frame cannot enter the ingress, so it is refused and its byte
+        // budget is released without waiting for the actor.
+        assert!(
+            !hub.handle_peer_message(&nas, message).await,
+            "the frame of the full ingress is refused"
+        );
+        assert_eq!(
+            handle.data_budget.available_permits(),
+            available,
+            "the unsent frame releases its byte budget at the refusal"
+        );
+
+        drop(version);
+        let _ = advertisement.await;
+    }
+
+    #[tokio::test]
+    async fn a_ready_failure_of_the_worker_stops_the_pump_before_the_next_frame() {
+        let (hub, state, mut nas_rx, _mac_rx) = routed_node().await;
+        wait_until(|| async { !state.inner.workers.lock().await.is_empty() }).await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let worker_id = {
+            *state
+                .inner
+                .workers
+                .lock()
+                .await
+                .keys()
+                .next()
+                .expect("the virtual worker of the route")
+        };
+        let worker = {
+            state
+                .inner
+                .workers
+                .lock()
+                .await
+                .values()
+                .next()
+                .cloned()
+                .expect("the virtual worker of the route")
+        };
+
+        // The actor blocks in the snapshot of the relay state and the data
+        // channel holds every slot, so the frame of the relay state cannot
+        // enter the ingress.
+        let (version, advertisement) = block_the_actor(&hub, &state, &handle, 2).await;
+        let queued = fill_data_channel(&handle, id(NAS), super::PEER_INGRESS_BUFFER);
+        assert_eq!(
+            queued,
+            super::PEER_INGRESS_BUFFER,
+            "the data channel of the node is full"
+        );
+
+        // The frame of the relay state waits in the inbox of the worker.
+        worker
+            .send(http_start("after-failure"))
+            .await
+            .expect("the frame reaches the worker");
+
+        // The worker of the route fails while the frame waits.
+        state.inner.signal_worker_failure(worker_id);
+
+        // The worker publishes its failure on the priority path, so the
+        // command of the failure is queued.
+        wait_until(|| async { handle.control.capacity() < super::PEER_CONTROL_BUFFER }).await;
+
+        drop(version);
+        let _ = advertisement.await;
+
+        // The failure of the worker wins over the retirement of the frame:
+        // the upstream work of the frame is never cancelled.
+        let frames = drain(&mut nas_rx).await;
+        assert_eq!(
+            frames
+                .iter()
+                .filter(|envelope| matches!(
+                    envelope.message,
+                    Some(BridgeMessage::RequestCancel(_))
+                ))
+                .count(),
+            0,
+            "the frame after the failure is never retired"
+        );
+        assert_eq!(
+            hub.owner_count().await,
+            0,
+            "the frame after the failure never reaches the route"
+        );
+        assert!(
+            hub.selected_path().await.is_none(),
+            "the failure of the worker tears its epoch down"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_ready_failure_of_the_worker_keeps_the_queued_frames_unpublished() {
+        let (hub, state, mut nas_rx, _mac_rx) = routed_node().await;
+        wait_until(|| async { !state.inner.workers.lock().await.is_empty() }).await;
+        let (worker_id, worker) = {
+            let workers = state.inner.workers.lock().await;
+            let (worker_id, worker) = workers
+                .iter()
+                .next()
+                .expect("the virtual worker of the route");
+            (*worker_id, worker.clone())
+        };
+
+        // The failure of the worker is ready before the traffic of its route
+        // is queued. The signal and the two frames are queued without an
+        // await, so the pump observes the ready failure before it admits any
+        // of them. This proves the lifecycle cleanup, not an interleaving
+        // inside the recovery.
+        state.inner.signal_worker_failure(worker_id);
+        worker
+            .try_send(http_start("before-failure"))
+            .expect("the frame reaches the worker");
+        worker
+            .try_send(http_start("after-failure"))
+            .expect("the later frame reaches the worker");
+
+        // The ready failure enters the existing worker-failure cleanup: the
+        // epoch of the route and the link of the database node end, no queued
+        // frame is published and the failed worker releases its registration.
+        wait_until(|| async { hub.selected_path().await.is_none() }).await;
+        assert_eq!(
+            hub.owner_count().await,
+            0,
+            "no frame of the failed worker reaches the route"
+        );
+        assert!(
+            drain(&mut nas_rx)
+                .await
+                .iter()
+                .all(|envelope| !matches!(envelope.message, Some(BridgeMessage::RequestStart(_)))),
+            "no queued frame of the failed worker is published"
+        );
+        assert!(
+            matches!(
+                tokio::time::timeout(Duration::from_millis(200), nas_rx.recv()).await,
+                Ok(None)
+            ),
+            "the ready failure stops the link of the database node"
+        );
+        assert!(
+            !state.inner.workers.lock().await.contains_key(&worker_id),
+            "the failed worker releases its registration"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_closed_failure_watch_keeps_the_route_and_the_link_of_the_node() {
+        let (hub, state, mut nas_rx, _mac_rx) = routed_node().await;
+        wait_until(|| async { !state.inner.workers.lock().await.is_empty() }).await;
+        let (worker_id, worker) = {
+            let workers = state.inner.workers.lock().await;
+            let (worker_id, worker) = workers
+                .iter()
+                .next()
+                .expect("the virtual worker of the route");
+            (*worker_id, worker.clone())
+        };
+
+        // The failure watch of the worker is closed before the traffic of its
+        // route is queued, and the end of the watch is no failure
+        // notification. The closure and the two frames are queued without an
+        // await, so no interleaving inside the recovery is claimed.
+        state.inner.remove_worker_failure(worker_id);
+        worker
+            .try_send(http_start("before-closure"))
+            .expect("the frame reaches the worker");
+        worker
+            .try_send(http_start("after-closure"))
+            .expect("the later frame reaches the worker");
+
+        // The end of the watch enters the ordinary invalidation: the route and
+        // the link of the database node stay, no queued frame is published and
+        // the worker releases its registration.
+        wait_until(|| async { !state.inner.workers.lock().await.contains_key(&worker_id) }).await;
+        assert!(
+            hub.selected_path().await.is_some(),
+            "the end of the failure watch keeps the route of the node"
+        );
+        assert_eq!(
+            hub.owner_count().await,
+            0,
+            "no frame of the ended watch reaches the route"
+        );
+        assert!(
+            drain(&mut nas_rx)
+                .await
+                .iter()
+                .all(|envelope| !matches!(envelope.message, Some(BridgeMessage::RequestStart(_)))),
+            "no queued frame of the ended watch is published"
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), nas_rx.recv())
+                .await
+                .is_err(),
+            "the end of the failure watch keeps the link of the database node"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stale_token_of_a_peer_publishes_nothing() {
+        let (hub, state, mut nas_rx, mut mac_rx) = routed_node().await;
+        let mac = super::super::admission::mint_for_test(id(MAC), 2);
+        hub.forward_start(&mac, forwarded_path(), http_start("peer-1"))
+            .await
+            .expect("the start of the peer is forwarded");
+        wait_until(|| async { hub.owner_count().await == 1 }).await;
+
+        // The link of the peer ended, so its frame is a stale no-op.
+        mac.mark_dead();
+        assert!(
+            hub.handle_peer_message(
+                &mac,
+                BridgeMessage::RequestChunk(crate::protocol::BridgeRequestChunk {
+                    request_id: "peer-1".to_string(),
+                    data: vec![7; 8],
+                }),
+            )
+            .await,
+            "the link of the peer survives the frame of a stale token"
+        );
+        assert_eq!(
+            hub.owner_count().await,
+            1,
+            "the request of the peer keeps its owner"
+        );
+        assert!(
+            drain(&mut mac_rx)
+                .await
+                .iter()
+                .all(|envelope| !matches!(envelope.message, Some(BridgeMessage::ResponseError(_)))),
+            "the peer learns nothing"
+        );
+
+        // The upstream work of the request was never cancelled.
+        let frames = drain(&mut nas_rx).await;
+        assert_eq!(
+            frames
+                .iter()
+                .filter(|envelope| matches!(
+                    envelope.message,
+                    Some(BridgeMessage::RequestCancel(_))
+                ))
+                .count(),
+            0,
+            "the upstream work of the request is never cancelled"
+        );
+        let _ = state;
     }
 
     #[tokio::test]
