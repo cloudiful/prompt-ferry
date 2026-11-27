@@ -117,9 +117,32 @@ never loops back into the network.
 
 ### The ingress of the forwarding actor
 
-- The ingress of the forwarding actor holds 64 commands and a byte budget of
+- The ingress of the forwarding actor holds 256 commands and a byte budget of
   16MiB + 64KiB. The worker pump never waits for that capacity: it queues a
   command without waiting and refuses it when the ingress cannot take it.
+- A command that does not fit the ingress is admitted with one initial try and
+  at most four further tries, and every further try is preceded by one
+  cooperative yield. A refused command keeps its identity and its byte budget
+  across the tries: the frame is never rebuilt and the budget is never
+  reserved twice. The yield is a best effort of the scheduler, so the recovery
+  is finite headroom for a burst and never a promise that the actor runs
+  before the tries are over. The fixed number of tries is a policy of the
+  ingress, not a wallclock latency or fairness guarantee. When the last try is
+  still refused, the command takes the ordinary refusal path of its producer.
+- The recovery never waits for the network, and the actor never waits for a
+  producer or for the network. A producer of a command that does not fit the
+  ingress may await up to four cooperative yields before its command is
+  refused, and it holds its own command during that time.
+- The guard of a command is checked before every try, so a command is never
+  sent after its guard stopped it. The link of a peer is checked before every
+  try, so a link that ended during the recovery publishes nothing. The failure
+  of the worker of the route interrupts the recovery of the relay state, so a
+  failure never waits for the ingress. The end of the failure watch of a
+  worker is not a failure of that worker: it is an ordinary invalidation of
+  the worker, so it never stops the link of the route.
+- The priority path of the actor keeps its own capacity of 64 commands and its
+  own byte budget, so a flood of traffic never starves the cleanup of a link
+  or the retirement of a request.
 - A refusal is scoped to the request of the refused frame. The worker of the
   route, the selected route, the configuration snapshot and the generation of
   the peer link stay, and the other requests of the node keep running. Only the
@@ -133,7 +156,9 @@ never loops back into the network.
   `503 peer_overloaded` instead of waiting for an answer that cannot come.
 - The queued-start fence is a private flag of the pump and the actor. It is
   never part of an owner and never part of the protocol, and it dies with the
-  command that carries it.
+  command that carries it. The fences of the queued starts are bounded by the
+  256 slots of the ingress and the one start that waits for the actor, so at
+  most 257 fences are alive at the same time.
 - A refused frame of a peer schedules a scoped retirement with the live
   admission token of the link, and the caller waits for its acknowledgement, so
   a later frame of the link cannot overtake the retirement. The actor derives
@@ -146,10 +171,11 @@ never loops back into the network.
   request, and a frame of a peer never starts a request. A frame of the wrong
   direction is dropped by the normal dispatch, so a full ingress drops it as
   well and never ends a valid request.
-- The failed flows are tracked in a bounded set, so a request that is refused
-  again and again needs no second retirement. The tracking of a flow ends with
-  its terminal message and with the teardown of the worker. When that bounded
-  set is exhausted, the worker of the route fails as it did before.
+- The failed flows are tracked in a bounded set of at most 1024 flows, so a
+  request that is refused again and again needs no second retirement. The
+  tracking of a flow ends with its terminal message and with the teardown of
+  the worker. When that bounded set is exhausted, the worker of the route fails
+  as it did before.
 - The diagnostics of a refusal use the category `peer_ingress_diag` and name
   the distinct reason: `channel_full` for a full ingress, `byte_budget_exhausted`
   for an exhausted byte budget, `channel_closed` for an ingress that ended,
