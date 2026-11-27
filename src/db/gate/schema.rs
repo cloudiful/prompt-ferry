@@ -25,9 +25,11 @@ pub const REQUEST_HYPERTABLES: [&str; 8] = [
     "request_record_replay_snapshots",
 ];
 
-/// The minimum TimescaleDB minor release that ships the native columnstore API.
+/// The minimum TimescaleDB release that ships a working native columnstore and
+/// the fixed background-job portal handling.
 const MIN_TIMESCALE_MAJOR: u64 = 2;
 const MIN_TIMESCALE_MINOR: u64 = 32;
+const MIN_TIMESCALE_PATCH: u64 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GuardMode {
@@ -202,7 +204,7 @@ fn read_failure() -> anyhow::Error {
     anyhow!("node schema admission read failed")
 }
 
-/// Parse an installed TimescaleDB version such as `2.32.0`.
+/// Parse an installed TimescaleDB version such as `2.32.1`.
 pub fn parse_timescale_version(raw: &str) -> Option<(u64, u64, u64)> {
     let mut parts = raw.trim().split('.');
     let major = numeric_prefix(parts.next()?)?;
@@ -230,10 +232,15 @@ pub fn classify_timescale(
     if !license.is_some_and(|license| license.trim().eq_ignore_ascii_case("timescale")) {
         return TimescaleSupport::Unlicensed(license.map(str::to_owned));
     }
-    let Some((major, minor, _)) = parse_timescale_version(installed_version) else {
+    let Some((major, minor, patch)) = parse_timescale_version(installed_version) else {
         return TimescaleSupport::TooOld(installed_version.to_owned());
     };
-    if major < MIN_TIMESCALE_MAJOR || (major == MIN_TIMESCALE_MAJOR && minor < MIN_TIMESCALE_MINOR)
+    if (major, minor, patch)
+        < (
+            MIN_TIMESCALE_MAJOR,
+            MIN_TIMESCALE_MINOR,
+            MIN_TIMESCALE_PATCH,
+        )
     {
         return TimescaleSupport::TooOld(installed_version.to_owned());
     }
@@ -380,7 +387,7 @@ fn embedded_migrations() -> Vec<EmbeddedMigration> {
 fn schema_error(refusal: SchemaRefusal) -> anyhow::Error {
     match refusal {
         SchemaRefusal::Timescale(TimescaleSupport::Missing) => anyhow!(
-            "TimescaleDB is not installed: install the timescale/timescaledb:2.32.0-pg18 \
+            "TimescaleDB is not installed: install the timescale/timescaledb:2.32.1-pg18 \
              image (or CREATE EXTENSION timescaledb once as a superuser) before starting; \
              prompt-ferry never creates the extension automatically"
         ),
@@ -390,8 +397,11 @@ fn schema_error(refusal: SchemaRefusal) -> anyhow::Error {
             license.as_deref().unwrap_or("not set")
         ),
         SchemaRefusal::Timescale(TimescaleSupport::TooOld(version)) => anyhow!(
-            "TimescaleDB {version} is installed: prompt-ferry requires TimescaleDB >= 2.32.0 \
-             for the native columnstore; use the timescale/timescaledb:2.32.0-pg18 image"
+            "TimescaleDB {version} is installed: prompt-ferry requires TimescaleDB >= 2.32.1 \
+             for the native columnstore and the fixed background-job portal handling; upgrade \
+             to the timescale/timescaledb:2.32.1-pg18 image first, then run ALTER EXTENSION \
+             timescaledb UPDATE to 2.32.1 in every database where the extension is installed, \
+             including template1, before starting"
         ),
         SchemaRefusal::Timescale(TimescaleSupport::Ready) => unreachable!(),
         SchemaRefusal::LegacyRequestSchema { present } => anyhow!(
@@ -489,35 +499,52 @@ mod tests {
             request_relations: Vec::new(),
             applied: Vec::new(),
             hypertables: Vec::new(),
-            timescale_version: Some("2.32.0".to_owned()),
+            timescale_version: Some("2.32.1".to_owned()),
             timescale_license: Some("timescale".to_owned()),
         }
     }
 
     #[test]
-    fn timescale_versions_parse_and_require_the_232_floor() {
+    fn timescale_versions_parse_and_require_the_2321_floor() {
         assert_eq!(parse_timescale_version("2.32.0"), Some((2, 32, 0)));
+        assert_eq!(parse_timescale_version("2.32.1"), Some((2, 32, 1)));
         assert_eq!(parse_timescale_version(" 2.33.1 "), Some((2, 33, 1)));
-        assert_eq!(parse_timescale_version("2.32.0-dev"), Some((2, 32, 0)));
+        assert_eq!(parse_timescale_version("2.32.1-dev"), Some((2, 32, 1)));
         assert_eq!(parse_timescale_version("nope"), None);
         assert_eq!(
-            classify_timescale(Some("2.32.0"), Some("timescale")),
+            classify_timescale(Some("2.32.1"), Some("timescale")),
             TimescaleSupport::Ready
         );
         assert_eq!(
-            classify_timescale(Some("2.32.0"), Some(" Timescale ")),
+            classify_timescale(Some("2.32.1"), Some(" Timescale ")),
             TimescaleSupport::Ready
+        );
+        assert_eq!(
+            classify_timescale(Some("2.32.0"), Some("timescale")),
+            TimescaleSupport::TooOld("2.32.0".to_owned())
         );
         assert_eq!(
             classify_timescale(Some("2.31.9"), Some("timescale")),
             TimescaleSupport::TooOld("2.31.9".to_owned())
         );
         assert_eq!(
-            classify_timescale(Some("2.32.0"), Some("apache")),
+            classify_timescale(Some("2.33.0"), Some("timescale")),
+            TimescaleSupport::Ready
+        );
+        assert_eq!(
+            classify_timescale(Some("3.0.0"), Some("timescale")),
+            TimescaleSupport::Ready
+        );
+        assert_eq!(
+            classify_timescale(Some("2.32.1-dev"), Some("timescale")),
+            TimescaleSupport::Ready
+        );
+        assert_eq!(
+            classify_timescale(Some("2.32.1"), Some("apache")),
             TimescaleSupport::Unlicensed(Some("apache".to_owned()))
         );
         assert_eq!(
-            classify_timescale(Some("2.32.0"), None),
+            classify_timescale(Some("2.32.1"), None),
             TimescaleSupport::Unlicensed(None)
         );
         assert_eq!(classify_timescale(None, None), TimescaleSupport::Missing);
@@ -594,7 +621,8 @@ mod tests {
         for (version, license) in [
             (None, None),
             (Some("2.31.0"), Some("timescale")),
-            (Some("2.32.0"), Some("apache")),
+            (Some("2.32.0"), Some("timescale")),
+            (Some("2.32.1"), Some("apache")),
         ] {
             let mut evidence = evidence();
             evidence.timescale_version = version.map(str::to_owned);
