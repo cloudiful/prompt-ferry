@@ -45,8 +45,11 @@ export type EndpointListItemView = {
   provider: ProviderEndpoint['provider']
   provider_region: ProviderEndpoint['provider_region']
   plan: EndpointPlan
-  has_oauth_token: boolean
-  base_url: string
+  // The administrator rows answer this from the stored endpoint; the safe
+  // catalog rows omit it, so the field is optional and never guessed.
+  has_oauth_token?: boolean
+  // Only the administrator rows carry the upstream address.
+  base_url?: string
   scope: string
   scope_label: string
   native_api: string
@@ -54,8 +57,12 @@ export type EndpointListItemView = {
   native_api_source: string
   native_api_source_label: string
   enabled: boolean
-  mcp_enabled: boolean
+  // Only the administrator rows carry the MCP exposure flag.
+  mcp_enabled?: boolean
   owner_label: string
+  // The administrator rows decide the quota surface from the endpoint
+  // itself; the safe catalog rows carry the server-side answer instead.
+  quota_eligible?: boolean
   testing: boolean
   toggling: boolean
   test_message: string

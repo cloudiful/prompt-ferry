@@ -2,6 +2,8 @@
 mod auth_users;
 #[path = "types/cache_alert.rs"]
 mod cache_alert;
+#[path = "types/catalog.rs"]
+mod catalog;
 mod config_audit;
 mod config_export;
 mod config_import;
@@ -30,6 +32,7 @@ mod usage;
 
 pub use auth_users::*;
 pub use cache_alert::*;
+pub use catalog::*;
 pub use config_audit::*;
 pub use config_export::*;
 pub use config_import::*;

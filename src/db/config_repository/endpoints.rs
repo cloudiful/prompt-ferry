@@ -120,10 +120,32 @@ fn stamp_oauth_presence(endpoint: &mut UnifiedProviderEndpoint, token_ids: &Hash
 }
 
 impl super::ConfigRepository {
-    pub async fn list_endpoints_page(&self, first: i64, rows: i64) -> Result<UnifiedEndpointPage> {
+    pub async fn list_endpoints_page(
+        &self,
+        first: i64,
+        rows: i64,
+        viewer: Option<i64>,
+    ) -> Result<UnifiedEndpointPage> {
         match self {
-            Self::Postgres(repo) => repo.list_endpoints_page(first, rows).await,
-            Self::Sqlite(repo) => repo.list_endpoints_page(first, rows).await,
+            Self::Postgres(repo) => repo.list_endpoints_page(first, rows, viewer).await,
+            Self::Sqlite(repo) => repo.list_endpoints_page(first, rows, viewer).await,
+        }
+    }
+
+    /// Issue #99 P1: the endpoint ids a viewer may see. The route targets of
+    /// the safe model-route catalog are filtered against this set, so a
+    /// target never names a hidden endpoint.
+    pub async fn list_visible_endpoint_ids(&self, viewer: Option<i64>) -> Result<HashSet<Uuid>> {
+        match self {
+            Self::Postgres(repo) => crate::db::list_visible_endpoint_ids(repo.pool(), viewer).await,
+            // Every SQLite endpoint is shared: the table carries no ownership
+            // columns, so every endpoint is visible to every viewer.
+            Self::Sqlite(repo) => repo
+                .store
+                .list_endpoint_ids(&repo.manager)
+                .await
+                .map_err(|err| anyhow::anyhow!("{err}"))
+                .map(|ids| ids.into_iter().collect()),
         }
     }
 
@@ -429,8 +451,14 @@ impl super::ConfigRepository {
 }
 
 impl PostgresConfigRepository {
-    async fn list_endpoints_page(&self, first: i64, rows: i64) -> Result<UnifiedEndpointPage> {
-        let page: EndpointPage = crate::db::list_endpoints_page(&self.pool, first, rows).await?;
+    async fn list_endpoints_page(
+        &self,
+        first: i64,
+        rows: i64,
+        viewer: Option<i64>,
+    ) -> Result<UnifiedEndpointPage> {
+        let page: EndpointPage =
+            crate::db::list_endpoints_page(&self.pool, first, rows, viewer).await?;
         // Issue #599 R2a: one presence query stamps the whole page (no N+1);
         // the secrets themselves never leave the token table.
         let token_ids = self
@@ -660,7 +688,15 @@ impl PostgresConfigRepository {
 }
 
 impl SqliteConfigRepository {
-    async fn list_endpoints_page(&self, first: i64, rows: i64) -> Result<UnifiedEndpointPage> {
+    async fn list_endpoints_page(
+        &self,
+        first: i64,
+        rows: i64,
+        _viewer: Option<i64>,
+    ) -> Result<UnifiedEndpointPage> {
+        // Issue #99 P1: the SQLite endpoint table carries no ownership
+        // columns, so every endpoint there is shared and the viewer never
+        // narrows the page.
         let (total, endpoints) = self
             .store
             .list_endpoints_page(&self.manager, first, rows)

@@ -37,6 +37,11 @@ pub(crate) use super::me::{
     __path_list_client_keys as __path_me_list_client_keys,
     __path_update_client_key as __path_me_update_client_key,
 };
+pub(crate) use super::me_catalog::{
+    __path_endpoint_quota as __path_me_endpoint_quota,
+    __path_list_endpoint_catalog as __path_me_list_endpoint_catalog,
+    __path_list_model_route_catalog as __path_me_list_model_route_catalog,
+};
 pub(crate) use super::model_routes::{
     __path_create_model_route, __path_delete_model_route, __path_list_model_routes,
     __path_test_model_route, __path_update_model_route,

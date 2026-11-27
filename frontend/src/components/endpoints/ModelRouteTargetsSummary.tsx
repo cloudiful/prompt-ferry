@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { LoaderCircle } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import type { ModelRouteTargetItemView } from '@/models/endpoints'
 import {
   enabledRouteTargets,
@@ -22,6 +23,8 @@ type ModelRouteTargetsSummaryProps = {
   onToggleTarget?: (targetId: string, enabled: boolean) => void
   pending?: boolean
   pendingTargetId?: string | null
+  // The read-only view discloses the same targets without the toggles.
+  readOnly?: boolean
 }
 
 type TargetPair = {
@@ -75,6 +78,7 @@ export function ModelRouteTargetsSummary({
   onToggleTarget,
   pending = false,
   pendingTargetId = null,
+  readOnly = false,
 }: ModelRouteTargetsSummaryProps) {
   const { t } = useLocale()
   const preferredLabel = t('modelRoutePreferredTarget')
@@ -84,7 +88,14 @@ export function ModelRouteTargetsSummary({
   const hidden = hiddenRouteTargetCount(targets)
 
   if (targets.length === 0)
-    return <span className="text-xs text-muted-foreground">-</span>
+    return (
+      <span
+        className="text-xs text-muted-foreground"
+        data-model-route-targets-empty
+      >
+        {readOnly ? t('modelRouteNoVisibleTargets') : '-'}
+      </span>
+    )
 
   const chipClassName =
     'inline-flex min-w-0 max-w-full items-center justify-self-start rounded-full border bg-background px-2 py-px text-xs'
@@ -129,23 +140,31 @@ export function ModelRouteTargetsSummary({
                 ) : null}
               </span>
               <span className="flex items-center gap-1">
-                <Switch
-                  aria-label={t('modelRouteTargetSwitch', {
-                    target: routeTargetPairLabel(target),
-                  })}
-                  checked={target.enabled}
-                  disabled={pending || !onToggleTarget}
-                  onCheckedChange={(next) =>
-                    onToggleTarget?.(target.target_id, next)
-                  }
-                  size="sm"
-                />
-                {pendingTargetId === target.target_id ? (
-                  <LoaderCircle
-                    aria-label={t('loading')}
-                    className="size-4 animate-spin text-muted-foreground"
-                  />
-                ) : null}
+                {readOnly ? (
+                  <Badge data-model-route-target-status={target.enabled ? 'on' : 'off'}>
+                    {target.enabled ? t('active') : t('disabled')}
+                  </Badge>
+                ) : (
+                  <>
+                    <Switch
+                      aria-label={t('modelRouteTargetSwitch', {
+                        target: routeTargetPairLabel(target),
+                      })}
+                      checked={target.enabled}
+                      disabled={pending || !onToggleTarget}
+                      onCheckedChange={(next) =>
+                        onToggleTarget?.(target.target_id, next)
+                      }
+                      size="sm"
+                    />
+                    {pendingTargetId === target.target_id ? (
+                      <LoaderCircle
+                        aria-label={t('loading')}
+                        className="size-4 animate-spin text-muted-foreground"
+                      />
+                    ) : null}
+                  </>
+                )}
               </span>
             </li>
           )

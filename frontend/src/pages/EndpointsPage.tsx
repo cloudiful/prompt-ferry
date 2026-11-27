@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { HeaderActions } from '@/components/layout/HeaderActions'
+import { CatalogQuota } from '@/components/endpoints/CatalogQuota'
 import { EndpointDialog } from '@/components/endpoints/EndpointDialog'
 import { EndpointsTable } from '@/components/endpoints/EndpointsTable'
 import { TokenPlanUsageDialog } from '@/components/endpoints/TokenPlanUsageDialog'
@@ -10,6 +11,7 @@ import {
   type TestResultSurface,
 } from '@/components/shared/TestResultPopover'
 import type {
+  EndpointCatalogRow,
   EndpointTestResponse,
   ProviderEndpoint,
 } from '@/generated/admin-api'
@@ -18,6 +20,7 @@ import {
   deleteEndpointMutation,
   listEndpointsOptions,
   listUserOptionsOptions,
+  meListEndpointCatalogOptions,
   testEndpointMutation,
   updateEndpointMutation,
 } from '@/generated/admin-api/@tanstack/react-query.gen'
@@ -36,6 +39,7 @@ import {
 } from '@/lib/endpoints'
 import {
   prefetchTokenPlanUsageBatch,
+  refreshCatalogQuotaBatch,
   refreshTokenPlanUsageBatch,
 } from '@/lib/quota-cache'
 import { useAsyncAction } from '@/lib/use-async-action'
@@ -43,7 +47,10 @@ import { useLocale } from '@/lib/i18n'
 import { useNotifier } from '@/lib/notifier'
 import { useSessionStore } from '@/lib/session'
 import { isQuotaEligible } from '@/models/endpoints/quota'
-import { createEndpointListItemView } from '@/models/endpoints/endpoint-item'
+import {
+  createCatalogEndpointListItemView,
+  createEndpointListItemView,
+} from '@/models/endpoints/endpoint-item'
 import {
   ENDPOINTS_REFRESH_KEY,
   endpointActionKey,
@@ -63,6 +70,7 @@ type TokenPlanDialogTarget = {
 }
 
 const EMPTY_ENDPOINTS: ProviderEndpoint[] = []
+const EMPTY_CATALOG_ENDPOINTS: EndpointCatalogRow[] = []
 
 export function EndpointsPage() {
   const { t } = useLocale()
@@ -71,6 +79,9 @@ export function EndpointsPage() {
   const { notifyApiError, notifySuccess } = useNotifier()
   const me = useSessionStore((state) => state.me)
   const isAdmin = me?.is_admin === true
+  // The normal view is the same page in read-only mode: it reads the safe
+  // catalog and never mounts the administrator controls.
+  const readOnly = !isAdmin
   const [first, setFirst] = useState(0)
   const [rows, setRows] = useStoredPageSize('endpoints')
   const [testResults, setTestResults] = useState<
@@ -98,6 +109,10 @@ export function EndpointsPage() {
   const endpointPageQuery = useQuery({
     ...listEndpointsOptions({ query: { first, rows } }),
     enabled: isAdmin,
+  })
+  const catalogPageQuery = useQuery({
+    ...meListEndpointCatalogOptions({ query: { first, rows } }),
+    enabled: readOnly,
   })
   const userOptionsQuery = useQuery({
     ...listUserOptionsOptions(),
@@ -130,11 +145,16 @@ export function EndpointsPage() {
   }, [endpointPageQuery.error, reportApiError])
 
   useEffect(() => {
+    if (catalogPageQuery.error) reportApiError(catalogPageQuery.error)
+  }, [catalogPageQuery.error, reportApiError])
+
+  useEffect(() => {
     if (userOptionsQuery.error) reportApiError(userOptionsQuery.error)
   }, [reportApiError, userOptionsQuery.error])
 
+  const page = isAdmin ? endpointPageQuery.data : catalogPageQuery.data
+
   useEffect(() => {
-    const page = endpointPageQuery.data
     if (!page || page.rows <= 0) return
     if (page.endpoints.length === 0 && page.first >= page.total) {
       const correctedFirst =
@@ -155,9 +175,11 @@ export function EndpointsPage() {
       rowsRef.current = page.rows
       setRows(page.rows)
     }
-  }, [endpointPageQuery.data, first, rows, setRows])
+  }, [page, first, rows, setRows])
 
   const endpoints = endpointPageQuery.data?.endpoints ?? EMPTY_ENDPOINTS
+  const catalogEndpoints =
+    catalogPageQuery.data?.endpoints ?? EMPTY_CATALOG_ENDPOINTS
   const users = userOptionsQuery.data?.users ?? []
   const eligibleQuotaIds = useMemo(
     () =>
@@ -187,10 +209,10 @@ export function EndpointsPage() {
         asyncAction.pendingOrigin(endpointActionKey(endpoint.endpoint_id)) ===
         'toggle',
     )?.endpoint_id ?? ''
-  const items = useMemo<EndpointListItemView[]>(
-    () =>
-      endpoints.map((endpoint) =>
-        createEndpointListItemView(endpoint, {
+  const items = useMemo<EndpointListItemView[]>(() => {
+    if (readOnly) {
+      return catalogEndpoints.map((row) =>
+        createCatalogEndpointListItemView(row, {
           endpointTestIdle: t('endpointTestIdle'),
           endpointSourceAuto: t('endpointSourceAuto'),
           endpointSourceDetected: t('endpointSourceDetected'),
@@ -202,13 +224,36 @@ export function EndpointsPage() {
           ownerLabel: t('owner'),
           scopeAdmin: t('scopeAdmin'),
           scopeUser: t('scopeUser'),
-          testResult: testResults[endpoint.endpoint_id] ?? null,
-          testingEndpointId: probeInFlightId,
-          togglingEndpointId: toggleInFlightId,
         }),
-      ),
-    [endpoints, probeInFlightId, t, testResults, toggleInFlightId],
-  )
+      )
+    }
+    return endpoints.map((endpoint) =>
+      createEndpointListItemView(endpoint, {
+        endpointTestIdle: t('endpointTestIdle'),
+        endpointSourceAuto: t('endpointSourceAuto'),
+        endpointSourceDetected: t('endpointSourceDetected'),
+        endpointSourceManual: t('endpointSourceManual'),
+        nativeApiChat: t('nativeApiChat'),
+        nativeApiAnthropicMessages: t('nativeApiAnthropicMessages'),
+        nativeApiResponses: t('nativeApiResponses'),
+        nativeApiRealtime: t('nativeApiRealtime'),
+        ownerLabel: t('owner'),
+        scopeAdmin: t('scopeAdmin'),
+        scopeUser: t('scopeUser'),
+        testResult: testResults[endpoint.endpoint_id] ?? null,
+        testingEndpointId: probeInFlightId,
+        togglingEndpointId: toggleInFlightId,
+      }),
+    )
+  }, [
+    catalogEndpoints,
+    endpoints,
+    probeInFlightId,
+    readOnly,
+    t,
+    testResults,
+    toggleInFlightId,
+  ])
 
   function changePage(change: TablePageChange): void {
     firstRef.current = change.first
@@ -224,6 +269,17 @@ export function EndpointsPage() {
   }
 
   function openTokenPlanUsage(endpointId: string): void {
+    if (readOnly) {
+      const row = catalogEndpoints.find((item) => item.endpoint_id === endpointId)
+      if (!row || !isQuotaEligible(row)) return
+      setTokenPlanDialogTarget({
+        endpointId,
+        endpointName: row.name,
+        provider: row.provider,
+        plan: row.plan,
+      })
+      return
+    }
     const endpoint = endpoints.find((item) => item.endpoint_id === endpointId)
     if (!endpoint || !isQuotaEligible(endpoint)) return
     setTokenPlanDialogTarget({
@@ -424,6 +480,34 @@ export function EndpointsPage() {
   }
 
   async function refresh(): Promise<void> {
+    if (readOnly) {
+      // The normal refresh only refetches the safe catalog and the cached
+      // quota: it never collects quota and never forces an administrator
+      // token-plan refresh.
+      const capturedQuotaIds = catalogEndpoints
+        .filter(isQuotaEligible)
+        .map((row) => row.endpoint_id)
+      try {
+        const outcome = await asyncAction.run(
+          ENDPOINTS_REFRESH_KEY,
+          async () => {
+            const [readResults] = await Promise.all([
+              Promise.allSettled([catalogPageQuery.refetch()]),
+              refreshCatalogQuotaBatch(queryClient, capturedQuotaIds),
+            ])
+            return readResults
+          },
+          'refresh',
+        )
+        if (!outcome.executed) return
+        for (const result of outcome.value) {
+          if (result.status === 'rejected') reportApiError(result.reason)
+        }
+      } catch (cause) {
+        reportApiError(cause)
+      }
+      return
+    }
     const capturedQuotaIds = endpoints
       .filter(isQuotaEligible)
       .map((endpoint) => endpoint.endpoint_id)
@@ -458,8 +542,6 @@ export function EndpointsPage() {
   )
   const refreshing = asyncAction.isPending(ENDPOINTS_REFRESH_KEY)
 
-  if (!isAdmin) return null
-
   return (
     <section
       className="grid min-w-0 gap-3"
@@ -483,19 +565,21 @@ export function EndpointsPage() {
           ) : null}
           {t('refresh')}
         </Button>
-        <Button
-          onClick={openCreateDialog}
-          size="sm"
-          type="button"
-          disabled={asyncAction.isPending(endpointActionKey(null))}
-        >
-          {t('newEndpoint')}
-        </Button>
+        {readOnly ? null : (
+          <Button
+            onClick={openCreateDialog}
+            size="sm"
+            type="button"
+            disabled={asyncAction.isPending(endpointActionKey(null))}
+          >
+            {t('newEndpoint')}
+          </Button>
+        )}
       </HeaderActions>
       <EndpointsTable
-        first={endpointPageQuery.data?.first ?? first}
+        first={page?.first ?? first}
         items={items}
-        loading={endpointPageQuery.isPending}
+        loading={isAdmin ? endpointPageQuery.isPending : catalogPageQuery.isPending}
         onDelete={(endpointId) => void deleteEndpoint(endpointId)}
         onEdit={openEditDialog}
         onPage={changePage}
@@ -509,10 +593,11 @@ export function EndpointsPage() {
         }
         openResultKey={openTestResultKey}
         pendingActions={asyncAction.pendingActions}
-        rows={endpointPageQuery.data?.rows ?? rows}
-        total={endpointPageQuery.data?.total ?? 0}
+        readOnly={readOnly}
+        rows={page?.rows ?? rows}
+        total={page?.total ?? 0}
       />
-      {dialogInitialForm ? (
+      {readOnly ? null : dialogInitialForm ? (
         <EndpointDialog
           dialogGeneration={dialogGenerationRef.current}
           endpointId={dialogEndpointId}
@@ -527,15 +612,25 @@ export function EndpointsPage() {
         />
       ) : null}
       {tokenPlanDialogTarget ? (
-        <TokenPlanUsageDialog
-          endpointId={tokenPlanDialogTarget.endpointId}
-          endpointName={tokenPlanDialogTarget.endpointName}
-          onError={reportApiError}
-          onOpenChange={changeTokenPlanDialogOpen}
-          open
-          provider={tokenPlanDialogTarget.provider}
-          plan={tokenPlanDialogTarget.plan}
-        />
+        readOnly ? (
+          <CatalogQuota
+            endpointId={tokenPlanDialogTarget.endpointId}
+            endpointName={tokenPlanDialogTarget.endpointName}
+            onError={reportApiError}
+            onOpenChange={changeTokenPlanDialogOpen}
+            open
+          />
+        ) : (
+          <TokenPlanUsageDialog
+            endpointId={tokenPlanDialogTarget.endpointId}
+            endpointName={tokenPlanDialogTarget.endpointName}
+            onError={reportApiError}
+            onOpenChange={changeTokenPlanDialogOpen}
+            open
+            provider={tokenPlanDialogTarget.provider}
+            plan={tokenPlanDialogTarget.plan}
+          />
+        )
       ) : null}
     </section>
   )

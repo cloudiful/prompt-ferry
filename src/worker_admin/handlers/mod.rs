@@ -21,6 +21,7 @@ mod endpoints;
 mod mcp;
 mod mcp_oauth;
 mod me;
+mod me_catalog;
 mod model_routes;
 mod nodes;
 pub mod oauth;

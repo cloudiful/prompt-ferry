@@ -173,10 +173,27 @@ pub async fn list_visible_endpoints(pool: &PgPool, user_id: i64) -> Result<Vec<R
     attach_route_config_credentials(pool, routes).await
 }
 
-pub async fn list_endpoints_page(pool: &PgPool, first: i64, rows: i64) -> Result<EndpointPage> {
+pub async fn list_endpoints_page(
+    pool: &PgPool,
+    first: i64,
+    rows: i64,
+    viewer: Option<i64>,
+) -> Result<EndpointPage> {
     let db = postgres_connection(pool);
-    let total = Entity::find().count(&db).await? as i64;
-    let endpoints = endpoint_projection()
+    // Issue #99 P1: the visibility predicate is built once and applied to the
+    // count and to the paged rows, so the total always matches the visible
+    // set. `None` keeps the administrator view of every row.
+    let visible = viewer.map(|viewer| {
+        crate::db::visibility::visible_condition(Column::Scope, Column::OwnerUserId, viewer)
+    });
+    let mut count_query = Entity::find();
+    let mut page_query = endpoint_projection();
+    if let Some(visible) = visible.clone() {
+        count_query = count_query.filter(visible.clone());
+        page_query = page_query.filter(visible);
+    }
+    let total = count_query.count(&db).await? as i64;
+    let endpoints = page_query
         .order_by_desc(Column::UpdatedAt)
         .order_by_desc(Column::EndpointId)
         .offset(first.max(0) as u64)
@@ -193,6 +210,27 @@ pub async fn list_endpoints_page(pool: &PgPool, first: i64, rows: i64) -> Result
         first: first.max(0),
         rows: rows.clamp(1, 200),
     })
+}
+
+/// Issue #99 P1: the endpoint ids a viewer may see.
+///
+/// The route targets of the safe model-route catalog are filtered against
+/// this set, so a target never names a hidden endpoint.
+pub async fn list_visible_endpoint_ids(
+    pool: &PgPool,
+    viewer: Option<i64>,
+) -> Result<HashSet<uuid::Uuid>> {
+    let db = postgres_connection(pool);
+    let mut query = Entity::find().select_only().column(Column::EndpointId);
+    if let Some(viewer) = viewer {
+        query = query.filter(crate::db::visibility::visible_condition(
+            Column::Scope,
+            Column::OwnerUserId,
+            viewer,
+        ));
+    }
+    let ids = query.into_tuple::<uuid::Uuid>().all(&db).await?;
+    Ok(ids.into_iter().collect())
 }
 
 pub async fn get_endpoint(

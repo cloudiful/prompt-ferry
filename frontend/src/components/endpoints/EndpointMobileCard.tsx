@@ -1,4 +1,5 @@
 import { Gauge, LoaderCircle, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { QuotaBadges } from '@/components/endpoints/QuotaBadges'
 import { ProviderIcon } from '@/components/providers/ProviderIcon'
 import { Button } from '@/components/ui/button'
@@ -26,6 +27,8 @@ type EndpointMobileCardProps = {
   onToggle: (endpointId: string, enabled: boolean) => void
   openResultKey: string | null
   pendingActions: Readonly<Record<string, string>>
+  // The read-only view shows the same record without the management controls.
+  readOnly?: boolean
 }
 
 export function EndpointMobileCard({
@@ -38,6 +41,7 @@ export function EndpointMobileCard({
   onToggle,
   openResultKey,
   pendingActions,
+  readOnly = false,
 }: EndpointMobileCardProps) {
   const { t } = useLocale()
   const rowKey = endpointActionKey(item.endpoint_id)
@@ -73,31 +77,51 @@ export function EndpointMobileCard({
             </span>
           </div>
         ) : null}
+        {readOnly ? (
+          <div className="grid gap-0.5">
+            <span className="text-xs text-muted-foreground">{t('scope')}</span>
+            <span className="break-words" data-endpoint-scope>
+              {item.scope_label}
+            </span>
+          </div>
+        ) : null}
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">{t('status')}</span>
-          <Switch
-            aria-label={t('endpointEnabledToggle', { name: item.name })}
-            checked={item.enabled}
-            disabled={rowPending}
-            onCheckedChange={(enabled) => onToggle(item.endpoint_id, enabled)}
-          />
-          {rowOrigin === 'toggle' ? (
-            <LoaderCircle
-              aria-label={t('loading')}
-              className="size-4 animate-spin"
-            />
-          ) : null}
+          {readOnly ? (
+            <Badge data-endpoint-status={item.enabled ? 'on' : 'off'}>
+              {item.enabled ? t('active') : t('disabled')}
+            </Badge>
+          ) : (
+            <>
+              <Switch
+                aria-label={t('endpointEnabledToggle', { name: item.name })}
+                checked={item.enabled}
+                disabled={rowPending}
+                onCheckedChange={(enabled) => onToggle(item.endpoint_id, enabled)}
+              />
+              {rowOrigin === 'toggle' ? (
+                <LoaderCircle
+                  aria-label={t('loading')}
+                  className="size-4 animate-spin"
+                />
+              ) : null}
+            </>
+          )}
         </div>
         {isQuotaEligible(item) ? (
           <div className="grid min-w-0 gap-1">
-            <span className="text-xs text-muted-foreground">
-              {t('tokenPlanUsage')}
-            </span>
-            <QuotaBadges
-              density="card"
-              eligible
-              endpointId={item.endpoint_id}
-            />
+            {readOnly ? null : (
+              <span className="text-xs text-muted-foreground">
+                {t('tokenPlanUsage')}
+              </span>
+            )}
+            {readOnly ? null : (
+              <QuotaBadges
+                density="card"
+                eligible
+                endpointId={item.endpoint_id}
+              />
+            )}
           </div>
         ) : null}
       </div>
@@ -113,49 +137,53 @@ export function EndpointMobileCard({
             {t('tokenPlanUsage')}
           </Button>
         ) : null}
-        <TestResultPopover
-          message={item.test_message}
-          onOpenChange={(open) => onResultOpenChange(resultKey, open)}
-          open={openResultKey === resultKey}
-          severity={item.test_severity}
-        >
-          <Button
-            disabled={probePending}
-            onClick={() => onTest(item.endpoint_id, 'mobile')}
-            type="button"
-            variant="outline"
-          >
-            {probePending ? (
-              <LoaderCircle aria-hidden="true" className="animate-spin" />
-            ) : (
-              <RefreshCw aria-hidden="true" />
-            )}
-            {t('test')}
-          </Button>
-        </TestResultPopover>
-        <Button
-          disabled={rowPending}
-          onClick={() => onEdit(item.endpoint_id)}
-          type="button"
-          variant="outline"
-        >
-          <Pencil aria-hidden="true" />
-          {t('edit')}
-        </Button>
-        <Button
-          className="col-span-2"
-          disabled={rowPending}
-          onClick={() => onDelete(item.endpoint_id)}
-          type="button"
-          variant="outline"
-        >
-          {rowOrigin === 'delete' ? (
-            <LoaderCircle aria-hidden="true" className="animate-spin" />
-          ) : (
-            <Trash2 aria-hidden="true" />
-          )}
-          {t('delete')}
-        </Button>
+        {readOnly ? null : (
+          <>
+            <TestResultPopover
+              message={item.test_message}
+              onOpenChange={(open) => onResultOpenChange(resultKey, open)}
+              open={openResultKey === resultKey}
+              severity={item.test_severity}
+            >
+              <Button
+                disabled={probePending}
+                onClick={() => onTest(item.endpoint_id, 'mobile')}
+                type="button"
+                variant="outline"
+              >
+                {probePending ? (
+                  <LoaderCircle className="animate-spin" />
+                ) : (
+                  <RefreshCw className="animate-spin" />
+                )}
+                {t('test')}
+              </Button>
+            </TestResultPopover>
+            <Button
+              disabled={rowPending}
+              onClick={() => onEdit(item.endpoint_id)}
+              type="button"
+              variant="outline"
+            >
+              <Pencil aria-hidden="true" />
+              {t('edit')}
+            </Button>
+            <Button
+              className="col-span-2"
+              disabled={rowPending}
+              onClick={() => onDelete(item.endpoint_id)}
+              type="button"
+              variant="outline"
+            >
+              {rowOrigin === 'delete' ? (
+                <LoaderCircle className="animate-spin" />
+              ) : (
+                <Trash2 aria-hidden="true" />
+              )}
+              {t('delete')}
+            </Button>
+          </>
+        )}
       </div>
     </article>
   )

@@ -2253,6 +2253,132 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/me/endpoint-catalog:
+    get:
+      tags:
+      - me
+      summary: The upstream endpoints the current user may see.
+      description: |-
+        The row set is filtered in the repository query, before the count and the
+        page, so the total always matches the visible rows.
+      operationId: me_list_endpoint_catalog
+      parameters:
+      - name: first
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: rows
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: Visible upstream endpoint catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EndpointCatalogPageResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/me/endpoint-catalog/{endpoint_id}/quota:
+    get:
+      tags:
+      - me
+      summary: The cached quota of one visible endpoint.
+      description: |-
+        The answer always comes from the cache: the read never collects quota,
+        never forces a refresh, and never reaches the upstream provider. An
+        endpoint the caller may not see is indistinguishable from a missing one.
+      operationId: me_endpoint_quota
+      parameters:
+      - name: endpoint_id
+        in: path
+        description: Endpoint ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Cached quota of a visible endpoint
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CachedQuotaResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Endpoint not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/me/model-route-catalog:
+    get:
+      tags:
+      - me
+      summary: The model routes the current user may see.
+      description: |-
+        The route rows are filtered in the repository query, and every target is
+        filtered again against the visible endpoint set, so a target never names a
+        hidden endpoint.
+      operationId: me_list_model_route_catalog
+      parameters:
+      - name: first
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: rows
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: Visible model route catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelRouteCatalogPageResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/me/models:
     get:
       tags:
@@ -2957,6 +3083,61 @@ components:
       enum:
       - implicit_tls
       - start_tls
+    CachedQuotaObservation:
+      type: object
+      description: |-
+        One cached quota observation of one cached key.
+
+        The observation carries the canonical quota windows only: no key label,
+        no key or account id, no provider error, and no spend metadata.
+      required:
+      - stale
+      - windows
+      properties:
+        observed_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: The moment the cached value was observed, when the cache knows it.
+        stale:
+          type: boolean
+          description: '`true` when the cached value is past its freshness window.'
+        windows:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalQuotaWindow'
+    CachedQuotaResponse:
+      type: object
+      description: |-
+        The cached quota of one visible endpoint.
+
+        The answer is always served from the cache: a read never collects quota,
+        never refreshes it, and never reaches the upstream provider.
+      required:
+      - endpoint_id
+      - provider
+      - available
+      - observations
+      properties:
+        available:
+          type: boolean
+          description: |-
+            `false` when no usable cached observation exists. An unknown balance is
+            never reported as zero.
+        endpoint_id:
+          type: string
+          format: uuid
+        observations:
+          type: array
+          items:
+            $ref: '#/components/schemas/CachedQuotaObservation'
+        provider:
+          $ref: '#/components/schemas/EndpointProvider'
+        provider_region:
+          oneOf:
+          - $ref: '#/components/schemas/EndpointRegion'
+          - type: 'null'
     CanonicalQuotaWindow:
       type: object
       description: |-
@@ -3032,6 +3213,12 @@ components:
       - balance
       - unlimited
       - custom
+    CatalogVisibility:
+      type: string
+      description: How a visible catalog row is scoped for the current viewer.
+      enum:
+      - shared
+      - owned
     ClientKey:
       type: object
       required:
@@ -3668,6 +3855,70 @@ components:
           description: Stable key identity; when omitted or null the key is matched by key_label on update
         key_label:
           type: string
+    EndpointCatalogPageResponse:
+      type: object
+      description: One page of the safe endpoint catalog.
+      required:
+      - total
+      - endpoints
+      - first
+      - rows
+      properties:
+        endpoints:
+          type: array
+          items:
+            $ref: '#/components/schemas/EndpointCatalogRow'
+        first:
+          type: integer
+          format: int64
+        rows:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    EndpointCatalogRow:
+      type: object
+      description: |-
+        One upstream endpoint of the safe catalog.
+
+        The row never names the endpoint address, the owner, the credential, or
+        the key labels; it only describes what the viewer may route through.
+      required:
+      - endpoint_id
+      - name
+      - provider
+      - plan
+      - enabled
+      - native_api
+      - native_api_source
+      - visibility
+      - quota_eligible
+      properties:
+        enabled:
+          type: boolean
+        endpoint_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        native_api:
+          $ref: '#/components/schemas/NativeApi'
+        native_api_source:
+          type: string
+        plan:
+          $ref: '#/components/schemas/EndpointPlan'
+        provider:
+          $ref: '#/components/schemas/EndpointProvider'
+        provider_region:
+          oneOf:
+          - $ref: '#/components/schemas/EndpointRegion'
+          - type: 'null'
+        quota_eligible:
+          type: boolean
+          description: '`true` when the provider exposes a quota surface for this endpoint.'
+        visibility:
+          $ref: '#/components/schemas/CatalogVisibility'
     EndpointModelsResponse:
       type: object
       description: |-
@@ -4590,6 +4841,87 @@ components:
         updated_at:
           type: string
           format: date-time
+    ModelRouteCatalogPageResponse:
+      type: object
+      description: One page of the safe model-route catalog.
+      required:
+      - total
+      - routes
+      - first
+      - rows
+      properties:
+        first:
+          type: integer
+          format: int64
+        routes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelRouteCatalogRow'
+        rows:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    ModelRouteCatalogRow:
+      type: object
+      description: One model route of the safe catalog.
+      required:
+      - rule_id
+      - model_pattern
+      - routing_strategy
+      - enabled
+      - visibility
+      - targets
+      properties:
+        enabled:
+          type: boolean
+        model_pattern:
+          type: string
+        routing_strategy:
+          $ref: '#/components/schemas/ModelRouteRoutingStrategy'
+        rule_id:
+          type: string
+          format: uuid
+        targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelRouteCatalogTarget'
+          description: |-
+            The targets the viewer may see. A route without a visible target keeps
+            an empty list instead of naming or counting a hidden target.
+        visibility:
+          $ref: '#/components/schemas/CatalogVisibility'
+    ModelRouteCatalogTarget:
+      type: object
+      description: |-
+        One target of a safe model-route row.
+
+        A target never names the upstream address, the credential, the proxy, or
+        the internal target identity.
+      required:
+      - endpoint_id
+      - endpoint_enabled
+      - enabled
+      - native_api
+      properties:
+        enabled:
+          type: boolean
+        endpoint_enabled:
+          type: boolean
+        endpoint_id:
+          type: string
+          format: uuid
+        endpoint_name:
+          type:
+          - string
+          - 'null'
+        native_api:
+          $ref: '#/components/schemas/NativeApi'
+        upstream_model:
+          type:
+          - string
+          - 'null'
     ModelRoutePage:
       type: object
       required:

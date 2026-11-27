@@ -9,6 +9,7 @@ import {
 import { capturePayload } from '@/stores/record-action-types'
 import type {
   ModelEndpointRule,
+  ModelRouteCatalogRow,
   ModelRouteTestResponse,
   ProviderEndpoint,
 } from '@/generated/admin-api'
@@ -17,6 +18,7 @@ import {
   deleteModelRouteMutation,
   listModelRoutesOptions,
   listUserOptionsOptions,
+  meListModelRouteCatalogOptions,
   testModelRouteMutation,
   updateModelRouteMutation,
 } from '@/generated/admin-api/@tanstack/react-query.gen'
@@ -45,6 +47,7 @@ import { useNotifier } from '@/lib/notifier'
 import { useSessionStore } from '@/lib/session'
 import { modelRouteActionKey, networkTestKey } from '@/models/endpoints'
 import {
+  createCatalogModelRouteListItemView,
   createModelRouteListItemView,
   modelRouteTargetToggleOrigin,
 } from '@/models/endpoints/model-route-item'
@@ -55,6 +58,7 @@ import { useStoredPageSize } from '@/components/shared/TablePagination'
 
 const EMPTY_ENDPOINTS: ProviderEndpoint[] = []
 const EMPTY_ROUTES: ModelEndpointRule[] = []
+const EMPTY_CATALOG_ROUTES: ModelRouteCatalogRow[] = []
 
 export function ModelRoutesPage() {
   const { t } = useLocale()
@@ -63,6 +67,9 @@ export function ModelRoutesPage() {
   const { notifyApiError, notifySuccess } = useNotifier()
   const me = useSessionStore((state) => state.me)
   const isAdmin = me?.is_admin === true
+  // The normal view is the same page in read-only mode: it reads the safe
+  // catalog and never mounts the administrator controls.
+  const readOnly = !isAdmin
   const [first, setFirst] = useState(0)
   const [rows, setRows] = useStoredPageSize(
     'model-routes',
@@ -90,6 +97,10 @@ export function ModelRoutesPage() {
   const routePageQuery = useQuery({
     ...listModelRoutesOptions({ query: { first, rows } }),
     enabled: isAdmin,
+  })
+  const catalogRouteQuery = useQuery({
+    ...meListModelRouteCatalogOptions({ query: { first, rows } }),
+    enabled: readOnly,
   })
   const endpointsQuery = useQuery({
     enabled: isAdmin,
@@ -122,13 +133,17 @@ export function ModelRoutesPage() {
     if (routePageQuery.error) reportApiError(routePageQuery.error)
   }, [reportApiError, routePageQuery.error])
   useEffect(() => {
+    if (catalogRouteQuery.error) reportApiError(catalogRouteQuery.error)
+  }, [catalogRouteQuery.error, reportApiError])
+  useEffect(() => {
     if (endpointsQuery.error) reportApiError(endpointsQuery.error)
   }, [endpointsQuery.error, reportApiError])
   useEffect(() => {
     if (usersQuery.error) reportApiError(usersQuery.error)
   }, [reportApiError, usersQuery.error])
 
-  const page = routePageQuery.data
+  const page = isAdmin ? routePageQuery.data : catalogRouteQuery.data
+
   useEffect(() => {
     if (!page || page.rows <= 0) return
     let correctedFirst = page.first
@@ -155,14 +170,15 @@ export function ModelRoutesPage() {
     setOpenTestResultKey(null)
   }, [first])
 
-  const routes = page?.routes ?? EMPTY_ROUTES
+  const routes = routePageQuery.data?.routes ?? EMPTY_ROUTES
+  const catalogRoutes = catalogRouteQuery.data?.routes ?? EMPTY_CATALOG_ROUTES
   const endpoints = endpointsQuery.data ?? EMPTY_ENDPOINTS
   const users = usersQuery.data?.users ?? []
   const pendingActions = asyncAction.pendingActions
-  const items = useMemo(
-    () =>
-      routes.map((route) =>
-        createModelRouteListItemView(route, {
+  const items = useMemo(() => {
+    if (readOnly) {
+      return catalogRoutes.map((route) =>
+        createCatalogModelRouteListItemView(route, {
           endpointTestIdle: t('endpointTestIdle'),
           modelRouteTestNoneEligible: t('modelRouteTestNoneEligible'),
           modelRouteTestPassed: (passed, total) =>
@@ -170,21 +186,32 @@ export function ModelRoutesPage() {
           ownerLabel: t('owner'),
           scopeAdmin: t('scopeAdmin'),
           scopeUser: t('scopeUser'),
-          testResult: testResults[route.rule_id] ?? null,
-          testingModelRouteId: asyncAction.isPending(
-            networkTestKey('modelroute', route.rule_id),
-          )
+        }),
+      )
+    }
+    return routes.map((route) =>
+      createModelRouteListItemView(route, {
+        endpointTestIdle: t('endpointTestIdle'),
+        modelRouteTestNoneEligible: t('modelRouteTestNoneEligible'),
+        modelRouteTestPassed: (passed, total) =>
+          t('modelRouteTestPassed', { passed, total }),
+        ownerLabel: t('owner'),
+        scopeAdmin: t('scopeAdmin'),
+        scopeUser: t('scopeUser'),
+        testResult: testResults[route.rule_id] ?? null,
+        testingModelRouteId: asyncAction.isPending(
+          networkTestKey('modelroute', route.rule_id),
+        )
+          ? route.rule_id
+          : '',
+        togglingModelRouteId:
+          asyncAction.pendingOrigin(modelRouteActionKey(route.rule_id)) ===
+          'toggle'
             ? route.rule_id
             : '',
-          togglingModelRouteId:
-            asyncAction.pendingOrigin(modelRouteActionKey(route.rule_id)) ===
-            'toggle'
-              ? route.rule_id
-              : '',
-        }),
-      ),
-    [asyncAction, routes, t, testResults],
-  )
+      }),
+    )
+  }, [asyncAction, catalogRoutes, readOnly, routes, t, testResults])
 
   function setPageAfterRefresh(
     refreshed: { first: number; rows: number },
@@ -282,8 +309,8 @@ export function ModelRoutesPage() {
       ) {
         dialogOpenRef.current = false
         dialogRuleIdRef.current = null
-        dialogGenerationRef.current += 1
         setDialogForm(null)
+        dialogGenerationRef.current += 1
       }
       notifySuccess(t('saved'))
     } catch (cause) {
@@ -396,6 +423,11 @@ export function ModelRoutesPage() {
   }
 
   async function refresh(): Promise<void> {
+    if (readOnly) {
+      // The normal refresh only refetches the safe catalog.
+      await catalogRouteQuery.refetch()
+      return
+    }
     const reads: Promise<unknown>[] = [
       routePageQuery.refetch(),
       endpointsQuery.refetch(),
@@ -412,17 +444,29 @@ export function ModelRoutesPage() {
       data-foundation-route-id="R-ENDPOINTS-ROUTES"
     >
       <HeaderActions>
-        <Button onClick={openCreateDialog} type="button">
-          <Plus />
-          {t('newModelRoute')}
-        </Button>
+        {readOnly ? null : (
+          <Button onClick={openCreateDialog} type="button">
+            <Plus />
+            {t('newModelRoute')}
+          </Button>
+        )}
         <Button
-          disabled={routePageQuery.isFetching || endpointsQuery.isFetching}
+          disabled={
+            isAdmin
+              ? routePageQuery.isFetching || endpointsQuery.isFetching
+              : catalogRouteQuery.isFetching
+          }
           onClick={() => void refresh()}
           type="button"
           variant="outline"
         >
-          {routePageQuery.isFetching || endpointsQuery.isFetching ? (
+          {isAdmin ? (
+            routePageQuery.isFetching || endpointsQuery.isFetching ? (
+              <LoaderCircle className="animate-spin" />
+            ) : (
+              <RefreshCw />
+            )
+          ) : catalogRouteQuery.isFetching ? (
             <LoaderCircle className="animate-spin" />
           ) : (
             <RefreshCw />
@@ -430,7 +474,7 @@ export function ModelRoutesPage() {
           {t('refresh')}
         </Button>
       </HeaderActions>
-      {routePageQuery.error ? (
+      {isAdmin && routePageQuery.error ? (
         <div
           className="grid gap-2 rounded-lg border border-destructive/40 p-3"
           role="alert"
@@ -453,7 +497,30 @@ export function ModelRoutesPage() {
           </Button>
         </div>
       ) : null}
-      {endpointsQuery.error ? (
+      {readOnly && catalogRouteQuery.error ? (
+        <div
+          className="grid gap-2 rounded-lg border border-destructive/40 p-3"
+          role="alert"
+        >
+          <span>
+            {t('error')}:{' '}
+            {String(
+              catalogRouteQuery.error instanceof Error
+                ? catalogRouteQuery.error.message
+                : catalogRouteQuery.error,
+            )}
+          </span>
+          <Button
+            onClick={() => void catalogRouteQuery.refetch()}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {t('retry')}
+          </Button>
+        </div>
+      ) : null}
+      {isAdmin && endpointsQuery.error ? (
         <div
           className="grid gap-2 rounded-lg border border-destructive/40 p-3"
           role="alert"
@@ -479,7 +546,9 @@ export function ModelRoutesPage() {
       <ModelRoutesTable
         first={page?.first ?? first}
         items={items}
-        loading={routePageQuery.isPending}
+        loading={
+          isAdmin ? routePageQuery.isPending : catalogRouteQuery.isPending
+        }
         onDelete={(id) => void deleteModelRoute(id)}
         onEdit={openEditDialog}
         onPageChange={changePage}
@@ -492,10 +561,11 @@ export function ModelRoutesPage() {
         }
         openResultKey={openTestResultKey}
         pendingActions={pendingActions}
+        readOnly={readOnly}
         rows={page?.rows ?? rows}
         total={page?.total ?? 0}
       />
-      {dialogForm ? (
+      {readOnly ? null : dialogForm ? (
         <ModelRouteDialog
           endpoints={endpoints}
           endpointOptions={endpoints.map((endpoint) => ({
@@ -515,13 +585,15 @@ export function ModelRoutesPage() {
           users={users}
         />
       ) : null}
-      <ModelRouteTestResultsDialog
-        onOpenChange={(open) => {
-          if (!open) setDetailsRuleId(null)
-        }}
-        open={detailsRuleId !== null}
-        results={details?.results ?? []}
-      />
+      {readOnly ? null : (
+        <ModelRouteTestResultsDialog
+          onOpenChange={(open) => {
+            if (!open) setDetailsRuleId(null)
+          }}
+          open={detailsRuleId !== null}
+          results={details?.results ?? []}
+        />
+      )}
     </section>
   )
 }

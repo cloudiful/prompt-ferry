@@ -19,7 +19,7 @@ pub(super) async fn list_model_routes(
     }
     match state
         .config_repository
-        .list_model_routes_page(query.first.unwrap_or(0), query.rows.unwrap_or(10))
+        .list_model_routes_page(query.first.unwrap_or(0), query.rows.unwrap_or(10), None)
         .await
     {
         Ok(page) => Json(ModelRoutePageResponse::from(page)).into_response(),

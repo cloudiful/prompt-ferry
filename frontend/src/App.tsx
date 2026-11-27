@@ -39,17 +39,9 @@ function AppRouteElement({ route }: { route: AppRoute }) {
         </AdminGuard>
       )
     case 'R-ENDPOINTS-UPSTREAMS':
-      return (
-        <AdminGuard>
-          <EndpointsPage />
-        </AdminGuard>
-      )
+      return <EndpointsPage />
     case 'R-ENDPOINTS-ROUTES':
-      return (
-        <AdminGuard>
-          <ModelRoutesPage />
-        </AdminGuard>
-      )
+      return <ModelRoutesPage />
     case 'R-MCP':
       return <McpPage />
     case 'R-REDACTION-RULES':

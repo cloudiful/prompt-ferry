@@ -73,19 +73,18 @@ export const navSections: NavSection[] = [
     id: 'endpoints',
     labelKey: 'endpoint',
     icon: Cable,
-    adminOnly: true,
     routes: [
       {
         id: 'R-ENDPOINTS-UPSTREAMS',
         path: '/endpoints/upstreams',
         titleKey: 'endpoint',
-        adminOnly: true,
+        adminOnly: false,
       },
       {
         id: 'R-ENDPOINTS-ROUTES',
         path: '/endpoints/routes',
         titleKey: 'modelRoute',
-        adminOnly: true,
+        adminOnly: false,
       },
     ],
   },

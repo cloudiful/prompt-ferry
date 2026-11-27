@@ -1,5 +1,5 @@
 use sea_orm::sea_query::{Alias, Expr, ExprTrait, JoinType, Order, Query, SelectStatement};
-use sea_orm::{ConnectionTrait, EntityTrait, QueryOrder, QuerySelect};
+use sea_orm::{ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
 use super::*;
 use crate::db::entities::postgres::model_endpoint_rules;
@@ -33,15 +33,31 @@ pub async fn list_model_endpoint_rules_page(
     pool: &PgPool,
     first: i64,
     rows: i64,
+    viewer: Option<i64>,
 ) -> Result<ModelRoutePage> {
     let db = postgres_connection(pool);
-    let counts = Query::select()
+    // Issue #99 P1: one visibility predicate drives the count and the paged
+    // rows, so the total always matches the visible set. `None` keeps the
+    // administrator view of every rule.
+    let visible = viewer.map(|viewer| {
+        crate::db::visibility::visible_condition(
+            model_endpoint_rules::Column::Scope,
+            model_endpoint_rules::Column::OwnerUserId,
+            viewer,
+        )
+    });
+    let mut counts = Query::select()
         .expr_as(
             Expr::col(model_endpoint_rules::Column::RuleId).count(),
             Alias::new("total"),
         )
         .from(model_endpoint_rules::Entity)
         .to_owned();
+    let mut route_query = model_endpoint_rules::Entity::find();
+    if let Some(visible) = visible.clone() {
+        counts.cond_where(visible.clone());
+        route_query = route_query.filter(visible);
+    }
     let count_row = db
         .query_one(&counts)
         .await
@@ -50,7 +66,7 @@ pub async fn list_model_endpoint_rules_page(
     let total: i64 = count_row.try_get("", "total").map_err(native_error)?;
     let first = std::cmp::Ord::max(first, 0);
     let rows = rows.clamp(1, 200);
-    let route_rows = model_endpoint_rules::Entity::find()
+    let route_rows = route_query
         .order_by_asc(Expr::cust("CASE WHEN scope = 'user' THEN 0 ELSE 1 END"))
         .order_by_asc(model_endpoint_rules::Column::OwnerUserId)
         .order_by_asc(model_endpoint_rules::Column::ModelPattern)

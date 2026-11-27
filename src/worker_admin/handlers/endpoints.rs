@@ -21,7 +21,7 @@ pub(super) async fn list_endpoints(
     }
     match state
         .config_repository
-        .list_endpoints_page(query.first.unwrap_or(0), query.rows.unwrap_or(10))
+        .list_endpoints_page(query.first.unwrap_or(0), query.rows.unwrap_or(10), None)
         .await
     {
         Ok(page) => Json(EndpointPageResponse::from(page)).into_response(),

@@ -131,6 +131,42 @@ export type CacheAlertSmtpSettingsResponse = {
 export type CacheAlertSmtpTls = 'implicit_tls' | 'start_tls';
 
 /**
+ * One cached quota observation of one cached key.
+ *
+ * The observation carries the canonical quota windows only: no key label,
+ * no key or account id, no provider error, and no spend metadata.
+ */
+export type CachedQuotaObservation = {
+    /**
+     * The moment the cached value was observed, when the cache knows it.
+     */
+    observed_at?: string | null;
+    /**
+     * `true` when the cached value is past its freshness window.
+     */
+    stale: boolean;
+    windows: Array<CanonicalQuotaWindow>;
+};
+
+/**
+ * The cached quota of one visible endpoint.
+ *
+ * The answer is always served from the cache: a read never collects quota,
+ * never refreshes it, and never reaches the upstream provider.
+ */
+export type CachedQuotaResponse = {
+    /**
+     * `false` when no usable cached observation exists. An unknown balance is
+     * never reported as zero.
+     */
+    available: boolean;
+    endpoint_id: string;
+    observations: Array<CachedQuotaObservation>;
+    provider: EndpointProvider;
+    provider_region?: EndpointRegion | null;
+};
+
+/**
  * One additive canonical quota observation (issue #844 P1). `source_id`
  * is the stable provider slot/model/currency identity (never a secret);
  * amounts preserve presence (`Some(0.0)` is a real zero, `None` is
@@ -159,6 +195,11 @@ export type CanonicalQuotaWindow = {
  * amounts only and never a synthetic percentage.
  */
 export type CanonicalQuotaWindowKind = 'five_hour' | 'rolling' | 'weekly' | 'monthly' | 'balance' | 'unlimited' | 'custom';
+
+/**
+ * How a visible catalog row is scoped for the current viewer.
+ */
+export type CatalogVisibility = 'shared' | 'owned';
 
 export type ClientKey = {
     created_at: string;
@@ -432,6 +473,38 @@ export type EndpointApiKeyRequest = {
      */
     key_id?: string | null;
     key_label: string;
+};
+
+/**
+ * One page of the safe endpoint catalog.
+ */
+export type EndpointCatalogPageResponse = {
+    endpoints: Array<EndpointCatalogRow>;
+    first: number;
+    rows: number;
+    total: number;
+};
+
+/**
+ * One upstream endpoint of the safe catalog.
+ *
+ * The row never names the endpoint address, the owner, the credential, or
+ * the key labels; it only describes what the viewer may route through.
+ */
+export type EndpointCatalogRow = {
+    enabled: boolean;
+    endpoint_id: string;
+    name: string;
+    native_api: NativeApi;
+    native_api_source: string;
+    plan: EndpointPlan;
+    provider: EndpointProvider;
+    provider_region?: EndpointRegion | null;
+    /**
+     * `true` when the provider exposes a quota surface for this endpoint.
+     */
+    quota_eligible: boolean;
+    visibility: CatalogVisibility;
 };
 
 /**
@@ -828,6 +901,47 @@ export type ModelEndpointRule = {
     scope: string;
     targets: Array<ModelRouteTarget>;
     updated_at: string;
+};
+
+/**
+ * One page of the safe model-route catalog.
+ */
+export type ModelRouteCatalogPageResponse = {
+    first: number;
+    routes: Array<ModelRouteCatalogRow>;
+    rows: number;
+    total: number;
+};
+
+/**
+ * One model route of the safe catalog.
+ */
+export type ModelRouteCatalogRow = {
+    enabled: boolean;
+    model_pattern: string;
+    routing_strategy: ModelRouteRoutingStrategy;
+    rule_id: string;
+    /**
+     * The targets the viewer may see. A route without a visible target keeps
+     * an empty list instead of naming or counting a hidden target.
+     */
+    targets: Array<ModelRouteCatalogTarget>;
+    visibility: CatalogVisibility;
+};
+
+/**
+ * One target of a safe model-route row.
+ *
+ * A target never names the upstream address, the credential, the proxy, or
+ * the internal target identity.
+ */
+export type ModelRouteCatalogTarget = {
+    enabled: boolean;
+    endpoint_enabled: boolean;
+    endpoint_id: string;
+    endpoint_name?: string | null;
+    native_api: NativeApi;
+    upstream_model?: string | null;
 };
 
 export type ModelRoutePage = {
@@ -4340,6 +4454,108 @@ export type MeUpdateClientKeyResponses = {
 };
 
 export type MeUpdateClientKeyResponse = MeUpdateClientKeyResponses[keyof MeUpdateClientKeyResponses];
+
+export type MeListEndpointCatalogData = {
+    body?: never;
+    path?: never;
+    query?: {
+        first?: number;
+        rows?: number;
+    };
+    url: '/api/v1/me/endpoint-catalog';
+};
+
+export type MeListEndpointCatalogErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorEnvelope;
+    /**
+     * Forbidden
+     */
+    403: ErrorEnvelope;
+};
+
+export type MeListEndpointCatalogError = MeListEndpointCatalogErrors[keyof MeListEndpointCatalogErrors];
+
+export type MeListEndpointCatalogResponses = {
+    /**
+     * Visible upstream endpoint catalog
+     */
+    200: EndpointCatalogPageResponse;
+};
+
+export type MeListEndpointCatalogResponse = MeListEndpointCatalogResponses[keyof MeListEndpointCatalogResponses];
+
+export type MeEndpointQuotaData = {
+    body?: never;
+    path: {
+        /**
+         * Endpoint ID
+         */
+        endpoint_id: string;
+    };
+    query?: never;
+    url: '/api/v1/me/endpoint-catalog/{endpoint_id}/quota';
+};
+
+export type MeEndpointQuotaErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorEnvelope;
+    /**
+     * Forbidden
+     */
+    403: ErrorEnvelope;
+    /**
+     * Endpoint not found
+     */
+    404: ErrorEnvelope;
+};
+
+export type MeEndpointQuotaError = MeEndpointQuotaErrors[keyof MeEndpointQuotaErrors];
+
+export type MeEndpointQuotaResponses = {
+    /**
+     * Cached quota of a visible endpoint
+     */
+    200: CachedQuotaResponse;
+};
+
+export type MeEndpointQuotaResponse = MeEndpointQuotaResponses[keyof MeEndpointQuotaResponses];
+
+export type MeListModelRouteCatalogData = {
+    body?: never;
+    path?: never;
+    query?: {
+        first?: number;
+        rows?: number;
+    };
+    url: '/api/v1/me/model-route-catalog';
+};
+
+export type MeListModelRouteCatalogErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorEnvelope;
+    /**
+     * Forbidden
+     */
+    403: ErrorEnvelope;
+};
+
+export type MeListModelRouteCatalogError = MeListModelRouteCatalogErrors[keyof MeListModelRouteCatalogErrors];
+
+export type MeListModelRouteCatalogResponses = {
+    /**
+     * Visible model route catalog
+     */
+    200: ModelRouteCatalogPageResponse;
+};
+
+export type MeListModelRouteCatalogResponse = MeListModelRouteCatalogResponses[keyof MeListModelRouteCatalogResponses];
 
 export type MeListModelsData = {
     body?: never;
