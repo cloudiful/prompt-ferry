@@ -142,10 +142,11 @@ impl super::ConfigRepository {
         &self,
         first: i64,
         rows: i64,
+        viewer: Option<i64>,
     ) -> Result<UnifiedModelRoutePage> {
         match self {
-            Self::Postgres(repo) => repo.list_model_routes_page(first, rows).await,
-            Self::Sqlite(repo) => repo.list_model_routes_page(first, rows).await,
+            Self::Postgres(repo) => repo.list_model_routes_page(first, rows, viewer).await,
+            Self::Sqlite(repo) => repo.list_model_routes_page(first, rows, viewer).await,
         }
     }
 
@@ -189,9 +190,14 @@ impl super::ConfigRepository {
 }
 
 impl PostgresConfigRepository {
-    async fn list_model_routes_page(&self, first: i64, rows: i64) -> Result<UnifiedModelRoutePage> {
+    async fn list_model_routes_page(
+        &self,
+        first: i64,
+        rows: i64,
+        viewer: Option<i64>,
+    ) -> Result<UnifiedModelRoutePage> {
         let page: PgModelRoutePage =
-            crate::db::list_model_endpoint_rules_page(&self.pool, first, rows).await?;
+            crate::db::list_model_endpoint_rules_page(&self.pool, first, rows, viewer).await?;
         Ok(UnifiedModelRoutePage {
             total: page.total,
             routes: page
@@ -234,10 +240,17 @@ impl PostgresConfigRepository {
 }
 
 impl SqliteConfigRepository {
-    async fn list_model_routes_page(&self, first: i64, rows: i64) -> Result<UnifiedModelRoutePage> {
+    async fn list_model_routes_page(
+        &self,
+        first: i64,
+        rows: i64,
+        viewer: Option<i64>,
+    ) -> Result<UnifiedModelRoutePage> {
+        // Issue #99 P1: the SQLite route table carries scope and owner, so a
+        // viewer's page holds only the shared rules and their own rules.
         let (total, routes) = self
             .store
-            .list_routes_page(&self.manager, first, rows)
+            .list_routes_page(&self.manager, first, rows, viewer)
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
         let snapshot = self

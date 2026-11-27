@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { Gauge, LoaderCircle, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { TablePagination } from '@/components/shared/TablePagination'
@@ -38,6 +39,8 @@ type EndpointsTableProps = {
   onToggle: (endpointId: string, enabled: boolean) => void
   openResultKey: string | null
   pendingActions: Readonly<Record<string, string>>
+  // The read-only view shows the same rows without the management controls.
+  readOnly?: boolean
   rows: number
   total: number
 }
@@ -55,6 +58,7 @@ export function EndpointsTable({
   onToggle,
   openResultKey,
   pendingActions,
+  readOnly = false,
   rows,
   total,
 }: EndpointsTableProps) {
@@ -89,6 +93,14 @@ export function EndpointsTable({
                     {item.owner_label}
                   </div>
                 ) : null}
+                {readOnly ? (
+                  <div
+                    className="text-xs text-muted-foreground"
+                    data-endpoint-scope
+                  >
+                    {item.scope_label}
+                  </div>
+                ) : null}
               </div>
             </div>
           )
@@ -99,6 +111,13 @@ export function EndpointsTable({
         header: t('status'),
         cell: ({ row }) => {
           const item = row.original
+          if (readOnly) {
+            return (
+              <Badge data-endpoint-status={item.enabled ? 'on' : 'off'}>
+                {item.enabled ? t('active') : t('disabled')}
+              </Badge>
+            )
+          }
           const rowKey = endpointActionKey(item.endpoint_id)
           const rowPending = Object.hasOwn(pendingActions, rowKey)
           const rowOrigin = pendingActions[rowKey]
@@ -128,16 +147,37 @@ export function EndpointsTable({
       result.push({
         id: 'quota',
         header: t('tokenPlanUsageColumn'),
-        cell: ({ row }) =>
-          isQuotaEligible(row.original) ? (
+        cell: ({ row }) => {
+          const item = row.original
+          if (!isQuotaEligible(item)) return null
+          if (readOnly) {
+            // The read-only view never reads the administrator token-plan
+            // usage surface, so the cached catalog quota is opened instead.
+            return (
+              <Button
+                aria-label={t('tokenPlanUsage')}
+                onClick={() => onTokenPlanUsage(item.endpoint_id)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <Gauge aria-hidden="true" />
+                {t('tokenPlanUsage')}
+              </Button>
+            )
+          }
+          return (
             <QuotaBadges
               density="table"
               eligible
               endpointId={row.original.endpoint_id}
             />
-          ) : null,
+          )
+        },
       })
     }
+
+    if (readOnly) return result
 
     result.push({
       id: 'actions',
@@ -224,6 +264,7 @@ export function EndpointsTable({
     onToggle,
     openResultKey,
     pendingActions,
+    readOnly,
     showQuotaColumn,
     t,
   ])
@@ -248,6 +289,7 @@ export function EndpointsTable({
             onToggle={onToggle}
             openResultKey={openResultKey}
             pendingActions={pendingActions}
+            readOnly={readOnly}
           />
         )}
         rowAttributes={(item) => ({

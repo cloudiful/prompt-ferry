@@ -458,6 +458,18 @@ function deepseekFallbackRows(
   )
 }
 
+// Every canonical window of one observation, validated and in payload order.
+//
+// This is the unfiltered adapter for surfaces that already own their rows: it
+// keeps every window, including a video-only observation, and never collapses
+// or reorders them.
+export function canonicalRowsFromWindows(
+  windows: readonly CanonicalQuotaWindow[],
+  nowMs: number,
+): CanonicalQuotaRow[] {
+  return windows.map((window) => validateRow(window, nowMs))
+}
+
 // Validated rows for one key: canonical observations when present (an
 // explicit empty stays empty and never falls back), otherwise the
 // conservative legacy projection. Failed keys carry no rows, so a failure
@@ -468,9 +480,9 @@ export function toCanonicalQuotaRows(
 ): CanonicalQuotaRow[] {
   if (!key.ok) return []
   if (key.quota_windows != null) {
-    return key.quota_windows
-      .map((window) => validateRow(window, nowMs))
-      .filter((row) => !isMinimaxVideoSourceId(row.sourceId))
+    return canonicalRowsFromWindows(key.quota_windows, nowMs).filter(
+      (row) => !isMinimaxVideoSourceId(row.sourceId),
+    )
   }
   return [
     ...minimaxFallbackRows(key, nowMs),

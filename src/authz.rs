@@ -109,10 +109,18 @@ pub enum UserAction {
     SettingsRead,
     SettingsManage,
     BridgeRead,
+    /// Issue #99 P1: read the shared/own upstream endpoint catalog without
+    /// any control action. The row visibility stays in the repository
+    /// filters; this action only admits the authenticated session.
+    EndpointRead,
+    /// Issue #99 P1: read the shared/own model-route catalog.
+    ModelRouteRead,
+    /// Issue #99 P1: read the cached quota of a visible endpoint.
+    QuotaRead,
 }
 
 impl UserAction {
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 13] = [
         Self::ClientKeyManage,
         Self::ModelRead,
         Self::UsageRead,
@@ -123,6 +131,9 @@ impl UserAction {
         Self::SettingsRead,
         Self::SettingsManage,
         Self::BridgeRead,
+        Self::EndpointRead,
+        Self::ModelRouteRead,
+        Self::QuotaRead,
     ];
 
     fn capability(self) -> Capability {
@@ -137,6 +148,13 @@ impl UserAction {
             Self::SettingsRead => ("settings", "read"),
             Self::SettingsManage => ("settings", "manage"),
             Self::BridgeRead => ("bridge", "read"),
+            // Issue #99 P1: the catalog reads are their own `read` actions on
+            // the endpoint/model_route/quota resources. The admin control
+            // groups keep the dedicated `control` action on the same
+            // resources, so a catalog read never satisfies a control check.
+            Self::EndpointRead => ("endpoint", "read"),
+            Self::ModelRouteRead => ("model_route", "read"),
+            Self::QuotaRead => ("quota", "read"),
         };
         Capability::new(resource, action)
     }
@@ -394,6 +412,82 @@ mod tests {
         for action in [UserAction::BridgeRead, UserAction::McpOauthManage] {
             assert!(check(&authorizer, 7, false, Operation::User(action)).is_allowed());
             assert!(check(&authorizer, 7, true, Operation::User(action)).is_allowed());
+        }
+    }
+
+    #[tokio::test]
+    async fn catalog_read_actions_allow_admin_and_normal_users_and_deny_control_actions() {
+        let authorizer = authorizer().await;
+        for action in [
+            UserAction::EndpointRead,
+            UserAction::ModelRouteRead,
+            UserAction::QuotaRead,
+        ] {
+            assert!(
+                check(&authorizer, 7, false, Operation::User(action)).is_allowed(),
+                "a normal user must reach {action:?}"
+            );
+            assert!(
+                check(&authorizer, 7, true, Operation::User(action)).is_allowed(),
+                "an admin must reach {action:?}"
+            );
+        }
+        // The catalog reads never satisfy a control check: the endpoint,
+        // model_route and quota control groups keep their own action.
+        for action in [
+            ControlAction::Endpoint,
+            ControlAction::ModelRoute,
+            ControlAction::Quota,
+        ] {
+            assert_eq!(
+                check(&authorizer, 7, false, Operation::Control(action)),
+                Decision::Deny(DenyReason::NoSubjectAuthority),
+                "a normal user must not reach {action:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_anonymous_subject_reaches_no_business_action() {
+        let authorizer = authorizer().await;
+        // An anonymous session carries no role, so every business read is
+        // denied instead of falling back to a default capability.
+        for action in [
+            UserAction::EndpointRead,
+            UserAction::ModelRouteRead,
+            UserAction::QuotaRead,
+        ] {
+            let request = request(action.capability(), None, None);
+            assert_eq!(
+                authorizer.authorize(
+                    &request,
+                    Authority::Registered(&ResolvedRoles::new(
+                        PrincipalRef::human("0".to_string()),
+                        DOMAIN,
+                        BTreeSet::<RoleId>::new(),
+                    ))
+                ),
+                Decision::Deny(DenyReason::NoSubjectAuthority),
+                "an anonymous subject must not reach {action:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_inference_credential_cannot_authorize_the_catalog_reads() {
+        let authorizer = authorizer().await;
+        let credential = inference_credential(7, "route-a");
+        for action in [
+            UserAction::EndpointRead,
+            UserAction::ModelRouteRead,
+            UserAction::QuotaRead,
+        ] {
+            let request = request(action.capability(), None, Some(credential.clone()));
+            assert_eq!(
+                authorizer.authorize(&request, Authority::Registered(&session_roles(7, false))),
+                Decision::Deny(DenyReason::CredentialGrantMissing),
+                "an inference-only credential must not authorize {action:?}"
+            );
         }
     }
 

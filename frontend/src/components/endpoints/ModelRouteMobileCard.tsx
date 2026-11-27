@@ -1,4 +1,5 @@
 import { LoaderCircle, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import {
   TestResultPopover,
   testResultKey,
@@ -28,6 +29,8 @@ type ModelRouteMobileCardProps = {
   onToggleTarget: (ruleId: string, targetId: string, enabled: boolean) => void
   openResultKey: string | null
   pendingActions: Readonly<Record<string, string>>
+  // The read-only view shows the same route without the management controls.
+  readOnly?: boolean
 }
 
 export function ModelRouteMobileCard({
@@ -41,6 +44,7 @@ export function ModelRouteMobileCard({
   onToggleTarget,
   openResultKey,
   pendingActions,
+  readOnly = false,
 }: ModelRouteMobileCardProps) {
   const { t } = useLocale()
   const writeKey = modelRouteActionKey(item.rule_id)
@@ -53,12 +57,19 @@ export function ModelRouteMobileCard({
       className="grid min-w-0 gap-3 rounded-xl border bg-card p-3"
       data-model-route-card={item.rule_id}
     >
-      <div
-        className="min-w-0 break-words font-semibold"
-        aria-label={item.model_pattern}
-        title={item.model_pattern}
-      >
-        {item.model_pattern}
+      <div className="grid min-w-0 gap-1">
+        <div
+          className="min-w-0 break-words font-semibold"
+          aria-label={item.model_pattern}
+          title={item.model_pattern}
+        >
+          {item.model_pattern}
+        </div>
+        {readOnly ? (
+          <span className="text-xs text-muted-foreground" data-model-route-scope>
+            {item.scope_label}
+          </span>
+        ) : null}
       </div>
       <div className="grid min-w-0 gap-1">
         <span className="text-xs font-medium text-muted-foreground">
@@ -70,6 +81,7 @@ export function ModelRouteMobileCard({
           }
           pending={Boolean(pending)}
           pendingTargetId={modelRouteTargetToggleOriginTarget(pending)}
+          readOnly={readOnly}
           targets={item.targets}
         />
         {item.owner_label ? (
@@ -79,66 +91,76 @@ export function ModelRouteMobileCard({
         ) : null}
       </div>
       <div className="flex min-w-0 items-center justify-end gap-2">
-        <Switch
-          aria-label={`${t('status')} ${item.model_pattern}`}
-          checked={item.enabled}
-          disabled={Boolean(pending)}
-          onCheckedChange={(enabled) => onToggle(item.rule_id, enabled)}
-        />
-        {pending === 'toggle' ? (
-          <LoaderCircle
-            aria-label={t('loading')}
-            className="size-4 animate-spin"
-          />
-        ) : null}
+        {readOnly ? (
+          <Badge data-model-route-status={item.enabled ? 'on' : 'off'}>
+            {item.enabled ? t('active') : t('disabled')}
+          </Badge>
+        ) : (
+          <>
+            <Switch
+              aria-label={`${t('status')} ${item.model_pattern}`}
+              checked={item.enabled}
+              disabled={Boolean(pending)}
+              onCheckedChange={(enabled) => onToggle(item.rule_id, enabled)}
+            />
+            {pending === 'toggle' ? (
+              <LoaderCircle
+                aria-label={t('loading')}
+                className="size-4 animate-spin"
+              />
+            ) : null}
+          </>
+        )}
       </div>
-      <div className="grid grid-cols-3 gap-2">
-        <TestResultPopover
-          detailLabel={
-            counts.total ? `${counts.passed}/${counts.total}` : undefined
-          }
-          message={item.test_message}
-          onOpenChange={(open) => onResultOpenChange(resultKey, open)}
-          onSelect={() => onShowDetails(item.rule_id)}
-          open={openResultKey === resultKey}
-          severity={item.test_severity}
-        >
+      {readOnly ? null : (
+        <div className="grid grid-cols-3 gap-2">
+          <TestResultPopover
+            detailLabel={
+              counts.total ? `${counts.passed}/${counts.total}` : undefined
+            }
+            message={item.test_message}
+            onOpenChange={(open) => onResultOpenChange(resultKey, open)}
+            onSelect={() => onShowDetails(item.rule_id)}
+            open={openResultKey === resultKey}
+            severity={item.test_severity}
+          >
+            <Button
+              disabled={item.testing}
+              onClick={() => onProbe(item.rule_id, 'mobile')}
+              type="button"
+              variant="outline"
+            >
+              {item.testing ? (
+                <LoaderCircle className="animate-spin" />
+              ) : (
+                <RefreshCw />
+              )}{' '}
+              {t('test')}
+            </Button>
+          </TestResultPopover>
           <Button
-            disabled={item.testing}
-            onClick={() => onProbe(item.rule_id, 'mobile')}
+            disabled={Boolean(pending)}
+            onClick={() => onEdit(item.rule_id)}
             type="button"
             variant="outline"
           >
-            {item.testing ? (
+            <Pencil /> {t('edit')}
+          </Button>
+          <Button
+            disabled={Boolean(pending)}
+            onClick={() => onDelete(item.rule_id)}
+            type="button"
+            variant="outline"
+          >
+            {pending === 'delete' ? (
               <LoaderCircle className="animate-spin" />
             ) : (
-              <RefreshCw />
+              <Trash2 />
             )}{' '}
-            {t('test')}
+            {t('delete')}
           </Button>
-        </TestResultPopover>
-        <Button
-          disabled={Boolean(pending)}
-          onClick={() => onEdit(item.rule_id)}
-          type="button"
-          variant="outline"
-        >
-          <Pencil /> {t('edit')}
-        </Button>
-        <Button
-          disabled={Boolean(pending)}
-          onClick={() => onDelete(item.rule_id)}
-          type="button"
-          variant="outline"
-        >
-          {pending === 'delete' ? (
-            <LoaderCircle className="animate-spin" />
-          ) : (
-            <Trash2 />
-          )}{' '}
-          {t('delete')}
-        </Button>
-      </div>
+        </div>
+      )}
     </article>
   )
 }

@@ -11,6 +11,57 @@ pub(crate) struct CachedQuotaObservation {
     pub(crate) refresh_failed: bool,
 }
 
+/// Issue #99 P1: one cached quota snapshot of one endpoint.
+///
+/// The snapshot is a clone of the in-memory cache entry: it never refreshes,
+/// never reaches the upstream provider, and never writes. Every successful
+/// cached key keeps its own observation, so no two keys are merged.
+pub(crate) struct CachedSnapshot {
+    pub(crate) usage: TokenPlanUsageResponse,
+    pub(crate) observations: Vec<CachedSnapshotObservation>,
+}
+
+/// The freshness of one cached key inside a [`CachedSnapshot`].
+pub(crate) struct CachedSnapshotObservation {
+    /// The cached key identity. It only pairs an observation with its cached
+    /// key and never reaches a response.
+    pub(crate) key_id: Uuid,
+    pub(crate) observed_at: Option<DateTime<Utc>>,
+    pub(crate) stale: bool,
+}
+
+impl CachedSnapshot {
+    /// The safe observations of the cached entry.
+    ///
+    /// Every successful cached key that carries at least one canonical window
+    /// becomes one observation; a key without a usable window carries no
+    /// quota and never becomes an observation. The cached freshness metadata
+    /// is preserved, and no amount is ever summed, averaged, or merged.
+    pub(crate) fn safe_observations(
+        &self,
+    ) -> Vec<crate::worker_admin_types::CachedQuotaObservation> {
+        let mut usage = self.usage.clone();
+        crate::worker_admin::quota_canonical::populate_response_observations(
+            usage.provider,
+            &mut usage,
+        );
+        self.observations
+            .iter()
+            .filter_map(|observation| {
+                let key = usage
+                    .keys
+                    .iter()
+                    .find(|key| key.key_id == observation.key_id)?;
+                crate::worker_admin_types::cached_observation(
+                    key,
+                    observation.observed_at,
+                    observation.stale,
+                )
+            })
+            .collect()
+    }
+}
+
 pub(crate) fn quota_observation_now(
     cache: &TokenPlanQuotaCache,
     endpoint_id: Uuid,
@@ -44,6 +95,44 @@ pub(crate) fn quota_observation_now(
 }
 
 impl TokenPlanQuotaCache {
+    /// Issue #99 P1: the cached quota snapshot of one endpoint.
+    ///
+    /// The read is cache-only: it clones the in-memory entry and its
+    /// freshness metadata, and it never refreshes, fetches, or writes. A
+    /// missing entry, a failed key, or an entry without a successful key
+    /// yields `None`, so an unknown quota stays unavailable instead of
+    /// reading as zero.
+    pub(crate) async fn cached_snapshot(&self, endpoint_id: Uuid) -> Option<CachedSnapshot> {
+        let entries = self.entries.read().await;
+        let entry = entries.get(&endpoint_id)?;
+        let usage = entry.usage.clone();
+        let now = Instant::now();
+        let mut observations = Vec::new();
+        for key in &usage.keys {
+            if !key.ok {
+                continue;
+            }
+            let observed_at = entry.observed_at.get(&key.key_id).copied();
+            let failed = entry.last_failure.contains_key(&key.key_id);
+            let fresh = entry
+                .successful
+                .get(&key.key_id)
+                .is_some_and(|at| now.saturating_duration_since(*at) < REFRESH_AFTER);
+            observations.push(CachedSnapshotObservation {
+                key_id: key.key_id,
+                observed_at,
+                stale: failed || !fresh,
+            });
+        }
+        if observations.is_empty() {
+            return None;
+        }
+        Some(CachedSnapshot {
+            usage,
+            observations,
+        })
+    }
+
     pub(crate) fn fresh_observed_key_now(
         &self,
         endpoint_id: Uuid,

@@ -1,7 +1,8 @@
 import type { QueryClient } from '@tanstack/react-query'
 import type { TokenPlanUsageResponse } from '@/generated/admin-api'
-import { tokenPlanUsage } from '@/generated/admin-api'
+import { meEndpointQuota, tokenPlanUsage } from '@/generated/admin-api'
 import {
+  meEndpointQuotaQueryKey,
   quotaInferenceQueryKey,
   tokenPlanUsageQueryKey,
 } from '@/generated/admin-api/@tanstack/react-query.gen'
@@ -45,6 +46,43 @@ export function tokenPlanUsageSnapshot(
 
 function uniqueEndpointIds(endpointIds: Iterable<string>): string[] {
   return Array.from(new Set(endpointIds)).filter(Boolean)
+}
+
+// The cached quota of one visible endpoint, as the safe catalog answers it.
+//
+// The read never collects quota, never forces a refresh and never reaches the
+// upstream provider: the answer is the cache. The normal view therefore never
+// calls the administrator token-plan usage surface.
+export function catalogQuotaQueryKey(endpointId: string) {
+  return meEndpointQuotaQueryKey({ path: { endpoint_id: endpointId } })
+}
+
+export function catalogQuotaQuery(endpointId: string) {
+  return {
+    queryKey: catalogQuotaQueryKey(endpointId),
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      meEndpointQuota({
+        path: { endpoint_id: endpointId },
+        signal,
+        throwOnError: true,
+      }),
+    staleTime: TOKEN_PLAN_CACHE_TTL_MS,
+  }
+}
+
+// Refetch the cached quota of the given endpoints.
+//
+// Only the safe catalog quota query is touched, so a refresh of the normal
+// view stays a cache read and never collects quota upstream.
+export async function refreshCatalogQuotaBatch(
+  queryClient: QueryClient,
+  endpointIds: Iterable<string>,
+): Promise<void> {
+  for (const endpointId of uniqueEndpointIds(endpointIds)) {
+    await queryClient.invalidateQueries({
+      queryKey: catalogQuotaQueryKey(endpointId),
+    })
+  }
 }
 
 function tokenPlanUsageQuery(endpointId: string, force: boolean) {

@@ -1,5 +1,6 @@
 import type {
   ModelEndpointRule,
+  ModelRouteCatalogRow,
   ModelRouteTestResponse,
   ModelRouteTestTargetResult,
 } from '@/generated/admin-api'
@@ -50,6 +51,45 @@ export function createModelRouteListItemView(
     test_message: createModelRouteTestMessage(result, options),
     test_severity: modelRouteTestSeverity(result),
     test_results: result?.results ?? [],
+  }
+}
+
+/**
+ * The list view of one safe model-route row.
+ *
+ * The safe row carries no owner and no internal target identity, so the view
+ * keeps those absent: the endpoint identity names the target, and the scope
+ * is the shared/owned distinction of the safe catalog.
+ */
+export function createCatalogModelRouteListItemView(
+  route: ModelRouteCatalogRow,
+  options: ModelRouteViewItemLabels,
+): ModelRouteListItemView {
+  return {
+    rule_id: route.rule_id,
+    model_pattern: route.model_pattern,
+    scope: route.visibility,
+    scope_label:
+      route.visibility === 'owned' ? options.scopeUser : options.scopeAdmin,
+    enabled: route.enabled,
+    owner_label: '',
+    targets: route.targets.map((target) => ({
+      // The safe catalog never names the internal target identity, so the
+      // endpoint identity is the target identity of the read-only view.
+      target_id: target.endpoint_id,
+      endpoint_label: target.endpoint_name || target.endpoint_id,
+      enabled: target.enabled,
+      endpoint_enabled: target.endpoint_enabled,
+      upstream_model: target.upstream_model ?? null,
+      // The safe catalog does not expose the session preference, so the
+      // read-only view never claims one.
+      prefer_new_sessions: false,
+    })),
+    testing: false,
+    toggling: false,
+    test_message: options.endpointTestIdle,
+    test_severity: null,
+    test_results: [],
   }
 }
 

@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { LoaderCircle, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import {
   TestResultPopover,
   testResultKey,
@@ -42,6 +43,8 @@ type ModelRoutesTableProps = {
   onToggleTarget: (ruleId: string, targetId: string, enabled: boolean) => void
   openResultKey: string | null
   pendingActions: Readonly<Record<string, string>>
+  // The read-only view shows the same routes without the management controls.
+  readOnly?: boolean
   rows: number
   total: number
 }
@@ -60,6 +63,7 @@ export function ModelRoutesTable({
   onToggleTarget,
   openResultKey,
   pendingActions,
+  readOnly = false,
   rows,
   total,
 }: ModelRoutesTableProps) {
@@ -68,18 +72,28 @@ export function ModelRoutesTable({
   const columns = useMemo<
     Array<DataTableColumnDef<ModelRouteListItemView>>
   >(() => {
-    return [
+    const result: Array<DataTableColumnDef<ModelRouteListItemView>> = [
       {
         id: 'model_pattern',
         header: t('modelPattern'),
         cell: ({ row }) => (
-          <span
-            aria-label={row.original.model_pattern}
-            className="block max-w-[22rem] truncate font-medium"
-            title={row.original.model_pattern}
-          >
-            {row.original.model_pattern}
-          </span>
+          <div className="grid min-w-0 gap-1">
+            <span
+              aria-label={row.original.model_pattern}
+              className="block max-w-[22rem] truncate font-medium"
+              title={row.original.model_pattern}
+            >
+              {row.original.model_pattern}
+            </span>
+            {readOnly ? (
+              <span
+                className="text-xs text-muted-foreground"
+                data-model-route-scope
+              >
+                {row.original.scope_label}
+              </span>
+            ) : null}
+          </div>
         ),
       },
       {
@@ -96,6 +110,7 @@ export function ModelRoutesTable({
                 }
                 pending={Boolean(pending)}
                 pendingTargetId={modelRouteTargetToggleOriginTarget(pending)}
+                readOnly={readOnly}
                 targets={item.targets}
               />
               {item.owner_label ? (
@@ -112,6 +127,13 @@ export function ModelRoutesTable({
         header: t('status'),
         cell: ({ row }) => {
           const item = row.original
+          if (readOnly) {
+            return (
+              <Badge data-model-route-status={item.enabled ? 'on' : 'off'}>
+                {item.enabled ? t('active') : t('disabled')}
+              </Badge>
+            )
+          }
           const pending = pendingActions[modelRouteActionKey(item.rule_id)]
           return (
             <div className="flex items-center gap-2 whitespace-nowrap">
@@ -131,71 +153,76 @@ export function ModelRoutesTable({
           )
         },
       },
-      {
-        id: 'actions',
-        header: () => <span className="sr-only">{t('edit')}</span>,
-        cell: ({ row }) => {
-          const item = row.original
-          const pending = pendingActions[modelRouteActionKey(item.rule_id)]
-          const counts = modelRouteTestCounts(item.test_results)
-          const resultKey = testResultKey('desktop', item.rule_id)
-          return (
-            <div className="flex justify-end gap-1">
-              <TestResultPopover
-                detailLabel={
-                  counts.total ? `${counts.passed}/${counts.total}` : undefined
-                }
-                message={item.test_message}
-                onOpenChange={(open) => onResultOpenChange(resultKey, open)}
-                onSelect={() => onShowDetails(item.rule_id)}
-                open={openResultKey === resultKey}
-                severity={item.test_severity}
-              >
-                <Button
-                  aria-label={`${t('test')} ${item.model_pattern}`}
-                  disabled={item.testing}
-                  onClick={() => onProbe(item.rule_id, 'desktop')}
-                  size="icon-sm"
-                  title={t('test')}
-                  type="button"
-                  variant="ghost"
-                >
-                  {item.testing ? (
-                    <LoaderCircle className="animate-spin" />
-                  ) : (
-                    <RefreshCw />
-                  )}
-                </Button>
-              </TestResultPopover>
+    ]
+
+    if (readOnly) return result
+
+    result.push({
+      id: 'actions',
+      header: () => <span className="sr-only">{t('edit')}</span>,
+      cell: ({ row }) => {
+        const item = row.original
+        const pending = pendingActions[modelRouteActionKey(item.rule_id)]
+        const counts = modelRouteTestCounts(item.test_results)
+        const resultKey = testResultKey('desktop', item.rule_id)
+        return (
+          <div className="flex justify-end gap-1">
+            <TestResultPopover
+              detailLabel={
+                counts.total ? `${counts.passed}/${counts.total}` : undefined
+              }
+              message={item.test_message}
+              onOpenChange={(open) => onResultOpenChange(resultKey, open)}
+              onSelect={() => onShowDetails(item.rule_id)}
+              open={openResultKey === resultKey}
+              severity={item.test_severity}
+            >
               <Button
-                aria-label={`${t('edit')} ${item.model_pattern}`}
-                disabled={Boolean(pending)}
-                onClick={() => onEdit(item.rule_id)}
+                aria-label={`${t('test')} ${item.model_pattern}`}
+                disabled={item.testing}
+                onClick={() => onProbe(item.rule_id, 'desktop')}
                 size="icon-sm"
+                title={t('test')}
                 type="button"
                 variant="ghost"
               >
-                <Pencil />
-              </Button>
-              <Button
-                aria-label={`${t('delete')} ${item.model_pattern}`}
-                disabled={Boolean(pending)}
-                onClick={() => onDelete(item.rule_id)}
-                size="icon-sm"
-                type="button"
-                variant="ghost"
-              >
-                {pending === 'delete' ? (
+                {item.testing ? (
                   <LoaderCircle className="animate-spin" />
                 ) : (
-                  <Trash2 />
+                  <RefreshCw />
                 )}
               </Button>
-            </div>
-          )
-        },
+            </TestResultPopover>
+            <Button
+              aria-label={`${t('edit')} ${item.model_pattern}`}
+              disabled={Boolean(pending)}
+              onClick={() => onEdit(item.rule_id)}
+              size="icon-sm"
+              type="button"
+              variant="ghost"
+            >
+              <Pencil />
+            </Button>
+            <Button
+              aria-label={`${t('delete')} ${item.model_pattern}`}
+              disabled={Boolean(pending)}
+              onClick={() => onDelete(item.rule_id)}
+              size="icon-sm"
+              type="button"
+              variant="ghost"
+            >
+              {pending === 'delete' ? (
+                <LoaderCircle className="animate-spin" />
+              ) : (
+                <Trash2 />
+              )}
+            </Button>
+          </div>
+        )
       },
-    ]
+    })
+
+    return result
   }, [
     onDelete,
     onEdit,
@@ -206,6 +233,7 @@ export function ModelRoutesTable({
     onToggleTarget,
     openResultKey,
     pendingActions,
+    readOnly,
     t,
   ])
 
@@ -230,6 +258,7 @@ export function ModelRoutesTable({
             onToggleTarget={onToggleTarget}
             openResultKey={openResultKey}
             pendingActions={pendingActions}
+            readOnly={readOnly}
           />
         )}
         rowAttributes={(item) => ({

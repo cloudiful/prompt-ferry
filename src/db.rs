@@ -22,6 +22,7 @@ mod shared_valkey;
 mod types;
 mod usage;
 mod users;
+pub(crate) mod visibility;
 mod workers;
 
 pub use config_repository::{
@@ -36,8 +37,8 @@ pub use connection::{
 };
 pub use endpoints::{
     create_endpoint, create_endpoint_with_mcp, delete_endpoint, get_endpoint, list_endpoints,
-    list_endpoints_page, list_visible_endpoints, set_endpoint_mcp_enabled,
-    set_user_endpoint_setting, update_endpoint,
+    list_endpoints_page, list_visible_endpoint_ids, list_visible_endpoints,
+    set_endpoint_mcp_enabled, set_user_endpoint_setting, update_endpoint,
 };
 pub use mcp::{
     create_mcp_server, delete_mcp_server, get_mcp_server, get_mcp_server_by_name,

@@ -88,6 +88,20 @@ fn api_router(state: AdminState) -> Router<AdminState> {
             patch(me::update_client_key).delete(me::delete_client_key),
         )
         .route("/me/models", get(me::list_available_models))
+        // Issue #99 P1: the safe, read-only catalogs for ordinary
+        // authenticated users. They never reach a control action.
+        .route(
+            "/me/endpoint-catalog",
+            get(me_catalog::list_endpoint_catalog),
+        )
+        .route(
+            "/me/model-route-catalog",
+            get(me_catalog::list_model_route_catalog),
+        )
+        .route(
+            "/me/endpoint-catalog/{endpoint_id}/quota",
+            get(me_catalog::endpoint_quota),
+        )
         .route("/admin/users", get(list_users).post(create_user))
         .route("/admin/users/options", get(list_user_options))
         .route(

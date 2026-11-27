@@ -66,6 +66,33 @@ impl StandaloneConfigStore {
         Ok((total, endpoints))
     }
 
+    /// Issue #99 P1: every endpoint id of the standalone configuration.
+    ///
+    /// The SQLite endpoint table carries no ownership columns: every endpoint
+    /// there is shared, so the visible set never depends on the viewer.
+    pub async fn list_endpoint_ids(
+        &self,
+        _manager: &RelaySecretManager,
+    ) -> Result<Vec<uuid::Uuid>> {
+        let db = sqlite_connection(&self.pool);
+        let ids = ProviderEndpointEntity::find()
+            .select_only()
+            .column(ProviderEndpointColumn::EndpointId)
+            .into_tuple::<String>()
+            .all(&db)
+            .await
+            .map_err(rows::native_error)?;
+        ids.into_iter()
+            .map(|id| {
+                uuid::Uuid::parse_str(&id).map_err(|_| {
+                    StandaloneConfigError::CorruptDatabase(format!(
+                        "endpoint id {id} is not a uuid"
+                    ))
+                })
+            })
+            .collect()
+    }
+
     pub async fn get_endpoint(
         &self,
         manager: &RelaySecretManager,

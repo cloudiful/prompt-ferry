@@ -48,6 +48,25 @@ impl ChatGptQuotaService {
         self.response(endpoint, snapshot, completion.state, completion.error)
     }
 
+    /// Issue #99 P1: the persisted ChatGPT quota snapshot of one endpoint.
+    ///
+    /// The read is snapshot-only: it loads the persisted snapshot and its
+    /// refresh state and answers from them. It never refreshes the snapshot,
+    /// never calls `refresh_shared`, and never reaches the upstream
+    /// provider. A missing service or a missing snapshot is `None`, so an
+    /// unknown quota stays unavailable instead of reading as zero.
+    pub(crate) async fn snapshot_only(
+        &self,
+        endpoint: &db::ProviderEndpoint,
+    ) -> Result<Option<TokenPlanUsageResponse>, ChatGptQuotaError> {
+        let (snapshot, state) = self.load(endpoint.endpoint_id).await?;
+        let Some(snapshot) = snapshot else {
+            return Ok(None);
+        };
+        let response = self.response(endpoint, snapshot, state, None)?;
+        Ok(Some(response))
+    }
+
     pub(super) async fn load(
         &self,
         endpoint_id: Uuid,

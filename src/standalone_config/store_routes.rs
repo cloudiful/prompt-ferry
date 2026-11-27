@@ -26,12 +26,28 @@ impl StandaloneConfigStore {
         manager: &RelaySecretManager,
         first: i64,
         rows: i64,
+        viewer: Option<i64>,
     ) -> Result<(i64, Vec<ModelRouteConfig>)> {
         let db = sqlite_connection(&self.pool);
-        let counts = sea_orm::sea_query::Query::select()
+        // Issue #99 P1: one visibility predicate drives the count and the
+        // paged rows, so the total always matches the visible set. `None`
+        // keeps the administrator view of every rule.
+        let visible = viewer.map(|viewer| {
+            crate::db::visibility::visible_condition(
+                RouteColumn::Scope,
+                RouteColumn::OwnerUserId,
+                viewer,
+            )
+        });
+        let mut counts = sea_orm::sea_query::Query::select()
             .expr_as(Expr::col(RouteColumn::RuleId).count(), Alias::new("total"))
             .from(RouteEntity)
             .to_owned();
+        let mut route_query = RouteEntity::find();
+        if let Some(visible) = visible.clone() {
+            counts.cond_where(visible.clone());
+            route_query = route_query.filter(visible);
+        }
         let count_row = db
             .query_one(&counts)
             .await
@@ -42,7 +58,7 @@ impl StandaloneConfigStore {
                 )
             })?;
         let total: i64 = count_row.try_get("", "total").map_err(rows::native_error)?;
-        let route_models = RouteEntity::find()
+        let route_models = route_query
             .order_by_asc(RouteColumn::ModelPattern)
             .order_by_asc(RouteColumn::RuleId)
             .limit(rows.clamp(1, 200) as u64)

@@ -1,4 +1,5 @@
 import type {
+  EndpointCatalogRow,
   EndpointTestResponse,
   ProviderEndpoint,
 } from '@/generated/admin-api'
@@ -64,25 +65,12 @@ export function createEndpointListItemView(
     scope_label:
       endpoint.scope === 'user' ? options.scopeUser : options.scopeAdmin,
     native_api: endpoint.native_api,
-    native_api_label:
-      endpoint.native_api === 'auto'
-        ? options.endpointSourceAuto
-        : endpoint.native_api === 'chat'
-          ? options.nativeApiChat
-          : endpoint.native_api === 'anthropic_messages'
-            ? options.nativeApiAnthropicMessages
-            : endpoint.native_api === 'realtime'
-              ? options.nativeApiRealtime
-              : endpoint.native_api === 'embeddings'
-                ? (options.nativeApiEmbeddings ?? options.nativeApiResponses)
-                : options.nativeApiResponses,
+    native_api_label: nativeApiLabel(endpoint.native_api, options),
     native_api_source: endpoint.native_api_source,
-    native_api_source_label:
-      endpoint.native_api_source === 'auto'
-        ? options.endpointSourceAuto
-        : endpoint.native_api_source === 'detected'
-          ? options.endpointSourceDetected
-          : options.endpointSourceManual,
+    native_api_source_label: nativeApiSourceLabel(
+      endpoint.native_api_source,
+      options,
+    ),
     enabled: endpoint.enabled,
     mcp_enabled: endpoint.mcp_enabled,
     owner_label: endpoint.owner_user_id
@@ -100,6 +88,74 @@ export function createEndpointListItemView(
         : 'error'
       : null,
   }
+}
+
+/**
+ * The list view of one safe catalog row.
+ *
+ * The safe row carries no upstream address, no credential, no owner and no
+ * OAuth state, so the view keeps those fields absent instead of inventing
+ * them. The scope is the shared/owned distinction of the safe catalog, and the
+ * owner never appears.
+ */
+export function createCatalogEndpointListItemView(
+  row: EndpointCatalogRow,
+  options: EndpointViewItemLabels,
+): EndpointListItemView {
+  return {
+    endpoint_id: row.endpoint_id,
+    name: row.name,
+    provider: row.provider,
+    provider_region: row.provider_region ?? null,
+    plan: row.plan ?? 'platform_api_key',
+    scope: row.visibility,
+    scope_label:
+      row.visibility === 'owned' ? options.scopeUser : options.scopeAdmin,
+    native_api: row.native_api,
+    native_api_label: nativeApiLabel(row.native_api, options),
+    native_api_source: row.native_api_source,
+    native_api_source_label: nativeApiSourceLabel(
+      row.native_api_source,
+      options,
+    ),
+    enabled: row.enabled,
+    quota_eligible: row.quota_eligible,
+    owner_label: '',
+    testing: false,
+    toggling: false,
+    test_message: options.endpointTestIdle,
+    test_severity: null,
+  }
+}
+
+/**
+ * The protocol label of one row, shared by the administrator rows and the
+ * safe catalog rows.
+ */
+function nativeApiLabel(
+  nativeApi: string,
+  options: EndpointViewItemLabels,
+): string {
+  if (nativeApi === 'auto') return options.endpointSourceAuto
+  if (nativeApi === 'chat') return options.nativeApiChat
+  if (nativeApi === 'anthropic_messages') return options.nativeApiAnthropicMessages
+  if (nativeApi === 'realtime') return options.nativeApiRealtime
+  if (nativeApi === 'embeddings')
+    return options.nativeApiEmbeddings ?? options.nativeApiResponses
+  return options.nativeApiResponses
+}
+
+/**
+ * The protocol source label of one row, shared by the administrator rows and
+ * the safe catalog rows.
+ */
+function nativeApiSourceLabel(
+  nativeApiSource: string,
+  options: EndpointViewItemLabels,
+): string {
+  if (nativeApiSource === 'auto') return options.endpointSourceAuto
+  if (nativeApiSource === 'detected') return options.endpointSourceDetected
+  return options.endpointSourceManual
 }
 
 function createEndpointTestMessage(
