@@ -115,6 +115,52 @@ never loops back into the network.
   the five-second bound of a session is a bounded refusal, not a network
   send timeout.
 
+### The ingress of the forwarding actor
+
+- The ingress of the forwarding actor holds 64 commands and a byte budget of
+  16MiB + 64KiB. The worker pump never waits for that capacity: it queues a
+  command without waiting and refuses it when the ingress cannot take it.
+- A refusal is scoped to the request of the refused frame. The worker of the
+  route, the selected route, the configuration snapshot and the generation of
+  the peer link stay, and the other requests of the node keep running. Only the
+  request of the refused frame is retired, and a retired request is never
+  replayed.
+- A refused start of a local request fails its pending request, as it did
+  before. A refused continuation or cancellation retires the request itself:
+  the queued-start fence of the same request kind and id is cancelled first, so
+  a start that waits in the ingress never creates an owner behind the
+  retirement, and the pending request of the local client fails with
+  `503 peer_overloaded` instead of waiting for an answer that cannot come.
+- The queued-start fence is a private flag of the pump and the actor. It is
+  never part of an owner and never part of the protocol, and it dies with the
+  command that carries it.
+- A refused frame of a peer schedules a scoped retirement with the live
+  admission token of the link, and the caller waits for its acknowledgement, so
+  a later frame of the link cannot overtake the retirement. The actor derives
+  the direction of the request again from the link generation and the owner it
+  holds, so an unknown, a stale or a foreign request id retires nothing and
+  the link of the peer survives. Only a retirement that cannot be scheduled or
+  acknowledged ends the link, as it did before.
+- The retirement accepts a frame only in the direction the normal dispatch
+  gives it: a frame of the executor of the route is a response of that
+  request, and a frame of a peer never starts a request. A frame of the wrong
+  direction is dropped by the normal dispatch, so a full ingress drops it as
+  well and never ends a valid request.
+- The failed flows are tracked in a bounded set, so a request that is refused
+  again and again needs no second retirement. The tracking of a flow ends with
+  its terminal message and with the teardown of the worker. When that bounded
+  set is exhausted, the worker of the route fails as it did before.
+- The diagnostics of a refusal use the category `peer_ingress_diag` and name
+  the distinct reason: `channel_full` for a full ingress, `byte_budget_exhausted`
+  for an exhausted byte budget, `channel_closed` for an ingress that ended,
+  `control_unavailable` for a priority path that cannot carry the retirement
+  and `retirement_tracking_exhausted` for an exhausted bound. A saturation is
+  a warning and a closed teardown is an observation. A closed ingress is
+  never reported as a full ingress or as an exhausted byte budget. The
+  diagnostics name the variant of the refused frame and the surface of its
+  request, the counters of the ingress and the identifiers of the route, never
+  a body, a message, a route key or a token.
+
 ## Failure behaviour
 
 - The route disappears while the link to its next hop is down. The requests

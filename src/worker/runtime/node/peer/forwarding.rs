@@ -14,8 +14,9 @@
 //! refused when the actor executes it, so a callback that was queued before
 //! the link was replaced never acts on the state of the node.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
@@ -103,7 +104,7 @@ pub(crate) const PEER_CONTROL_BUDGET_BYTES: usize = PEER_ENVELOPE_BUDGET_BYTES;
 const PEER_FRAME_RESERVE_BYTES: usize = 512;
 
 /// The kind of a request, by the surface it belongs to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum RequestKind {
     /// An ordinary HTTP request.
     Http,
@@ -111,6 +112,362 @@ pub(crate) enum RequestKind {
     Mcp,
     /// A realtime session.
     Realtime,
+}
+
+/// The fence of a local start that waits in the ingress of the actor.
+///
+/// The fence is private to the pump and the actor: it is never part of an
+/// owner and never part of the protocol, and it dies with the command that
+/// carries it.
+struct StartFence {
+    cancelled: AtomicBool,
+}
+
+impl StartFence {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            cancelled: AtomicBool::new(false),
+        })
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+}
+
+/// Why the ingress of the node refused a frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IngressRefusal {
+    /// The data channel of the actor holds every slot.
+    ChannelFull,
+    /// The byte budget of the ingress is exhausted.
+    ByteBudgetExhausted,
+    /// The data channel of the actor is closed.
+    ChannelClosed,
+    /// The control path of the actor cannot carry the retirement.
+    ControlUnavailable,
+    /// The bounded tracking of the retired flows is exhausted.
+    TrackingExhausted,
+}
+
+impl IngressRefusal {
+    /// The stable name of the reason, free of any content of the frame.
+    fn reason(self) -> &'static str {
+        match self {
+            Self::ChannelFull => "channel_full",
+            Self::ByteBudgetExhausted => "byte_budget_exhausted",
+            Self::ChannelClosed => "channel_closed",
+            Self::ControlUnavailable => "control_unavailable",
+            Self::TrackingExhausted => "retirement_tracking_exhausted",
+        }
+    }
+}
+
+/// What a scoped retirement of a request did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Retirement {
+    /// The request of the frame was retired.
+    Retired,
+    /// The frame named no request of the link, so nothing was retired.
+    NoOwner,
+}
+
+/// The safe counters of the ingress of the node.
+///
+/// The counters are a concurrent observation of the ingress at the moment of
+/// the refusal, not the exact peak it reached.
+#[derive(Clone, Copy, Debug)]
+struct IngressState {
+    pending: usize,
+    capacity: usize,
+    available_bytes: usize,
+    total_bytes: usize,
+}
+
+/// The context of a refusal of the ingress of the node.
+struct IngressRefusalContext<'a> {
+    source: &'a str,
+    reason: IngressRefusal,
+    frame: FrameVariant,
+    peer: Option<NodeId>,
+    generation: Option<u64>,
+    worker: Option<usize>,
+    epoch: Option<u64>,
+    state: IngressState,
+    outcome: &'a str,
+}
+
+/// Report a frame that the ingress of the node refused.
+///
+/// The report names the source of the frame, the variant of the frame, the
+/// distinct reason of the refusal, the safe counters of the ingress and what
+/// the node did with the refusal. It never carries the content of the frame:
+/// no body, no message, no route, no key and no token ever reaches the log.
+fn report_ingress_refusal(context: IngressRefusalContext<'_>) {
+    let reason = context.reason.reason();
+    match context.reason {
+        // A closed channel is the ordinary end of the actor, not a pressure
+        // of the ingress.
+        IngressRefusal::ChannelClosed => info!(
+            category = "peer_ingress_diag",
+            source = context.source,
+            reason,
+            frame = context.frame.name(),
+            surface = ?context.frame.surface(),
+            peer = ?context.peer,
+            generation = ?context.generation,
+            worker = ?context.worker,
+            epoch = ?context.epoch,
+            pending = context.state.pending,
+            capacity = context.state.capacity,
+            available_bytes = context.state.available_bytes,
+            total_bytes = context.state.total_bytes,
+            outcome = context.outcome,
+            "the ingress of the node refused a frame"
+        ),
+        _ => warn!(
+            category = "peer_ingress_diag",
+            source = context.source,
+            reason,
+            frame = context.frame.name(),
+            surface = ?context.frame.surface(),
+            peer = ?context.peer,
+            generation = ?context.generation,
+            worker = ?context.worker,
+            epoch = ?context.epoch,
+            pending = context.state.pending,
+            capacity = context.state.capacity,
+            available_bytes = context.state.available_bytes,
+            total_bytes = context.state.total_bytes,
+            outcome = context.outcome,
+            "the ingress of the node refused a frame"
+        ),
+    }
+}
+
+fn ingress_counters(
+    data: &mpsc::Sender<Command>,
+    budget: &Arc<Semaphore>,
+    total_bytes: usize,
+) -> IngressState {
+    IngressState {
+        pending: data.max_capacity() - data.capacity(),
+        capacity: data.max_capacity(),
+        available_bytes: budget.available_permits(),
+        total_bytes,
+    }
+}
+
+/// What the pump does with a frame that the ingress of the node refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RefusalAction {
+    FailRequest,
+    RetireRequest,
+    FailWorker,
+}
+
+/// The action for a frame the ingress of the node refused.
+///
+/// A new start never reached the actor, so it is failed to the pending
+/// request of the relay state. A continuation of a running request is
+/// retired in its own scope, as long as the bounded tracking of the failed
+/// flows has room. A frame that belongs to no request, and a tracking that
+/// is exhausted, fail the worker of the route as they did before.
+fn refusal_action(role: MessageRole, tracking_has_room: bool) -> RefusalAction {
+    match role {
+        MessageRole::Start(_) => RefusalAction::FailRequest,
+        MessageRole::Stream(_) | MessageRole::End(_) | MessageRole::Cancel(_) => {
+            if tracking_has_room {
+                RefusalAction::RetireRequest
+            } else {
+                RefusalAction::FailWorker
+            }
+        }
+        _ => RefusalAction::FailWorker,
+    }
+}
+
+/// The content-free variant of a frame.
+///
+/// The variant names the frame of the protocol without any content of it, so
+/// a diagnostic and an admission decision can name the frame without
+/// carrying a body, a header, a key or an id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FrameVariant {
+    RequestStart,
+    RequestChunk,
+    RequestEnd,
+    RequestCancel,
+    McpRequestStart,
+    McpRequestChunk,
+    McpRequestEnd,
+    McpRequestCancel,
+    RealtimeSessionStart,
+    RealtimeClientEvent,
+    RealtimeServerEvent,
+    RealtimeSessionClose,
+    ResponseStart,
+    ResponseChunk,
+    ResponseEnd,
+    McpResponseStart,
+    McpResponseChunk,
+    McpResponseEnd,
+    ResponseError,
+    Control,
+}
+
+impl FrameVariant {
+    /// The name of the variant in a diagnostic.
+    fn name(self) -> &'static str {
+        match self {
+            Self::RequestStart => "request_start",
+            Self::RequestChunk => "request_chunk",
+            Self::RequestEnd => "request_end",
+            Self::RequestCancel => "request_cancel",
+            Self::McpRequestStart => "mcp_request_start",
+            Self::McpRequestChunk => "mcp_request_chunk",
+            Self::McpRequestEnd => "mcp_request_end",
+            Self::McpRequestCancel => "mcp_request_cancel",
+            Self::RealtimeSessionStart => "realtime_session_start",
+            Self::RealtimeClientEvent => "realtime_client_event",
+            Self::RealtimeServerEvent => "realtime_server_event",
+            Self::RealtimeSessionClose => "realtime_session_close",
+            Self::ResponseStart => "response_start",
+            Self::ResponseChunk => "response_chunk",
+            Self::ResponseEnd => "response_end",
+            Self::McpResponseStart => "mcp_response_start",
+            Self::McpResponseChunk => "mcp_response_chunk",
+            Self::McpResponseEnd => "mcp_response_end",
+            Self::ResponseError => "response_error",
+            Self::Control => "control",
+        }
+    }
+
+    /// The request surface of the frame, if it belongs to one.
+    ///
+    /// The surface is the kind of the request, not the kind of the frame: a
+    /// frame of the shared error belongs to no surface of its own.
+    fn surface(self) -> Option<RequestKind> {
+        match self {
+            Self::RequestStart
+            | Self::RequestChunk
+            | Self::RequestEnd
+            | Self::RequestCancel
+            | Self::ResponseStart
+            | Self::ResponseChunk
+            | Self::ResponseEnd => Some(RequestKind::Http),
+            Self::McpRequestStart
+            | Self::McpRequestChunk
+            | Self::McpRequestEnd
+            | Self::McpRequestCancel
+            | Self::McpResponseStart
+            | Self::McpResponseChunk
+            | Self::McpResponseEnd => Some(RequestKind::Mcp),
+            Self::RealtimeSessionStart
+            | Self::RealtimeClientEvent
+            | Self::RealtimeServerEvent
+            | Self::RealtimeSessionClose => Some(RequestKind::Realtime),
+            Self::ResponseError | Self::Control => None,
+        }
+    }
+
+    /// Whether the frame is a response of the executor of the route.
+    fn is_response(self) -> bool {
+        matches!(
+            self,
+            Self::ResponseStart
+                | Self::ResponseChunk
+                | Self::ResponseEnd
+                | Self::McpResponseStart
+                | Self::McpResponseChunk
+                | Self::McpResponseEnd
+                | Self::RealtimeServerEvent
+                | Self::RealtimeSessionClose
+                | Self::ResponseError
+        )
+    }
+
+    /// Whether the frame starts a request.
+    fn is_start(self) -> bool {
+        matches!(
+            self,
+            Self::RequestStart | Self::McpRequestStart | Self::RealtimeSessionStart
+        )
+    }
+}
+
+/// The variant of a frame.
+fn frame_variant(message: &BridgeMessage) -> FrameVariant {
+    match message {
+        BridgeMessage::RequestStart(_) => FrameVariant::RequestStart,
+        BridgeMessage::RequestChunk(_) => FrameVariant::RequestChunk,
+        BridgeMessage::RequestEnd(_) => FrameVariant::RequestEnd,
+        BridgeMessage::RequestCancel(_) => FrameVariant::RequestCancel,
+        BridgeMessage::McpRequestStart(_) => FrameVariant::McpRequestStart,
+        BridgeMessage::McpRequestChunk(_) => FrameVariant::McpRequestChunk,
+        BridgeMessage::McpRequestEnd(_) => FrameVariant::McpRequestEnd,
+        BridgeMessage::McpRequestCancel(_) => FrameVariant::McpRequestCancel,
+        BridgeMessage::RealtimeSessionStart(_) => FrameVariant::RealtimeSessionStart,
+        BridgeMessage::RealtimeClientEvent(_) => FrameVariant::RealtimeClientEvent,
+        BridgeMessage::RealtimeServerEvent(_) => FrameVariant::RealtimeServerEvent,
+        BridgeMessage::RealtimeSessionClose(_) => FrameVariant::RealtimeSessionClose,
+        BridgeMessage::ResponseStart(_) => FrameVariant::ResponseStart,
+        BridgeMessage::ResponseChunk(_) => FrameVariant::ResponseChunk,
+        BridgeMessage::ResponseEnd(_) => FrameVariant::ResponseEnd,
+        BridgeMessage::McpResponseStart(_) => FrameVariant::McpResponseStart,
+        BridgeMessage::McpResponseChunk(_) => FrameVariant::McpResponseChunk,
+        BridgeMessage::McpResponseEnd(_) => FrameVariant::McpResponseEnd,
+        BridgeMessage::ResponseError(_) => FrameVariant::ResponseError,
+        BridgeMessage::Ping | BridgeMessage::Pong | BridgeMessage::ConfigSnapshot(_) => {
+            FrameVariant::Control
+        }
+    }
+}
+
+/// Whether a frame of a peer is valid for the direction it travels in.
+///
+/// The predicate is the acceptance of the normal dispatch: only a response
+/// of the executor is a frame of the upstream direction, and a start of a
+/// peer never travels in the downstream direction. A frame that the normal
+/// dispatch would drop retires nothing.
+fn frame_accepted(direction: &Direction, variant: FrameVariant) -> bool {
+    match direction {
+        Direction::Upstream => variant.is_response(),
+        Direction::Downstream(_) => !variant.is_start(),
+    }
+}
+
+/// Drop the fences of the starts that already retired.
+///
+/// A fence dies with the command that carries it, so the tracking of the
+/// pump never grows beyond the starts that still wait in the ingress.
+fn prune_fences(fences: &mut HashMap<(RequestKind, String), Vec<Weak<StartFence>>>) {
+    fences.retain(|_, entries| {
+        entries.retain(|entry| entry.strong_count() > 0);
+        !entries.is_empty()
+    });
+}
+
+/// Abort the starts of a flow that wait in the ingress.
+///
+/// Every fence of the flow is aborted, so a duplicate start of the same flow
+/// cannot create an owner behind the abort.
+fn cancel_fences(
+    fences: &mut HashMap<(RequestKind, String), Vec<Weak<StartFence>>>,
+    flow: &(RequestKind, String),
+) {
+    let Some(entries) = fences.get(flow) else {
+        return;
+    };
+    for entry in entries {
+        if let Some(fence) = entry.upgrade() {
+            fence.cancel();
+        }
+    }
 }
 
 /// What a bridge message does to a request.
@@ -815,8 +1172,40 @@ enum Command {
         epoch: u64,
         /// The message of the relay state.
         message: BridgeMessage,
+        /// The fence of a start of the relay state.
+        ///
+        /// The fence is set when the start was aborted while it waited in
+        /// the ingress, so the actor never creates an owner for it.
+        fence: Option<Arc<StartFence>>,
         /// The byte budget of the queued command.
         permit: OwnedSemaphorePermit,
+    },
+    /// Retire the request of a peer whose frame the ingress refused.
+    AbortPeer {
+        /// The authority of the link the frame arrived on.
+        token: AdmissionToken,
+        /// The id of the request the frame belongs to.
+        request_id: String,
+        /// The variant of the refused frame.
+        ///
+        /// The variant decides whether the frame is valid for the direction
+        /// it travels in, exactly as the normal dispatch decides.
+        frame: FrameVariant,
+        /// The answer of the actor.
+        reply: oneshot::Sender<Retirement>,
+    },
+    /// Retire a local request whose continuation the ingress refused.
+    AbortLocal {
+        /// The worker of the relay state that produced the message.
+        worker_id: usize,
+        /// The epoch of the route the worker served.
+        epoch: u64,
+        /// The kind of the request that is retired.
+        kind: RequestKind,
+        /// The id of the request that is retired.
+        request_id: String,
+        /// The answer of the actor.
+        reply: oneshot::Sender<()>,
     },
     /// Fail a local request that could not be admitted.
     FailLocal {
@@ -904,6 +1293,19 @@ enum Command {
     },
 }
 
+impl Command {
+    /// Take the message out of a command that carries one.
+    ///
+    /// A command that the ingress of the node refused gives its message back,
+    /// so the caller can name the request the frame belongs to.
+    fn take_message(self) -> Option<BridgeMessage> {
+        match self {
+            Command::HandlePeerMessage { message, .. } => Some(message),
+            _ => None,
+        }
+    }
+}
+
 /// The forwarding hub of a database-less node.
 pub(crate) struct RouteHub {
     /// The relay state of this node.
@@ -989,6 +1391,7 @@ impl RouteHub {
             control.clone(),
             data.clone(),
             data_budget.clone(),
+            self.ingress_budget,
         ));
         let handle = Arc::new(ActorHandle {
             control,
@@ -1242,11 +1645,45 @@ impl RouteHub {
         message: BridgeMessage,
     ) -> anyhow::Result<()> {
         let handle = self.ensure_actor().await?;
-        let permit = handle
+        let state = ingress_counters(&handle.data, &handle.data_budget, self.ingress_budget);
+        let frame = frame_variant(&message);
+        // A closed ingress is the ordinary end of the actor, so it is never
+        // a pressure of the ingress.
+        if handle.data.is_closed() {
+            report_ingress_refusal(IngressRefusalContext {
+                source: "peer",
+                reason: IngressRefusal::ChannelClosed,
+                frame,
+                peer: Some(token.peer()),
+                generation: Some(token.generation()),
+                worker: None,
+                epoch: None,
+                state,
+                outcome: "request_refused",
+            });
+            return Err(anyhow!("the ingress of the node is closed"));
+        }
+        let permit = match handle
             .data_budget
             .clone()
             .try_acquire_many_owned(ingress_bytes(&message) as u32)
-            .map_err(|_| anyhow!("the ingress of the node is exhausted"))?;
+        {
+            Ok(permit) => permit,
+            Err(_) => {
+                report_ingress_refusal(IngressRefusalContext {
+                    source: "peer",
+                    reason: IngressRefusal::ByteBudgetExhausted,
+                    frame,
+                    peer: Some(token.peer()),
+                    generation: Some(token.generation()),
+                    worker: None,
+                    epoch: None,
+                    state,
+                    outcome: "request_refused",
+                });
+                return Err(anyhow!("the ingress of the node is exhausted"));
+            }
+        };
         let (reply, wait) = oneshot::channel();
         let command = Command::ForwardStart {
             token: token.clone(),
@@ -1255,10 +1692,37 @@ impl RouteHub {
             permit,
             reply,
         };
-        handle
-            .data
-            .try_send(command)
-            .map_err(|_| anyhow!("the ingress of the node is full"))?;
+        match handle.data.try_send(command) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                report_ingress_refusal(IngressRefusalContext {
+                    source: "peer",
+                    reason: IngressRefusal::ChannelFull,
+                    frame,
+                    peer: Some(token.peer()),
+                    generation: Some(token.generation()),
+                    worker: None,
+                    epoch: None,
+                    state,
+                    outcome: "request_refused",
+                });
+                return Err(anyhow!("the ingress of the node is full"));
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                report_ingress_refusal(IngressRefusalContext {
+                    source: "peer",
+                    reason: IngressRefusal::ChannelClosed,
+                    frame,
+                    peer: Some(token.peer()),
+                    generation: Some(token.generation()),
+                    worker: None,
+                    epoch: None,
+                    state,
+                    outcome: "request_refused",
+                });
+                return Err(anyhow!("the ingress of the node is closed"));
+            }
+        }
         wait.await
             .unwrap_or_else(|_| Err(anyhow!("the actor of the node is gone")))
     }
@@ -1283,13 +1747,34 @@ impl RouteHub {
         let Ok(handle) = self.ensure_actor().await else {
             return false;
         };
-        let Ok(permit) = handle
+        // A closed ingress is the ordinary end of the actor, so it is never
+        // a pressure of the ingress.
+        if handle.data.is_closed() {
+            let state = ingress_counters(&handle.data, &handle.data_budget, self.ingress_budget);
+            report_ingress_refusal(IngressRefusalContext {
+                source: "peer",
+                reason: IngressRefusal::ChannelClosed,
+                frame: frame_variant(&message),
+                peer: Some(token.peer()),
+                generation: Some(token.generation()),
+                worker: None,
+                epoch: None,
+                state,
+                outcome: "link_fallback",
+            });
+            return false;
+        }
+        let permit = match handle
             .data_budget
             .clone()
             .try_acquire_many_owned(ingress_bytes(&message) as u32)
-        else {
-            warn!("the ingress of the node is exhausted; a frame of a peer is dropped");
-            return false;
+        {
+            Ok(permit) => permit,
+            Err(_) => {
+                return self
+                    .refuse_peer_frame(&handle, token, message, IngressRefusal::ByteBudgetExhausted)
+                    .await;
+            }
         };
         let (reply, wait) = oneshot::channel();
         let command = Command::HandlePeerMessage {
@@ -1298,12 +1783,144 @@ impl RouteHub {
             permit,
             reply,
         };
-        if handle.data.try_send(command).is_err() {
-            warn!("the ingress of the node is full; a frame of a peer is dropped");
-            return false;
+        match handle.data.try_send(command) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(command)) => {
+                let Some(message) = command.take_message() else {
+                    return false;
+                };
+                return self
+                    .refuse_peer_frame(&handle, token, message, IngressRefusal::ChannelFull)
+                    .await;
+            }
+            Err(mpsc::error::TrySendError::Closed(command)) => {
+                let Some(message) = command.take_message() else {
+                    return false;
+                };
+                return self
+                    .refuse_peer_frame(&handle, token, message, IngressRefusal::ChannelClosed)
+                    .await;
+            }
         }
         let _ = wait.await;
         true
+    }
+
+    /// Retire the request of a peer frame that the ingress of the node
+    /// refused.
+    ///
+    /// The retirement is scoped to the request the frame belongs to: the
+    /// link of the peer and the other requests of the node keep working. A
+    /// frame that carries no request is ignored by the normal dispatch as
+    /// well, so it is not a reason to stop the link. When the retirement
+    /// cannot be scheduled or acknowledged, the link ends as before.
+    async fn refuse_peer_frame(
+        &self,
+        handle: &ActorHandle,
+        token: &AdmissionToken,
+        message: BridgeMessage,
+        reason: IngressRefusal,
+    ) -> bool {
+        let state = ingress_counters(&handle.data, &handle.data_budget, self.ingress_budget);
+        let frame = frame_variant(&message);
+        if reason == IngressRefusal::ChannelClosed {
+            // The actor is gone, so no retirement can be scheduled. The
+            // closed channel is the ordinary end of the node, not a
+            // pressure of the ingress.
+            report_ingress_refusal(IngressRefusalContext {
+                source: "peer",
+                reason,
+                frame,
+                peer: Some(token.peer()),
+                generation: Some(token.generation()),
+                worker: None,
+                epoch: None,
+                state,
+                outcome: "link_fallback",
+            });
+            return false;
+        }
+        let request_id = request_id_of(&message).map(|id| id.to_string());
+        let Some(request_id) = request_id.filter(|id| !id.is_empty() && id.len() <= MAX_ID_BYTES)
+        else {
+            report_ingress_refusal(IngressRefusalContext {
+                source: "peer",
+                reason,
+                frame,
+                peer: Some(token.peer()),
+                generation: Some(token.generation()),
+                worker: None,
+                epoch: None,
+                state,
+                outcome: "not_request_addressable",
+            });
+            return true;
+        };
+        let (reply, wait) = oneshot::channel();
+        let command = Command::AbortPeer {
+            token: token.clone(),
+            request_id,
+            frame,
+            reply,
+        };
+        if handle.control.try_send(command).is_err() {
+            report_ingress_refusal(IngressRefusalContext {
+                source: "peer",
+                reason: IngressRefusal::ControlUnavailable,
+                frame,
+                peer: Some(token.peer()),
+                generation: Some(token.generation()),
+                worker: None,
+                epoch: None,
+                state,
+                outcome: "link_fallback",
+            });
+            return false;
+        }
+        match wait.await {
+            Ok(Retirement::Retired) => {
+                report_ingress_refusal(IngressRefusalContext {
+                    source: "peer",
+                    reason,
+                    frame,
+                    peer: Some(token.peer()),
+                    generation: Some(token.generation()),
+                    worker: None,
+                    epoch: None,
+                    state,
+                    outcome: "scoped_retirement",
+                });
+                true
+            }
+            Ok(Retirement::NoOwner) => {
+                report_ingress_refusal(IngressRefusalContext {
+                    source: "peer",
+                    reason,
+                    frame,
+                    peer: Some(token.peer()),
+                    generation: Some(token.generation()),
+                    worker: None,
+                    epoch: None,
+                    state,
+                    outcome: "no_owner_noop",
+                });
+                true
+            }
+            Err(_) => {
+                report_ingress_refusal(IngressRefusalContext {
+                    source: "peer",
+                    reason: IngressRefusal::ControlUnavailable,
+                    frame,
+                    peer: Some(token.peer()),
+                    generation: Some(token.generation()),
+                    worker: None,
+                    epoch: None,
+                    state,
+                    outcome: "link_fallback",
+                });
+                false
+            }
+        }
     }
 
     /// Invalidate the link of a generation that failed.
@@ -1363,6 +1980,7 @@ async fn actor_loop(
     control_tx: mpsc::Sender<Command>,
     data_tx: mpsc::Sender<Command>,
     data_budget: Arc<Semaphore>,
+    ingress_total: usize,
 ) {
     let mut actor = Actor {
         state,
@@ -1370,6 +1988,7 @@ async fn actor_loop(
         control_tx,
         data_tx,
         data_budget,
+        ingress_total,
     };
     loop {
         tokio::select! {
@@ -1403,6 +2022,12 @@ struct Actor {
     data_tx: mpsc::Sender<Command>,
     /// The byte budget of the traffic commands.
     data_budget: Arc<Semaphore>,
+    /// The byte budget of the ingress, as a total.
+    ///
+    /// The total belongs to the ingress of the node, so the diagnostics of a
+    /// refusal report the budget the node holds and not only what is left of
+    /// it.
+    ingress_total: usize,
 }
 
 impl Actor {
@@ -1480,6 +2105,29 @@ impl Actor {
                 reply,
             } => {
                 self.fail_worker(worker_id, epoch).await;
+                let _ = reply.send(());
+            }
+            Command::AbortPeer {
+                token,
+                request_id,
+                frame,
+                reply,
+            } => {
+                let outcome = self.abort_peer(&token, &request_id, frame).await;
+                let _ = reply.send(outcome);
+            }
+            Command::AbortLocal {
+                worker_id,
+                epoch,
+                kind,
+                request_id,
+                reply,
+            } => {
+                // The retirement belongs to the worker that produced it, so
+                // the work of a worker that was replaced is left alone.
+                if self.worker_command_is_current(worker_id, epoch) {
+                    self.abort_local(&request_id, kind).await;
+                }
                 let _ = reply.send(());
             }
             Command::Stop { reply } => {
@@ -1576,10 +2224,11 @@ impl Actor {
                 worker_id,
                 epoch,
                 message,
+                fence,
                 permit,
             } => {
                 if self.worker_command_is_current(worker_id, epoch) {
-                    self.forward_local(message).await;
+                    self.forward_local(message, fence).await;
                 } else {
                     // The work belongs to a worker or a route that is gone.
                     // The pending request of the relay state was already
@@ -1970,23 +2619,7 @@ impl Actor {
                 debug!(request_id = %id, "a frame of a link that is not live was dropped");
                 return;
             }
-            let hub = &self.inner;
-            if hub.owners.get(&id).is_some_and(|owner| {
-                owner.upstream_peer == peer && owner.upstream_generation == link_generation
-            }) {
-                Some(Direction::Upstream)
-            } else {
-                hub.downstream
-                    .get(&DownstreamKey {
-                        peer,
-                        link_generation,
-                        request_id: id.clone(),
-                    })
-                    .and_then(|upstream| {
-                        hub.owners.contains_key(upstream).then(|| upstream.clone())
-                    })
-                    .map(Direction::Downstream)
-            }
+            self.frame_direction(peer, link_generation, &id)
         };
         match direction {
             Some(Direction::Upstream) => {
@@ -2001,6 +2634,30 @@ impl Actor {
                 debug!(request_id = %id, "a frame of an unknown request was dropped");
             }
         }
+    }
+
+    /// The direction of a frame of a peer, if the node holds a request for
+    /// it.
+    ///
+    /// The direction belongs to the owner the node holds, never to the type
+    /// of the frame: a frame of the executor of the route travels on the
+    /// upstream of its owner, a frame of the peer that forwarded the request
+    /// travels on its downstream.
+    fn frame_direction(&self, peer: NodeId, link_generation: u64, id: &str) -> Option<Direction> {
+        let hub = &self.inner;
+        if hub.owners.get(id).is_some_and(|owner| {
+            owner.upstream_peer == peer && owner.upstream_generation == link_generation
+        }) {
+            return Some(Direction::Upstream);
+        }
+        hub.downstream
+            .get(&DownstreamKey {
+                peer,
+                link_generation,
+                request_id: id.to_string(),
+            })
+            .and_then(|upstream| hub.owners.contains_key(upstream).then(|| upstream.clone()))
+            .map(Direction::Downstream)
     }
 
     /// Handle a frame of the executor of the route.
@@ -2128,7 +2785,7 @@ impl Actor {
     /// The relay state owns the request ids of the local clients, so the id
     /// of a local request stays the same on the wire and the response of the
     /// database node reaches the pending request of the relay state.
-    async fn forward_local(&mut self, message: BridgeMessage) {
+    async fn forward_local(&mut self, message: BridgeMessage, fence: Option<Arc<StartFence>>) {
         let Some(id) = request_id_of(&message).map(|id| id.to_string()) else {
             return;
         };
@@ -2138,6 +2795,14 @@ impl Actor {
         };
         match role {
             MessageRole::Start(kind) => {
+                if fence.as_ref().is_some_and(|fence| fence.is_cancelled()) {
+                    // The start was aborted while it waited in the ingress, so
+                    // it never creates an owner and never reaches the
+                    // executor. The abort owns the terminal delivery of the
+                    // request.
+                    debug!(request_id = %id, "an aborted local start was retired");
+                    return;
+                }
                 if id.is_empty() || id.len() > MAX_ID_BYTES {
                     warn!("a local request carries an invalid request id");
                     self.fail_local(&id, 400, "peer_request_invalid").await;
@@ -2255,6 +2920,24 @@ impl Actor {
         self.deliver(BridgeMessage::ResponseError(error)).await;
     }
 
+    /// Fail a local request of the relay state with an overload error.
+    ///
+    /// The overload of the ingress is the reason of the failure, so the
+    /// pending request of the relay state learns it instead of waiting for a
+    /// terminal that never comes.
+    async fn fail_local_overloaded(&mut self, id: &str) {
+        if id.is_empty() {
+            return;
+        }
+        let error = ResponseError {
+            request_id: id.to_string(),
+            status: 503,
+            code: "peer_overloaded".to_string(),
+            message: "the ingress of the node is overloaded".to_string(),
+        };
+        self.deliver(BridgeMessage::ResponseError(error)).await;
+    }
+
     /// Hand a message to the relay state.
     ///
     /// The dispatch of a local action only touches the in-memory state of
@@ -2358,11 +3041,33 @@ impl Actor {
 
     /// Fail one owner of the node.
     async fn fail_owner(&mut self, id: &str, owner: Owner) {
+        self.fail_owner_with(
+            id,
+            owner,
+            503,
+            "peer_link_lost",
+            "the peer link of the request ended",
+        )
+        .await;
+    }
+
+    /// Fail one owner of the node with a terminal error.
+    ///
+    /// The wrapper keeps the semantics of the default failure, so only the
+    /// error that reaches the caller changes.
+    async fn fail_owner_with(
+        &mut self,
+        id: &str,
+        owner: Owner,
+        status: u16,
+        code: &str,
+        message: &str,
+    ) {
         let mut error = ResponseError {
             request_id: id.to_string(),
-            status: 503,
-            code: "peer_link_lost".to_string(),
-            message: "the peer link of the request ended".to_string(),
+            status,
+            code: code.to_string(),
+            message: message.to_string(),
         };
         match owner.downstream {
             Some(downstream) => {
@@ -2382,6 +3087,98 @@ impl Actor {
                 self.deliver(BridgeMessage::ResponseError(error)).await;
             }
         }
+    }
+
+    /// Retire a local request whose continuation the ingress of the node
+    /// refused.
+    ///
+    /// Only the local request of that kind on the current route is retired:
+    /// a request of a peer and a request of another kind keep their owner on
+    /// an id collision. The pending request of the relay state is failed even
+    /// when no owner existed, so an abort that overtook its start never
+    /// leaves the request hanging.
+    async fn abort_local(&mut self, id: &str, kind: RequestKind) {
+        let epoch = self.inner.route.epoch();
+        let owner = self
+            .inner
+            .owners
+            .get(id)
+            .filter(|owner| {
+                owner.downstream.is_none() && owner.kind == kind && owner.epoch == epoch
+            })
+            .cloned();
+        if let Some(owner) = owner {
+            remove_owner_entry(&mut self.inner, id);
+            // The upstream work of the retired request is cancelled once, so
+            // the executor stops it.
+            self.cancel_upstream(&owner, id).await;
+        }
+        self.fail_local_overloaded(id).await;
+    }
+
+    /// Retire the request of a peer whose frame the ingress of the node
+    /// refused.
+    ///
+    /// The direction of the request is derived again from the state of the
+    /// node, exactly as the normal dispatch does: a frame never retires a
+    /// request of another link, of another route or of another kind. A frame
+    /// that names no request of the link retires nothing.
+    async fn abort_peer(
+        &mut self,
+        token: &AdmissionToken,
+        id: &str,
+        frame: FrameVariant,
+    ) -> Retirement {
+        let peer = token.peer();
+        let link_generation = token.generation();
+        if !token.is_live() {
+            return Retirement::NoOwner;
+        }
+        if !self
+            .inner
+            .links
+            .get(&peer)
+            .is_some_and(|link| link.generation == link_generation)
+        {
+            return Retirement::NoOwner;
+        }
+        let Some(direction) = self.frame_direction(peer, link_generation, id) else {
+            return Retirement::NoOwner;
+        };
+        // A frame that the normal dispatch would drop retires nothing, so an
+        // ingress that is full never ends a request of a valid direction.
+        if !frame_accepted(&direction, frame) {
+            return Retirement::NoOwner;
+        }
+        let owner_id = match &direction {
+            Direction::Upstream => id.to_string(),
+            Direction::Downstream(upstream_id) => upstream_id.clone(),
+        };
+        let epoch = self.inner.route.epoch();
+        let surface = frame.surface();
+        let owner = self
+            .inner
+            .owners
+            .get(&owner_id)
+            .filter(|owner| owner.epoch == epoch && surface.map_or(true, |kind| owner.kind == kind))
+            .cloned();
+        let Some(owner) = owner else {
+            return Retirement::NoOwner;
+        };
+        remove_owner_entry(&mut self.inner, &owner_id);
+        // The upstream work of the retired request is cancelled once, so the
+        // executor stops it.
+        self.cancel_upstream(&owner, &owner_id).await;
+        // The caller of the request learns the failure.
+        self.fail_owner_with(
+            &owner_id,
+            owner,
+            503,
+            "peer_overloaded",
+            "the ingress of the node is overloaded",
+        )
+        .await;
+        Retirement::Retired
     }
 
     /// The frame that cancels the upstream work of an owner whose client
@@ -2687,10 +3484,19 @@ impl Actor {
         let data_tx = self.data_tx.clone();
         let control_tx = self.control_tx.clone();
         let data_budget = self.data_budget.clone();
+        let ingress_total = self.ingress_total;
         let relay_state = self.state.clone();
         let task = tokio::spawn(async move {
             let mut failed = false;
+            // The fences of the starts that wait in the ingress of the actor.
+            // The pump keeps only weak references, so a fence dies with the
+            // command that carries it and is never a tombstone.
+            let mut fences: HashMap<(RequestKind, String), Vec<Weak<StartFence>>> = HashMap::new();
+            // The flows that were already failed. The set is bounded, and it
+            // is retired with the terminal message of its flow.
+            let mut aborted: HashSet<(RequestKind, String)> = HashSet::new();
             loop {
+                prune_fences(&mut fences);
                 let message = tokio::select! {
                     biased;
                     // The failure of the worker is read first, so a producer
@@ -2706,37 +3512,234 @@ impl Actor {
                         None => break,
                     },
                 };
-                // The producer of the route hands the traffic of the relay
-                // state to the actor, with the byte budget of the ingress.
-                let size = ingress_bytes(&message) as u32;
-                let permit = data_budget.clone().try_acquire_many_owned(size).ok();
-                let refused = match permit {
-                    Some(permit) => data_tx
-                        .try_send(Command::ForwardLocal {
-                            worker_id,
-                            epoch,
-                            message: message.clone(),
-                            permit,
-                        })
-                        .is_err(),
-                    None => true,
-                };
-                if refused {
-                    // A new start never reached the actor, so it is failed
-                    // promptly to the pending request of the relay state. A
-                    // continuation of a running request has no pending
-                    // request any more, so it cannot be failed that way: the
-                    // worker signals its own failure and the actor tears the
-                    // captured epoch down on the priority path.
-                    if matches!(classify(&message), MessageRole::Start(_)) {
-                        warn!("the ingress of the node is full; a local request is refused");
-                        fail_local_message(&control_tx, worker_id, epoch, &message).await;
-                        continue;
+                // The close of a realtime session ends its flow on the way
+                // up, so it is the terminal of that flow.
+                let role = match &message {
+                    BridgeMessage::RealtimeSessionClose(_) => {
+                        MessageRole::Cancel(RequestKind::Realtime)
                     }
-                    warn!("the ingress of the node is full; the worker of the route failed");
-                    relay_state.inner.signal_worker_failure(worker_id);
-                    failed = true;
-                    break;
+                    _ => classify(&message),
+                };
+                let request_id = request_id_of(&message).map(|id| id.to_string());
+                let frame = frame_variant(&message);
+                let kind = match role {
+                    MessageRole::Start(kind)
+                    | MessageRole::Stream(kind)
+                    | MessageRole::End(kind)
+                    | MessageRole::Cancel(kind) => Some(kind),
+                    _ => None,
+                };
+                let terminal = matches!(role, MessageRole::End(_) | MessageRole::Cancel(_));
+                let flow = kind.zip(request_id.clone()).map(|(kind, id)| (kind, id));
+                // A message of a flow that was already failed is discarded:
+                // the flow was explicitly failed, so it is not silently
+                // continued and it needs no second retirement.
+                if let Some(flow) = flow.as_ref()
+                    && aborted.contains(flow)
+                {
+                    if terminal {
+                        aborted.remove(flow);
+                    }
+                    continue;
+                }
+                // The producer of the route hands the traffic of the relay
+                // state to the actor, with the byte budget of the ingress. A
+                // closed ingress is the ordinary end of the actor, so it is
+                // never a pressure of the ingress.
+                let closed = data_tx.is_closed();
+                let size = ingress_bytes(&message) as u32;
+                let permit = if closed {
+                    None
+                } else {
+                    data_budget.clone().try_acquire_many_owned(size).ok()
+                };
+                let fence = match role {
+                    // A start of the relay state is fenced, so an abort that
+                    // overtakes it keeps it from creating an owner.
+                    MessageRole::Start(_) => {
+                        let trackable = request_id
+                            .as_ref()
+                            .is_some_and(|id| !id.is_empty() && id.len() <= MAX_ID_BYTES);
+                        if trackable && fences.len() >= MAX_FORWARDED_REQUESTS {
+                            // The bounded tracking of the queued starts is
+                            // exhausted, so the start is refused instead of
+                            // being queued without a fence.
+                            report_ingress_refusal(IngressRefusalContext {
+                                source: "local",
+                                reason: IngressRefusal::TrackingExhausted,
+                                frame,
+                                peer: None,
+                                generation: None,
+                                worker: Some(worker_id),
+                                epoch: Some(epoch),
+                                state: ingress_counters(&data_tx, &data_budget, ingress_total),
+                                outcome: "request_failed",
+                            });
+                            fail_local_message(&control_tx, worker_id, epoch, &message).await;
+                            continue;
+                        }
+                        trackable.then(StartFence::new)
+                    }
+                    _ => None,
+                };
+                let refused = match permit {
+                    Some(permit) => match data_tx.try_send(Command::ForwardLocal {
+                        worker_id,
+                        epoch,
+                        message: message.clone(),
+                        fence: fence.clone(),
+                        permit,
+                    }) {
+                        Ok(()) => None,
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            Some(IngressRefusal::ChannelFull)
+                        }
+                        Err(mpsc::error::TrySendError::Closed(_)) => {
+                            Some(IngressRefusal::ChannelClosed)
+                        }
+                    },
+                    None => {
+                        if data_tx.is_closed() {
+                            Some(IngressRefusal::ChannelClosed)
+                        } else {
+                            Some(IngressRefusal::ByteBudgetExhausted)
+                        }
+                    }
+                };
+                if let Some(reason) = refused {
+                    let state = ingress_counters(&data_tx, &data_budget, ingress_total);
+                    let tracking_has_room = aborted.len() < MAX_FORWARDED_REQUESTS;
+                    let action = refusal_action(role, tracking_has_room);
+                    // A tracking that is exhausted is its own reason, so the
+                    // diagnostic names the bound that was reached.
+                    let reason = if action == RefusalAction::FailWorker
+                        && matches!(
+                            role,
+                            MessageRole::Stream(_) | MessageRole::End(_) | MessageRole::Cancel(_)
+                        ) {
+                        IngressRefusal::TrackingExhausted
+                    } else {
+                        reason
+                    };
+                    match action {
+                        RefusalAction::FailRequest => {
+                            // A new start never reached the actor, so it is
+                            // failed promptly to the pending request of the
+                            // relay state.
+                            report_ingress_refusal(IngressRefusalContext {
+                                source: "local",
+                                reason,
+                                frame,
+                                peer: None,
+                                generation: None,
+                                worker: Some(worker_id),
+                                epoch: Some(epoch),
+                                state,
+                                outcome: "request_failed",
+                            });
+                            fail_local_message(&control_tx, worker_id, epoch, &message).await;
+                            continue;
+                        }
+                        RefusalAction::RetireRequest => {
+                            let kind = kind.expect("a continuation carries its kind");
+                            // A continuation of a running request has no
+                            // pending request of the relay state any more,
+                            // so the request itself is retired: the ingress
+                            // of the node refuses one request, not the worker
+                            // and not the route.
+                            let Some(request_id) = request_id.clone() else {
+                                report_ingress_refusal(IngressRefusalContext {
+                                    source: "local",
+                                    reason,
+                                    frame,
+                                    peer: None,
+                                    generation: None,
+                                    worker: Some(worker_id),
+                                    epoch: Some(epoch),
+                                    state,
+                                    outcome: "worker_fallback",
+                                });
+                                relay_state.inner.signal_worker_failure(worker_id);
+                                failed = true;
+                                break;
+                            };
+                            let flow = (kind, request_id.clone());
+                            aborted.insert(flow.clone());
+                            // The start of the flow is fenced, so it never
+                            // creates an owner when the actor sees it.
+                            cancel_fences(&mut fences, &flow);
+                            let (reply, _wait) = oneshot::channel();
+                            let command = Command::AbortLocal {
+                                worker_id,
+                                epoch,
+                                kind,
+                                request_id,
+                                reply,
+                            };
+                            if control_tx.try_send(command).is_err() {
+                                // The priority path cannot carry the
+                                // retirement, so the worker of the route
+                                // fails as it did before.
+                                report_ingress_refusal(IngressRefusalContext {
+                                    source: "local",
+                                    reason: IngressRefusal::ControlUnavailable,
+                                    frame,
+                                    peer: None,
+                                    generation: None,
+                                    worker: Some(worker_id),
+                                    epoch: Some(epoch),
+                                    state,
+                                    outcome: "worker_fallback",
+                                });
+                                relay_state.inner.signal_worker_failure(worker_id);
+                                failed = true;
+                                break;
+                            }
+                            report_ingress_refusal(IngressRefusalContext {
+                                source: "local",
+                                reason,
+                                frame,
+                                peer: None,
+                                generation: None,
+                                worker: Some(worker_id),
+                                epoch: Some(epoch),
+                                state,
+                                outcome: "scoped_retirement",
+                            });
+                            if terminal {
+                                aborted.remove(&flow);
+                            }
+                            continue;
+                        }
+                        RefusalAction::FailWorker => {
+                            // A message that cannot be retired in its scope
+                            // fails the worker of the route as it did before.
+                            report_ingress_refusal(IngressRefusalContext {
+                                source: "local",
+                                reason,
+                                frame,
+                                peer: None,
+                                generation: None,
+                                worker: Some(worker_id),
+                                epoch: Some(epoch),
+                                state,
+                                outcome: "worker_fallback",
+                            });
+                            relay_state.inner.signal_worker_failure(worker_id);
+                            failed = true;
+                            break;
+                        }
+                    }
+                }
+                // The start reached the ingress of the actor, so its fence is
+                // tracked until the command retires.
+                if let (Some(fence), Some(flow)) = (fence, flow.as_ref())
+                    && !aborted.contains(flow)
+                {
+                    fences
+                        .entry(flow.clone())
+                        .or_default()
+                        .push(Arc::downgrade(&fence));
                 }
             }
             if failed {
@@ -3073,7 +4076,10 @@ mod tests {
     use tokio::sync::oneshot;
     use uuid::Uuid;
 
-    use super::{RouteHub, RouteState};
+    use super::{
+        FrameVariant, MessageRole, RefusalAction, RequestKind, RouteHub, RouteState, classify,
+        frame_variant, refusal_action, response_kind,
+    };
     use crate::protocol::{
         BridgeMessage, BridgeRequestStart, ClientRoute, ConfigSnapshot, ResponseEnd, ResponseStart,
     };
@@ -3292,6 +4298,56 @@ mod tests {
         })
         .await
         .expect("the condition holds");
+    }
+
+    /// The envelopes a link receives until it stays quiet.
+    ///
+    /// The observation is bounded: the drain ends when the link receives
+    /// nothing for a moment.
+    async fn drain(receiver: &mut super::EnvelopeReceiver) -> Vec<PeerEnvelope> {
+        let mut envelopes = Vec::new();
+        while let Ok(Some(queued)) =
+            tokio::time::timeout(Duration::from_millis(200), receiver.recv()).await
+        {
+            let (bytes, _permit) = queued.into_parts();
+            envelopes.push(PeerEnvelope::decode(&bytes).expect("the envelope decodes"));
+        }
+        envelopes
+    }
+
+    /// The commands that wait in the data channel of the actor.
+    ///
+    /// The actor is blocked, so the commands pile up in the data channel
+    /// until it holds every slot.
+    fn fill_data_channel(handle: &super::ActorHandle, peer: NodeId, limit: usize) -> usize {
+        let mut queued = 0usize;
+        while queued < limit {
+            let message = BridgeMessage::ResponseEnd(crate::protocol::ResponseEnd {
+                request_id: format!("filler-{queued}"),
+            });
+            let Ok(permit) = handle
+                .data_budget
+                .clone()
+                .try_acquire_many_owned(super::ingress_bytes(&message) as u32)
+            else {
+                break;
+            };
+            let (reply, _wait) = oneshot::channel();
+            if handle
+                .data
+                .try_send(super::Command::HandlePeerMessage {
+                    token: super::super::admission::mint_for_test(peer, 1),
+                    message,
+                    permit,
+                    reply,
+                })
+                .is_err()
+            {
+                break;
+            }
+            queued += 1;
+        }
+        queued
     }
 
     #[tokio::test]
@@ -4744,13 +5800,19 @@ mod tests {
 
         // A frame that does not fit the byte budget of the ingress never
         // enters the queue of the actor.
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let available_before = handle.data_budget.available_permits();
         let huge = BridgeMessage::ResponseChunk(crate::protocol::ResponseChunk {
             request_id: "huge".to_string(),
             data: vec![7; 4096],
         });
         assert!(
-            !hub.handle_peer_message(&nas, huge).await,
-            "the ingress of the node refuses a message over its budget"
+            hub.handle_peer_message(&nas, huge).await,
+            "the link of the peer survives the refusal of a frame over its budget"
+        );
+        assert!(
+            handle.data_budget.available_permits() >= available_before,
+            "the frame over the budget never entered the ingress of the node"
         );
     }
 
@@ -5757,10 +6819,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_refused_local_continuation_tears_the_captured_worker_down() {
-        let (hub, state, _nas, _mac) = routed_node().await;
+    async fn a_refused_local_continuation_retires_only_its_own_request() {
+        let (hub, state, mut nas_rx, _mac_rx) = routed_node().await;
         wait_until(|| async { !state.inner.workers.lock().await.is_empty() }).await;
         let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let worker = {
+            state
+                .inner
+                .workers
+                .lock()
+                .await
+                .values()
+                .next()
+                .cloned()
+                .expect("the virtual worker of the route")
+        };
+        worker
+            .send(http_start("local-1"))
+            .await
+            .expect("the request reaches the worker");
+        wait_until(|| async { hub.owner_count().await == 1 }).await;
 
         // The byte budget of the ingress of the node is exhausted, so the
         // traffic of the relay state cannot enter the actor any more.
@@ -5776,18 +6854,7 @@ mod tests {
             "the ingress of the node is exhausted"
         );
 
-        // A continuation of a running request cannot enter the ingress.
-        let worker = {
-            state
-                .inner
-                .workers
-                .lock()
-                .await
-                .values()
-                .next()
-                .cloned()
-                .expect("the virtual worker of the route")
-        };
+        // A continuation of the running request cannot enter the ingress.
         worker
             .send(BridgeMessage::RequestEnd(
                 crate::protocol::BridgeRequestEnd {
@@ -5800,12 +6867,1389 @@ mod tests {
             .await
             .expect("the frame reaches the worker");
 
-        // The worker lost a critical frame, so the actor tears the captured
-        // epoch down and the route of the node ends with it. The budget
-        // stays exhausted, so the worker cannot hand its traffic over.
-        wait_until(|| async { state.inner.workers.lock().await.is_empty() }).await;
-        wait_until(|| async { hub.selected_path().await.is_none() }).await;
-        assert_eq!(hub.owner_count().await, 0, "the retired work owns nothing");
+        // The request is retired, so it owns nothing any more.
+        wait_until(|| async { hub.owner_count().await == 0 }).await;
+
+        // The upstream work of the retired request is cancelled once.
+        let frames = drain(&mut nas_rx).await;
+        let cancels = frames
+            .iter()
+            .filter(|envelope| matches!(envelope.message, Some(BridgeMessage::RequestCancel(_))))
+            .count();
+        assert_eq!(
+            cancels, 1,
+            "the upstream work of the retired request is cancelled once"
+        );
+
+        // The worker of the route, the route and its snapshot survive the
+        // refusal: only the request of the refused frame is retired.
+        assert!(
+            !state.inner.workers.lock().await.is_empty(),
+            "the worker of the route survives the refusal"
+        );
+        assert_eq!(
+            hub.selected_path().await,
+            Some(vec![id(LOCAL), id(NAS)]),
+            "the route of the node survives the refusal"
+        );
+        assert_eq!(
+            *state.inner.config_version.lock().await,
+            Some(1),
+            "the snapshot of the route survives the refusal"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_local_continuation_retires_its_request_when_the_data_channel_is_full() {
+        let (hub, state, mut nas_rx, _mac_rx) = routed_node().await;
+        wait_until(|| async { !state.inner.workers.lock().await.is_empty() }).await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let worker = {
+            state
+                .inner
+                .workers
+                .lock()
+                .await
+                .values()
+                .next()
+                .cloned()
+                .expect("the virtual worker of the route")
+        };
+        // The affected request and an unrelated request run on the route.
+        worker
+            .send(http_start("affected"))
+            .await
+            .expect("the request reaches the worker");
+        worker
+            .send(http_start("unrelated"))
+            .await
+            .expect("the request reaches the worker");
+        wait_until(|| async { hub.owner_count().await == 2 }).await;
+
+        // The actor blocks in the snapshot of the relay state, so the traffic
+        // of the data path piles up.
+        let version = state.inner.config_version.lock().await;
+        let path = PeerPath::new(vec![id(NAS)]).expect("a bounded path");
+        let advertisement = tokio::spawn({
+            let hub = hub.clone();
+            let nas = super::super::admission::mint_for_test(id(NAS), 1);
+            async move { hub.apply_update(&nas, 2, &path, snapshot(2)).await }
+        });
+        // The command waits on the priority path and the actor takes it, so
+        // the actor cannot consume the data path any more.
+        wait_until(|| async {
+            handle.control_budget.available_permits() < super::PEER_CONTROL_BUDGET_BYTES
+        })
+        .await;
+        wait_until(|| async { handle.control.capacity() == super::PEER_CONTROL_BUFFER }).await;
+
+        // The data channel of the actor holds every slot, and the byte budget
+        // of the ingress is untouched.
+        let queued = fill_data_channel(&handle, id(NAS), super::PEER_INGRESS_BUFFER);
+        assert_eq!(
+            queued,
+            super::PEER_INGRESS_BUFFER,
+            "the data channel of the node is full"
+        );
+        assert_eq!(
+            handle.data.capacity(),
+            0,
+            "the data channel of the node is full"
+        );
+        assert!(
+            handle.data_budget.available_permits() > 0,
+            "the byte budget of the ingress is not exhausted"
+        );
+
+        // A continuation of the affected request cannot enter the ingress.
+        worker
+            .send(BridgeMessage::RequestChunk(
+                crate::protocol::BridgeRequestChunk {
+                    request_id: "affected".to_string(),
+                    data: vec![7; 8],
+                },
+            ))
+            .await
+            .expect("the frame reaches the worker");
+        // The retirement waits on the priority path, so it runs as soon as the
+        // actor is free again.
+        wait_until(|| async { handle.control.capacity() < super::PEER_CONTROL_BUFFER }).await;
+        drop(version);
+        let _ = advertisement.await;
+
+        // Only the affected request is retired.
+        wait_until(|| async { hub.owner_count().await == 1 }).await;
+
+        // The upstream work of the retired request is cancelled once.
+        let frames = drain(&mut nas_rx).await;
+        let cancels = frames
+            .iter()
+            .filter(|envelope| matches!(envelope.message, Some(BridgeMessage::RequestCancel(_))))
+            .count();
+        assert_eq!(
+            cancels, 1,
+            "the upstream work of the retired request is cancelled once"
+        );
+
+        // The worker of the route, the route and its snapshot survive the
+        // refusal.
+        assert!(
+            !state.inner.workers.lock().await.is_empty(),
+            "the worker of the route survives the refusal"
+        );
+        assert_eq!(
+            hub.selected_path().await,
+            Some(vec![id(LOCAL), id(NAS)]),
+            "the route of the node survives the refusal"
+        );
+        assert_eq!(
+            *state.inner.config_version.lock().await,
+            Some(2),
+            "the snapshot of the route survives the refusal"
+        );
+
+        // The unrelated request can still finish.
+        let nas_token = super::super::admission::mint_for_test(id(NAS), 1);
+        assert!(
+            hub.handle_peer_message(
+                &nas_token,
+                BridgeMessage::ResponseEnd(crate::protocol::ResponseEnd {
+                    request_id: "unrelated".to_string(),
+                }),
+            )
+            .await,
+            "the answer of the unrelated request enters the ingress"
+        );
+        wait_until(|| async { hub.owner_count().await == 0 }).await;
+
+        // A request that comes after the capacity drained works again.
+        worker
+            .send(http_start("later"))
+            .await
+            .expect("the request reaches the worker");
+        wait_until(|| async { hub.owner_count().await == 1 }).await;
+    }
+
+    /// Block the actor of the hub in the snapshot of the relay state.
+    ///
+    /// The actor cannot consume the data path while it waits for the
+    /// configuration version, so the traffic of the relay state piles up in
+    /// the data channel of the actor.
+    async fn block_the_actor<'a>(
+        hub: &Arc<RouteHub>,
+        state: &'a AppState,
+        handle: &super::ActorHandle,
+        generation: u64,
+    ) -> (
+        tokio::sync::MutexGuard<'a, Option<i64>>,
+        tokio::task::JoinHandle<Result<super::RouteOutcome, super::RouteError>>,
+    ) {
+        let version = state.inner.config_version.lock().await;
+        let path = PeerPath::new(vec![id(NAS)]).expect("a bounded path");
+        let advertisement = tokio::spawn({
+            let hub = hub.clone();
+            let nas = super::super::admission::mint_for_test(id(NAS), 1);
+            async move {
+                hub.apply_update(&nas, generation, &path, snapshot(generation as i64))
+                    .await
+            }
+        });
+        // The command waits on the priority path and the actor takes it, so
+        // the actor cannot consume the data path any more.
+        wait_until(|| async {
+            handle.control_budget.available_permits() < super::PEER_CONTROL_BUDGET_BYTES
+        })
+        .await;
+        wait_until(|| async { handle.control.capacity() == super::PEER_CONTROL_BUFFER }).await;
+        (version, advertisement)
+    }
+
+    /// Fill the control channel of the actor.
+    ///
+    /// The actor is blocked, so the commands pile up in the control channel
+    /// until it holds every slot.
+    fn fill_control_channel(handle: &super::ActorHandle) -> usize {
+        let mut queued = 0usize;
+        while queued < super::PEER_CONTROL_BUFFER {
+            let (reply, _wait) = oneshot::channel();
+            if handle
+                .control
+                .try_send(super::Command::OwnerCount { reply })
+                .is_err()
+            {
+                break;
+            }
+            queued += 1;
+        }
+        queued
+    }
+
+    #[tokio::test]
+    async fn a_refusal_without_a_free_control_path_stops_the_link_of_the_peer() {
+        let (hub, state, _nas_rx, _mac_rx) = routed_node().await;
+        let mac = super::super::admission::mint_for_test(id(MAC), 2);
+        hub.forward_start(&mac, forwarded_path(), http_start("peer-1"))
+            .await
+            .expect("the start of the peer is forwarded");
+        wait_until(|| async { hub.owner_count().await == 1 }).await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let (version, advertisement) = block_the_actor(&hub, &state, &handle, 2).await;
+
+        // The data channel of the actor holds every slot, so the frame of the
+        // peer cannot enter the ingress.
+        let queued = fill_data_channel(&handle, id(NAS), super::PEER_INGRESS_BUFFER);
+        assert_eq!(
+            queued,
+            super::PEER_INGRESS_BUFFER,
+            "the data channel of the node is full"
+        );
+        // The control channel holds every slot too, so the retirement of the
+        // request cannot be scheduled.
+        let queued = fill_control_channel(&handle);
+        assert_eq!(
+            queued,
+            super::PEER_CONTROL_BUFFER,
+            "the control channel of the node is full"
+        );
+
+        // The link of the peer ends, because the retirement of the request
+        // could not be scheduled.
+        assert!(
+            !hub.handle_peer_message(
+                &mac,
+                BridgeMessage::RequestChunk(crate::protocol::BridgeRequestChunk {
+                    request_id: "peer-1".to_string(),
+                    data: vec![7; 8],
+                }),
+            )
+            .await,
+            "the link of the peer ends without a free control path"
+        );
+        drop(version);
+        let _ = advertisement.await;
+    }
+
+    #[tokio::test]
+    async fn a_retirement_of_another_worker_epoch_keeps_the_request() {
+        let (hub, state, _nas_rx, _mac_rx) = routed_node().await;
+        wait_until(|| async { !state.inner.workers.lock().await.is_empty() }).await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let worker = {
+            state
+                .inner
+                .workers
+                .lock()
+                .await
+                .values()
+                .next()
+                .cloned()
+                .expect("the virtual worker of the route")
+        };
+        let worker_id = {
+            let workers = state.inner.workers.lock().await;
+            workers
+                .keys()
+                .next()
+                .copied()
+                .expect("the virtual worker of the route")
+        };
+        worker
+            .send(http_start("local-1"))
+            .await
+            .expect("the request reaches the worker");
+        wait_until(|| async { hub.owner_count().await == 1 }).await;
+
+        // The retirement belongs to a worker that was replaced, so the
+        // request of the current worker keeps its owner.
+        let (reply, wait) = oneshot::channel();
+        handle
+            .control
+            .try_send(super::Command::AbortLocal {
+                worker_id,
+                epoch: hub.epoch().await + 1,
+                kind: super::RequestKind::Http,
+                request_id: "local-1".to_string(),
+                reply,
+            })
+            .expect("the retirement is queued");
+        wait.await.expect("the retirement is answered");
+        assert_eq!(
+            hub.owner_count().await,
+            1,
+            "the request of the current worker keeps its owner"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_bounded_tracking_of_the_failed_flows_fails_the_worker_of_the_route() {
+        let (hub, state, _nas_rx, _mac_rx) = routed_node().await;
+        wait_until(|| async { !state.inner.workers.lock().await.is_empty() }).await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let worker = {
+            state
+                .inner
+                .workers
+                .lock()
+                .await
+                .values()
+                .next()
+                .cloned()
+                .expect("the virtual worker of the route")
+        };
+
+        // The byte budget of the ingress is exhausted, so the traffic of the
+        // relay state cannot enter the ingress.
+        let _budget = handle
+            .data_budget
+            .clone()
+            .acquire_many_owned(super::PEER_INGRESS_BUDGET_BYTES as u32)
+            .await
+            .expect("the budget of the ingress");
+
+        // Every message of a flow of its own is refused, so the bounded
+        // tracking of the failed flows grows until it is exhausted. The test
+        // hands one message over at a time and waits for the priority path to
+        // be free again, so the retirement of every flow is carried by the
+        // priority path.
+        let mut refused = 0usize;
+        for index in 0..(super::MAX_FORWARDED_REQUESTS + 2) {
+            let message = BridgeMessage::RequestChunk(crate::protocol::BridgeRequestChunk {
+                request_id: format!("flow-{index}"),
+                data: vec![7; 8],
+            });
+            worker
+                .send(message)
+                .await
+                .expect("the frame reaches the worker");
+            wait_until(|| async { worker.capacity() == worker.max_capacity() }).await;
+            wait_until(|| async { handle.control.capacity() == super::PEER_CONTROL_BUFFER }).await;
+            refused += 1;
+            if worker.is_closed() {
+                break;
+            }
+        }
+
+        // The tracking of the failed flows is exhausted, so the worker of the
+        // route fails as it did before. The priority path never failed, so
+        // the tracking was the bound that was reached.
+        wait_until(|| async { worker.is_closed() }).await;
+        assert!(
+            refused > super::MAX_FORWARDED_REQUESTS,
+            "the tracking of the failed flows was exhausted: {refused}"
+        );
+    }
+
+    /// One message of every frame variant of the protocol.
+    fn every_frame_variant() -> Vec<(FrameVariant, BridgeMessage)> {
+        let id = "frame".to_string();
+        let start = http_start("frame");
+        vec![
+            (FrameVariant::RequestStart, start.clone()),
+            (
+                FrameVariant::RequestChunk,
+                BridgeMessage::RequestChunk(crate::protocol::BridgeRequestChunk {
+                    request_id: id.clone(),
+                    data: vec![1],
+                }),
+            ),
+            (
+                FrameVariant::RequestEnd,
+                BridgeMessage::RequestEnd(crate::protocol::BridgeRequestEnd {
+                    request_id: id.clone(),
+                    http_request_compressed_bytes: None,
+                    http_request_decompressed_bytes: None,
+                    http_request_compression_ratio: None,
+                }),
+            ),
+            (
+                FrameVariant::RequestCancel,
+                BridgeMessage::RequestCancel(crate::protocol::BridgeRequestCancel {
+                    request_id: id.clone(),
+                    reason: "client_cancel".to_string(),
+                    response_started: false,
+                }),
+            ),
+            (
+                FrameVariant::McpRequestStart,
+                BridgeMessage::McpRequestStart(crate::protocol::McpRequestStart {
+                    request_id: id.clone(),
+                    server_name: None,
+                    method: "POST".to_string(),
+                    path: "/mcp".to_string(),
+                    headers: vec![],
+                    user_id: None,
+                    client_key_hash: None,
+                    http_request_content_encoding: None,
+                    http_request_compressed: false,
+                    http_request_compressed_bytes: None,
+                }),
+            ),
+            (
+                FrameVariant::McpRequestChunk,
+                BridgeMessage::McpRequestChunk(crate::protocol::McpRequestChunk {
+                    request_id: id.clone(),
+                    data: vec![1],
+                }),
+            ),
+            (
+                FrameVariant::McpRequestEnd,
+                BridgeMessage::McpRequestEnd(crate::protocol::McpRequestEnd {
+                    request_id: id.clone(),
+                    http_request_compressed_bytes: None,
+                    http_request_decompressed_bytes: None,
+                    http_request_compression_ratio: None,
+                }),
+            ),
+            (
+                FrameVariant::McpRequestCancel,
+                BridgeMessage::McpRequestCancel(crate::protocol::McpRequestCancel {
+                    request_id: id.clone(),
+                    reason: "client_cancel".to_string(),
+                    response_started: false,
+                }),
+            ),
+            (
+                FrameVariant::RealtimeSessionStart,
+                BridgeMessage::RealtimeSessionStart(crate::protocol::RealtimeSessionStart {
+                    request_id: id.clone(),
+                    model: "model".to_string(),
+                    path: "/realtime".to_string(),
+                    user_id: None,
+                    route_id: None,
+                    client_key_hash: None,
+                    request_user_agent: None,
+                }),
+            ),
+            (
+                FrameVariant::RealtimeClientEvent,
+                BridgeMessage::RealtimeClientEvent(crate::protocol::RealtimeClientEventMessage {
+                    request_id: id.clone(),
+                    event_json: "{}".to_string(),
+                }),
+            ),
+            (
+                FrameVariant::RealtimeServerEvent,
+                BridgeMessage::RealtimeServerEvent(crate::protocol::RealtimeServerEventMessage {
+                    request_id: id.clone(),
+                    event_json: "{}".to_string(),
+                }),
+            ),
+            (
+                FrameVariant::RealtimeSessionClose,
+                BridgeMessage::RealtimeSessionClose(crate::protocol::RealtimeSessionClose {
+                    request_id: id.clone(),
+                    code: None,
+                    reason: None,
+                    response_started: false,
+                }),
+            ),
+            (
+                FrameVariant::ResponseStart,
+                BridgeMessage::ResponseStart(ResponseStart {
+                    request_id: id.clone(),
+                    status: 200,
+                    content_type: None,
+                    headers: vec![],
+                }),
+            ),
+            (
+                FrameVariant::ResponseChunk,
+                BridgeMessage::ResponseChunk(crate::protocol::ResponseChunk {
+                    request_id: id.clone(),
+                    data: vec![1],
+                }),
+            ),
+            (
+                FrameVariant::ResponseEnd,
+                BridgeMessage::ResponseEnd(ResponseEnd {
+                    request_id: id.clone(),
+                }),
+            ),
+            (
+                FrameVariant::McpResponseStart,
+                BridgeMessage::McpResponseStart(crate::protocol::McpResponseStart {
+                    request_id: id.clone(),
+                    status: 200,
+                    content_type: None,
+                    headers: vec![],
+                }),
+            ),
+            (
+                FrameVariant::McpResponseChunk,
+                BridgeMessage::McpResponseChunk(crate::protocol::McpResponseChunk {
+                    request_id: id.clone(),
+                    data: vec![1],
+                }),
+            ),
+            (
+                FrameVariant::McpResponseEnd,
+                BridgeMessage::McpResponseEnd(crate::protocol::McpResponseEnd {
+                    request_id: id.clone(),
+                }),
+            ),
+            (
+                FrameVariant::ResponseError,
+                BridgeMessage::ResponseError(crate::protocol::ResponseError {
+                    request_id: id.clone(),
+                    status: 503,
+                    code: "peer_overloaded".to_string(),
+                    message: "the ingress of the node is overloaded".to_string(),
+                }),
+            ),
+            (
+                FrameVariant::Control,
+                BridgeMessage::ConfigSnapshot(snapshot(1)),
+            ),
+        ]
+    }
+
+    #[test]
+    fn the_frame_variant_agrees_with_the_dispatch_of_the_node() {
+        for (variant, message) in every_frame_variant() {
+            assert_eq!(
+                frame_variant(&message),
+                variant,
+                "the variant names the frame of the protocol"
+            );
+            // The upstream direction accepts a response of the executor and
+            // nothing else.
+            assert_eq!(
+                variant.is_response(),
+                response_kind(&message).is_some()
+                    || matches!(message, BridgeMessage::ResponseError(_)),
+                "the acceptance of the upstream direction is the one of the node: {variant:?}"
+            );
+            // The downstream direction accepts every frame but a start.
+            assert_eq!(
+                variant.is_start(),
+                matches!(classify(&message), MessageRole::Start(_)),
+                "the acceptance of the downstream direction is the one of the node: {variant:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_action_of_a_refused_frame_follows_its_role() {
+        // A new start is failed to the pending request of the relay state.
+        assert_eq!(
+            refusal_action(MessageRole::Start(RequestKind::Http), true),
+            RefusalAction::FailRequest
+        );
+        assert_eq!(
+            refusal_action(MessageRole::Start(RequestKind::Http), false),
+            RefusalAction::FailRequest
+        );
+        // A continuation of a running request is retired in its scope.
+        for role in [
+            MessageRole::Stream(RequestKind::Http),
+            MessageRole::End(RequestKind::Http),
+            MessageRole::Cancel(RequestKind::Realtime),
+        ] {
+            assert_eq!(
+                refusal_action(role, true),
+                RefusalAction::RetireRequest,
+                "a continuation is retired in its scope"
+            );
+            // An exhausted tracking fails the worker of the route.
+            assert_eq!(
+                refusal_action(role, false),
+                RefusalAction::FailWorker,
+                "an exhausted tracking fails the worker of the route"
+            );
+        }
+        // A frame that belongs to no request fails the worker of the route.
+        assert_eq!(
+            refusal_action(MessageRole::Control, true),
+            RefusalAction::FailWorker
+        );
+        assert_eq!(
+            refusal_action(MessageRole::Response(RequestKind::Http), true),
+            RefusalAction::FailWorker
+        );
+    }
+
+    #[tokio::test]
+    async fn the_local_client_learns_the_overload_of_the_ingress() {
+        let (router, hub, state, stop_tx, node_task, nas_task) =
+            node_with_a_database_peer(false).await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+
+        // The actor blocks in the snapshot of the relay state, so the traffic
+        // of the relay state piles up in the data channel of the actor.
+        let (version, advertisement) = block_the_actor(&hub, &state, &handle, 2).await;
+
+        // The data channel of the actor holds every slot but one, so the
+        // start of the request of the local client fits and its continuation
+        // does not.
+        let queued = fill_data_channel(&handle, id(NAS), super::PEER_INGRESS_BUFFER - 1);
+        assert_eq!(
+            queued,
+            super::PEER_INGRESS_BUFFER - 1,
+            "the data channel of the node is nearly full"
+        );
+
+        // The local client asks the node.
+        let client = tokio::spawn(async move {
+            let request = client_request(CLIENT_KEY);
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                tower::ServiceExt::oneshot(router, request),
+            )
+            .await
+            .expect("the local client is answered")
+            .expect("the router answers the local client")
+        });
+        // The retirement of the refused continuation waits on the priority
+        // path of the actor, so the test releases the actor first.
+        wait_until(|| async { handle.control.capacity() < super::PEER_CONTROL_BUFFER }).await;
+        drop(version);
+        let _ = advertisement.await;
+
+        // The local client learns the overload of the ingress instead of
+        // waiting for an answer that cannot come.
+        let response = client.await.expect("the local client is answered");
+        assert_eq!(
+            response.status(),
+            503,
+            "the local client learns the overload of the ingress"
+        );
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .expect("the body of the answer");
+        assert!(
+            String::from_utf8_lossy(&body).contains("peer_overloaded"),
+            "the local client learns the reason of the overload: {}",
+            String::from_utf8_lossy(&body)
+        );
+
+        stop_tx.send(()).ok();
+        let _ = node_task.await;
+        nas_task.abort();
+    }
+
+    #[tokio::test]
+    async fn an_aborted_local_start_never_creates_an_owner() {
+        let (hub, state, mut nas_rx, _mac_rx) = routed_node().await;
+        wait_until(|| async { !state.inner.workers.lock().await.is_empty() }).await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let worker = {
+            state
+                .inner
+                .workers
+                .lock()
+                .await
+                .values()
+                .next()
+                .cloned()
+                .expect("the virtual worker of the route")
+        };
+        let (version, advertisement) = block_the_actor(&hub, &state, &handle, 2).await;
+
+        // The start of the request waits in the data channel of the actor.
+        worker
+            .send(http_start("queued"))
+            .await
+            .expect("the request reaches the worker");
+        wait_until(|| async { handle.data.capacity() < super::PEER_INGRESS_BUFFER }).await;
+
+        // The data channel of the actor holds every slot, so the continuation
+        // of the request cannot enter the ingress.
+        let queued = fill_data_channel(&handle, id(NAS), super::PEER_INGRESS_BUFFER - 1);
+        assert_eq!(
+            queued,
+            super::PEER_INGRESS_BUFFER - 1,
+            "the data channel of the node is full"
+        );
+        worker
+            .send(BridgeMessage::RequestChunk(
+                crate::protocol::BridgeRequestChunk {
+                    request_id: "queued".to_string(),
+                    data: vec![7; 8],
+                },
+            ))
+            .await
+            .expect("the frame reaches the worker");
+        // The retirement waits on the priority path, so it runs as soon as the
+        // actor is free again.
+        wait_until(|| async { handle.control.capacity() < super::PEER_CONTROL_BUFFER }).await;
+        drop(version);
+        let _ = advertisement.await;
+
+        // The start never creates an owner: the abort overtook it.
+        wait_until(|| async { handle.data.capacity() == super::PEER_INGRESS_BUFFER }).await;
+        assert_eq!(hub.owner_count().await, 0, "the aborted start owns nothing");
+        // Nothing of the aborted start reached the executor.
+        let frames = drain(&mut nas_rx).await;
+        assert!(
+            frames
+                .iter()
+                .all(|envelope| !matches!(envelope.message, Some(BridgeMessage::RequestStart(_)))),
+            "the aborted start never reached the executor"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_duplicate_local_start_cannot_bypass_the_fence_of_its_flow() {
+        let (hub, state, mut nas_rx, _mac_rx) = routed_node().await;
+        wait_until(|| async { !state.inner.workers.lock().await.is_empty() }).await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let worker = {
+            state
+                .inner
+                .workers
+                .lock()
+                .await
+                .values()
+                .next()
+                .cloned()
+                .expect("the virtual worker of the route")
+        };
+        let (version, advertisement) = block_the_actor(&hub, &state, &handle, 2).await;
+
+        // Two starts of the same flow wait in the data channel of the actor.
+        worker
+            .send(http_start("duplicate"))
+            .await
+            .expect("the request reaches the worker");
+        worker
+            .send(http_start("duplicate"))
+            .await
+            .expect("the request reaches the worker");
+        wait_until(|| async { handle.data.capacity() < super::PEER_INGRESS_BUFFER - 1 }).await;
+
+        // The data channel of the actor holds every slot, so the continuation
+        // of the flow cannot enter the ingress.
+        let queued = fill_data_channel(&handle, id(NAS), super::PEER_INGRESS_BUFFER - 2);
+        assert_eq!(
+            queued,
+            super::PEER_INGRESS_BUFFER - 2,
+            "the data channel of the node is full"
+        );
+        worker
+            .send(BridgeMessage::RequestChunk(
+                crate::protocol::BridgeRequestChunk {
+                    request_id: "duplicate".to_string(),
+                    data: vec![7; 8],
+                },
+            ))
+            .await
+            .expect("the frame reaches the worker");
+        wait_until(|| async { handle.control.capacity() < super::PEER_CONTROL_BUFFER }).await;
+        drop(version);
+        let _ = advertisement.await;
+
+        // Neither start of the flow creates an owner.
+        wait_until(|| async { handle.data.capacity() == super::PEER_INGRESS_BUFFER }).await;
+        assert_eq!(hub.owner_count().await, 0, "the aborted flow owns nothing");
+        let frames = drain(&mut nas_rx).await;
+        assert!(
+            frames
+                .iter()
+                .all(|envelope| !matches!(envelope.message, Some(BridgeMessage::RequestStart(_)))),
+            "the aborted flow never reached the executor"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_further_messages_of_a_failed_flow_are_coalesced() {
+        let (hub, state, _nas_rx, _mac_rx) = routed_node().await;
+        wait_until(|| async { !state.inner.workers.lock().await.is_empty() }).await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let worker = {
+            state
+                .inner
+                .workers
+                .lock()
+                .await
+                .values()
+                .next()
+                .cloned()
+                .expect("the virtual worker of the route")
+        };
+        let (version, advertisement) = block_the_actor(&hub, &state, &handle, 2).await;
+
+        // The data channel of the actor holds every slot, so the traffic of
+        // the relay state cannot enter the ingress.
+        let queued = fill_data_channel(&handle, id(NAS), super::PEER_INGRESS_BUFFER);
+        assert_eq!(
+            queued,
+            super::PEER_INGRESS_BUFFER,
+            "the data channel of the node is full"
+        );
+        let chunk = BridgeMessage::RequestChunk(crate::protocol::BridgeRequestChunk {
+            request_id: "failed".to_string(),
+            data: vec![7; 8],
+        });
+
+        // The first message of the flow is retired.
+        worker
+            .send(chunk.clone())
+            .await
+            .expect("the frame reaches the worker");
+        wait_until(|| async { handle.control.capacity() < super::PEER_CONTROL_BUFFER }).await;
+        let after_the_first = handle.control.capacity();
+
+        // A further message of the failed flow is discarded: it needs no
+        // second retirement.
+        worker
+            .send(chunk.clone())
+            .await
+            .expect("the frame reaches the worker");
+        wait_until(|| async { worker.capacity() == worker.max_capacity() }).await;
+        assert_eq!(
+            handle.control.capacity(),
+            after_the_first,
+            "the failed flow needs no second retirement"
+        );
+
+        // The terminal message of the flow retires its tracking.
+        worker
+            .send(BridgeMessage::RequestCancel(
+                crate::protocol::BridgeRequestCancel {
+                    request_id: "failed".to_string(),
+                    reason: "client_cancel".to_string(),
+                    response_started: false,
+                },
+            ))
+            .await
+            .expect("the frame reaches the worker");
+        wait_until(|| async { worker.capacity() == worker.max_capacity() }).await;
+        assert_eq!(
+            handle.control.capacity(),
+            after_the_first,
+            "the terminal message of the failed flow needs no retirement"
+        );
+
+        // A message that comes after the terminal of the flow is retired
+        // again, because the tracking of the flow is gone.
+        worker
+            .send(chunk)
+            .await
+            .expect("the frame reaches the worker");
+        wait_until(|| async { handle.control.capacity() < after_the_first }).await;
+
+        drop(version);
+        let _ = advertisement.await;
+    }
+
+    /// Refuse a frame of a peer while the ingress of the node is full.
+    ///
+    /// The actor is blocked while the data channel fills up, so the frame of
+    /// the peer cannot enter the ingress. The actor is released again, so the
+    /// retirement of the request is acknowledged.
+    async fn refuse_a_peer_frame_while_full(
+        hub: &Arc<RouteHub>,
+        state: &AppState,
+        handle: &super::ActorHandle,
+        token: super::super::admission::AdmissionToken,
+        message: BridgeMessage,
+        generation: u64,
+    ) -> bool {
+        let (version, advertisement) = block_the_actor(hub, state, handle, generation).await;
+        let queued = fill_data_channel(handle, id(NAS), super::PEER_INGRESS_BUFFER);
+        assert_eq!(
+            queued,
+            super::PEER_INGRESS_BUFFER,
+            "the data channel of the node is full"
+        );
+        let refused = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.handle_peer_message(&token, message).await }
+        });
+        wait_until(|| async { handle.control.capacity() < super::PEER_CONTROL_BUFFER }).await;
+        drop(version);
+        let _ = advertisement.await;
+        refused.await.expect("the refusal of the frame completes")
+    }
+
+    #[tokio::test]
+    async fn a_closed_ingress_is_never_a_pressure_of_the_node() {
+        let (hub, state, _nas_rx, _mac_rx) = routed_node().await;
+        wait_until(|| async { !state.inner.workers.lock().await.is_empty() }).await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let nas = super::super::admission::mint_for_test(id(NAS), 1);
+        let worker = {
+            state
+                .inner
+                .workers
+                .lock()
+                .await
+                .values()
+                .next()
+                .cloned()
+                .expect("the virtual worker of the route")
+        };
+
+        // The byte budget of the ingress is exhausted, so a closed ingress
+        // must never be reported as a byte pressure.
+        let _budget = handle
+            .data_budget
+            .clone()
+            .acquire_many_owned(super::PEER_INGRESS_BUDGET_BYTES as u32)
+            .await
+            .expect("the budget of the ingress");
+
+        // The actor ends, so the ingress of the node is closed.
+        let task = handle
+            .task
+            .lock()
+            .await
+            .take()
+            .expect("the task of the actor");
+        task.abort();
+        let _ = task.await;
+        wait_until(|| async { handle.data.is_closed() }).await;
+
+        // A start of a peer names the closed ingress.
+        let path = PeerPath::new(vec![id(NAS)]).expect("a bounded path");
+        let error = hub
+            .forward_start(&nas, path, http_start("closed"))
+            .await
+            .expect_err("the start is refused");
+        assert!(
+            error.to_string().contains("closed"),
+            "the start names the closed ingress: {error}"
+        );
+
+        // A frame of a peer is refused and the link of the peer ends.
+        assert!(
+            !hub.handle_peer_message(
+                &nas,
+                BridgeMessage::RequestChunk(crate::protocol::BridgeRequestChunk {
+                    request_id: "closed".to_string(),
+                    data: vec![7; 8],
+                }),
+            )
+            .await,
+            "the link of the peer ends with the closed ingress"
+        );
+
+        // The worker of the route cannot hand its traffic over any more, so
+        // the pump of the route fails as it did before.
+        worker
+            .send(BridgeMessage::RequestChunk(
+                crate::protocol::BridgeRequestChunk {
+                    request_id: "closed".to_string(),
+                    data: vec![7; 8],
+                },
+            ))
+            .await
+            .expect("the frame reaches the worker");
+        wait_until(|| async { worker.is_closed() }).await;
+
+        // The refusals never took a permit of the byte budget.
+        assert_eq!(
+            handle.data_budget.available_permits(),
+            0,
+            "the byte budget of the ingress is untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_peer_frame_retires_only_the_request_of_the_peer() {
+        let (hub, state, mut nas_rx, mut mac_rx) = routed_node().await;
+        let mac = super::super::admission::mint_for_test(id(MAC), 2);
+        // Two requests of the peer travel on the route of the node.
+        hub.forward_start(&mac, forwarded_path(), http_start("affected"))
+            .await
+            .expect("the start of the peer is forwarded");
+        hub.forward_start(&mac, forwarded_path(), http_start("unrelated"))
+            .await
+            .expect("the start of the peer is forwarded");
+        wait_until(|| async { hub.owner_count().await == 2 }).await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let (version, advertisement) = block_the_actor(&hub, &state, &handle, 2).await;
+
+        // The data channel of the actor holds every slot, so the frame of the
+        // peer cannot enter the ingress.
+        let queued = fill_data_channel(&handle, id(NAS), super::PEER_INGRESS_BUFFER);
+        assert_eq!(
+            queued,
+            super::PEER_INGRESS_BUFFER,
+            "the data channel of the node is full"
+        );
+
+        // The refusal waits for the acknowledgement of the actor, so the test
+        // releases the actor first.
+        let refused = tokio::spawn({
+            let hub = hub.clone();
+            let mac = mac.clone();
+            async move {
+                hub.handle_peer_message(
+                    &mac,
+                    BridgeMessage::RequestChunk(crate::protocol::BridgeRequestChunk {
+                        request_id: "affected".to_string(),
+                        data: vec![7; 8],
+                    }),
+                )
+                .await
+            }
+        });
+        wait_until(|| async { handle.control.capacity() < super::PEER_CONTROL_BUFFER }).await;
+        drop(version);
+        let _ = advertisement.await;
+        assert!(
+            refused.await.expect("the refusal of the frame completes"),
+            "the link of the peer survives the refusal of a frame"
+        );
+
+        // The request of the peer is retired with the overload error, and only
+        // that request.
+        let error = next_bridge(&mut mac_rx).await;
+        let BridgeMessage::ResponseError(error) = error else {
+            panic!("the peer learns the failure of its request");
+        };
+        assert_eq!(error.request_id, "affected");
+        assert_eq!(error.status, 503);
+        assert_eq!(error.code, "peer_overloaded");
+        assert_eq!(
+            hub.owner_count().await,
+            1,
+            "only the request of the refused frame is retired"
+        );
+
+        // The upstream work of the retired request is cancelled once.
+        let frames = drain(&mut nas_rx).await;
+        let cancels = frames
+            .iter()
+            .filter(|envelope| matches!(envelope.message, Some(BridgeMessage::RequestCancel(_))))
+            .count();
+        assert_eq!(
+            cancels, 1,
+            "the upstream work of the retired request is cancelled once"
+        );
+
+        // The worker of the route, the route, its snapshot and the
+        // generation of the link of the peer survive the refusal.
+        assert!(
+            !state.inner.workers.lock().await.is_empty(),
+            "the worker of the route survives the refusal"
+        );
+        assert_eq!(
+            hub.selected_path().await,
+            Some(vec![id(LOCAL), id(NAS)]),
+            "the route of the node survives the refusal"
+        );
+        assert_eq!(
+            *state.inner.config_version.lock().await,
+            Some(2),
+            "the snapshot of the route survives the refusal"
+        );
+        assert!(
+            mac.is_live(),
+            "the admission token of the peer survives the refusal"
+        );
+
+        // The unrelated request of the peer still finishes.
+        wait_until(|| async { handle.data.capacity() == super::PEER_INGRESS_BUFFER }).await;
+        assert!(
+            hub.handle_peer_message(
+                &mac,
+                BridgeMessage::RequestCancel(crate::protocol::BridgeRequestCancel {
+                    request_id: "unrelated".to_string(),
+                    reason: "client_cancel".to_string(),
+                    response_started: false,
+                }),
+            )
+            .await,
+            "the frame of the unrelated request enters the ingress"
+        );
+        wait_until(|| async { hub.owner_count().await == 0 }).await;
+
+        // A request that comes after the capacity drained works again. The
+        // start needs the registered link of the peer under the generation of
+        // its token, so the successful start proves that the generation of
+        // the link of the peer survived the refusal.
+        hub.forward_start(&mac, forwarded_path(), http_start("later"))
+            .await
+            .expect("the start of the peer is forwarded");
+        wait_until(|| async { hub.owner_count().await == 1 }).await;
+    }
+
+    /// The upstream id of the request the node forwarded.
+    ///
+    /// The node rewrites the id of a forwarded request, so the executor of
+    /// the route knows the request by an id of its own.
+    async fn upstream_id_of(receiver: &mut super::EnvelopeReceiver) -> String {
+        let message = next_bridge(receiver).await;
+        super::request_id_of(&message)
+            .expect("the forwarded start carries a request id")
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn a_refused_frame_of_the_wrong_direction_retires_nothing() {
+        let (hub, state, mut nas_rx, mut mac_rx) = routed_node().await;
+        let mac = super::super::admission::mint_for_test(id(MAC), 2);
+        let nas = super::super::admission::mint_for_test(id(NAS), 1);
+        hub.forward_start(&mac, forwarded_path(), http_start("peer-1"))
+            .await
+            .expect("the start of the peer is forwarded");
+        wait_until(|| async { hub.owner_count().await == 1 }).await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+
+        // The node rewrites the id of a forwarded request, so the executor
+        // knows the request by the id the node gave it.
+        let upstream_id = upstream_id_of(&mut nas_rx).await;
+        assert_ne!(
+            upstream_id, "peer-1",
+            "the upstream id of the request differs from the id of the peer"
+        );
+
+        // The executor sends a frame that is not a response. The normal
+        // dispatch drops it, so a full ingress must not retire the request.
+        assert!(
+            refuse_a_peer_frame_while_full(
+                &hub,
+                &state,
+                &handle,
+                nas,
+                BridgeMessage::RequestChunk(crate::protocol::BridgeRequestChunk {
+                    request_id: upstream_id.clone(),
+                    data: vec![7; 8],
+                }),
+                2,
+            )
+            .await,
+            "the link of the executor survives the refusal of a frame"
+        );
+        // The refusal waits for the answer of the actor, so the retirement
+        // was processed before the state of the node is checked.
+        assert_eq!(
+            hub.owner_count().await,
+            1,
+            "the request of the executor keeps its owner"
+        );
+        assert!(
+            drain(&mut mac_rx)
+                .await
+                .iter()
+                .all(|envelope| !matches!(envelope.message, Some(BridgeMessage::ResponseError(_)))),
+            "the peer learns nothing"
+        );
+
+        // The peer sends a start outside a request start envelope. The normal
+        // dispatch drops it, so a full ingress must not retire the request.
+        assert!(
+            refuse_a_peer_frame_while_full(&hub, &state, &handle, mac, http_start("peer-1"), 3,)
+                .await,
+            "the link of the peer survives the refusal of a frame"
+        );
+        assert_eq!(
+            hub.owner_count().await,
+            1,
+            "the request of the peer keeps its owner"
+        );
+
+        // The upstream work of the request was never cancelled.
+        let frames = drain(&mut nas_rx).await;
+        assert_eq!(
+            frames
+                .iter()
+                .filter(|envelope| matches!(
+                    envelope.message,
+                    Some(BridgeMessage::RequestCancel(_))
+                ))
+                .count(),
+            0,
+            "the upstream work of the request is never cancelled"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_local_continuation_of_another_kind_retires_nothing() {
+        let (hub, state, mut nas_rx, _mac_rx) = routed_node().await;
+        wait_until(|| async { !state.inner.workers.lock().await.is_empty() }).await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let worker = {
+            state
+                .inner
+                .workers
+                .lock()
+                .await
+                .values()
+                .next()
+                .cloned()
+                .expect("the virtual worker of the route")
+        };
+
+        // A local request of the route runs under its own id.
+        worker
+            .send(http_start("collision"))
+            .await
+            .expect("the request reaches the worker");
+        wait_until(|| async { hub.owner_count().await == 1 }).await;
+
+        // The actor blocks in the snapshot of the relay state, so the
+        // traffic of the data path piles up.
+        let (version, advertisement) = block_the_actor(&hub, &state, &handle, 2).await;
+        let queued = fill_data_channel(&handle, id(NAS), super::PEER_INGRESS_BUFFER);
+        assert_eq!(
+            queued,
+            super::PEER_INGRESS_BUFFER,
+            "the data channel of the node is full"
+        );
+
+        // A continuation of another kind cannot enter the ingress, so the
+        // pump retires it in its own scope.
+        worker
+            .send(BridgeMessage::McpRequestChunk(
+                crate::protocol::McpRequestChunk {
+                    request_id: "collision".to_string(),
+                    data: vec![7; 8],
+                },
+            ))
+            .await
+            .expect("the frame reaches the worker");
+        // The retirement waits on the priority path, so the actor takes it
+        // as soon as it is free again.
+        wait_until(|| async { handle.control.capacity() < super::PEER_CONTROL_BUFFER }).await;
+        drop(version);
+        let _ = advertisement.await;
+
+        // The actor answers the commands of the priority path in order, so
+        // the answer of the owner count comes after the retirement of the
+        // request was processed.
+        assert_eq!(
+            hub.owner_count().await,
+            1,
+            "the request of the local client keeps its owner"
+        );
+
+        // The upstream work of the request was never cancelled.
+        let frames = drain(&mut nas_rx).await;
+        assert_eq!(
+            frames
+                .iter()
+                .filter(|envelope| matches!(
+                    envelope.message,
+                    Some(BridgeMessage::RequestCancel(_))
+                ))
+                .count(),
+            0,
+            "the upstream work of the request is never cancelled"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_retirement_of_an_unknown_or_foreign_request_retires_nothing() {
+        let (hub, state, mut nas_rx, mut mac_rx) = routed_node().await;
+        let mac = super::super::admission::mint_for_test(id(MAC), 2);
+        hub.forward_start(&mac, forwarded_path(), http_start("peer-1"))
+            .await
+            .expect("the start of the peer is forwarded");
+        wait_until(|| async { hub.owner_count().await == 1 }).await;
+        let handle = hub.ensure_actor().await.expect("the actor of the hub");
+        let worker = {
+            state
+                .inner
+                .workers
+                .lock()
+                .await
+                .values()
+                .next()
+                .cloned()
+                .expect("the virtual worker of the route")
+        };
+
+        // A frame of an unknown request of the peer is refused, and the
+        // request of the peer keeps its owner.
+        assert!(
+            refuse_a_peer_frame_while_full(
+                &hub,
+                &state,
+                &handle,
+                mac.clone(),
+                BridgeMessage::RequestChunk(crate::protocol::BridgeRequestChunk {
+                    request_id: "unknown".to_string(),
+                    data: vec![7; 8],
+                }),
+                2,
+            )
+            .await,
+            "the link of the peer survives the refusal of a frame"
+        );
+        assert_eq!(
+            hub.owner_count().await,
+            1,
+            "the request of the peer keeps its owner"
+        );
+        assert!(
+            drain(&mut mac_rx)
+                .await
+                .iter()
+                .all(|envelope| !matches!(envelope.message, Some(BridgeMessage::ResponseError(_)))),
+            "the peer of an unknown request learns nothing"
+        );
+
+        // A frame of a replaced generation of the peer is refused, and the
+        // request of the peer keeps its owner.
+        let stale = super::super::admission::mint_for_test(id(MAC), 9);
+        assert!(
+            refuse_a_peer_frame_while_full(
+                &hub,
+                &state,
+                &handle,
+                stale,
+                BridgeMessage::RequestChunk(crate::protocol::BridgeRequestChunk {
+                    request_id: "peer-1".to_string(),
+                    data: vec![7; 8],
+                }),
+                3,
+            )
+            .await,
+            "the link of the peer survives the refusal of a frame"
+        );
+        assert_eq!(
+            hub.owner_count().await,
+            1,
+            "the request of the peer keeps its owner"
+        );
+
+        // The request of the local client carries the same id as the frame
+        // of the peer, so the collision is a real one.
+        worker
+            .send(http_start("collision"))
+            .await
+            .expect("the request reaches the worker");
+        wait_until(|| async { hub.owner_count().await == 2 }).await;
+
+        // A frame of a peer that names the request of the local client never
+        // retires it: the direction of the request is derived again.
+        assert!(
+            refuse_a_peer_frame_while_full(
+                &hub,
+                &state,
+                &handle,
+                mac.clone(),
+                BridgeMessage::RequestChunk(crate::protocol::BridgeRequestChunk {
+                    request_id: "collision".to_string(),
+                    data: vec![7; 8],
+                }),
+                4,
+            )
+            .await,
+            "the link of the peer survives the refusal of a frame"
+        );
+        assert_eq!(
+            hub.owner_count().await,
+            2,
+            "the request of the local client keeps its owner"
+        );
+
+        // The upstream work of the requests was never cancelled.
+        let frames = drain(&mut nas_rx).await;
+        assert_eq!(
+            frames
+                .iter()
+                .filter(|envelope| matches!(
+                    envelope.message,
+                    Some(BridgeMessage::RequestCancel(_))
+                ))
+                .count(),
+            0,
+            "the upstream work of the requests is never cancelled"
+        );
     }
 
     #[tokio::test]
